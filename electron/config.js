@@ -1,7 +1,7 @@
 const path = require('path');
 
 const config = {
-    // app root directives. Dependeing on how you build run or view the app
+    // app root directives. Depending on how you build run or view the app
     // it all falls under different directories. electron-builder by default
     // have asar enabled so unless personally changed leave this config as is
     asar: true, // have this match your build configs asar

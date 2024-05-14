@@ -1,9 +1,6 @@
-<script>
-  import Nav from './nav.svelte';
-
-  // export let fileMenu = [];
-</script>
+<div class="banner">
+  <img src="assets/images/banner.webp" alt="Electron boilerplate banner"/>
+</div>
 <header id="titlebar">
-  <div class="title app-region">Electron template</div>
-  <Nav />
+  <div class="title app-region">D2R Reimagined Launcher</div>
 </header>
