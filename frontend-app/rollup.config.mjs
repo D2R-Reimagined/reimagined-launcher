@@ -1,15 +1,18 @@
 import path from "path";
-
+import { fileURLToPath } from "url";
 import alias from "@rollup/plugin-alias";
 import json from "@rollup/plugin-json";
 import image from "@rollup/plugin-image";
-
 import svelte from "rollup-plugin-svelte";
 import commonjs from "@rollup/plugin-commonjs";
 import resolve from "@rollup/plugin-node-resolve";
 import livereload from "rollup-plugin-livereload";
-import {terser} from "rollup-plugin-terser";
+import { terser } from "rollup-plugin-terser";
 import css from "rollup-plugin-css-only";
+import { spawn } from "child_process";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const production = !process.env.ROLLUP_WATCH;
 
@@ -23,7 +26,7 @@ function serve() {
     return {
         writeBundle() {
             if (server) return;
-            server = require("child_process").spawn(
+            server = spawn(
                 "npm",
                 ["run", "start", "--", "--dev"],
                 {
@@ -40,7 +43,6 @@ function serve() {
 
 export default {
     input: "src/main.js",
-    browser: true,
     output: {
         sourcemap: true,
         format: "iife",
@@ -63,7 +65,7 @@ export default {
         }),
         // we'll extract any component CSS out into
         // a separate file - better for performance
-        css({output: "bundle.css"}),
+        css({ output: "bundle.css" }),
 
         // If you have external dependencies installed from
         // npm, you'll most likely need these plugins. In
