@@ -1,36 +1,32 @@
-# Svelte Electron Boilerplate
+# D2R Reimagined
 
 ## Installation
 Clone repository to get started
-```
-npx degit hjalmar/svelte-electron-boilerplate <app-name>
-cd <app-name>
-npm install
-```
+
 ### Electron
 NOTE: electron dev script relies on `nodemon` to listen for file changes. Instead of installing nodemon as a package install it globally with the `-g` flag.
 
 https://www.npmjs.com/package/nodemon
 ```
-npm install -g nodemon
+pnpm i -g nodemon
 ```
 
 To run dev server. Execute following command in your terminal from the 
 root directory 
 ```
-npm run electron
+pnpm run electron
 ```
 or to launch electron with devtools open
 ```
-npm run electron:devtools
+pnpm run electron:devtools
 ```
 
 ### Frontend
 To spawn frontend dev server simply cd into `frontend-app`, install and launch the dev script
 ```
 cd frontend-app
-npm install
-npm run dev
+pnpm install
+pnpm run dev
 ```
 
 ## Build
@@ -38,7 +34,7 @@ Launching the electron build will first build the `frontend-app` before being pa
 
 From root directory. Execute following build script
 ```
-npm run build
+pnpm run build
 ```
 
 The build step is managed by the [electron-builder](https://www.electron.build/) library. To configure the build step, refer to it's documentation.
@@ -51,26 +47,3 @@ This boilerplate is customized by me for me so and the reason why these packages
 * https://github.com/hjalmar/enums-manager
 * https://github.com/hjalmar/hotkeys-manager
 * https://github.com/hjalmar/svelte-standalone-router
-
-### Your own frontend
-If you want to change frontend-app simply make sure that your build output is pointed to `frontend-app/public` or make the neccessary changes in `electron/config.js` and the root `package.json` file.
-
-To replace it with a blank svelte app, start by removing the contents of `frontend-app` and follow the instructions over at https://svelte.dev/ to install a blank template.
-
-# Branding
-Logos and icons used in this boilerplate is my personal brand. Use them as references to change to your own custom icons which are more suitable for your application.
-
-# Support
-
-Open source in all it's glory is amazing and I personally love to share the knowledge I've accumulated over my years programming 
-and doing webdevelopment. A small tip helps greatly to incentivize having packages up to date 
-and the tools and services sometimes needed to be able to do so. While it's 100% not required, if you find this project beneficial to you and your work, any contribution would be highly appreciated.
-
-[Tip on paypal](https://www.paypal.com/donate?hosted_button_id=N7CCZ2K5L2GV6)
-
-Additional support like bug reporting and feature requests are also highly encouraged. Do so in respective 
-package repository that it may concern. Cheers!
-
-https://github.com/hjalmar
-
-![Svelte-Electron-Boilerplate preview](preview.png?raw=true "In action preview")
