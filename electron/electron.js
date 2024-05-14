@@ -29,7 +29,7 @@ async function createWindow() {
     const PROTOCOL = 'file';
     protocol.interceptFileProtocol(PROTOCOL, (request, callback) => {
         // Strip protocol
-        let url = request.url.substr(PROTOCOL.length + 1);
+        let url = request.url.substring(PROTOCOL.length + 1);
         // Build complete path for node require function
         url = path.join(__dirname, WEB_FOLDER, url);
         // Replace backslashes by forward slashes (windows)
