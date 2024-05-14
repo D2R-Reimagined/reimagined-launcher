@@ -1,0 +1,33 @@
+{
+    "name": "svelte-app",
+    "version": "1.0.0",
+    "private": true,
+    "scripts": {
+        "build": "rollup -c",
+        "dev": "rollup -c -w",
+        "dependencies:check": "pnpm dlx npm-check-updates",
+        "dependencies:update": "pnpm dlx npm-check-updates -u",
+        "dependencies:update:patch": "pnpm dlx npm-check-updates -u --target patch",
+        "dependencies:update:minor": "pnpm dlx npm-check-updates -u --target minor",
+        "start": "sirv public --no-clear"
+    },
+    "devDependencies": {
+        "@rollup/plugin-alias": "^3.1.1",
+        "@rollup/plugin-commonjs": "^17.0.0",
+        "@rollup/plugin-image": "^2.0.5",
+        "@rollup/plugin-json": "^4.1.0",
+        "@rollup/plugin-node-resolve": "^11.0.0",
+        "enums-manager": "^1.0.0",
+        "hotkeys-manager": "^1.0.3",
+        "rollup": "^2.3.4",
+        "rollup-plugin-css-only": "^3.1.0",
+        "rollup-plugin-livereload": "^2.0.0",
+        "rollup-plugin-svelte": "^7.0.0",
+        "rollup-plugin-terser": "^7.0.0",
+        "svelte": "^3.59.2",
+        "svelte-standalone-router": "^1.0.25"
+    },
+    "dependencies": {
+        "sirv-cli": "^1.0.0"
+    }
+}

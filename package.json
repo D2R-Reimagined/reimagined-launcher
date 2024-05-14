@@ -1,0 +1,59 @@
+{
+    "name": "electron-boilerplate",
+    "version": "1.0.0",
+    "main": "./electron.js",
+    "description": "Electron boilerplate",
+    "author": "Jens Hjalmarsson",
+    "license": "MIT",
+    "scripts": {
+        "build": "cd frontend-app && npm run build && cd .. && electron-builder",
+        "dependencies:check": "pnpm dlx npm-check-updates",
+        "dependencies:update": "pnpm dlx npm-check-updates -u",
+        "dependencies:update:patch": "pnpm dlx npm-check-updates -u --target patch",
+        "dependencies:update:minor": "pnpm dlx npm-check-updates -u --target minor",
+        "electron": "nodemon --watch ./frontend-app -e js,mjs,json,css --exec npx electron ./electron/electron.js --dev",
+        "electron:devtools": "nodemon --watch ./frontend-app -e js,mjs,json,css --exec npx electron ./electron/electron.js --dev --devtools",
+        "start": "electron ./electron/electron.js --dev"
+    },
+    "productName": "Svelte Electron Boilerplate",
+    "build": {
+        "appId": "com.reimagined.launcher",
+        "asar": true,
+        "files": [
+            "package.json",
+            {
+                "from": "electron",
+                "to": "",
+                "filter": [
+                    "**/*"
+                ]
+            },
+            {
+                "from": "frontend-app/public",
+                "to": "public",
+                "filter": [
+                    "**/*"
+                ]
+            }
+        ],
+        "win": {
+            "target": [
+                "nsis"
+            ],
+            "icon": "electron/assets/icon.png"
+        },
+        "nsis": {
+            "installerSidebar": "electron/assets/installerSidebar.bmp",
+            "uninstallerSidebar": "electron/assets/installerSidebar.bmp",
+            "installerIcon": "electron/assets/icon.ico",
+            "uninstallerIcon": "electron/assets/icon.ico",
+            "uninstallDisplayName": "Svelte Electron Boilerplate",
+            "oneClick": false,
+            "allowToChangeInstallationDirectory": true
+        }
+    },
+    "devDependencies": {
+        "electron": "18.3.15",
+        "electron-builder": "^22.14.5"
+    }
+}
