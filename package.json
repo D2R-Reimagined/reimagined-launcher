@@ -15,7 +15,7 @@
         "electron:devtools": "nodemon --watch ./frontend-app -e js,mjs,json,css --exec npx electron ./electron/electron.js --dev --devtools",
         "start": "electron ./electron/electron.js --dev"
     },
-    "productName": "Svelte Electron Boilerplate",
+    "productName": "D2R Reimagined Launcher",
     "build": {
         "appId": "com.reimagined.launcher",
         "asar": true,

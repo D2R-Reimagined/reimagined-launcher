@@ -50,22 +50,16 @@ async function createWindow() {
 
     // We set a intercept on incoming requests to disable x-frame-options headers.
     mainWindow.webContents.session.webRequest.onHeadersReceived({urls: ["*://*/*"]}, (details, callback) => {
-
-        // disable x-frame to be able to load external pages in an iframe
         if (config.disable_x_frame) {
-            if (details.responseHeaders['X-Frame-Options']) {
-                delete details.responseHeaders['X-Frame-Options'];
-            } else if (details.responseHeaders['x-frame-options']) {
-                delete details.responseHeaders['x-frame-options'];
-            }
+            delete details.responseHeaders['X-Frame-Options'];
+            delete details.responseHeaders['x-frame-options'];
         }
 
-        // update the header
         callback({
             cancel: false,
             responseHeaders: {
                 ...details.responseHeaders,
-                'Content-Security-Policy': ['default-src \'none\'']
+                'Content-Security-Policy': ["default-src 'self'; script-src 'self'; object-src 'none'; style-src 'self' 'unsafe-inline';"]
             }
         });
     });
@@ -94,10 +88,8 @@ async function createWindow() {
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
-app.on('ready', async () => {
-    // create the window
+app.whenReady().then(async () => {
     await createWindow();
-    // include the ipc calls and bindings
     require('./ipc.js')(app, mainWindow);
 });
 
@@ -105,14 +97,14 @@ app.on('ready', async () => {
 // app.on('unmaximize', () => {console.log('unmaximize');});
 
 // Quit when all windows are closed.
-app.on('window-all-closed', function () {
-    app.quit();
+app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+        app.quit();
+    }
 });
 
-app.on('activate', function () {
-    // On OS X it's common to re-create a window in the app when the
-    // dock icon is clicked and there are no other windows open.
-    if (mainWindow === null) {
-        createWindow()
+app.on('activate', async () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+        await createWindow();
     }
 });
