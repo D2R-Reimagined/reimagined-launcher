@@ -1,4 +1,4 @@
-const { contextBridge } = require('electron');
+const {contextBridge} = require('electron');
 const applicationMethods = require('./ipc-methods/application.js');
 
 // are we in electron? only available in node context
@@ -6,5 +6,5 @@ const applicationMethods = require('./ipc-methods/application.js');
 
 // expose electron functions globally through contextBridge
 contextBridge.exposeInMainWorld('electron', {
-  ...applicationMethods
+    ...applicationMethods
 });
