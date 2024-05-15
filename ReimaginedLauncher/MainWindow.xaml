@@ -5,10 +5,11 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         Title="D2R Reimagined"
         mc:Ignorable="d"
-        Height="450"
-        Width="650"
+        Height="600"
+        Width="850"
         ResizeMode="NoResize"
-        WindowStartupLocation="CenterScreen">
+        WindowStartupLocation="CenterScreen" 
+        Icon="pack://application:,,,/Resources/logo-25.ico">
     <Window.Resources>
         <Style x:Key="GothicButton" TargetType="Button">
             <Setter Property="Background">
@@ -35,9 +36,16 @@
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-        <Image Source="pack://application:,,,/Resources/d2r-r-header.jpg" Grid.Row="0" Stretch="Uniform" Width="650" />
+        <Image Source="pack://application:,,,/Resources/d2r-r-header.jpg" Grid.Row="0" Stretch="Uniform" Width="850" />
+        <StackPanel Grid.Row="1" HorizontalAlignment="Left" Orientation="Horizontal">
+            <Button x:Name="ConfigureButton" Content="Configure"
+                    Height="30"
+                    Width="150"
+                    Click="ConfigureButton_Click"
+                    Style="{StaticResource GothicButton}"/>
+        </StackPanel>
         <StackPanel Grid.Row="1" HorizontalAlignment="Right" Orientation="Horizontal">
-            <Button x:Name="BrowseButton" Content="Select D2R.exe Location" 
+            <Button x:Name="BrowseButton" Content="{Binding BrowseButtonContent}" 
                     Height="30"
                     Width="180"
                     Click="BrowseButton_Click"
@@ -47,7 +55,7 @@
                     Width="180"
                     Click="LaunchButton_Click"
                     Style="{StaticResource GothicButton}"
-                    IsEnabled="False"/>
+                    IsEnabled="{Binding IsLaunchButtonEnabled}"/>
         </StackPanel>
     </Grid>
 </Window>
