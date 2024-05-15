@@ -1,8 +1,8 @@
 {
-    "name": "electron-boilerplate",
+    "name": "reimagined-launcher",
     "version": "1.0.0",
     "main": "./electron.js",
-    "description": "Electron boilerplate",
+    "description": "D2R Reimagined Launcher",
     "author": "Jens Hjalmarsson",
     "license": "MIT",
     "scripts": {
@@ -47,7 +47,7 @@
             "uninstallerSidebar": "electron/assets/installerSidebar.bmp",
             "installerIcon": "electron/assets/icon.ico",
             "uninstallerIcon": "electron/assets/icon.ico",
-            "uninstallDisplayName": "Svelte Electron Boilerplate",
+            "uninstallDisplayName": "ReimaginedLauncher",
             "oneClick": false,
             "allowToChangeInstallationDirectory": true
         }
