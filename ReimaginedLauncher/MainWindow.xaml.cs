@@ -105,12 +105,19 @@ public sealed partial class MainWindow : INotifyPropertyChanged
                 UseShellExecute = true,
                 Arguments = launchParameters
             });
+            ShowOverlayWindow();
         }
         catch (Exception ex)
         {
             // Handle any errors that might occur during the launch process.
             MessageBox.Show("Error: Could not execute the file. Original error: " + ex.Message);
         }
+    }
+    
+    private static void ShowOverlayWindow()
+    {
+        var overlayWindow = new OverlayWindow();
+        overlayWindow.Show();
     }
     
     private void ConfigureButton_Click(object sender, RoutedEventArgs e)

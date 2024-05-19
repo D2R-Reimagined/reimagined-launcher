@@ -34,5 +34,4 @@
             <DependentUpon>Settings.settings</DependentUpon>
         </Compile>
     </ItemGroup>
-
 </Project>
