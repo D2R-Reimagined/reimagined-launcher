@@ -1,10 +1,15 @@
-﻿<?xml version="1.0" encoding="UTF-8"?>
-<SettingsFile xmlns="http://schemas.microsoft.com/VisualStudio/2004/01/settings" CurrentProfile="(Default)">
+﻿<?xml version='1.0' encoding='utf-8'?>
+<SettingsFile xmlns="http://schemas.microsoft.com/VisualStudio/2004/01/settings" CurrentProfile="(Default)" GeneratedClassNamespace="ReimaginedLauncher.Properties" GeneratedClassName="Settings">
   <Profiles />
   <Settings>
     <Setting Name="D2RExePath" Type="System.String" Scope="User">
       <Value Profile="(Default)">C:\Program Files (x86)\Diablo II Resurrected\D2R.exe</Value>
     </Setting>
+    <Setting Name="UUID" Type="System.String" Scope="User">
+      <Value Profile="(Default)" />
+    </Setting>
+    <Setting Name="Token" Type="System.String" Scope="User">
+      <Value Profile="(Default)" />
+    </Setting>
   </Settings>
 </SettingsFile>
-

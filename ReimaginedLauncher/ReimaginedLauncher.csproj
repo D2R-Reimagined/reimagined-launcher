@@ -18,6 +18,7 @@
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </Resource>
       <None Remove="Resources\logo-25.ico" />
+      <PackageReference Include="Pathoschild.FluentNexus" Version="1.0.5" />
       <Resource Include="Resources\logo-25.ico">
         <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       </Resource>
