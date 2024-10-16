@@ -1,0 +1,24 @@
+﻿@page "/"
+@using ReimaginedLauncherMaui.Services
+
+<h1>Hello, world!</h1>
+
+<button @onclick="LaunchGame">Launch Game</button>
+
+@code {
+    [Inject]
+    private GameLauncherService GameLauncher { get; set; }
+
+    private void LaunchGame()
+    {
+        try
+        {
+            GameLauncher.LaunchGame();
+        }
+        catch (Exception ex)
+        {
+            // Handle any errors that might occur during the launch process.
+            Console.WriteLine("Error launching game: " + ex.Message);
+        }
+    }
+}
