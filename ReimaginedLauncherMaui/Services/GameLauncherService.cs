@@ -37,23 +37,74 @@ public class GameLauncherService
 
     private string? FindD2RExecutable()
     {
+        // Check the default installation path first
         if (File.Exists(DefaultInstallPath))
         {
             return DefaultInstallPath;
         }
 
+        // Iterate through all fixed drives
         foreach (var drive in DriveInfo.GetDrives())
         {
             if (drive.DriveType != DriveType.Fixed) continue;
-            var possiblePath = Path.Combine(drive.RootDirectory.FullName, @"Program Files (x86)\Diablo II Resurrected\D2R.exe");
-            if (File.Exists(possiblePath))
+
+            try
             {
-                return possiblePath;
+                // Start a recursive search in the root directory of each fixed drive
+                var executablePath = FindFileRecursively(drive.RootDirectory.FullName, "D2R.exe");
+                if (!string.IsNullOrEmpty(executablePath))
+                {
+                    return executablePath;
+                }
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Handle unauthorized access (skip to the next drive)
+                continue;
             }
         }
 
+        // Return null if not found
         return null;
     }
+
+    // Helper method to search for a file recursively
+    private string? FindFileRecursively(string rootDirectory, string fileName)
+    {
+        try
+        {
+            // Search in the current directory for the file
+            var files = Directory.GetFiles(rootDirectory, fileName, SearchOption.TopDirectoryOnly);
+            if (files.Length > 0)
+            {
+                return files[0]; // Return the first found instance
+            }
+
+            // Recurse into subdirectories
+            foreach (var directory in Directory.GetDirectories(rootDirectory))
+            {
+                var result = FindFileRecursively(directory, fileName);
+                if (result != null)
+                {
+                    return result;
+                }
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Skip directories we do not have permission to access
+            return null;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            // Skip directories that may have been deleted or moved
+            return null;
+        }
+
+        // Return null if not found
+        return null;
+    }
+
 
     public void LaunchGame()
     {
