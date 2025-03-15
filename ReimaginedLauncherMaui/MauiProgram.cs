@@ -20,6 +20,10 @@ public static class MauiProgram
         builder.Logging.AddDebug();
 #endif
 
+        builder.Services.AddSingleton<IUniqueItemService, UniqueItemService>();
+        builder.Services.AddSingleton<ISetItemService, SetItemService>();
+        builder.Services.AddSingleton<IPropertyService, PropertyService>();
+        
         return builder.Build();
     }
 }

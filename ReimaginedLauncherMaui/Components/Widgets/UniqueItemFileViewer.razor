@@ -1,0 +1,101 @@
+﻿@using D2RReimaginedTools.Models
+@using ReimaginedLauncherMaui.Model
+@using ReimaginedLauncherMaui.Services
+@inject IPropertyService PropertyService
+
+@if (Items == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <div class="row">
+        <div class="col-8">
+            <table class="table">
+                <thead class="sticky-header">
+                    <tr>
+                        <th>ID</th>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Rarity</th>
+                        <th>Lvl</th>
+                        <th>Enabled</th>
+                        <th>No Limit</th>
+                        <th>Lvl req</th>
+                        <th>Code</th>
+                        <th>Carry 1</th>
+                        <th>Cost Mult</th>
+                        <th>Cost Add</th>
+                        <th>Chr Transform</th>
+                        <th>Inv Transform</th>
+                        <th>Flippy File</th>
+                        <th>Inv File</th>
+                        <th>Drop Sound</th>
+                        <th>Drop Sfx Frame</th>
+                        <th>Use Sound</th>
+                        <th>DClone Weight</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in Items)
+                    {
+                        <tr class="@GetRowClass(item)" @onclick="() => SelectItem(item)">
+                            <td>@item.ID</td>
+                            <td>@item.ItemName</td>
+                            <td>@item.Index</td>
+                            <td>@item.Rarity</td>
+                            <td>@item.Level</td>
+                            <td>@item.Enabled</td>
+                            <td>@item.NoLimit</td>
+                            <td>@item.LevelRequirement</td>
+                            <td>@item.Code</td>
+                            <td>@item.Carry1</td>
+                            <td>@item.CostMultiplier</td>
+                            <td>@item.CostAdd</td>
+                            <td>@item.ChrTransform</td>
+                            <td>@item.InvTransform</td>
+                            <td>@item.FlippyFile</td>
+                            <td>@item.InvFile</td>
+                            <td>@item.DropSound</td>
+                            <td>@item.DropSfxFrame</td>
+                            <td>@item.UseSound</td>
+                            <td>@item.DiabloCloneWeight</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <div class="col-4">
+            <div class="sticky-container">
+                @if (selectedItem != null)
+                {
+                    <UniqueItemPropertyViewer Item="selectedItem" PropertyDescriptions="PropertyDescriptions" />
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public IList<UniqueItem> Items { get; set; }
+
+    private IDictionary<string, string> PropertyDescriptions = null;
+
+    private UniqueItem selectedItem;
+
+    private void SelectItem(UniqueItem item)
+    {
+        selectedItem = item;
+    }
+
+    private string GetRowClass(UniqueItem item)
+    {
+        return item == selectedItem ? "selected-row" : string.Empty;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        PropertyDescriptions = await PropertyService.GetPropertyDescriptions();
+    }
+}

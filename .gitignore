@@ -187,3 +187,6 @@ publish/
 *.swp
 *.*~
 project.vscode
+
+# Game Data
+gamedata/

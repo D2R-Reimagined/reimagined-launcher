@@ -66,5 +66,21 @@
         <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="9.0.50" />
         <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="9.0.3" />
     </ItemGroup>
+    
+    <ItemGroup>
+        <None Update="Resources\GameData\data\global\excel\properties.txt">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
+        <None Update="Resources\GameData\data\global\excel\uniqueitems.txt">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
+        <None Update="Resources\GameData\data\global\excel\sets.txt">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
+    </ItemGroup>
+    
+    <ItemGroup>
+      <Folder Include="Resources\GameData\data\global\" />
+    </ItemGroup>
 
 </Project>

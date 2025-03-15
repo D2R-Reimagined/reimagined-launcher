@@ -1,0 +1,19 @@
+﻿@page "/items/uniques"
+@using D2RReimaginedTools.Models
+@using ReimaginedLauncherMaui.Services
+@using ReimaginedLauncherMaui.Components.Widgets
+@inject IUniqueItemService ItemsService
+
+<h3>Uniques</h3>
+
+<UniqueItemFileViewer Items="UniqueItems" />
+
+@code
+{
+    private IList<UniqueItem> UniqueItems { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        UniqueItems = await ItemsService.GetUniqueItems();
+    }
+}

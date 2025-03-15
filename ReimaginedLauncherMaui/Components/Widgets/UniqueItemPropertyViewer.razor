@@ -1,0 +1,82 @@
+﻿@using D2RReimaginedTools.Models
+
+@if (PropertyDescriptions == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th></th>
+                <th>Property</th>
+                <th>Parameter</th>
+                <th>Min</th>
+                <th>Max</th>
+            </tr>
+        </thead>
+        <tbody>
+            @{
+                var currentItem = 1;
+                @foreach (var prop in Item.Properties)
+                {
+                    <tr>
+                        <td>@(currentItem++)</td>
+                        <td>@ParsePropertyDescription(prop)</td>
+                        <td>@prop.Parameter</td>
+                        <td>@prop.Min</td>
+                        <td>@prop.Max</td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    [Parameter]
+    public UniqueItem Item { get; set; }
+
+    [Parameter]
+    public IDictionary<string, string> PropertyDescriptions { get; set; }
+
+    private string ParsePropertyDescription(ItemProperty prop)
+    {
+        if (!PropertyDescriptions.TryGetValue(prop.Property, out var propDesc))
+        {
+            return prop.Property;
+        }
+
+        var firstHashIndex = propDesc.IndexOf('#');
+        if (firstHashIndex == -1)
+        {
+            return string.IsNullOrWhiteSpace(propDesc) ? prop.Property : propDesc;
+        }
+
+        var minStr = Math.Abs(prop.Min).ToString();
+        var maxStr = Math.Abs(prop.Max).ToString();
+
+        if (firstHashIndex == propDesc.Length - 1)
+        {
+            return propDesc.Remove(firstHashIndex, 1).Insert(firstHashIndex, prop.Min != prop.Max ? $"[{minStr}-{maxStr}]" : minStr);
+        }
+
+        var secondHashIndex = propDesc.IndexOf('#', firstHashIndex + minStr.Length);
+        if (secondHashIndex != -1)
+        {
+            propDesc = propDesc.Remove(firstHashIndex, 1).Insert(firstHashIndex, minStr);
+            propDesc = propDesc.Remove(secondHashIndex, 1).Insert(secondHashIndex, maxStr);
+        }
+        else if (prop.Min != prop.Max)
+        {
+            propDesc = propDesc.Remove(firstHashIndex, 1).Insert(firstHashIndex, $"[{minStr}-{maxStr}]");
+        }
+        else
+        {
+            propDesc = propDesc.Remove(firstHashIndex, 1).Insert(firstHashIndex, minStr);
+        }
+
+        return propDesc;
+    }
+}

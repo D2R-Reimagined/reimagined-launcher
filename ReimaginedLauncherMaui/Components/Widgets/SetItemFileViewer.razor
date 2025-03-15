@@ -1,0 +1,64 @@
+﻿@using ReimaginedLauncherMaui.Model
+@using ReimaginedLauncherMaui.Services
+@inject IPropertyService PropertyService
+
+@if (Items == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <div class="row">
+        <div class="col-8">
+            <table class="table">
+                <thead class="sticky-header">
+                    <tr>
+                        <th>ID</th>
+                        <th>Name</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in Items)
+                    {
+                        <tr class="@GetRowClass(item)" @onclick="() => SelectItem(item)">
+                            <td>@item.Index</td>
+                            <td>@item.Name</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <div class="col-4">
+            <div class="sticky-container">
+                @if (selectedItem != null)
+                {
+                    <SetItemPropertyViewer Item="selectedItem" PropertyDescriptions="PropertyDescriptions" />
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public IList<SetItem> Items { get; set; }
+
+    private IDictionary<string, string> PropertyDescriptions = null;
+
+    private SetItem selectedItem;
+
+    private void SelectItem(SetItem item)
+    {
+        selectedItem = item;
+    }
+
+    private string GetRowClass(SetItem item)
+    {
+        return item == selectedItem ? "selected-row" : string.Empty;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        PropertyDescriptions = await PropertyService.GetPropertyDescriptions();
+    }
+}

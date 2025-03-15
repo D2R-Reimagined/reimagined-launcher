@@ -1,0 +1,19 @@
+﻿@page "/items/sets"
+@using ReimaginedLauncherMaui.Services
+@using ReimaginedLauncherMaui.Components.Widgets
+@using ReimaginedLauncherMaui.Model
+@inject ISetItemService ItemsService
+
+<h3>Sets</h3>
+
+<SetItemFileViewer Items="SetItems" />
+
+@code
+{
+    private IList<SetItem> SetItems { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        SetItems = await ItemsService.GetItems();
+    }
+}
