@@ -6,9 +6,15 @@ public class GameLauncherService
 {
     private const string ExePathPreferenceKey = "D2RExePath";
     private const string? DefaultInstallPath = @"C:\Program Files (x86)\Diablo II Resurrected\D2R.exe";
+    public string? GamePathOverride { get; set; } = string.Empty;
     private string? _selectedExePath;
+    public string LaunchParameters = "-mod Reimagined -txt";
     
-    public string? InstallDirectory => Path.GetDirectoryName(_selectedExePath) ?? string.Empty;
+    public string? InstallDirectory
+    {
+        get => Path.GetDirectoryName(_selectedExePath) ?? string.Empty;
+        set => throw new NotImplementedException();
+    }
 
     public GameLauncherService()
     {
@@ -108,20 +114,29 @@ public class GameLauncherService
     }
 
 
-    public void LaunchGame()
+    public void LaunchGame(string? launchParamOverride = null, string? gamePathOverride = null)
     {
-        if (string.IsNullOrWhiteSpace(_selectedExePath))
+        if (!string.IsNullOrWhiteSpace(launchParamOverride))
         {
-            throw new Exception("Executable path not set. Please ensure the game is installed.");
+            LaunchParameters = launchParamOverride;
         }
 
-        const string launchParameters = "-mod Reimagined -txt";
+        if (!string.IsNullOrWhiteSpace(gamePathOverride))
+        {
+            GamePathOverride = gamePathOverride;
+        }
+
+        // Validate the selected executable path and game path override
+        if (string.IsNullOrWhiteSpace(_selectedExePath) && string.IsNullOrWhiteSpace(GamePathOverride))
+        {
+            throw new Exception("No valid game path found. Please set the game path in settings.");
+        }
             
 #pragma warning disable CA1416
-        Process.Start(new ProcessStartInfo(_selectedExePath)
+        Process.Start(new ProcessStartInfo((!string.IsNullOrWhiteSpace(GamePathOverride) ? GamePathOverride + "\\D2R.exe" : _selectedExePath) ?? throw new InvalidOperationException())
         {
             UseShellExecute = true,
-            Arguments = launchParameters
+            Arguments = LaunchParameters
         });
 #pragma warning restore CA1416
     }

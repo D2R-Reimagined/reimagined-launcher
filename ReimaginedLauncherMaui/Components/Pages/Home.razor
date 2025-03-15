@@ -3,7 +3,19 @@
 
 
 <div>
-    Found Game Path: <span>@FoundGamePath</span>
+    Found Game Path: <span>@GamePath</span>
+</div>
+
+<div>
+    <label>Override Game Path</label>
+    <input type="text" @bind="GamePath" />
+</div>
+
+<div>
+    <label>
+        Override Launch Parameters
+    </label>
+    <input type="text" @bind="LaunchParameters" />
 </div>
 
 <button @onclick="LaunchGame">
@@ -14,14 +26,16 @@
     [Inject]
     private GameLauncherService? GameLauncher { get; set; }
 
-    private string? FoundGamePath { get; set; }
+    private string? GamePath { get; set; }
+    private string? LaunchParameters { get; set; }
     
     protected override Task OnInitializedAsync()
     {
         // Initialize any necessary services or data here.
         try
         {
-            FoundGamePath = GameLauncher?.InstallDirectory;
+            GamePath = GameLauncher?.InstallDirectory;
+            LaunchParameters = GameLauncher?.LaunchParameters;
         }
         catch (Exception ex)
         {
@@ -36,7 +50,7 @@
     {
         try
         {
-            GameLauncher.LaunchGame();
+            GameLauncher?.LaunchGame(LaunchParameters, GamePath);
         }
         catch (Exception ex)
         {
