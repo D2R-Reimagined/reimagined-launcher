@@ -7,6 +7,8 @@ public class GameLauncherService
     private const string ExePathPreferenceKey = "D2RExePath";
     private const string? DefaultInstallPath = @"C:\Program Files (x86)\Diablo II Resurrected\D2R.exe";
     private string? _selectedExePath;
+    
+    public string? InstallDirectory => Path.GetDirectoryName(_selectedExePath) ?? string.Empty;
 
     public GameLauncherService()
     {

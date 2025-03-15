@@ -1,11 +1,36 @@
 ﻿@page "/"
 @using ReimaginedLauncherMaui.Services
 
-<button @onclick="LaunchGame">Launch Game</button>
+
+<div>
+    Found Game Path: <span>@FoundGamePath</span>
+</div>
+
+<button @onclick="LaunchGame">
+    Launch Game
+</button>
 
 @code {
     [Inject]
-    private GameLauncherService GameLauncher { get; set; }
+    private GameLauncherService? GameLauncher { get; set; }
+
+    private string? FoundGamePath { get; set; }
+    
+    protected override Task OnInitializedAsync()
+    {
+        // Initialize any necessary services or data here.
+        try
+        {
+            FoundGamePath = GameLauncher?.InstallDirectory;
+        }
+        catch (Exception ex)
+        {
+            // Handle any errors that might occur during initialization.
+            Console.WriteLine("Error finding game path: " + ex.Message);
+        }
+
+        return Task.CompletedTask;
+    }
 
     private void LaunchGame()
     {
