@@ -113,7 +113,7 @@ public class GameLauncherService
             throw new Exception("Executable path not set. Please ensure the game is installed.");
         }
 
-        const string launchParameters = "-mod Merged -txt";
+        const string launchParameters = "-mod Reimagined -txt";
             
 #pragma warning disable CA1416
         Process.Start(new ProcessStartInfo(_selectedExePath)
