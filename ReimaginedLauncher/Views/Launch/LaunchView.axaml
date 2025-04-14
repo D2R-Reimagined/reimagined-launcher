@@ -1,0 +1,17 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+             x:Class="ReimaginedLauncher.Views.Launch.LaunchView">
+    <StackPanel>
+        
+        <TextBlock Text="Install Directory" Margin="0,0,0,5"/>
+        <DockPanel>
+            <TextBox x:Name="DirectoryTextBox" Width="500" IsReadOnly="True" Margin="0,0,5,0"/>
+            <Button Content="Browse" Click="OnBrowseClick"/>
+        </DockPanel>
+        
+        <Button Content="Start Game" Margin="0,20,0,0" Click="OnRunClick"/>
+    </StackPanel>
+</UserControl>

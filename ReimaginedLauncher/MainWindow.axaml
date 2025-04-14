@@ -1,0 +1,30 @@
+<Window 
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:reimaginedLauncher="clr-namespace:ReimaginedLauncher"
+    mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+    x:Class="ReimaginedLauncher.MainWindow"
+    x:DataType="reimaginedLauncher:MainWindow"
+    Title="D2R Reimagined Launcher"
+>
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="200"/> <!-- nav -->
+            <ColumnDefinition Width="*"/>   <!-- content -->
+        </Grid.ColumnDefinitions>
+
+        <!-- Navigation -->
+        <ListBox Grid.Column="0"
+                 x:Name="NavigationList"
+                 SelectionChanged="OnNavigationSelectionChanged">
+            <ListBoxItem Content="Launch" />
+            <ListBoxItem Content="Settings" />
+        </ListBox>
+
+        <Border Grid.Column="1" Padding="20">
+            <ContentControl x:Name="ContentArea" />
+        </Border>
+    </Grid>
+</Window>
