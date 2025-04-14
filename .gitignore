@@ -367,3 +367,4 @@ gamedata/
 
 # Jetbrains Products
 .idea/
+.DS_Store
