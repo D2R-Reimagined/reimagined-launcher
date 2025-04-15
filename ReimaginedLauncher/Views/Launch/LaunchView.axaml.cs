@@ -9,7 +9,7 @@ namespace ReimaginedLauncher.Views.Launch;
 
 public partial class LaunchView : UserControl
 {
-    //public GameLauncherService LauncherService = new();
+    public GameLauncherService LauncherService = new();
     
     public LaunchView()
     {
@@ -27,11 +27,11 @@ public partial class LaunchView : UserControl
             return;
         }
         
-        //LauncherService.LaunchGame();
+        LauncherService.LaunchGame();
         Notifications.SendNotification("Clicked Launch", "Success");
     }
     
-    private async void OnBrowseClick(object? sender, RoutedEventArgs e)
+    private async void OnInstallDirectoryClick(object? sender, RoutedEventArgs e)
     {
         if (this.GetVisualRoot() is Window window)
         {

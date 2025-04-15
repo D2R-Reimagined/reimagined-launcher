@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
@@ -43,4 +44,24 @@ public partial class MainWindow : Window
             }
         }
     }
+    
+    private void OnVisitWebsiteClicked(object? sender, RoutedEventArgs e)
+    {
+        var url = "https://www.nexusmods.com/diablo2resurrected/mods/503";
+        try
+        {
+            using var process = new System.Diagnostics.Process();
+            process.StartInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = url,
+                UseShellExecute = true
+            };
+            process.Start();
+        }
+        catch (Exception ex)
+        {
+            // Handle exception (log, display error, etc.)
+        }
+    }
+
 }

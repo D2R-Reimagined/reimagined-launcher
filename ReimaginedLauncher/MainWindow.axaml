@@ -16,12 +16,28 @@
         </Grid.ColumnDefinitions>
 
         <!-- Navigation -->
-        <ListBox Grid.Column="0"
-                 x:Name="NavigationList"
-                 SelectionChanged="OnNavigationSelectionChanged">
-            <ListBoxItem Content="Launch" />
-            <ListBoxItem Content="Settings" />
-        </ListBox>
+        <Grid Grid.Column="0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>   <!-- For ListBox -->
+                <RowDefinition Height="Auto"/> <!-- For Button at the bottom -->
+            </Grid.RowDefinitions>
+
+            <!-- Navigation -->
+            <ListBox x:Name="NavigationList"
+                     SelectionChanged="OnNavigationSelectionChanged"
+                     Grid.Row="0">
+                <ListBoxItem Content="Launch" />
+                <ListBoxItem Content="Settings" />
+            </ListBox>
+
+            <!-- Bottom-left button -->
+            <Button Grid.Row="1"
+                    Content="Visit Website"
+                    HorizontalAlignment="Left"
+                    Margin="10"
+                    Click="OnVisitWebsiteClicked"/>
+        </Grid>
+
 
         <Border Grid.Column="1" Padding="20">
             <ContentControl x:Name="ContentArea" />
