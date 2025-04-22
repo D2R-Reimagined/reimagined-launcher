@@ -21,4 +21,15 @@
         <PackageReference Include="D2RReimaginedTools.FileExtensions" Version="0.1.0" />
         <PackageReference Include="Notification.Avalonia" Version="2.1.0" />
     </ItemGroup>
+
+    <ItemGroup>
+      <Folder Include="Assets\" />
+    </ItemGroup>
+
+     <ItemGroup>
+       <None Include="Assets\ReimaginedLauncher.ico">
+         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+       </None>
+     </ItemGroup>
+
 </Project>

@@ -14,6 +14,12 @@ namespace ReimaginedLauncher;
 
 public partial class MainWindow : Window
 {
+    // Make URLs readonly for safe reuse across the file
+    private const string WebsiteUrl = "https://www.d2r-reimagined.com";
+    private const string WikiUrl = "https://wiki.d2r-reimagined.com";
+    private const string NexusUrl = "https://www.nexusmods.com/diablo2resurrected/mods/503";
+    private const string DiscordUrl = "https://discord.gg/5bbjneJCrr";
+    
     public static INotificationMessageManager ManagerInstance { get; } = new NotificationMessageManager();
     public static AppSettings Settings = new();
 
@@ -22,6 +28,9 @@ public partial class MainWindow : Window
         InitializeComponent();
         _ = LoadSettingsAsync();
         ContentArea.Content = new LaunchView();
+        
+        // Set the window icon
+        this.Icon = new WindowIcon("Assets/ReimaginedLauncher.ico");
     }
     
     private async Task LoadSettingsAsync()
@@ -47,21 +56,37 @@ public partial class MainWindow : Window
     
     private void OnVisitWebsiteClicked(object? sender, RoutedEventArgs e)
     {
-        var url = "https://www.nexusmods.com/diablo2resurrected/mods/503";
         try
         {
-            using var process = new System.Diagnostics.Process();
-            process.StartInfo = new System.Diagnostics.ProcessStartInfo
+            string? urlToOpen = null;
+
+            // Use the sender's context to determine which URL to use
+            if (sender is Button button)
             {
-                FileName = url,
-                UseShellExecute = true
-            };
-            process.Start();
+                urlToOpen = button.Name switch
+                {
+                    "WebsiteButton" => WebsiteUrl,
+                    "WikiButton" => WikiUrl,
+                    "NexusButton" => NexusUrl,
+                    "DiscordButton" => DiscordUrl,
+                    _ => urlToOpen
+                };
+            }
+
+            if (!string.IsNullOrEmpty(urlToOpen))
+            {
+                using var process = new System.Diagnostics.Process();
+                process.StartInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = urlToOpen,
+                    UseShellExecute = true
+                };
+                process.Start();
+            }
         }
         catch (Exception ex)
         {
             // Handle exception (log, display error, etc.)
         }
     }
-
 }
