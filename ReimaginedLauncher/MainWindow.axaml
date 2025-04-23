@@ -9,53 +9,62 @@
     x:DataType="reimaginedLauncher:MainWindow"
     Title="D2R Reimagined Launcher"
 >
-    <Grid>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="200"/> <!-- nav -->
-            <ColumnDefinition Width="*"/>   <!-- content -->
-        </Grid.ColumnDefinitions>
+    <DockPanel LastChildFill="True">
+        <!-- Top bar -->
+        <StackPanel Orientation="Horizontal" DockPanel.Dock="Top" HorizontalAlignment="Right">
+            <Button Content="Login with Nexus Mods" Margin="5,0" Click="OnNexusLoginClicked"/>
+        </StackPanel>
 
-        <!-- Navigation -->
-        <Grid Grid.Column="0">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="*"/>   <!-- For ListBox -->
-                <RowDefinition Height="Auto"/> <!-- For Buttons at the bottom -->
-            </Grid.RowDefinitions>
+        <!-- Main Grid -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="200"/> <!-- nav -->
+                <ColumnDefinition Width="*"/>   <!-- content -->
+            </Grid.ColumnDefinitions>
 
             <!-- Navigation -->
-            <ListBox x:Name="NavigationList"
-                     SelectionChanged="OnNavigationSelectionChanged"
-                     Grid.Row="0">
-                <ListBoxItem Content="Launch" />
-                <ListBoxItem Content="Settings" />
-            </ListBox>
+            <Grid Grid.Column="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>   <!-- For ListBox -->
+                    <RowDefinition Height="Auto"/> <!-- For Buttons at the bottom -->
+                </Grid.RowDefinitions>
 
-            <!-- Buttons -->
-            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="10">
-                <Button Content="Website"
-                        Name="WebsiteButton"
-                        HorizontalAlignment="Left"
-                        Click="OnVisitWebsiteClicked"/>
-                <Button Content="Wiki"
-                        Name="WikiButton"
-                        HorizontalAlignment="Left"
-                        Margin="5,0,0,0"
-                        Click="OnVisitWebsiteClicked"/>
-                <Button Content="Nexus"
-                        Name="NexusButton"
-                        HorizontalAlignment="Left"
-                        Margin="5,0,0,0"
-                        Click="OnVisitWebsiteClicked"/>
-                <Button Content="Discord"
-                        Name="DiscordButton"
-                        HorizontalAlignment="Left"
-                        Margin="5,0,0,0"
-                        Click="OnVisitWebsiteClicked"/>
-            </StackPanel>
+                <!-- Navigation -->
+                <ListBox x:Name="NavigationList"
+                         SelectionChanged="OnNavigationSelectionChanged"
+                         Grid.Row="0">
+                    <ListBoxItem Content="Launch" />
+                    <ListBoxItem Content="Settings" />
+                </ListBox>
+
+                <!-- Buttons -->
+                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="10">
+                    <Button Content="Website"
+                            Name="WebsiteButton"
+                            HorizontalAlignment="Left"
+                            Click="OnVisitWebsiteClicked"/>
+                    <Button Content="Wiki"
+                            Name="WikiButton"
+                            HorizontalAlignment="Left"
+                            Margin="5,0,0,0"
+                            Click="OnVisitWebsiteClicked"/>
+                    <Button Content="Nexus"
+                            Name="NexusButton"
+                            HorizontalAlignment="Left"
+                            Margin="5,0,0,0"
+                            Click="OnVisitWebsiteClicked"/>
+                    <Button Content="Discord"
+                            Name="DiscordButton"
+                            HorizontalAlignment="Left"
+                            Margin="5,0,0,0"
+                            Click="OnVisitWebsiteClicked"/>
+                </StackPanel>
+            </Grid>
+
+            <Border Grid.Column="1" Padding="20">
+                <ContentControl x:Name="ContentArea" />
+            </Border>
         </Grid>
-
-        <Border Grid.Column="1" Padding="20">
-            <ContentControl x:Name="ContentArea" />
-        </Border>
-    </Grid>
+    </DockPanel>
+    
 </Window>
