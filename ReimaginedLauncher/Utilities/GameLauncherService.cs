@@ -19,7 +19,9 @@ public class GameLauncherService
 
     public GameLauncherService()
     {
+#if OS_WINDOWS
         CheckForD2RExecutable();
+#endif
     }
 
     private void CheckForD2RExecutable()
