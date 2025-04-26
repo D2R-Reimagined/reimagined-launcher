@@ -2,9 +2,11 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
+using Avalonia.Controls.Notifications;
 using Avalonia.Interactivity;
 using Avalonia.Notification;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using ReimaginedLauncher.Generators;
 using ReimaginedLauncher.Utilities;
 using ReimaginedLauncher.Views.Launch;
@@ -22,6 +24,7 @@ public partial class MainWindow : Window
     
     public static INotificationMessageManager ManagerInstance { get; } = new NotificationMessageManager();
     public static AppSettings Settings = new();
+    private NexusModsSSO _nexusSSO;
 
     public MainWindow()
     {
@@ -88,5 +91,19 @@ public partial class MainWindow : Window
         {
             // Handle exception (log, display error, etc.)
         }
+    }
+
+    private async void OnNexusLoginClicked(object sender, RoutedEventArgs e)
+    {
+        _nexusSSO = new NexusModsSSO();
+        _nexusSSO.OnApiKeyReceived += apiKey =>
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                Notifications.SendNotification($"Nexus Login API Key: {apiKey}");
+            });
+        };
+
+        await _nexusSSO.ConnectAsync();
     }
 }
