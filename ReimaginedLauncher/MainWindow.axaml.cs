@@ -100,6 +100,7 @@ public partial class MainWindow : Window
         {
             Dispatcher.UIThread.Post(() =>
             {
+                Settings.NexusModsSSOApiKey = apiKey;
                 Notifications.SendNotification($"Nexus Login API Key: {apiKey}");
             });
         };

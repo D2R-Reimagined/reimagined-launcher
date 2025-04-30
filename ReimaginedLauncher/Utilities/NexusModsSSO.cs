@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
+using ReimaginedLauncher.Generators;
 
 namespace ReimaginedLauncher.Utilities;
 
@@ -15,6 +17,7 @@ public class NexusModsSSO
     private ClientWebSocket _webSocket;
     private string _uuid;
     private string _token;
+    private string _applicationSlug = "d2rrlauncher";
     public event Action<string> OnApiKeyReceived;
 
     public async Task ConnectAsync()
@@ -34,7 +37,7 @@ public class NexusModsSSO
         var json = JsonSerializer.Serialize(request);
         await _webSocket.SendAsync(Encoding.UTF8.GetBytes(json), WebSocketMessageType.Text, true, CancellationToken.None);
 
-        var authUrl = $"https://www.nexusmods.com/sso?id={_uuid}&application=NOT-REAL-SLUG";
+        var authUrl = $"https://www.nexusmods.com/sso?id={_uuid}&application={_applicationSlug}";
         OpenInBrowser(authUrl);
 
         _ = ReceiveMessagesAsync();
@@ -69,19 +72,19 @@ public class NexusModsSSO
             }
 
             var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-            var response = JsonSerializer.Deserialize<NexusSSOResponse>(message);
+            var response = JsonSerializer.Deserialize<NexusSSOResponse>(message, SerializerOptions.CamelCase);
 
             if (response?.Success == true)
             {
-                if (response.Data.TryGetValue("connection_token", out var connectionToken))
+                if (!string.IsNullOrEmpty(response.Data.ConnectionToken))
                 {
-                    _token = connectionToken?.ToString();
+                    _token = response.Data.ConnectionToken;
                     Console.WriteLine("Connection token received");
                 }
-                else if (response.Data.TryGetValue("api_key", out var apiKey))
+                else if (!string.IsNullOrEmpty(response.Data.ApiKey))
                 {
-                    Console.WriteLine("API Key Received: " + apiKey);
-                    OnApiKeyReceived?.Invoke(apiKey.ToString());
+                    Console.WriteLine("API Key Received: " + response.Data.ApiKey);
+                    OnApiKeyReceived?.Invoke(response.Data.ApiKey);
                 }
             }
             else
@@ -95,6 +98,15 @@ public class NexusModsSSO
 public class NexusSSOResponse
 {
     public bool Success { get; set; }
-    public Dictionary<string, object> Data { get; set; } = new();
+    public NexusSSOResponseData Data { get; set; } = new();
     public string Error { get; set; }
+}
+
+public class NexusSSOResponseData
+{
+    [JsonPropertyName("api_key")]
+    public string ApiKey { get; set; }
+    
+    [JsonPropertyName("connection_token")]
+    public string ConnectionToken { get; set; }
 }

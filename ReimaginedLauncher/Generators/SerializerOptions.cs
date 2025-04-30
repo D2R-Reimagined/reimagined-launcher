@@ -13,4 +13,10 @@ public static class SerializerOptions
     {
         PropertyNameCaseInsensitive = true
     };
+    
+    public static JsonSerializerOptions CamelCase = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = true
+    };
 }
