@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
@@ -7,8 +8,12 @@ using Avalonia.Interactivity;
 using Avalonia.Notification;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Microsoft.Extensions.DependencyInjection;
 using ReimaginedLauncher.Generators;
+using ReimaginedLauncher.HttpClients;
+using ReimaginedLauncher.HttpClients.Models;
 using ReimaginedLauncher.Utilities;
+using ReimaginedLauncher.Utilities.ViewModels;
 using ReimaginedLauncher.Views.Launch;
 using ReimaginedLauncher.Views.Settings;
 
@@ -21,6 +26,9 @@ public partial class MainWindow : Window
     private const string WikiUrl = "https://wiki.d2r-reimagined.com";
     private const string NexusUrl = "https://www.nexusmods.com/diablo2resurrected/mods/503";
     private const string DiscordUrl = "https://discord.gg/5bbjneJCrr";
+    private readonly INexusModsHttpClient _nexusModsHttpClient;
+    public NexusModsValidateResponse? User { get; set; }
+    public static NexusUserViewModel UserViewModel { get; } = new();
     
     public static INotificationMessageManager ManagerInstance { get; } = new NotificationMessageManager();
     public static AppSettings Settings = new();
@@ -28,17 +36,26 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
+        _nexusModsHttpClient = Program.ServiceProvider.GetRequiredService<NexusModsHttpClient>();;
         InitializeComponent();
+        
+        DataContext = UserViewModel;
         _ = LoadSettingsAsync();
         ContentArea.Content = new LaunchView();
         
         // Set the window icon
-        this.Icon = new WindowIcon("Assets/ReimaginedLauncher.ico");
+        Icon = new WindowIcon("Assets/ReimaginedLauncher.ico");
     }
     
     private async Task LoadSettingsAsync()
     {
         Settings = await SettingsManager.LoadAsync();
+        
+        if (!string.IsNullOrWhiteSpace(Settings.NexusModsSSOApiKey))
+        {
+            User = await _nexusModsHttpClient.ValidateApiKeyAsync();
+            UserViewModel.User = User;
+        }
     }
     
     private void OnNavigationSelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -101,10 +118,22 @@ public partial class MainWindow : Window
             Dispatcher.UIThread.Post(() =>
             {
                 Settings.NexusModsSSOApiKey = apiKey;
+                _ = ValidateKey();
                 Notifications.SendNotification($"Nexus Login API Key: {apiKey}");
             });
         };
 
         await _nexusSSO.ConnectAsync();
+    }
+    
+    private async Task ValidateKey()
+    {
+        await SettingsManager.SaveAsync(Settings);
+        
+        if (!string.IsNullOrWhiteSpace(Settings.NexusModsSSOApiKey))
+        {
+            User = await _nexusModsHttpClient.ValidateApiKeyAsync(Settings.NexusModsSSOApiKey);
+            UserViewModel.User = User;
+        }
     }
 }

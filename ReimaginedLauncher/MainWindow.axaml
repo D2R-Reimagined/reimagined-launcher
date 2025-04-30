@@ -3,11 +3,11 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    xmlns:reimaginedLauncher="clr-namespace:ReimaginedLauncher"
     xmlns:materialIcons="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
+    xmlns:reimaginedLauncher1="clr-namespace:ReimaginedLauncher.Utilities.ViewModels"
     mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
     x:Class="ReimaginedLauncher.MainWindow"
-    x:DataType="reimaginedLauncher:MainWindow"
+    x:DataType="reimaginedLauncher1:NexusUserViewModel"
     Title="D2R Reimagined Launcher"
 >
     <Window.Styles>
@@ -17,8 +17,23 @@
     <DockPanel LastChildFill="True">
         <!-- Top bar -->
         <StackPanel Orientation="Horizontal" DockPanel.Dock="Top" HorizontalAlignment="Right">
-            <Button Content="Login with Nexus Mods" Margin="5,0" Click="OnNexusLoginClicked"/>
+            <!-- Login Button: Visible when not logged in -->
+            <Button Content="Login with Nexus Mods"
+                    Click="OnNexusLoginClicked"
+                    IsVisible="{Binding IsLoggedIn, Converter={StaticResource InverseBooleanConverter}}"/>
+
+            <StackPanel Orientation="Horizontal"
+                        Spacing="5"
+                        VerticalAlignment="Center"
+                        IsVisible="{Binding IsLoggedIn}">
+                <TextBlock VerticalAlignment="Center"
+                           Text="{Binding Name}"
+                           FontWeight="Bold"/>
+            </StackPanel>
+
         </StackPanel>
+
+
 
         <!-- Main Grid -->
         <Grid>
