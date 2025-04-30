@@ -4,11 +4,16 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:reimaginedLauncher="clr-namespace:ReimaginedLauncher"
+    xmlns:materialIcons="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
     mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
     x:Class="ReimaginedLauncher.MainWindow"
     x:DataType="reimaginedLauncher:MainWindow"
     Title="D2R Reimagined Launcher"
 >
+    <Window.Styles>
+        <materialIcons:MaterialIconStyles />
+    </Window.Styles>
+    
     <DockPanel LastChildFill="True">
         <!-- Top bar -->
         <StackPanel Orientation="Horizontal" DockPanel.Dock="Top" HorizontalAlignment="Right">
@@ -39,21 +44,21 @@
 
                 <!-- Buttons -->
                 <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="10">
-                    <Button Content="Website"
+                    <Button Content="{materialIcons:MaterialIconTextExt Text=Website, Kind=OpenInNew, TextFirst=True}"
                             Name="WebsiteButton"
                             HorizontalAlignment="Left"
                             Click="OnVisitWebsiteClicked"/>
-                    <Button Content="Wiki"
+                    <Button Content="{materialIcons:MaterialIconTextExt Text=Wiki, Kind=OpenInNew, TextFirst=True}"
                             Name="WikiButton"
                             HorizontalAlignment="Left"
                             Margin="5,0,0,0"
                             Click="OnVisitWebsiteClicked"/>
-                    <Button Content="Nexus"
+                    <Button Content="{materialIcons:MaterialIconTextExt Text=Nexus, Kind=OpenInNew, TextFirst=True}"
                             Name="NexusButton"
                             HorizontalAlignment="Left"
                             Margin="5,0,0,0"
                             Click="OnVisitWebsiteClicked"/>
-                    <Button Content="Discord"
+                    <Button Content="{materialIcons:MaterialIconTextExt Text=Discord, Kind=OpenInNew, TextFirst=True}"
                             Name="DiscordButton"
                             HorizontalAlignment="Left"
                             Margin="5,0,0,0"
