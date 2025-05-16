@@ -16,11 +16,15 @@
     
     <DockPanel LastChildFill="True">
         <!-- Top bar -->
-        <StackPanel Orientation="Horizontal" DockPanel.Dock="Top" HorizontalAlignment="Right">
+        <StackPanel Orientation="Vertical" DockPanel.Dock="Top">
+            <TextBlock x:Name="VersionTextBlock" Margin="10,5,0,0" FontWeight="Bold"/>
+            
             <!-- Login Button: Visible when not logged in -->
-            <Button Content="Login with Nexus Mods"
-                    Click="OnNexusLoginClicked"
-                    IsVisible="{Binding IsLoggedIn, Converter={StaticResource InverseBooleanConverter}}"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="Login with Nexus Mods"
+                        Click="OnNexusLoginClicked"
+                        IsVisible="{Binding IsLoggedIn, Converter={StaticResource InverseBooleanConverter}}"/>
+            </StackPanel>
 
             <StackPanel Orientation="Horizontal"
                         Spacing="5"

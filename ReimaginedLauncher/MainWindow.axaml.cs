@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
@@ -13,6 +14,7 @@ using ReimaginedLauncher.Generators;
 using ReimaginedLauncher.HttpClients;
 using ReimaginedLauncher.HttpClients.Models;
 using ReimaginedLauncher.Utilities;
+using ReimaginedLauncher.Utilities.Json;
 using ReimaginedLauncher.Utilities.ViewModels;
 using ReimaginedLauncher.Views.Launch;
 using ReimaginedLauncher.Views.Settings;
@@ -55,6 +57,28 @@ public partial class MainWindow : Window
         {
             User = await _nexusModsHttpClient.ValidateApiKeyAsync();
             UserViewModel.User = User;
+        }
+        
+        var installDir = Settings.InstallDirectory;
+        if (installDir != null && installDir.EndsWith("D2R.exe", StringComparison.OrdinalIgnoreCase))
+        {
+            installDir = Path.GetDirectoryName(installDir);
+        }
+
+        if (!string.IsNullOrEmpty(installDir))
+        {
+            var layoutsDir = Path.Combine(
+                installDir,
+                "mods", "Reimagined", "Reimagined.mpq", "data", "global", "ui", "layouts"
+            );
+
+            var panel = CharacterSelectPanelService.FromJson(layoutsDir);
+            var version = panel?.GetModVersion() ?? "Unknown";
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                VersionTextBlock.Text = $"D2R Reimagined v{version}";
+            });
         }
     }
     
