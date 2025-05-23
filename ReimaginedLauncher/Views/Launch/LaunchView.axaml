@@ -4,14 +4,12 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
              x:Class="ReimaginedLauncher.Views.Launch.LaunchView">
-    <StackPanel>
-        
-        <TextBlock Text="Install Directory" Margin="0,0,0,20"/>
+    <StackPanel Spacing="16" Margin="16,8,16,16">
+        <TextBlock Text="Install Directory" Margin="0,0,0,8"/>
         <DockPanel>
-            <TextBox x:Name="DirectoryTextBox" Width="500" IsReadOnly="True" Margin="0,0,5,0"/>
+            <TextBox x:Name="DirectoryTextBox" Width="500" IsReadOnly="True" Margin="0,0,8,0"/>
             <Button Content="Browse" Click="OnInstallDirectoryClick"/>
         </DockPanel>
-        
-        <Button Content="Start Game" Margin="0,20,0,0" Click="OnRunClick"/>
+        <Button Content="Start Game" Margin="0,16,0,0" Click="OnRunClick" Height="40"/>
     </StackPanel>
 </UserControl>

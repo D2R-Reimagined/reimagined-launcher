@@ -4,7 +4,9 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:materialIcons="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
+    xmlns:controls="clr-namespace:Avalonia.Notification.Controls;assembly=Notification.Avalonia"
     xmlns:reimaginedLauncher1="clr-namespace:ReimaginedLauncher.Utilities.ViewModels"
+    xmlns:local="clr-namespace:ReimaginedLauncher"
     mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
     x:Class="ReimaginedLauncher.MainWindow"
     x:DataType="reimaginedLauncher1:NexusUserViewModel"
@@ -13,31 +15,31 @@
     <Window.Styles>
         <materialIcons:MaterialIconStyles />
     </Window.Styles>
-    
     <DockPanel LastChildFill="True">
         <!-- Top bar -->
-        <StackPanel Orientation="Vertical" DockPanel.Dock="Top">
-            <TextBlock x:Name="VersionTextBlock" Margin="10,5,0,0" FontWeight="Bold"/>
-            
-            <!-- Login Button: Visible when not logged in -->
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+        <Grid DockPanel.Dock="Top" Margin="0,0,0,8" Height="40">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="VersionTextBlock" Margin="10,5,0,0" FontWeight="Bold" VerticalAlignment="Center" Grid.Column="0"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="8" Grid.Column="2">
+                <controls:NotificationMessageContainer Manager="{x:Static local:MainWindow.ManagerInstance}" />
                 <Button Content="Login with Nexus Mods"
                         Click="OnNexusLoginClicked"
-                        IsVisible="{Binding IsLoggedIn, Converter={StaticResource InverseBooleanConverter}}"/>
+                        IsVisible="{Binding IsLoggedIn, Converter={StaticResource InverseBooleanConverter}}"
+                        VerticalAlignment="Center"/>
+                <StackPanel Orientation="Horizontal"
+                            Spacing="5"
+                            VerticalAlignment="Center"
+                            IsVisible="{Binding IsLoggedIn}">
+                    <TextBlock VerticalAlignment="Center"
+                               Text="{Binding Name}"
+                               FontWeight="Bold"/>
+                </StackPanel>
             </StackPanel>
-
-            <StackPanel Orientation="Horizontal"
-                        Spacing="5"
-                        VerticalAlignment="Center"
-                        IsVisible="{Binding IsLoggedIn}">
-                <TextBlock VerticalAlignment="Center"
-                           Text="{Binding Name}"
-                           FontWeight="Bold"/>
-            </StackPanel>
-
-        </StackPanel>
-
-
+        </Grid>
 
         <!-- Main Grid -->
         <Grid>
@@ -47,7 +49,7 @@
             </Grid.ColumnDefinitions>
 
             <!-- Navigation -->
-            <Grid Grid.Column="0">
+            <Grid Grid.Column="0" Margin="0,0,8,0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*"/>   <!-- For ListBox -->
                     <RowDefinition Height="Auto"/> <!-- For Buttons at the bottom -->
@@ -56,13 +58,14 @@
                 <!-- Navigation -->
                 <ListBox x:Name="NavigationList"
                          SelectionChanged="OnNavigationSelectionChanged"
-                         Grid.Row="0">
+                         Grid.Row="0"
+                         Margin="10,10,10,10">
                     <ListBoxItem Content="Launch" />
                     <ListBoxItem Content="Settings" />
                 </ListBox>
 
                 <!-- Buttons -->
-                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="10">
+                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="10,0,10,10" Spacing="5">
                     <Button Content="{materialIcons:MaterialIconTextExt Text=Website, Kind=OpenInNew, TextFirst=True}"
                             Name="WebsiteButton"
                             HorizontalAlignment="Left"
@@ -70,22 +73,19 @@
                     <Button Content="{materialIcons:MaterialIconTextExt Text=Wiki, Kind=OpenInNew, TextFirst=True}"
                             Name="WikiButton"
                             HorizontalAlignment="Left"
-                            Margin="5,0,0,0"
                             Click="OnVisitWebsiteClicked"/>
                     <Button Content="{materialIcons:MaterialIconTextExt Text=Nexus, Kind=OpenInNew, TextFirst=True}"
                             Name="NexusButton"
                             HorizontalAlignment="Left"
-                            Margin="5,0,0,0"
                             Click="OnVisitWebsiteClicked"/>
                     <Button Content="{materialIcons:MaterialIconTextExt Text=Discord, Kind=OpenInNew, TextFirst=True}"
                             Name="DiscordButton"
                             HorizontalAlignment="Left"
-                            Margin="5,0,0,0"
                             Click="OnVisitWebsiteClicked"/>
                 </StackPanel>
             </Grid>
 
-            <Border Grid.Column="1" Padding="20">
+            <Border Grid.Column="1" Padding="32,24" CornerRadius="8">
                 <ContentControl x:Name="ContentArea" />
             </Border>
         </Grid>

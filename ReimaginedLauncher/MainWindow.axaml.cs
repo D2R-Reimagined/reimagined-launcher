@@ -35,6 +35,7 @@ public partial class MainWindow : Window
     public static INotificationMessageManager ManagerInstance { get; } = new NotificationMessageManager();
     public static AppSettings Settings = new();
     private NexusModsSSO _nexusSSO;
+    private string? _localModVersion;
 
     public MainWindow()
     {
@@ -73,12 +74,52 @@ public partial class MainWindow : Window
             );
 
             var panel = CharacterSelectPanelService.FromJson(layoutsDir);
-            var version = panel?.GetModVersion() ?? "Unknown";
+            _localModVersion = panel?.GetModVersion() ?? "Unknown";
 
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                VersionTextBlock.Text = $"D2R Reimagined v{version}";
+                VersionTextBlock.Text = $"D2R Reimagined v{_localModVersion}";
             });
+        }
+
+        // Only check for latest mod version if user is logged in
+        if (UserViewModel.User != null)
+        {
+            await CheckLatestModVersionAsync();
+        }
+        else
+        {
+            // Subscribe to UserViewModel.User property changed to trigger check when user logs in
+            UserViewModel.PropertyChanged += UserViewModelOnPropertyChanged;
+        }
+    }
+
+    private async void UserViewModelOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(UserViewModel.User) && UserViewModel.User != null)
+        {
+            UserViewModel.PropertyChanged -= UserViewModelOnPropertyChanged;
+            await CheckLatestModVersionAsync();
+        }
+    }
+
+    private async Task CheckLatestModVersionAsync()
+    {
+        var filesResponse = await _nexusModsHttpClient.GetModFilesAsync("diablo2resurrected", 503);
+        if (filesResponse?.Files == null || filesResponse.Files.Count == 0)
+            return;
+        // Assume the first file is the latest (sorted by upload date desc)
+        var latestFile = filesResponse.Files.OrderByDescending(f => f.UploadedTimestamp).FirstOrDefault();
+        if (latestFile == null)
+            return;
+        var latestVersion = latestFile.Version;
+        if (!string.IsNullOrEmpty(_localModVersion) && !string.IsNullOrEmpty(latestVersion) && !_localModVersion.Equals(latestVersion, StringComparison.OrdinalIgnoreCase))
+        {
+            Notifications.SendNotification("Update Available");
+        }
+        else
+        {
+            Notifications.SendNotification("You have the latest version of the mod");
         }
     }
     
@@ -161,3 +202,4 @@ public partial class MainWindow : Window
         }
     }
 }
+
