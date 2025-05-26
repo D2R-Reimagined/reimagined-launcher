@@ -108,14 +108,29 @@ public partial class MainWindow : Window
         var filesResponse = await _nexusModsHttpClient.GetModFilesAsync("diablo2resurrected", 503);
         if (filesResponse?.Files == null || filesResponse.Files.Count == 0)
             return;
-        // Assume the first file is the latest (sorted by upload date desc)
         var latestFile = filesResponse.Files.OrderByDescending(f => f.UploadedTimestamp).FirstOrDefault();
         if (latestFile == null)
             return;
         var latestVersion = latestFile.Version;
         if (!string.IsNullOrEmpty(_localModVersion) && !string.IsNullOrEmpty(latestVersion) && !_localModVersion.Equals(latestVersion, StringComparison.OrdinalIgnoreCase))
         {
-            Notifications.SendNotification("Update Available");
+            // Get the download link for the latest file
+            NexusModsDownloadLinkResponse downloadLinkResponse = await _nexusModsHttpClient.GenerateDownloadLink("diablo2resurrected", 503, latestFile.FileId);
+            string downloadUrl = downloadLinkResponse.first().Uri;
+
+            // Show update popup if downloadUrl is not null
+            if (!string.IsNullOrEmpty(downloadUrl))
+            {
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    var updateWindow = new ReimaginedLauncher.Views.UpdateFoundWindow(_localModVersion, latestVersion, downloadUrl);
+                    updateWindow.ShowDialog(this);
+                });
+            }
+            else
+            {
+                Notifications.SendNotification("Failed to retrieve the download link for the latest mod version.");
+            }
         }
         else
         {
