@@ -29,6 +29,7 @@ public partial class LaunchView : UserControl
         ValidationBannerText.Text = string.IsNullOrWhiteSpace(MainWindow.Settings.InstallDirectory)
             ? "Enter your Diablo II: Resurrected install directory before using the launcher."
             : "The selected install directory has not been validated. Choose the folder that contains D2R.exe.";
+        LaunchCommandText.Text = LauncherService.BuildLaunchCommand();
     }
     
     private async void OnRunClick(object? sender, RoutedEventArgs e)

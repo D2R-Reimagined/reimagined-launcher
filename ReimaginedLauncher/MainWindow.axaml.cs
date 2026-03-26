@@ -86,6 +86,10 @@ public partial class MainWindow : Window
             {
                 launchView.RefreshInstallDirectoryState();
             }
+            else if (ContentArea.Content is SettingsView settingsView)
+            {
+                settingsView.RefreshSettingsState();
+            }
         });
 
         await SettingsManager.SaveAsync(Settings);
@@ -113,6 +117,13 @@ public partial class MainWindow : Window
 
     private async Task CheckLatestModVersionAsync()
     {
+        if (!Settings.IsInstallDirectoryValidated || string.IsNullOrWhiteSpace(Settings.InstallDirectory))
+            return;
+
+        if (string.IsNullOrWhiteSpace(_localModVersion) ||
+            _localModVersion.Equals("Unknown", StringComparison.OrdinalIgnoreCase))
+            return;
+
         var filesResponse = await _nexusModsHttpClient.GetModFilesAsync("diablo2resurrected", 503);
         if (filesResponse?.Files == null || filesResponse.Files.Count == 0)
             return;
@@ -125,7 +136,7 @@ public partial class MainWindow : Window
         {
             Notifications.SendNotification("Update Available");
         }
-        else
+        else if (!string.IsNullOrEmpty(latestVersion))
         {
             Notifications.SendNotification("You have the latest version of the mod");
         }
@@ -138,10 +149,14 @@ public partial class MainWindow : Window
             switch (item.Content?.ToString())
             {
                 case "Launch":
-                    ContentArea.Content = new LaunchView();
+                    var launchView = new LaunchView();
+                    launchView.RefreshInstallDirectoryState();
+                    ContentArea.Content = launchView;
                     break;
                 case "Settings":
-                    ContentArea.Content = new SettingsView();
+                    var settingsView = new SettingsView();
+                    settingsView.RefreshSettingsState();
+                    ContentArea.Content = settingsView;
                     break;
             }
         }

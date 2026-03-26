@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 
@@ -8,7 +9,7 @@ public class GameLauncherService
 {
     private const string? DefaultInstallPath = @"C:\Program Files (x86)\Diablo II Resurrected\D2R.exe";
     public string? GamePathOverride { get; set; } = string.Empty;
-    public string LaunchParameters = "-mod Reimagined -txt";
+    public string LaunchParameters => BuildLaunchParameters();
     
     public string? InstallDirectory
     {
@@ -122,35 +123,100 @@ public class GameLauncherService
     }
 
 
-    public void LaunchGame(string? launchParamOverride = null, string? gamePathOverride = null)
+    public string BuildLaunchParameters()
     {
-        if (!string.IsNullOrWhiteSpace(launchParamOverride))
+        var launchParameters = new List<string>
         {
-            LaunchParameters = launchParamOverride;
+            "-mod",
+            "Reimagined",
+            "-txt"
+        };
+
+        if (MainWindow.Settings.UseDirectLaunch)
+        {
+            launchParameters.Add("-direct");
         }
 
+        if (MainWindow.Settings.NoSound)
+        {
+            launchParameters.Add("-nosound");
+        }
+
+        if (MainWindow.Settings.SkipLogoVideo)
+        {
+            launchParameters.Add("-skiplogovideo");
+        }
+
+        if (MainWindow.Settings.NoRumble)
+        {
+            launchParameters.Add("-norumble");
+        }
+
+        if (MainWindow.Settings.ResetOfflineMaps)
+        {
+            launchParameters.Add("-resetofflinemaps");
+        }
+
+        if (MainWindow.Settings.EnableRespec)
+        {
+            launchParameters.Add("-enablerespec");
+        }
+
+        if (MainWindow.Settings.PlayersCount is >= 2 and <= 8)
+        {
+            launchParameters.Add("-players");
+            launchParameters.Add(MainWindow.Settings.PlayersCount.Value.ToString());
+        }
+
+        return string.Join(" ", launchParameters);
+    }
+
+    public string BuildLaunchCommand(string? launchParamOverride = null, string? gamePathOverride = null)
+    {
+        var launchParameters = string.IsNullOrWhiteSpace(launchParamOverride)
+            ? LaunchParameters
+            : launchParamOverride;
+        var executablePath = ResolveExecutablePath(gamePathOverride) ?? "D2R.exe";
+
+        return $"\"{executablePath}\" {launchParameters}";
+    }
+
+    public void LaunchGame(string? launchParamOverride = null, string? gamePathOverride = null)
+    {
         if (!string.IsNullOrWhiteSpace(gamePathOverride))
         {
             GamePathOverride = gamePathOverride;
         }
 
-        var executablePath = InstallDirectoryValidator.GetExecutablePath(MainWindow.Settings.InstallDirectory);
-
-        // Validate the selected executable path and game path override
-        if (string.IsNullOrWhiteSpace(executablePath) && string.IsNullOrWhiteSpace(GamePathOverride))
+        var executablePath = ResolveExecutablePath(GamePathOverride);
+        if (string.IsNullOrWhiteSpace(executablePath))
         {
             Notifications.SendNotification("No valid game path found. Please set the game path in settings.");
             return;
         }
+
+        var launchParameters = string.IsNullOrWhiteSpace(launchParamOverride)
+            ? LaunchParameters
+            : launchParamOverride;
             
 #if OS_WINDOWS
-        Process.Start(new ProcessStartInfo((!string.IsNullOrWhiteSpace(GamePathOverride) ? GamePathOverride + "\\D2R.exe" : executablePath) ?? throw new InvalidOperationException())
+        Process.Start(new ProcessStartInfo(executablePath)
         {
             UseShellExecute = true,
-            Arguments = LaunchParameters
+            Arguments = launchParameters
         });
 #else
         Notifications.SendNotification("This only works on Windows");
 #endif
+    }
+
+    private string? ResolveExecutablePath(string? gamePathOverride = null)
+    {
+        if (!string.IsNullOrWhiteSpace(gamePathOverride))
+        {
+            return Path.Combine(gamePathOverride, "D2R.exe");
+        }
+
+        return InstallDirectoryValidator.GetExecutablePath(MainWindow.Settings.InstallDirectory);
     }
 }

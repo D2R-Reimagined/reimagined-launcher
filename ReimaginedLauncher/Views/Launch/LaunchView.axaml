@@ -22,5 +22,9 @@
             <Button Content="Browse" Click="OnInstallDirectoryClick"/>
         </DockPanel>
         <Button x:Name="StartGameButton" Content="Start Game" Margin="0,16,0,0" Click="OnRunClick" Height="40" IsEnabled="False"/>
+        <TextBlock Text="Launch Command" Margin="0,12,0,0"/>
+        <TextBlock x:Name="LaunchCommandText"
+                   TextWrapping="Wrap"
+                   FontFamily="Cascadia Code,Consolas,Monaco,monospace"/>
     </StackPanel>
 </UserControl>
