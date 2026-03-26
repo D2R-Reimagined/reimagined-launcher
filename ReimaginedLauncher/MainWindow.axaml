@@ -66,19 +66,19 @@
 
                 <!-- Buttons -->
                 <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="10,0,10,10" Spacing="5">
-                    <Button Content="{materialIcons:MaterialIconTextExt Text=Website, Kind=OpenInNew, TextFirst=True}"
+                    <Button Content="{materialIcons:MaterialIconTextExt Text=Website, Kind=OpenInNew, IconPlacement=Right}"
                             Name="WebsiteButton"
                             HorizontalAlignment="Left"
                             Click="OnVisitWebsiteClicked"/>
-                    <Button Content="{materialIcons:MaterialIconTextExt Text=Wiki, Kind=OpenInNew, TextFirst=True}"
+                    <Button Content="{materialIcons:MaterialIconTextExt Text=Wiki, Kind=OpenInNew, IconPlacement=Right}"
                             Name="WikiButton"
                             HorizontalAlignment="Left"
                             Click="OnVisitWebsiteClicked"/>
-                    <Button Content="{materialIcons:MaterialIconTextExt Text=Nexus, Kind=OpenInNew, TextFirst=True}"
+                    <Button Content="{materialIcons:MaterialIconTextExt Text=Nexus, Kind=OpenInNew, IconPlacement=Right}"
                             Name="NexusButton"
                             HorizontalAlignment="Left"
                             Click="OnVisitWebsiteClicked"/>
-                    <Button Content="{materialIcons:MaterialIconTextExt Text=Discord, Kind=OpenInNew, TextFirst=True}"
+                    <Button Content="{materialIcons:MaterialIconTextExt Text=Discord, Kind=OpenInNew, IconPlacement=Right}"
                             Name="DiscordButton"
                             HorizontalAlignment="Left"
                             Click="OnVisitWebsiteClicked"/>
