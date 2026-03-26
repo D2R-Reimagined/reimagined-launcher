@@ -23,7 +23,7 @@ jobs:
           dotnet-version: "10.0.x"
 
       - name: Restore solution
-        run: dotnet restore ReimaginedLauncher.sln
+        run: dotnet restore ReimaginedLauncher.sln -p:Configuration=Production -r win-x64
 
       - name: Build solution
         run: dotnet build ReimaginedLauncher.sln --configuration Production --no-restore
@@ -33,6 +33,7 @@ jobs:
           dotnet publish ReimaginedLauncher/ReimaginedLauncher.csproj
           --configuration Production
           --no-build
+          -r win-x64
           --output "${{ github.workspace }}\artifacts\ReimaginedLauncher"
 
       - name: Create release zip
