@@ -4,12 +4,23 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
              x:Class="ReimaginedLauncher.Views.Launch.LaunchView">
-    <StackPanel Spacing="16" Margin="16,8,16,16">
+    <StackPanel Spacing="16">
+        <Border x:Name="ValidationBanner"
+                Background="#4A2F16"
+                BorderBrush="#D7A24B"
+                BorderThickness="1"
+                CornerRadius="6"
+                Padding="12"
+                IsVisible="False">
+            <TextBlock x:Name="ValidationBannerText"
+                       Foreground="#F6D8A8"
+                       TextWrapping="Wrap"/>
+        </Border>
         <TextBlock Text="Install Directory" Margin="0,0,0,8"/>
         <DockPanel>
             <TextBox x:Name="DirectoryTextBox" Width="500" IsReadOnly="True" Margin="0,0,8,0"/>
             <Button Content="Browse" Click="OnInstallDirectoryClick"/>
         </DockPanel>
-        <Button Content="Start Game" Margin="0,16,0,0" Click="OnRunClick" Height="40"/>
+        <Button x:Name="StartGameButton" Content="Start Game" Margin="0,16,0,0" Click="OnRunClick" Height="40" IsEnabled="False"/>
     </StackPanel>
 </UserControl>

@@ -1,0 +1,18 @@
+These instructions apply to the entire repository.
+- This repo contains an Avalonia desktop launcher in `ReimaginedLauncher/`.
+- The main project file is `ReimaginedLauncher/ReimaginedLauncher.csproj`.
+- The app targets `net10.0` with nullable reference types enabled.
+- UI views live in `ReimaginedLauncher/Views/` with paired `.axaml` and `.axaml.cs` files.
+- Keep changes focused and minimal; do not refactor unrelated code.
+- Preserve the existing C# style, file-scoped namespaces, and naming patterns.
+- Prefer existing services and utilities before adding new abstractions.
+- Do not edit generated or build output files under `bin/` or `obj/`.
+- Do not edit IDE metadata under `.idea/` unless the user explicitly asks.
+- Restore packages with `dotnet restore ReimaginedLauncher.sln`.
+- Build with `dotnet build ReimaginedLauncher.sln`.
+- Run the app with `dotnet run --project ReimaginedLauncher/ReimaginedLauncher.csproj`.
+- When making code changes, validate the smallest relevant command first before broader checks.
+- Root `.gitignore` already covers standard .NET and IDE artifacts.
+- `Program.cs` configures dependency injection and Avalonia startup.
+- HTTP client code lives under `ReimaginedLauncher/HttpClients/`.
+- Shared application helpers live under `ReimaginedLauncher/Utilities/`.

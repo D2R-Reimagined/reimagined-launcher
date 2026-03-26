@@ -15,17 +15,61 @@
     <Window.Styles>
         <materialIcons:MaterialIconStyles />
     </Window.Styles>
-    <DockPanel LastChildFill="True">
-        <!-- Top bar -->
-        <Grid DockPanel.Dock="Top" Margin="0,0,0,8" Height="40">
+    <Grid ColumnDefinitions="200,*" RowDefinitions="Auto,*">
+        <Grid Grid.RowSpan="2" Grid.Column="0" Margin="0,0,8,0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <ListBox x:Name="NavigationList"
+                     SelectionChanged="OnNavigationSelectionChanged"
+                     Grid.Row="0"
+                     Margin="10">
+                <ListBoxItem Content="Launch" />
+                <ListBoxItem Content="Settings" />
+            </ListBox>
+
+            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="10,0,10,10" Spacing="5">
+                <Button Content="{materialIcons:MaterialIconTextExt Text=Website, Kind=OpenInNew, IconPlacement=Right}"
+                        Name="WebsiteButton"
+                        HorizontalAlignment="Left"
+                        Click="OnVisitWebsiteClicked"/>
+                <Button Content="{materialIcons:MaterialIconTextExt Text=Wiki, Kind=OpenInNew, IconPlacement=Right}"
+                        Name="WikiButton"
+                        HorizontalAlignment="Left"
+                        Click="OnVisitWebsiteClicked"/>
+                <Button Content="{materialIcons:MaterialIconTextExt Text=Nexus, Kind=OpenInNew, IconPlacement=Right}"
+                        Name="NexusButton"
+                        HorizontalAlignment="Left"
+                        Click="OnVisitWebsiteClicked"/>
+                <Button Content="{materialIcons:MaterialIconTextExt Text=Discord, Kind=OpenInNew, IconPlacement=Right}"
+                        Name="DiscordButton"
+                        HorizontalAlignment="Left"
+                        Click="OnVisitWebsiteClicked"/>
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="0" Grid.Column="1" Margin="0,0,0,8" Height="40">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
-            <TextBlock x:Name="VersionTextBlock" Margin="10,5,0,0" FontWeight="Bold" VerticalAlignment="Center" Grid.Column="0"/>
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="8" Grid.Column="2">
-                <controls:NotificationMessageContainer Manager="{x:Static local:MainWindow.ManagerInstance}" />
+
+            <TextBlock x:Name="VersionTextBlock"
+                       Grid.Column="0"
+                       Margin="10,5,0,0"
+                       FontWeight="Bold"
+                       VerticalAlignment="Center"/>
+
+            <controls:NotificationMessageContainer Grid.Column="1"
+                                                   Margin="12,0"
+                                                   HorizontalAlignment="Stretch"
+                                                   VerticalAlignment="Stretch"
+                                                   Manager="{x:Static local:MainWindow.ManagerInstance}" />
+
+            <Grid Grid.Column="2" VerticalAlignment="Center">
                 <Button Content="Login with Nexus Mods"
                         Click="OnNexusLoginClicked"
                         IsVisible="{Binding IsLoggedIn, Converter={StaticResource InverseBooleanConverter}}"
@@ -38,57 +82,12 @@
                                Text="{Binding Name}"
                                FontWeight="Bold"/>
                 </StackPanel>
-            </StackPanel>
-        </Grid>
-
-        <!-- Main Grid -->
-        <Grid>
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="200"/> <!-- nav -->
-                <ColumnDefinition Width="*"/>   <!-- content -->
-            </Grid.ColumnDefinitions>
-
-            <!-- Navigation -->
-            <Grid Grid.Column="0" Margin="0,0,8,0">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="*"/>   <!-- For ListBox -->
-                    <RowDefinition Height="Auto"/> <!-- For Buttons at the bottom -->
-                </Grid.RowDefinitions>
-
-                <!-- Navigation -->
-                <ListBox x:Name="NavigationList"
-                         SelectionChanged="OnNavigationSelectionChanged"
-                         Grid.Row="0"
-                         Margin="10,10,10,10">
-                    <ListBoxItem Content="Launch" />
-                    <ListBoxItem Content="Settings" />
-                </ListBox>
-
-                <!-- Buttons -->
-                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="10,0,10,10" Spacing="5">
-                    <Button Content="{materialIcons:MaterialIconTextExt Text=Website, Kind=OpenInNew, IconPlacement=Right}"
-                            Name="WebsiteButton"
-                            HorizontalAlignment="Left"
-                            Click="OnVisitWebsiteClicked"/>
-                    <Button Content="{materialIcons:MaterialIconTextExt Text=Wiki, Kind=OpenInNew, IconPlacement=Right}"
-                            Name="WikiButton"
-                            HorizontalAlignment="Left"
-                            Click="OnVisitWebsiteClicked"/>
-                    <Button Content="{materialIcons:MaterialIconTextExt Text=Nexus, Kind=OpenInNew, IconPlacement=Right}"
-                            Name="NexusButton"
-                            HorizontalAlignment="Left"
-                            Click="OnVisitWebsiteClicked"/>
-                    <Button Content="{materialIcons:MaterialIconTextExt Text=Discord, Kind=OpenInNew, IconPlacement=Right}"
-                            Name="DiscordButton"
-                            HorizontalAlignment="Left"
-                            Click="OnVisitWebsiteClicked"/>
-                </StackPanel>
             </Grid>
-
-            <Border Grid.Column="1" Padding="32,24" CornerRadius="8">
-                <ContentControl x:Name="ContentArea" />
-            </Border>
         </Grid>
-    </DockPanel>
+
+        <Border Grid.Row="1" Grid.Column="1" Padding="32,24" CornerRadius="8">
+            <ContentControl x:Name="ContentArea" />
+        </Border>
+    </Grid>
     
 </Window>

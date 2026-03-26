@@ -53,6 +53,8 @@ public partial class MainWindow : Window
     private async Task LoadSettingsAsync()
     {
         Settings = await SettingsManager.LoadAsync();
+        Settings.InstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(Settings.InstallDirectory);
+        Settings.IsInstallDirectoryValidated = InstallDirectoryValidator.IsValidInstallDirectory(Settings.InstallDirectory);
         
         if (!string.IsNullOrWhiteSpace(Settings.NexusModsSSOApiKey))
         {
@@ -61,10 +63,6 @@ public partial class MainWindow : Window
         }
         
         var installDir = Settings.InstallDirectory;
-        if (installDir != null && installDir.EndsWith("D2R.exe", StringComparison.OrdinalIgnoreCase))
-        {
-            installDir = Path.GetDirectoryName(installDir);
-        }
 
         if (!string.IsNullOrEmpty(installDir))
         {
@@ -81,6 +79,16 @@ public partial class MainWindow : Window
                 VersionTextBlock.Text = $"D2R Reimagined v{_localModVersion}";
             });
         }
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (ContentArea.Content is LaunchView launchView)
+            {
+                launchView.RefreshInstallDirectoryState();
+            }
+        });
+
+        await SettingsManager.SaveAsync(Settings);
 
         // Only check for latest mod version if user is logged in
         if (UserViewModel.User != null)
@@ -202,4 +210,3 @@ public partial class MainWindow : Window
         }
     }
 }
-

@@ -8,12 +8,11 @@ public class GameLauncherService
 {
     private const string? DefaultInstallPath = @"C:\Program Files (x86)\Diablo II Resurrected\D2R.exe";
     public string? GamePathOverride { get; set; } = string.Empty;
-    private string? _selectedExePath;
     public string LaunchParameters = "-mod Reimagined -txt";
     
     public string? InstallDirectory
     {
-        get => Path.GetDirectoryName(_selectedExePath) ?? string.Empty;
+        get => InstallDirectoryValidator.NormalizeInstallDirectory(MainWindow.Settings.InstallDirectory) ?? string.Empty;
         set => throw new NotImplementedException();
     }
 
@@ -26,21 +25,26 @@ public class GameLauncherService
 
     private void CheckForD2RExecutable()
     {
-        if (MainWindow.Settings.InstallDirectory is not null)
+        if (InstallDirectoryValidator.IsValidInstallDirectory(MainWindow.Settings.InstallDirectory))
         {
-            _selectedExePath = MainWindow.Settings.InstallDirectory;
+            MainWindow.Settings.InstallDirectory =
+                InstallDirectoryValidator.NormalizeInstallDirectory(MainWindow.Settings.InstallDirectory);
+            MainWindow.Settings.IsInstallDirectoryValidated = true;
         }
         else
         {
-            _selectedExePath = FindD2RExecutable();
+            var detectedExecutablePath = FindD2RExecutable();
 
-            if (!string.IsNullOrEmpty(_selectedExePath))
+            if (!string.IsNullOrEmpty(detectedExecutablePath))
             {
-                MainWindow.Settings.InstallDirectory = _selectedExePath;
+                MainWindow.Settings.InstallDirectory =
+                    InstallDirectoryValidator.NormalizeInstallDirectory(detectedExecutablePath);
+                MainWindow.Settings.IsInstallDirectoryValidated = true;
                 _ = SettingsManager.SaveAsync(MainWindow.Settings);
             }
             else
             {
+                MainWindow.Settings.IsInstallDirectoryValidated = false;
                 // Handle the case where the executable wasn't found
                 Notifications.SendNotification("D2R.exe not found");
             }
@@ -130,15 +134,17 @@ public class GameLauncherService
             GamePathOverride = gamePathOverride;
         }
 
+        var executablePath = InstallDirectoryValidator.GetExecutablePath(MainWindow.Settings.InstallDirectory);
+
         // Validate the selected executable path and game path override
-        if (string.IsNullOrWhiteSpace(_selectedExePath) && string.IsNullOrWhiteSpace(GamePathOverride))
+        if (string.IsNullOrWhiteSpace(executablePath) && string.IsNullOrWhiteSpace(GamePathOverride))
         {
             Notifications.SendNotification("No valid game path found. Please set the game path in settings.");
             return;
         }
             
 #if OS_WINDOWS
-        Process.Start(new ProcessStartInfo((!string.IsNullOrWhiteSpace(GamePathOverride) ? GamePathOverride + "\\D2R.exe" : _selectedExePath) ?? throw new InvalidOperationException())
+        Process.Start(new ProcessStartInfo((!string.IsNullOrWhiteSpace(GamePathOverride) ? GamePathOverride + "\\D2R.exe" : executablePath) ?? throw new InvalidOperationException())
         {
             UseShellExecute = true,
             Arguments = LaunchParameters

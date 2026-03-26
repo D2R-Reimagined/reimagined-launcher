@@ -14,16 +14,30 @@ public partial class LaunchView : UserControl
     public LaunchView()
     {
         InitializeComponent();
-        
-        if (!string.IsNullOrWhiteSpace(MainWindow.Settings.InstallDirectory))
-            DirectoryTextBox.Text = MainWindow.Settings.InstallDirectory;
+
+        RefreshInstallDirectoryState();
+    }
+
+    public void RefreshInstallDirectoryState()
+    {
+        DirectoryTextBox.Text = MainWindow.Settings.InstallDirectory ?? string.Empty;
+
+        var isValidated = InstallDirectoryValidator.IsValidInstallDirectory(MainWindow.Settings.InstallDirectory);
+        MainWindow.Settings.IsInstallDirectoryValidated = isValidated;
+        StartGameButton.IsEnabled = isValidated;
+        ValidationBanner.IsVisible = !isValidated;
+        ValidationBannerText.Text = string.IsNullOrWhiteSpace(MainWindow.Settings.InstallDirectory)
+            ? "Enter your Diablo II: Resurrected install directory before using the launcher."
+            : "The selected install directory has not been validated. Choose the folder that contains D2R.exe.";
     }
     
     private async void OnRunClick(object? sender, RoutedEventArgs e)
     {
-        if (string.IsNullOrEmpty(MainWindow.Settings.InstallDirectory))
+        if (!MainWindow.Settings.IsInstallDirectoryValidated)
         {
-            Notifications.SendNotification("Install Directory Not Set", "Please set the install directory in settings.");
+            Notifications.SendNotification(
+                "Install directory not validated",
+                "Choose the Diablo II: Resurrected folder that contains D2R.exe.");
             return;
         }
         
@@ -44,9 +58,21 @@ public partial class LaunchView : UserControl
             if (folders.Count <= 0) return;
             
             var path = folders[0].Path.LocalPath;
-            DirectoryTextBox.Text = path;
-            MainWindow.Settings.InstallDirectory = path;
+            MainWindow.Settings.InstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(path);
+            MainWindow.Settings.IsInstallDirectoryValidated =
+                InstallDirectoryValidator.IsValidInstallDirectory(MainWindow.Settings.InstallDirectory);
             await SettingsManager.SaveAsync(MainWindow.Settings);
+            RefreshInstallDirectoryState();
+
+            if (!MainWindow.Settings.IsInstallDirectoryValidated)
+            {
+                Notifications.SendNotification(
+                    "D2R install not found",
+                    "Select the Diablo II: Resurrected folder that contains D2R.exe.");
+                return;
+            }
+
+            Notifications.SendNotification("Install directory validated", "Success");
         }
     }
 }
