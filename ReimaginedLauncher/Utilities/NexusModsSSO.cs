@@ -14,11 +14,11 @@ namespace ReimaginedLauncher.Utilities;
 public class NexusModsSSO
 {
     private readonly Uri _socketUri = new("wss://sso.nexusmods.com");
-    private ClientWebSocket _webSocket;
-    private string _uuid;
-    private string _token;
+    private ClientWebSocket _webSocket = new();
+    private string _uuid = string.Empty;
+    private string _token = string.Empty;
     private string _applicationSlug = "d2rrlauncher";
-    public event Action<string> OnApiKeyReceived;
+    public event Action<string>? OnApiKeyReceived;
 
     public async Task ConnectAsync()
     {
@@ -99,14 +99,14 @@ public class NexusSSOResponse
 {
     public bool Success { get; set; }
     public NexusSSOResponseData Data { get; set; } = new();
-    public string Error { get; set; }
+    public string Error { get; set; } = string.Empty;
 }
 
 public class NexusSSOResponseData
 {
     [JsonPropertyName("api_key")]
-    public string ApiKey { get; set; }
+    public string ApiKey { get; set; } = string.Empty;
     
     [JsonPropertyName("connection_token")]
-    public string ConnectionToken { get; set; }
+    public string ConnectionToken { get; set; } = string.Empty;
 }

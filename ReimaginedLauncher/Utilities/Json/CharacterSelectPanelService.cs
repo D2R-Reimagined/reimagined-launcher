@@ -10,24 +10,24 @@ namespace ReimaginedLauncher.Utilities.Json;
 
 public class WidgetNode
 {
-    [JsonPropertyName("type")] public string Type { get; set; }
+    [JsonPropertyName("type")] public string Type { get; set; } = string.Empty;
 
-    [JsonPropertyName("name")] public string Name { get; set; }
+    [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
 
-    [JsonPropertyName("fields")] public Dictionary<string, JsonElement> Fields { get; set; }
+    [JsonPropertyName("fields")] public Dictionary<string, JsonElement> Fields { get; set; } = new();
 
-    [JsonPropertyName("children")] public List<WidgetNode> Children { get; set; }
+    [JsonPropertyName("children")] public List<WidgetNode> Children { get; set; } = new();
 }
 
 public class CharacterSelectPanelService
 {
-    [JsonPropertyName("type")] public string Type { get; set; }
+    [JsonPropertyName("type")] public string Type { get; set; } = string.Empty;
 
-    [JsonPropertyName("name")] public string Name { get; set; }
+    [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
 
-    [JsonPropertyName("fields")] public Dictionary<string, JsonElement> Fields { get; set; }
+    [JsonPropertyName("fields")] public Dictionary<string, JsonElement> Fields { get; set; } = new();
 
-    [JsonPropertyName("children")] public List<WidgetNode> Children { get; set; }
+    [JsonPropertyName("children")] public List<WidgetNode> Children { get; set; } = new();
 
     public static CharacterSelectPanelService? FromJson(string layoutsDirectory)
     {
