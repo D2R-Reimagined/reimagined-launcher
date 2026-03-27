@@ -34,7 +34,7 @@ public partial class MainWindow : Window
     
     public static INotificationMessageManager ManagerInstance { get; } = new NotificationMessageManager();
     public static AppSettings Settings = new();
-    private NexusModsSSO _nexusSSO;
+    private NexusModsSSO? _nexusSSO;
     private string? _localModVersion;
 
     public MainWindow()

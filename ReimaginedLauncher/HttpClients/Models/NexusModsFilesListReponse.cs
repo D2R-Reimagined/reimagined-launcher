@@ -7,16 +7,16 @@ namespace ReimaginedLauncher.HttpClients.Models;
 public class NexusModsFileListResponse
 {
     [JsonPropertyName("files")]
-    public List<NexusModsFileResponse> Files { get; set; }
+    public List<NexusModsFileResponse> Files { get; set; } = [];
 
     [JsonPropertyName("file_updates")]
-    public List<FileUpdate> FileUpdates { get; set; }
+    public List<FileUpdate> FileUpdates { get; set; } = [];
 }
 
 public class NexusModsFileResponse
 {
     [JsonPropertyName("id")]
-    public List<int> Id { get; set; }
+    public List<int> Id { get; set; } = [];
 
     [JsonPropertyName("uid")]
     public long Uid { get; set; }
@@ -25,16 +25,16 @@ public class NexusModsFileResponse
     public int FileId { get; set; }
 
     [JsonPropertyName("name")]
-    public string Name { get; set; }
+    public string Name { get; set; } = string.Empty;
 
     [JsonPropertyName("version")]
-    public string Version { get; set; }
+    public string Version { get; set; } = string.Empty;
 
     [JsonPropertyName("category_id")]
     public int CategoryId { get; set; }
 
     [JsonPropertyName("category_name")]
-    public string CategoryName { get; set; }
+    public string CategoryName { get; set; } = string.Empty;
 
     [JsonPropertyName("is_primary")]
     public bool IsPrimary { get; set; }
@@ -43,7 +43,7 @@ public class NexusModsFileResponse
     public int Size { get; set; }
 
     [JsonPropertyName("file_name")]
-    public string FileName { get; set; }
+    public string FileName { get; set; } = string.Empty;
 
     [JsonPropertyName("uploaded_timestamp")]
     public long UploadedTimestamp { get; set; }
@@ -52,13 +52,13 @@ public class NexusModsFileResponse
     public DateTime UploadedTime { get; set; }
 
     [JsonPropertyName("mod_version")]
-    public string ModVersion { get; set; }
+    public string ModVersion { get; set; } = string.Empty;
 
     [JsonPropertyName("external_virus_scan_url")]
-    public string ExternalVirusScanUrl { get; set; }
+    public string ExternalVirusScanUrl { get; set; } = string.Empty;
 
     [JsonPropertyName("description")]
-    public string Description { get; set; }
+    public string Description { get; set; } = string.Empty;
 
     [JsonPropertyName("size_kb")]
     public int SizeKb { get; set; }
@@ -70,7 +70,7 @@ public class NexusModsFileResponse
     public string? ChangelogHtml { get; set; }
 
     [JsonPropertyName("content_preview_link")]
-    public string ContentPreviewLink { get; set; }
+    public string ContentPreviewLink { get; set; } = string.Empty;
 }
 public class FileUpdate
 {
@@ -81,10 +81,10 @@ public class FileUpdate
     public int NewFileId { get; set; }
 
     [JsonPropertyName("old_file_name")]
-    public string OldFileName { get; set; }
+    public string OldFileName { get; set; } = string.Empty;
 
     [JsonPropertyName("new_file_name")]
-    public string NewFileName { get; set; }
+    public string NewFileName { get; set; } = string.Empty;
 
     [JsonPropertyName("uploaded_timestamp")]
     public long UploadedTimestamp { get; set; }
@@ -92,4 +92,3 @@ public class FileUpdate
     [JsonPropertyName("uploaded_time")]
     public DateTime UploadedTime { get; set; }
 }
-

@@ -5,7 +5,7 @@ namespace ReimaginedLauncher.HttpClients.Models;
 public class NexusModsValidateResponse
 {
     [JsonPropertyName("message")]
-    public string Message { get; set; }
+    public string Message { get; set; } = string.Empty;
     
     [JsonPropertyName("user_id")]
     public int UserId { get; set; }
