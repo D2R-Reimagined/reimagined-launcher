@@ -1,0 +1,14 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="ReimaginedLauncher.Views.UpdateFoundWindow"
+        Title="Update Found"
+        Width="350" Height="200" WindowStartupLocation="CenterOwner">
+  <StackPanel Margin="20" Spacing="10">
+    <TextBlock Text="A new version of the mod is available!" FontWeight="Bold" FontSize="16"/>
+    <TextBlock Text="Current Mod Version:"/>
+    <TextBlock x:Name="CurrentVersionText" FontWeight="Bold"/>
+    <TextBlock Text="New Mod Version:" Margin="0,10,0,0"/>
+    <TextBlock x:Name="NewVersionText" FontWeight="Bold"/>
+    <Button Content="Download Latest Version" Margin="0,20,0,0" Click="OnDownloadClicked"/>
+  </StackPanel>
+</Window>

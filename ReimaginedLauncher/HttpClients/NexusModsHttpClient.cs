@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Net.Http;
+using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading.Tasks;
 using ReimaginedLauncher.Generators;
@@ -27,12 +28,28 @@ public class NexusModsHttpClient : INexusModsHttpClient
 
         if (!response.IsSuccessStatusCode)
         {
-            await Console.Error.WriteLineAsync($"Failed to fetch files: {response.StatusCode}");
+            Notifications.SendNotification($"Failed to fetch files: {response.StatusCode}");
             return null;
         }
 
         var stream = await response.Content.ReadAsStreamAsync();
         return await JsonSerializer.DeserializeAsync<NexusModsFileListResponse>(stream, SerializerOptions.CamelCase);
+    }
+    
+    public async Task<NexusModsFileListResponse?> GenerateDownloadLink(string gameName, int modid, int fileId)
+    {
+        await FindAndSetApiKey();
+        var url = $"{BaseUrl}/games/{gameName}/mods/{modid}/files/{fileId}/download_link.json";
+        var response = await _httpClient.GetAsync(url);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            Notifications.SendNotification($"Failed to generate download link: {response.StatusCode}");
+            return null;
+        }
+
+        var stream = await response.Content.ReadAsStreamAsync();
+        return await JsonSerializer.DeserializeAsync<NexusModsDownloadLinkResponse>(stream, SerializerOptions.CamelCase);
     }
 
     public async Task<NexusModsValidateResponse?> ValidateApiKeyAsync(string? apiKey = "")
@@ -43,16 +60,16 @@ public class NexusModsHttpClient : INexusModsHttpClient
             _httpClient.DefaultRequestHeaders.Remove("apikey");
             _httpClient.DefaultRequestHeaders.Add("apikey", apiKey);
         }
-        
+
         var url = $"{BaseUrl}/users/validate.json";
         var response = await _httpClient.GetAsync(url);
-        
+
         if (!response.IsSuccessStatusCode)
         {
-            await Console.Error.WriteLineAsync($"Failed to validate API key: {response.StatusCode}");
+            Notifications.SendNotification($"Failed to validate API key: {response.StatusCode}");
             return null;
         }
-        
+
         return await JsonSerializer.DeserializeAsync<NexusModsValidateResponse>(await response.Content.ReadAsStreamAsync(), SerializerOptions.CamelCase);
     }
 
