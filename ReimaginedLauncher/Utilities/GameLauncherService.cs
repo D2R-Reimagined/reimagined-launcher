@@ -19,9 +19,10 @@ public class GameLauncherService
 
     public GameLauncherService()
     {
-#if OS_WINDOWS
-        CheckForD2RExecutable();
-#endif
+        if (OperatingSystem.IsWindows())
+        {
+            CheckForD2RExecutable();
+        }
     }
 
     private void CheckForD2RExecutable()
@@ -199,15 +200,17 @@ public class GameLauncherService
             ? LaunchParameters
             : launchParamOverride;
             
-#if OS_WINDOWS
+        if (!OperatingSystem.IsWindows())
+        {
+            Notifications.SendNotification("This only works on Windows");
+            return;
+        }
+
         Process.Start(new ProcessStartInfo(executablePath)
         {
             UseShellExecute = true,
             Arguments = launchParameters
         });
-#else
-        Notifications.SendNotification("This only works on Windows");
-#endif
     }
 
     private string? ResolveExecutablePath(string? gamePathOverride = null)
