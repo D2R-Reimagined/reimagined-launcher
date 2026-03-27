@@ -5,6 +5,8 @@ public class AppSettings
     public string? InstallDirectory { get; set; }
     public bool IsInstallDirectoryValidated { get; set; }
     public string? BackupSaveDirectory { get; set; }
+    public int BackupIntervalMinutes { get; set; } = 15;
+    public int BackupAmount { get; set; } = 10;
     public string? NexusModsSSOApiKey { get; set; }
     public bool UseDirectLaunch { get; set; }
     public bool NoSound { get; set; }

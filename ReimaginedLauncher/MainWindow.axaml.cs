@@ -16,13 +16,17 @@ using ReimaginedLauncher.HttpClients.Models;
 using ReimaginedLauncher.Utilities;
 using ReimaginedLauncher.Utilities.Json;
 using ReimaginedLauncher.Utilities.ViewModels;
+using ReimaginedLauncher.Views.Backups;
 using ReimaginedLauncher.Views.Launch;
 using ReimaginedLauncher.Views.Settings;
+using ReimaginedLauncher.Views.Update;
 
 namespace ReimaginedLauncher;
 
 public partial class MainWindow : Window
 {
+    private const string NexusGameName = "diablo2resurrected";
+    private const int NexusModId = 503;
     // Make URLs readonly for safe reuse across the file
     private const string WebsiteUrl = "https://www.d2r-reimagined.com";
     private const string WikiUrl = "https://wiki.d2r-reimagined.com";
@@ -88,12 +92,17 @@ public partial class MainWindow : Window
             {
                 launchView.RefreshInstallDirectoryState();
             }
+            else if (ContentArea.Content is BackupsView backupsView)
+            {
+                backupsView.RefreshBackupState();
+            }
             else if (ContentArea.Content is SettingsView settingsView)
             {
                 settingsView.RefreshSettingsState();
             }
         });
 
+        BackupService.UpdateSchedule();
         await SettingsManager.SaveAsync(Settings);
 
         // Only check for latest mod version if user is logged in
@@ -126,25 +135,32 @@ public partial class MainWindow : Window
             _localModVersion.Equals("Unknown", StringComparison.OrdinalIgnoreCase))
             return;
 
-        var filesResponse = await _nexusModsHttpClient.GetModFilesAsync("diablo2resurrected", 503);
+        var filesResponse = await _nexusModsHttpClient.GetModFilesAsync(NexusGameName, NexusModId);
         if (filesResponse?.Files == null || filesResponse.Files.Count == 0)
             return;
-        var latestFile = filesResponse.Files.OrderByDescending(f => f.UploadedTimestamp).FirstOrDefault();
+
+        var latestFile = filesResponse.Files
+            .Where(file => file.IsPrimary)
+            .OrderByDescending(file => file.UploadedTimestamp)
+            .FirstOrDefault()
+            ?? filesResponse.Files.OrderByDescending(file => file.UploadedTimestamp).FirstOrDefault();
+
         if (latestFile == null)
             return;
-        var latestVersion = latestFile.Version;
+
+        var latestVersion = !string.IsNullOrWhiteSpace(latestFile.ModVersion)
+            ? latestFile.ModVersion
+            : latestFile.Version;
+
         if (!string.IsNullOrEmpty(_localModVersion) && !string.IsNullOrEmpty(latestVersion) && !_localModVersion.Equals(latestVersion, StringComparison.OrdinalIgnoreCase))
         {
-            // Get the download link for the latest file
-            var downloadLinkResponse = await _nexusModsHttpClient.GenerateDownloadLink("diablo2resurrected", 503, latestFile.FileId);
-            var downloadUrl = downloadLinkResponse?.Uri;
+            var downloadUrl = await GetUpdateUrlAsync(latestFile.FileId);
 
-            // Show update popup if downloadUrl is not null
             if (!string.IsNullOrEmpty(downloadUrl))
             {
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
-                    var updateWindow = new ReimaginedLauncher.Views.UpdateFoundWindow(_localModVersion, latestVersion, downloadUrl);
+                    var updateWindow = new UpdateFoundWindow(_localModVersion, latestVersion, downloadUrl);
                     updateWindow.ShowDialog(this);
                 });
             }
@@ -158,6 +174,15 @@ public partial class MainWindow : Window
             Notifications.SendNotification("You have the latest version of the mod");
         }
     }
+
+    private async Task<string?> GetUpdateUrlAsync(int fileId)
+    {
+        var downloadLinkResponse = await _nexusModsHttpClient.GenerateDownloadLink(NexusGameName, NexusModId, fileId);
+        if (!string.IsNullOrWhiteSpace(downloadLinkResponse?.Uri))
+            return downloadLinkResponse.Uri;
+
+        return $"{NexusUrl}?tab=files&file_id={fileId}";
+    }
     
     private void OnNavigationSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
@@ -169,6 +194,11 @@ public partial class MainWindow : Window
                     var launchView = new LaunchView();
                     launchView.RefreshInstallDirectoryState();
                     ContentArea.Content = launchView;
+                    break;
+                case "Backups":
+                    var backupsView = new BackupsView();
+                    backupsView.RefreshBackupState();
+                    ContentArea.Content = backupsView;
                     break;
                 case "Settings":
                     var settingsView = new SettingsView();
@@ -209,7 +239,7 @@ public partial class MainWindow : Window
                 process.Start();
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             // Handle exception (log, display error, etc.)
         }

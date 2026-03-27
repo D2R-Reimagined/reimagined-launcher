@@ -63,6 +63,7 @@ public partial class LaunchView : UserControl
             MainWindow.Settings.IsInstallDirectoryValidated =
                 InstallDirectoryValidator.IsValidInstallDirectory(MainWindow.Settings.InstallDirectory);
             await SettingsManager.SaveAsync(MainWindow.Settings);
+            BackupService.UpdateSchedule();
             RefreshInstallDirectoryState();
 
             if (!MainWindow.Settings.IsInstallDirectoryValidated)

@@ -5,11 +5,6 @@
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
              x:Class="ReimaginedLauncher.Views.Settings.SettingsView">
     <StackPanel Spacing="16">
-        <TextBlock Text="Backup Directory" Margin="0,0,0,8"/>
-        <DockPanel>
-            <TextBox x:Name="BackupTextBox" Width="500" IsReadOnly="True" Margin="0,0,8,0"/>
-            <Button Content="Browse" Click="OnBackupDirectoryClick"/>
-        </DockPanel>
         <TextBlock Text="Launch Parameters" Margin="0,8,0,0"/>
         <CheckBox x:Name="DirectLaunchCheckBox"
                   Content="-direct"

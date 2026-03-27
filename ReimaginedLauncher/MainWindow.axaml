@@ -27,6 +27,7 @@
                      Grid.Row="0"
                      Margin="10">
                 <ListBoxItem Content="Launch" />
+                <ListBoxItem Content="Backups" />
                 <ListBoxItem Content="Settings" />
             </ListBox>
 

@@ -34,7 +34,7 @@ public class NexusModsHttpClient : INexusModsHttpClient
         }
 
         var stream = await response.Content.ReadAsStreamAsync();
-        return await JsonSerializer.DeserializeAsync<NexusModsFileListResponse>(stream, SerializerOptions.CamelCase);
+        return await JsonSerializer.DeserializeAsync<NexusModsFileListResponse>(stream, SerializerOptions.PropertyNameCaseInsensitive);
     }
     
     public async Task<NexusModsDownloadLinkResponse?> GenerateDownloadLink(string gameName, int modid, int fileId)
@@ -50,8 +50,8 @@ public class NexusModsHttpClient : INexusModsHttpClient
         }
 
         var stream = await response.Content.ReadAsStreamAsync();
-        var downloadLinks = await JsonSerializer.DeserializeAsync<List<NexusModsDownloadLinkResponse>>(stream, SerializerOptions.CamelCase);
-        return downloadLinks?.FirstOrDefault();
+        var downloadLinks = await JsonSerializer.DeserializeAsync<List<NexusModsDownloadLinkResponse>>(stream, SerializerOptions.PropertyNameCaseInsensitive);
+        return downloadLinks?.FirstOrDefault(link => !string.IsNullOrWhiteSpace(link.Uri));
     }
 
     public async Task<NexusModsValidateResponse?> ValidateApiKeyAsync(string? apiKey = "")
@@ -72,7 +72,7 @@ public class NexusModsHttpClient : INexusModsHttpClient
             return null;
         }
 
-        return await JsonSerializer.DeserializeAsync<NexusModsValidateResponse>(await response.Content.ReadAsStreamAsync(), SerializerOptions.CamelCase);
+        return await JsonSerializer.DeserializeAsync<NexusModsValidateResponse>(await response.Content.ReadAsStreamAsync(), SerializerOptions.PropertyNameCaseInsensitive);
     }
 
     private Task FindAndSetApiKey()
