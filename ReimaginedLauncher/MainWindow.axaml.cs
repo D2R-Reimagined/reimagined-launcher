@@ -76,7 +76,9 @@ public partial class MainWindow : Window
 
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                VersionTextBlock.Text = $"D2R Reimagined v{_localModVersion}";
+                VersionTextBlock.Text = string.Equals(_localModVersion, "Unknown", StringComparison.OrdinalIgnoreCase)
+                    ? "D2R Reimagined Version Not Detected"
+                    : $"D2R Reimagined v{_localModVersion}";
             });
         }
 

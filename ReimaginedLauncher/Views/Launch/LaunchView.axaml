@@ -19,9 +19,9 @@
         <TextBlock Text="Install Directory" Margin="0,0,0,8"/>
         <DockPanel>
             <TextBox x:Name="DirectoryTextBox" Width="500" IsReadOnly="True" Margin="0,0,8,0"/>
-            <Button Content="Browse" Click="OnInstallDirectoryClick"/>
+            <Button Content="Browse" Click="OnInstallDirectoryClick" Height="40" VerticalContentAlignment="Center"/>
         </DockPanel>
-        <Button x:Name="StartGameButton" Content="Start Game" Margin="0,16,0,0" Click="OnRunClick" Height="40" IsEnabled="False"/>
+        <Button x:Name="StartGameButton" Content="Start Game" Margin="0,16,0,0" Padding="12,6" Click="OnRunClick" Height="40" VerticalContentAlignment="Center" IsEnabled="False"/>
         <TextBlock Text="Launch Command" Margin="0,12,0,0"/>
         <TextBlock x:Name="LaunchCommandText"
                    TextWrapping="Wrap"
