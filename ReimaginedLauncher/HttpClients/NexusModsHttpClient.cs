@@ -1,10 +1,11 @@
-﻿using System;
+﻿using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
-using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading.Tasks;
 using ReimaginedLauncher.Generators;
 using ReimaginedLauncher.HttpClients.Models;
+using ReimaginedLauncher.Utilities;
 
 namespace ReimaginedLauncher.HttpClients;
 
@@ -36,7 +37,7 @@ public class NexusModsHttpClient : INexusModsHttpClient
         return await JsonSerializer.DeserializeAsync<NexusModsFileListResponse>(stream, SerializerOptions.CamelCase);
     }
     
-    public async Task<NexusModsFileListResponse?> GenerateDownloadLink(string gameName, int modid, int fileId)
+    public async Task<NexusModsDownloadLinkResponse?> GenerateDownloadLink(string gameName, int modid, int fileId)
     {
         await FindAndSetApiKey();
         var url = $"{BaseUrl}/games/{gameName}/mods/{modid}/files/{fileId}/download_link.json";
@@ -49,7 +50,8 @@ public class NexusModsHttpClient : INexusModsHttpClient
         }
 
         var stream = await response.Content.ReadAsStreamAsync();
-        return await JsonSerializer.DeserializeAsync<NexusModsDownloadLinkResponse>(stream, SerializerOptions.CamelCase);
+        var downloadLinks = await JsonSerializer.DeserializeAsync<List<NexusModsDownloadLinkResponse>>(stream, SerializerOptions.CamelCase);
+        return downloadLinks?.FirstOrDefault();
     }
 
     public async Task<NexusModsValidateResponse?> ValidateApiKeyAsync(string? apiKey = "")
@@ -73,9 +75,10 @@ public class NexusModsHttpClient : INexusModsHttpClient
         return await JsonSerializer.DeserializeAsync<NexusModsValidateResponse>(await response.Content.ReadAsStreamAsync(), SerializerOptions.CamelCase);
     }
 
-    private async Task FindAndSetApiKey()
+    private Task FindAndSetApiKey()
     {
         _httpClient.DefaultRequestHeaders.Remove("apikey");
         _httpClient.DefaultRequestHeaders.Add("apikey", MainWindow.Settings.NexusModsSSOApiKey);
+        return Task.CompletedTask;
     }
 }

@@ -134,8 +134,8 @@ public partial class MainWindow : Window
         if (!string.IsNullOrEmpty(_localModVersion) && !string.IsNullOrEmpty(latestVersion) && !_localModVersion.Equals(latestVersion, StringComparison.OrdinalIgnoreCase))
         {
             // Get the download link for the latest file
-            NexusModsDownloadLinkResponse downloadLinkResponse = await _nexusModsHttpClient.GenerateDownloadLink("diablo2resurrected", 503, latestFile.FileId);
-            string downloadUrl = downloadLinkResponse.first().Uri;
+            var downloadLinkResponse = await _nexusModsHttpClient.GenerateDownloadLink("diablo2resurrected", 503, latestFile.FileId);
+            var downloadUrl = downloadLinkResponse?.Uri;
 
             // Show update popup if downloadUrl is not null
             if (!string.IsNullOrEmpty(downloadUrl))
