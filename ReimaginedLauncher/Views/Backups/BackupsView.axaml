@@ -1,0 +1,66 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:utilities="clr-namespace:ReimaginedLauncher.Utilities"
+             mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="520"
+             x:CompileBindings="False"
+             x:Class="ReimaginedLauncher.Views.Backups.BackupsView">
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                  VerticalScrollBarVisibility="Auto">
+        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="12" ColumnSpacing="12">
+            <StackPanel Grid.Row="0" Grid.ColumnSpan="2" Spacing="4">
+                <TextBlock Text="Backups" FontSize="22" FontWeight="Bold"/>
+                <TextBlock Text="Create scheduled save backups and restore any saved snapshot." Opacity="0.75"/>
+            </StackPanel>
+
+            <Grid Grid.Row="1" Grid.ColumnSpan="2" ColumnDefinitions="*,140,140" ColumnSpacing="12">
+                <StackPanel Grid.Column="0" Spacing="6">
+                    <TextBlock Text="Backup Directory"/>
+                    <TextBox x:Name="BackupDirectoryTextBox" IsReadOnly="True"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="6">
+                    <TextBlock Text="Time in minute"/>
+                    <TextBox x:Name="BackupIntervalTextBox" Watermark="15" LostFocus="OnBackupConfigurationChanged"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2" Spacing="6">
+                    <TextBlock Text="Backup Amount"/>
+                    <TextBox x:Name="BackupAmountTextBox" Watermark="10" LostFocus="OnBackupConfigurationChanged"/>
+                </StackPanel>
+            </Grid>
+
+            <Grid Grid.Row="2" Grid.ColumnSpan="2" ColumnDefinitions="Auto,Auto,Auto,Auto,*" ColumnSpacing="8">
+                <Button Grid.Column="0" Content="Browse" Click="OnBackupDirectoryClick"/>
+                <Button Grid.Column="1" Content="Take Backup Now" Click="OnTakeBackupNowClick"/>
+                <Button Grid.Column="2" Content="Restore Selected" Click="OnRestoreSelectedClick"/>
+                <Button Grid.Column="3" Content="Refresh" Click="OnRefreshClick"/>
+                <TextBlock Grid.Column="4"
+                           x:Name="SaveDirectoryTextBlock"
+                           VerticalAlignment="Center"
+                           TextWrapping="Wrap"/>
+            </Grid>
+
+            <Border Grid.Row="3" Grid.ColumnSpan="2" Padding="12" BorderThickness="1" CornerRadius="6">
+                <ListBox x:Name="BackupsListBox"
+                         MinHeight="260"
+                         MaxHeight="360"
+                         SelectionChanged="OnBackupSelectionChanged">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="utilities:BackupEntry">
+                            <StackPanel Spacing="2" Margin="0,4">
+                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding Summary}" Opacity="0.75"/>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Border>
+
+            <TextBlock Grid.Row="4"
+                       Grid.ColumnSpan="2"
+                       x:Name="RestoreSelectionTextBlock"
+                       Opacity="0.75"
+                       Text="Select a backup to restore."/>
+        </Grid>
+    </ScrollViewer>
+</UserControl>
