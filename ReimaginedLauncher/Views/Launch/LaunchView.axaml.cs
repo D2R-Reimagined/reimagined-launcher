@@ -23,12 +23,15 @@ public partial class LaunchView : UserControl
         DirectoryTextBox.Text = MainWindow.Settings.InstallDirectory ?? string.Empty;
 
         var isValidated = InstallDirectoryValidator.IsValidInstallDirectory(MainWindow.Settings.InstallDirectory);
+        var isModDetected = MainWindow.IsLocalModDetected;
         MainWindow.Settings.IsInstallDirectoryValidated = isValidated;
-        StartGameButton.IsEnabled = isValidated;
-        ValidationBanner.IsVisible = !isValidated;
-        ValidationBannerText.Text = string.IsNullOrWhiteSpace(MainWindow.Settings.InstallDirectory)
-            ? "Enter your Diablo II: Resurrected install directory before using the launcher."
-            : "The selected install directory has not been validated. Choose the folder that contains D2R.exe.";
+        StartGameButton.IsEnabled = isValidated && isModDetected;
+        ValidationBanner.IsVisible = !isValidated || !isModDetected;
+        ValidationBannerText.Text = !isValidated
+            ? string.IsNullOrWhiteSpace(MainWindow.Settings.InstallDirectory)
+                ? "Enter your Diablo II: Resurrected install directory before using the launcher."
+                : "The selected install directory has not been validated. Choose the folder that contains D2R.exe."
+            : "D2R Reimagined mod not detected in this directory. Install the mod before launching.";
         LaunchCommandText.Text = LauncherService.BuildLaunchCommand();
     }
     
@@ -39,6 +42,20 @@ public partial class LaunchView : UserControl
             Notifications.SendNotification(
                 "Install directory not validated",
                 "Choose the Diablo II: Resurrected folder that contains D2R.exe.");
+            return;
+        }
+
+        if (!MainWindow.IsLocalModDetected)
+        {
+            Notifications.SendNotification(
+                "D2R Reimagined mod not detected",
+                "Install the mod in the selected directory before launching.");
+
+            if (this.GetVisualRoot() is MainWindow mainWindow)
+            {
+                await mainWindow.PromptInstallForMissingModAsync();
+            }
+
             return;
         }
         
@@ -64,6 +81,11 @@ public partial class LaunchView : UserControl
                 InstallDirectoryValidator.IsValidInstallDirectory(MainWindow.Settings.InstallDirectory);
             await SettingsManager.SaveAsync(MainWindow.Settings);
             BackupService.UpdateSchedule();
+            if (this.GetVisualRoot() is MainWindow mw)
+            {
+                mw.RefreshLocalModState();
+                await mw.RefreshUpdateStateAsync();
+            }
             RefreshInstallDirectoryState();
 
             if (!MainWindow.Settings.IsInstallDirectoryValidated)
@@ -71,6 +93,20 @@ public partial class LaunchView : UserControl
                 Notifications.SendNotification(
                     "D2R install not found",
                     "Select the Diablo II: Resurrected folder that contains D2R.exe.");
+                return;
+            }
+
+            if (!MainWindow.IsLocalModDetected)
+            {
+                Notifications.SendNotification(
+                    "D2R Reimagined mod not detected",
+                    "Install the mod in this directory before launching.");
+
+                if (this.GetVisualRoot() is MainWindow mainWindow)
+                {
+                    await mainWindow.PromptInstallForMissingModAsync();
+                }
+
                 return;
             }
 

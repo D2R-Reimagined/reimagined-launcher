@@ -31,18 +31,22 @@ public class CharacterSelectPanelService
 
     public static CharacterSelectPanelService? FromJson(string layoutsDirectory)
     {
-        Console.WriteLine($"Loading JSON from: {layoutsDirectory}");
         var path = Path.Combine(layoutsDirectory, "characterselectpanelhd.json");
         if (!File.Exists(path))
         {
-            Console.WriteLine("File not found!");
             return null;
         }
-        
-        var json = File.ReadAllText(path);
-        
-        return JsonSerializer.Deserialize<CharacterSelectPanelService>(json,
-            SerializerOptions.PropertyNameCaseInsensitive);
+
+        try
+        {
+            var json = File.ReadAllText(path);
+            return JsonSerializer.Deserialize<CharacterSelectPanelService>(json,
+                SerializerOptions.PropertyNameCaseInsensitive);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public string GetModVersion()

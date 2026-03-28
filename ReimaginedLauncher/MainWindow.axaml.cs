@@ -2,6 +2,7 @@ using System;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Controls.Notifications;
@@ -38,6 +39,14 @@ public partial class MainWindow : Window
     
     public static INotificationMessageManager ManagerInstance { get; } = new NotificationMessageManager();
     public static AppSettings Settings = new();
+    public static bool IsLocalModDetected { get; private set; }
+    public static bool IsUpdateAvailable { get; private set; }
+    public static bool CanInstallOrUpdate { get; private set; }
+    public static string UpdateStatusTitle { get; private set; } = "Update status unavailable";
+    public static string UpdateStatusMessage { get; private set; } = "Open this tab to check mod install and update status.";
+    public static string UpdateCurrentVersion { get; private set; } = "Unknown";
+    public static string UpdateLatestVersion { get; private set; } = "Unknown";
+    public static string UpdateDownloadUrl { get; private set; } = NexusUrl;
     private NexusModsSSO? _nexusSSO;
     private string? _localModVersion;
 
@@ -67,24 +76,7 @@ public partial class MainWindow : Window
         }
         
         var installDir = Settings.InstallDirectory;
-
-        if (!string.IsNullOrEmpty(installDir))
-        {
-            var layoutsDir = Path.Combine(
-                installDir,
-                "mods", "Reimagined", "Reimagined.mpq", "data", "global", "ui", "layouts"
-            );
-
-            var panel = CharacterSelectPanelService.FromJson(layoutsDir);
-            _localModVersion = panel?.GetModVersion() ?? "Unknown";
-
-            await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                VersionTextBlock.Text = string.Equals(_localModVersion, "Unknown", StringComparison.OrdinalIgnoreCase)
-                    ? "D2R Reimagined Version Not Detected"
-                    : $"D2R Reimagined v{_localModVersion}";
-            });
-        }
+        RefreshLocalModState(installDir);
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
@@ -105,15 +97,15 @@ public partial class MainWindow : Window
         BackupService.UpdateSchedule();
         await SettingsManager.SaveAsync(Settings);
 
-        // Only check for latest mod version if user is logged in
-        if (UserViewModel.User != null)
+        await RefreshUpdateStateAsync();
+
+        // Subscribe to UserViewModel.User property changed to trigger check when user logs in
+        UserViewModel.PropertyChanged -= UserViewModelOnPropertyChanged;
+        UserViewModel.PropertyChanged += UserViewModelOnPropertyChanged;
+
+        if (!IsLocalModDetected)
         {
-            await CheckLatestModVersionAsync();
-        }
-        else
-        {
-            // Subscribe to UserViewModel.User property changed to trigger check when user logs in
-            UserViewModel.PropertyChanged += UserViewModelOnPropertyChanged;
+            await PromptInstallForMissingModAsync();
         }
     }
 
@@ -121,58 +113,245 @@ public partial class MainWindow : Window
     {
         if (e.PropertyName == nameof(UserViewModel.User) && UserViewModel.User != null)
         {
-            UserViewModel.PropertyChanged -= UserViewModelOnPropertyChanged;
-            await CheckLatestModVersionAsync();
+            await RefreshUpdateStateAsync();
+            RefreshCurrentContent();
         }
     }
 
-    private async Task CheckLatestModVersionAsync()
+    public async Task RefreshUpdateStateAsync()
     {
         if (!Settings.IsInstallDirectoryValidated || string.IsNullOrWhiteSpace(Settings.InstallDirectory))
+        {
+            SetUpdateState(
+                isUpdateAvailable: false,
+                canInstallOrUpdate: false,
+                title: "Install directory required",
+                message: "Select a valid Diablo II: Resurrected install directory to check mod updates.",
+                currentVersion: "Unknown",
+                latestVersion: "Unknown",
+                downloadUrl: NexusUrl);
+            RefreshCurrentContent();
             return;
+        }
+
+        if (!IsLocalModDetected)
+        {
+            var latestVersionForInstall = "Latest available";
+            var downloadUrlForInstall = NexusUrl;
+
+            if (UserViewModel.User != null)
+            {
+                var installFile = await GetLatestModFileAsync();
+                if (installFile != null)
+                {
+                    latestVersionForInstall = !string.IsNullOrWhiteSpace(installFile.ModVersion)
+                        ? installFile.ModVersion
+                        : installFile.Version;
+
+                    var resolvedInstallUrl = await GetUpdateUrlAsync(installFile.FileId);
+                    if (!string.IsNullOrWhiteSpace(resolvedInstallUrl))
+                    {
+                        downloadUrlForInstall = resolvedInstallUrl;
+                    }
+                }
+            }
+
+            SetUpdateState(
+                isUpdateAvailable: true,
+                canInstallOrUpdate: true,
+                title: "Mod not detected",
+                message: "D2R Reimagined is not detected in this install directory. Install the mod to enable Play.",
+                currentVersion: "Not detected",
+                latestVersion: latestVersionForInstall,
+                downloadUrl: downloadUrlForInstall);
+            RefreshCurrentContent();
+            return;
+        }
 
         if (string.IsNullOrWhiteSpace(_localModVersion) ||
             _localModVersion.Equals("Unknown", StringComparison.OrdinalIgnoreCase))
+        {
+            SetUpdateState(
+                isUpdateAvailable: false,
+                canInstallOrUpdate: true,
+                title: "Version not detected",
+                message: "Mod files are installed, but the local version could not be detected automatically.",
+                currentVersion: "Unknown",
+                latestVersion: "Unknown",
+                downloadUrl: NexusUrl);
+            RefreshCurrentContent();
             return;
+        }
 
-        var filesResponse = await _nexusModsHttpClient.GetModFilesAsync(NexusGameName, NexusModId);
-        if (filesResponse?.Files == null || filesResponse.Files.Count == 0)
+        if (UserViewModel.User == null)
+        {
+            SetUpdateState(
+                isUpdateAvailable: false,
+                canInstallOrUpdate: true,
+                title: "Nexus login required",
+                message: "Log in with Nexus Mods to compare your local mod version with the latest release.",
+                currentVersion: _localModVersion,
+                latestVersion: "Unknown",
+                downloadUrl: NexusUrl);
+            RefreshCurrentContent();
             return;
+        }
 
-        var latestFile = filesResponse.Files
-            .Where(file => file.IsPrimary)
-            .OrderByDescending(file => file.UploadedTimestamp)
-            .FirstOrDefault()
-            ?? filesResponse.Files.OrderByDescending(file => file.UploadedTimestamp).FirstOrDefault();
+        var latestFile = await GetLatestModFileAsync();
 
         if (latestFile == null)
+        {
+            SetUpdateState(
+                isUpdateAvailable: false,
+                canInstallOrUpdate: true,
+                title: "Unable to check updates",
+                message: "Could not retrieve latest mod file information from Nexus Mods.",
+                currentVersion: _localModVersion,
+                latestVersion: "Unknown",
+                downloadUrl: NexusUrl);
+            RefreshCurrentContent();
             return;
+        }
 
         var latestVersion = !string.IsNullOrWhiteSpace(latestFile.ModVersion)
             ? latestFile.ModVersion
             : latestFile.Version;
 
-        if (!string.IsNullOrEmpty(_localModVersion) && !string.IsNullOrEmpty(latestVersion) && !_localModVersion.Equals(latestVersion, StringComparison.OrdinalIgnoreCase))
-        {
-            var downloadUrl = await GetUpdateUrlAsync(latestFile.FileId);
+        var downloadUrl = await GetUpdateUrlAsync(latestFile.FileId) ?? NexusUrl;
 
-            if (!string.IsNullOrEmpty(downloadUrl))
-            {
-                await Dispatcher.UIThread.InvokeAsync(() =>
-                {
-                    var updateWindow = new UpdateFoundWindow(_localModVersion, latestVersion, downloadUrl);
-                    updateWindow.ShowDialog(this);
-                });
-            }
-            else
-            {
-                Notifications.SendNotification("Failed to retrieve the download link for the latest mod version.");
-            }
-        }
-        else if (!string.IsNullOrEmpty(latestVersion))
+        if (!string.IsNullOrEmpty(_localModVersion) &&
+            !string.IsNullOrEmpty(latestVersion) &&
+            !_localModVersion.Equals(latestVersion, StringComparison.OrdinalIgnoreCase))
         {
-            Notifications.SendNotification("You have the latest version of the mod");
+            SetUpdateState(
+                isUpdateAvailable: true,
+                canInstallOrUpdate: true,
+                title: "Update available",
+                message: "A newer version of D2R Reimagined is available.",
+                currentVersion: _localModVersion,
+                latestVersion: latestVersion,
+                downloadUrl: downloadUrl);
         }
+        else
+        {
+            SetUpdateState(
+                isUpdateAvailable: false,
+                canInstallOrUpdate: true,
+                title: "No updates detected",
+                message: "Your local D2R Reimagined version is up to date.",
+                currentVersion: _localModVersion,
+                latestVersion: latestVersion,
+                downloadUrl: downloadUrl);
+        }
+
+        RefreshCurrentContent();
+    }
+
+    public async Task PromptInstallForMissingModAsync()
+    {
+        if (!Settings.IsInstallDirectoryValidated || string.IsNullOrWhiteSpace(Settings.InstallDirectory) || IsLocalModDetected)
+            return;
+
+        await NavigateToUpdateViewAsync();
+    }
+
+    public void RefreshLocalModState(string? installDirectory = null)
+    {
+        _localModVersion = "Unknown";
+        IsLocalModDetected = false;
+
+        var installDir = installDirectory ?? Settings.InstallDirectory;
+        if (!string.IsNullOrWhiteSpace(installDir))
+        {
+            var modRootDirectory = Path.Combine(installDir, "mods", "Reimagined");
+            var modInfoPath = Path.Combine(modRootDirectory, "modinfo.json");
+            var modInfoPathInMpq = Path.Combine(modRootDirectory, "Reimagined.mpq", "modinfo.json");
+            var layoutsDir = Path.Combine(
+                modRootDirectory,
+                "Reimagined.mpq", "data", "global", "ui", "layouts"
+            );
+
+            var panel = CharacterSelectPanelService.FromJson(layoutsDir);
+            var panelVersion = panel?.GetModVersion();
+            var modInfoVersion = TryGetVersionFromModInfo(modInfoPath) ?? TryGetVersionFromModInfo(modInfoPathInMpq);
+            _localModVersion = !string.IsNullOrWhiteSpace(panelVersion) && !panelVersion.Equals("Unknown", StringComparison.OrdinalIgnoreCase)
+                ? panelVersion
+                : !string.IsNullOrWhiteSpace(modInfoVersion)
+                    ? modInfoVersion
+                    : "Unknown";
+
+            IsLocalModDetected = Directory.Exists(modRootDirectory) || File.Exists(modInfoPath) || File.Exists(modInfoPathInMpq);
+        }
+
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            VersionTextBlock.Text = IsLocalModDetected
+                ? string.Equals(_localModVersion, "Unknown", StringComparison.OrdinalIgnoreCase)
+                    ? "D2R Reimagined Installed (version unknown)"
+                    : $"D2R Reimagined v{_localModVersion}"
+                : "D2R Reimagined Version Not Detected";
+            return;
+        }
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            VersionTextBlock.Text = IsLocalModDetected
+                ? string.Equals(_localModVersion, "Unknown", StringComparison.OrdinalIgnoreCase)
+                    ? "D2R Reimagined Installed (version unknown)"
+                    : $"D2R Reimagined v{_localModVersion}"
+                : "D2R Reimagined Version Not Detected";
+        });
+    }
+
+    private static string? TryGetVersionFromModInfo(string modInfoPath)
+    {
+        if (!File.Exists(modInfoPath))
+            return null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(modInfoPath));
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+                return null;
+
+            if (document.RootElement.TryGetProperty("version", out var versionElement) &&
+                versionElement.ValueKind == JsonValueKind.String)
+            {
+                return versionElement.GetString();
+            }
+
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task<NexusModsFileResponse?> GetLatestModFileAsync()
+    {
+        var filesResponse = await _nexusModsHttpClient.GetModFilesAsync(NexusGameName, NexusModId);
+        if (filesResponse?.Files == null || filesResponse.Files.Count == 0)
+            return null;
+
+        if (filesResponse.FileUpdates.Count > 0)
+        {
+            var filesById = filesResponse.Files.ToDictionary(file => file.FileId);
+            var newestUpdate = filesResponse.FileUpdates
+                .OrderByDescending(update => update.UploadedTimestamp)
+                .ThenByDescending(update => update.NewFileId)
+                .FirstOrDefault();
+
+            if (newestUpdate != null && filesById.TryGetValue(newestUpdate.NewFileId, out var updatedFile))
+            {
+                return updatedFile;
+            }
+        }
+
+        return filesResponse.Files
+            .OrderByDescending(file => file.UploadedTimestamp)
+            .ThenByDescending(file => file.FileId)
+            .FirstOrDefault();
     }
 
     private async Task<string?> GetUpdateUrlAsync(int fileId)
@@ -205,7 +384,86 @@ public partial class MainWindow : Window
                     settingsView.RefreshSettingsState();
                     ContentArea.Content = settingsView;
                     break;
+                case "Update":
+                    _ = NavigateToUpdateViewAsync();
+                    break;
             }
+        }
+    }
+
+    private void SetUpdateState(
+        bool isUpdateAvailable,
+        bool canInstallOrUpdate,
+        string title,
+        string message,
+        string currentVersion,
+        string latestVersion,
+        string downloadUrl)
+    {
+        IsUpdateAvailable = isUpdateAvailable;
+        CanInstallOrUpdate = canInstallOrUpdate;
+        UpdateStatusTitle = title;
+        UpdateStatusMessage = message;
+        UpdateCurrentVersion = currentVersion;
+        UpdateLatestVersion = latestVersion;
+        UpdateDownloadUrl = downloadUrl;
+    }
+
+    public async Task NavigateToUpdateViewAsync()
+    {
+        await RefreshUpdateStateAsync();
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            var updateView = new UpdateView();
+            updateView.RefreshUpdateState();
+            ContentArea.Content = updateView;
+
+            if (UpdateNavItem != null && NavigationList.SelectedItem != UpdateNavItem)
+            {
+                NavigationList.SelectedItem = UpdateNavItem;
+            }
+        });
+    }
+
+    public async Task NavigateToLaunchViewAsync()
+    {
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            var launchView = new LaunchView();
+            launchView.RefreshInstallDirectoryState();
+            ContentArea.Content = launchView;
+
+            if (LaunchNavItem != null && NavigationList.SelectedItem != LaunchNavItem)
+            {
+                NavigationList.SelectedItem = LaunchNavItem;
+            }
+        });
+    }
+
+    private void RefreshCurrentContent()
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(RefreshCurrentContent);
+            return;
+        }
+
+        if (ContentArea.Content is LaunchView launchView)
+        {
+            launchView.RefreshInstallDirectoryState();
+        }
+        else if (ContentArea.Content is BackupsView backupsView)
+        {
+            backupsView.RefreshBackupState();
+        }
+        else if (ContentArea.Content is SettingsView settingsView)
+        {
+            settingsView.RefreshSettingsState();
+        }
+        else if (ContentArea.Content is UpdateView updateView)
+        {
+            updateView.RefreshUpdateState();
         }
     }
     
@@ -269,6 +527,8 @@ public partial class MainWindow : Window
         {
             User = await _nexusModsHttpClient.ValidateApiKeyAsync(Settings.NexusModsSSOApiKey);
             UserViewModel.User = User;
+            await RefreshUpdateStateAsync();
+            RefreshCurrentContent();
         }
     }
 }

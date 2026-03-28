@@ -1,0 +1,46 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+             x:Class="ReimaginedLauncher.Views.Update.UpdateView">
+    <StackPanel Spacing="12">
+        <TextBlock Text="Update" FontSize="18" FontWeight="Bold"/>
+        <Border Background="#1E293B"
+                BorderBrush="#334155"
+                BorderThickness="1"
+                CornerRadius="6"
+                Padding="12">
+            <StackPanel Spacing="6">
+                <TextBlock x:Name="StatusTitleText" FontWeight="Bold"/>
+                <TextBlock x:Name="StatusMessageText" TextWrapping="Wrap"/>
+            </StackPanel>
+        </Border>
+        <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto" Margin="0,8,0,0">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Current Version:" Margin="0,0,10,8"/>
+            <TextBlock x:Name="CurrentVersionText" Grid.Row="0" Grid.Column="1" FontWeight="Bold"/>
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Latest Version:" Margin="0,0,10,0"/>
+            <TextBlock x:Name="LatestVersionText" Grid.Row="1" Grid.Column="1" FontWeight="Bold"/>
+        </Grid>
+        <Border x:Name="AuthWarningBanner"
+                Background="#4A2F16"
+                BorderBrush="#D7A24B"
+                BorderThickness="1"
+                CornerRadius="6"
+                Padding="10"
+                IsVisible="False">
+            <TextBlock Text="Authenticate with Nexus Mods first to use Download and Install."
+                       Foreground="#F6D8A8"
+                       TextWrapping="Wrap"/>
+        </Border>
+        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
+            <Button x:Name="InstallOrUpdateButton"
+                    Content="Download and Install"
+                    Click="OnInstallOrUpdateClick"/>
+            <Button Content="Open Download Page"
+                    Click="OnOpenDownloadPageClick"/>
+            <Button Content="Re-check"
+                    Click="OnRecheckClick"/>
+        </StackPanel>
+    </StackPanel>
+</UserControl>
