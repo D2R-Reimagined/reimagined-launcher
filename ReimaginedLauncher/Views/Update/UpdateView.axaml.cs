@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
+using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
@@ -23,17 +25,22 @@ public partial class UpdateView : UserControl
     public void RefreshUpdateState()
     {
         var isAuthenticated = MainWindow.UserViewModel.User != null;
+        var usesDownloadsWatcher = isAuthenticated && MainWindow.Settings.NexusPremiumDownloadAccess == false;
         var isInstallMissing = MainWindow.UpdateCurrentVersion.Equals("Not detected", StringComparison.OrdinalIgnoreCase);
         var canDownload = isInstallMissing || MainWindow.IsUpdateAvailable;
         StatusTitleText.Text = MainWindow.UpdateStatusTitle;
         StatusMessageText.Text = MainWindow.UpdateStatusMessage;
         CurrentVersionText.Text = MainWindow.UpdateCurrentVersion;
         LatestVersionText.Text = MainWindow.UpdateLatestVersion;
-        InstallOrUpdateButton.IsEnabled = MainWindow.CanInstallOrUpdate && !_isInstalling && isAuthenticated && canDownload;
+        InstallOrUpdateButton.IsEnabled = MainWindow.CanInstallOrUpdate &&
+                                          !_isInstalling &&
+                                          isAuthenticated &&
+                                          canDownload;
         InstallOrUpdateButton.Content = MainWindow.UpdateCurrentVersion.Equals("Not detected", StringComparison.OrdinalIgnoreCase)
             ? "Download and Install"
             : "Download and Update";
         AuthWarningBanner.IsVisible = !isAuthenticated;
+        NonPremiumWarningBanner.IsVisible = usesDownloadsWatcher && canDownload;
     }
 
     private async void OnInstallOrUpdateClick(object? sender, RoutedEventArgs e)
@@ -48,7 +55,7 @@ public partial class UpdateView : UserControl
                 "Warning");
             return;
         }
-
+        
         var installDirectory = MainWindow.Settings.InstallDirectory;
         if (!MainWindow.Settings.IsInstallDirectoryValidated || string.IsNullOrWhiteSpace(installDirectory))
         {
@@ -62,51 +69,24 @@ public partial class UpdateView : UserControl
         {
             _isInstalling = true;
             RefreshUpdateState();
-            Notifications.SendNotification("Downloading mod archive. This may take a moment.");
 
-            var tempZipPath = Path.Combine(Path.GetTempPath(), $"reimagined-{Guid.NewGuid():N}.zip");
-
-            try
+            if (MainWindow.Settings.NexusPremiumDownloadAccess == false)
             {
-                using var httpClient = new HttpClient();
-                using var response = await httpClient.GetAsync(
-                    MainWindow.UpdateDownloadUrl,
-                    HttpCompletionOption.ResponseHeadersRead);
-                response.EnsureSuccessStatusCode();
-
-                await using (var contentStream = await response.Content.ReadAsStreamAsync())
-                await using (var fileStream = new FileStream(tempZipPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                Notifications.SendNotification("Open Manual Download in browser. Waiting for zip in Downloads...", "Info");
+                OnOpenDownloadPageClick(null, null);
+                var downloadedZip = await WaitForNewZipFromDownloadsAsync(TimeSpan.FromMinutes(8));
+                if (string.IsNullOrWhiteSpace(downloadedZip))
                 {
-                    await contentStream.CopyToAsync(fileStream);
-                }
-
-                if (!IsZipArchive(tempZipPath))
-                {
-                    Notifications.SendNotification(
-                        "Automatic install needs a direct download link. Opening the download page instead.",
-                        "Warning");
-                    OnOpenDownloadPageClick(null, null);
+                    Notifications.SendNotification("No new zip detected in Downloads. Try again after download completes.", "Warning");
                     return;
                 }
 
-                ZipFile.ExtractToDirectory(tempZipPath, installDirectory, overwriteFiles: true);
-            }
-            finally
-            {
-                if (File.Exists(tempZipPath))
-                {
-                    File.Delete(tempZipPath);
-                }
+                await ExtractAndFinalizeInstallAsync(downloadedZip, installDirectory);
+                return;
             }
 
-            Notifications.SendNotification("Mod installed successfully.", "Success");
-
-            if (this.GetVisualRoot() is MainWindow mainWindow)
-            {
-                mainWindow.RefreshLocalModState();
-                await mainWindow.RefreshUpdateStateAsync();
-                await mainWindow.NavigateToLaunchViewAsync();
-            }
+            Notifications.SendNotification("Downloading mod archive. This may take a moment.");
+            await DownloadExtractAndFinalizeInstallAsync(MainWindow.UpdateDownloadUrl, installDirectory);
         }
         catch (Exception ex)
         {
@@ -165,5 +145,139 @@ public partial class UpdateView : UserControl
                signature[1] == 0x4B &&
                (signature[2] == 0x03 || signature[2] == 0x05 || signature[2] == 0x07) &&
                (signature[3] == 0x04 || signature[3] == 0x06 || signature[3] == 0x08);
+    }
+
+    private async Task DownloadExtractAndFinalizeInstallAsync(string downloadUrl, string installDirectory)
+    {
+        var tempZipPath = Path.Combine(Path.GetTempPath(), $"reimagined-{Guid.NewGuid():N}.zip");
+
+        try
+        {
+            using var httpClient = new HttpClient();
+            using var response = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
+            response.EnsureSuccessStatusCode();
+
+            await using (var contentStream = await response.Content.ReadAsStreamAsync())
+            await using (var fileStream = new FileStream(tempZipPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                await contentStream.CopyToAsync(fileStream);
+            }
+
+            if (!IsZipArchive(tempZipPath))
+            {
+                Notifications.SendNotification(
+                    "Automatic install needs a direct zip. Opening the download page instead.",
+                    "Warning");
+                OnOpenDownloadPageClick(null, null);
+                return;
+            }
+
+            await ExtractAndFinalizeInstallAsync(tempZipPath, installDirectory);
+        }
+        finally
+        {
+            if (File.Exists(tempZipPath))
+            {
+                File.Delete(tempZipPath);
+            }
+        }
+    }
+
+    private async Task ExtractAndFinalizeInstallAsync(string zipPath, string installDirectory)
+    {
+        if (!IsZipArchive(zipPath))
+        {
+            Notifications.SendNotification("Downloaded file is not a valid zip archive.", "Warning");
+            return;
+        }
+
+        ZipFile.ExtractToDirectory(zipPath, installDirectory, overwriteFiles: true);
+        Notifications.SendNotification("Mod installed successfully.", "Success");
+
+        if (this.GetVisualRoot() is MainWindow mainWindow)
+        {
+            mainWindow.RefreshLocalModState();
+            await mainWindow.RefreshUpdateStateAsync();
+            await mainWindow.NavigateToLaunchViewAsync();
+        }
+    }
+
+    private static async Task<string?> WaitForNewZipFromDownloadsAsync(TimeSpan timeout)
+    {
+        var downloadsFolder = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "Downloads");
+
+        if (!Directory.Exists(downloadsFolder))
+            return null;
+
+        var start = DateTime.UtcNow;
+        var baseline = SnapshotZipFiles(downloadsFolder);
+
+        while (DateTime.UtcNow - start < timeout)
+        {
+            var candidates = Directory.GetFiles(downloadsFolder, "*.zip", SearchOption.TopDirectoryOnly)
+                .OrderByDescending(path => Path.GetFileName(path).Contains("reimagined", StringComparison.OrdinalIgnoreCase))
+                .ThenByDescending(path => File.GetLastWriteTimeUtc(path))
+                .ToArray();
+
+            foreach (var path in candidates)
+            {
+                var signature = GetFileSignature(path);
+                if (signature == null || baseline.Contains(signature))
+                    continue;
+
+                if (!IsFileReady(path))
+                    continue;
+
+                if (IsZipArchive(path))
+                    return path;
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(2));
+        }
+
+        return null;
+    }
+
+    private static HashSet<string> SnapshotZipFiles(string folder)
+    {
+        var snapshot = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in Directory.GetFiles(folder, "*.zip", SearchOption.TopDirectoryOnly))
+        {
+            var signature = GetFileSignature(path);
+            if (!string.IsNullOrWhiteSpace(signature))
+            {
+                snapshot.Add(signature);
+            }
+        }
+
+        return snapshot;
+    }
+
+    private static string? GetFileSignature(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            return $"{info.FullName}|{info.Length}|{info.LastWriteTimeUtc.Ticks}";
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool IsFileReady(string path)
+    {
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
+            return stream.Length > 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

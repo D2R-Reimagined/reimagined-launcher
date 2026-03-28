@@ -70,14 +70,18 @@
                         Click="OnNexusLoginClicked"
                         IsVisible="{Binding IsLoggedIn, Converter={StaticResource InverseBooleanConverter}}"
                         VerticalAlignment="Center"/>
-                <StackPanel Orientation="Horizontal"
-                            Spacing="5"
-                            VerticalAlignment="Center"
-                            IsVisible="{Binding IsLoggedIn}">
-                    <TextBlock VerticalAlignment="Center"
-                               Text="{Binding Name}"
-                               FontWeight="Bold"/>
-                </StackPanel>
+                <Button x:Name="UserMenuButton"
+                        Content="{Binding Name}"
+                        Click="OnUserMenuClick"
+                        VerticalAlignment="Center"
+                        FontWeight="Bold"
+                        IsVisible="{Binding IsLoggedIn}">
+                    <Button.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="Logout" Click="OnLogoutClicked"/>
+                        </ContextMenu>
+                    </Button.ContextMenu>
+                </Button>
             </Grid>
         </Grid>
 

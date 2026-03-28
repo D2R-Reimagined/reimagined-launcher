@@ -8,6 +8,7 @@ public class AppSettings
     public int BackupIntervalMinutes { get; set; } = 15;
     public int BackupAmount { get; set; } = 10;
     public string? NexusModsSSOApiKey { get; set; }
+    public bool? NexusPremiumDownloadAccess { get; set; }
     public bool UseDirectLaunch { get; set; }
     public bool NoSound { get; set; }
     public bool SkipLogoVideo { get; set; }

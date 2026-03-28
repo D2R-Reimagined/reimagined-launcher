@@ -1,5 +1,6 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -36,22 +37,30 @@ public class NexusModsHttpClient : INexusModsHttpClient
         var stream = await response.Content.ReadAsStreamAsync();
         return await JsonSerializer.DeserializeAsync<NexusModsFileListResponse>(stream, SerializerOptions.PropertyNameCaseInsensitive);
     }
-    
-    public async Task<NexusModsDownloadLinkResponse?> GenerateDownloadLink(string gameName, int modid, int fileId)
+
+    public async Task<(NexusModsDownloadLinkResponse? Link, HttpStatusCode StatusCode)> GenerateDownloadLink(
+        string gameName,
+        int modid,
+        int fileId,
+        string? key = null,
+        long? expires = null)
     {
         await FindAndSetApiKey();
         var url = $"{BaseUrl}/games/{gameName}/mods/{modid}/files/{fileId}/download_link.json";
-        var response = await _httpClient.GetAsync(url);
+        if (!string.IsNullOrWhiteSpace(key) && expires.HasValue)
+        {
+            url += $"?key={System.Uri.EscapeDataString(key)}&expires={expires.Value}";
+        }
 
+        var response = await _httpClient.GetAsync(url);
         if (!response.IsSuccessStatusCode)
         {
-            Notifications.SendNotification($"Failed to generate download link: {response.StatusCode}");
-            return null;
+            return (null, response.StatusCode);
         }
 
         var stream = await response.Content.ReadAsStreamAsync();
         var downloadLinks = await JsonSerializer.DeserializeAsync<List<NexusModsDownloadLinkResponse>>(stream, SerializerOptions.PropertyNameCaseInsensitive);
-        return downloadLinks?.FirstOrDefault(link => !string.IsNullOrWhiteSpace(link.Uri));
+        return (downloadLinks?.FirstOrDefault(link => !string.IsNullOrWhiteSpace(link.Uri)), response.StatusCode);
     }
 
     public async Task<NexusModsValidateResponse?> ValidateApiKeyAsync(string? apiKey = "")
@@ -72,7 +81,9 @@ public class NexusModsHttpClient : INexusModsHttpClient
             return null;
         }
 
-        return await JsonSerializer.DeserializeAsync<NexusModsValidateResponse>(await response.Content.ReadAsStreamAsync(), SerializerOptions.PropertyNameCaseInsensitive);
+        return await JsonSerializer.DeserializeAsync<NexusModsValidateResponse>(
+            await response.Content.ReadAsStreamAsync(),
+            SerializerOptions.PropertyNameCaseInsensitive);
     }
 
     private Task FindAndSetApiKey()

@@ -33,6 +33,17 @@
                        Foreground="#F6D8A8"
                        TextWrapping="Wrap"/>
         </Border>
+        <Border x:Name="NonPremiumWarningBanner"
+                Background="#3B2C12"
+                BorderBrush="#C8902E"
+                BorderThickness="1"
+                CornerRadius="6"
+                Padding="10"
+                IsVisible="False">
+            <TextBlock Text="Non-premium workflow: click Download and Install, complete Manual Download in your browser, and keep this launcher open. It will watch Downloads for the new zip and install it automatically."
+                       Foreground="#F6D8A8"
+                       TextWrapping="Wrap"/>
+        </Border>
         <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
             <Button x:Name="InstallOrUpdateButton"
                     Content="Download and Install"

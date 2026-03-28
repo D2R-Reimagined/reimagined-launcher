@@ -2,6 +2,7 @@ using System;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Avalonia.Controls;
@@ -47,6 +48,8 @@ public partial class MainWindow : Window
     public static string UpdateCurrentVersion { get; private set; } = "Unknown";
     public static string UpdateLatestVersion { get; private set; } = "Unknown";
     public static string UpdateDownloadUrl { get; private set; } = NexusUrl;
+    public static bool IsUpdateDownloadDirect { get; private set; }
+    public static int? UpdateFileId { get; private set; }
     private NexusModsSSO? _nexusSSO;
     private string? _localModVersion;
 
@@ -129,7 +132,9 @@ public partial class MainWindow : Window
                 message: "Select a valid Diablo II: Resurrected install directory to check mod updates.",
                 currentVersion: "Unknown",
                 latestVersion: "Unknown",
-                downloadUrl: NexusUrl);
+                downloadUrl: NexusUrl,
+                isDirectDownload: false,
+                fileId: null);
             RefreshCurrentContent();
             return;
         }
@@ -148,11 +153,24 @@ public partial class MainWindow : Window
                         ? installFile.ModVersion
                         : installFile.Version;
 
-                    var resolvedInstallUrl = await GetUpdateUrlAsync(installFile.FileId);
-                    if (!string.IsNullOrWhiteSpace(resolvedInstallUrl))
+                    var installLink = await GetUpdateUrlAsync(installFile.FileId);
+                    if (!string.IsNullOrWhiteSpace(installLink.Url))
                     {
-                        downloadUrlForInstall = resolvedInstallUrl;
+                        downloadUrlForInstall = installLink.Url;
                     }
+
+                    SetUpdateState(
+                        isUpdateAvailable: true,
+                        canInstallOrUpdate: true,
+                        title: "Mod not detected",
+                        message: "D2R Reimagined is not detected in this install directory. Install the mod to enable Play.",
+                        currentVersion: "Not detected",
+                        latestVersion: latestVersionForInstall,
+                        downloadUrl: downloadUrlForInstall,
+                        isDirectDownload: installLink.IsDirect,
+                        fileId: installFile.FileId);
+                    RefreshCurrentContent();
+                    return;
                 }
             }
 
@@ -163,7 +181,9 @@ public partial class MainWindow : Window
                 message: "D2R Reimagined is not detected in this install directory. Install the mod to enable Play.",
                 currentVersion: "Not detected",
                 latestVersion: latestVersionForInstall,
-                downloadUrl: downloadUrlForInstall);
+                downloadUrl: downloadUrlForInstall,
+                isDirectDownload: false,
+                fileId: null);
             RefreshCurrentContent();
             return;
         }
@@ -178,7 +198,9 @@ public partial class MainWindow : Window
                 message: "Mod files are installed, but the local version could not be detected automatically.",
                 currentVersion: "Unknown",
                 latestVersion: "Unknown",
-                downloadUrl: NexusUrl);
+                downloadUrl: NexusUrl,
+                isDirectDownload: false,
+                fileId: null);
             RefreshCurrentContent();
             return;
         }
@@ -192,7 +214,9 @@ public partial class MainWindow : Window
                 message: "Log in with Nexus Mods to compare your local mod version with the latest release.",
                 currentVersion: _localModVersion,
                 latestVersion: "Unknown",
-                downloadUrl: NexusUrl);
+                downloadUrl: NexusUrl,
+                isDirectDownload: false,
+                fileId: null);
             RefreshCurrentContent();
             return;
         }
@@ -208,7 +232,9 @@ public partial class MainWindow : Window
                 message: "Could not retrieve latest mod file information from Nexus Mods.",
                 currentVersion: _localModVersion,
                 latestVersion: "Unknown",
-                downloadUrl: NexusUrl);
+                downloadUrl: NexusUrl,
+                isDirectDownload: false,
+                fileId: null);
             RefreshCurrentContent();
             return;
         }
@@ -217,7 +243,8 @@ public partial class MainWindow : Window
             ? latestFile.ModVersion
             : latestFile.Version;
 
-        var downloadUrl = await GetUpdateUrlAsync(latestFile.FileId) ?? NexusUrl;
+        var updateLink = await GetUpdateUrlAsync(latestFile.FileId);
+        var downloadUrl = updateLink.Url;
 
         if (!string.IsNullOrEmpty(_localModVersion) &&
             !string.IsNullOrEmpty(latestVersion) &&
@@ -230,7 +257,9 @@ public partial class MainWindow : Window
                 message: "A newer version of D2R Reimagined is available.",
                 currentVersion: _localModVersion,
                 latestVersion: latestVersion,
-                downloadUrl: downloadUrl);
+                downloadUrl: downloadUrl,
+                isDirectDownload: updateLink.IsDirect,
+                fileId: latestFile.FileId);
         }
         else
         {
@@ -241,7 +270,9 @@ public partial class MainWindow : Window
                 message: "Your local D2R Reimagined version is up to date.",
                 currentVersion: _localModVersion,
                 latestVersion: latestVersion,
-                downloadUrl: downloadUrl);
+                downloadUrl: downloadUrl,
+                isDirectDownload: updateLink.IsDirect,
+                fileId: latestFile.FileId);
         }
 
         RefreshCurrentContent();
@@ -354,13 +385,49 @@ public partial class MainWindow : Window
             .FirstOrDefault();
     }
 
-    private async Task<string?> GetUpdateUrlAsync(int fileId)
+    private async Task<(string Url, bool IsDirect)> GetUpdateUrlAsync(
+        int fileId,
+        string? key = null,
+        long? expires = null,
+        bool allowFallback = true)
     {
-        var downloadLinkResponse = await _nexusModsHttpClient.GenerateDownloadLink(NexusGameName, NexusModId, fileId);
-        if (!string.IsNullOrWhiteSpace(downloadLinkResponse?.Uri))
-            return downloadLinkResponse.Uri;
+        var usesManualNxmKey = !string.IsNullOrWhiteSpace(key) && expires.HasValue;
+        if (!usesManualNxmKey && Settings.NexusPremiumDownloadAccess == false)
+        {
+            if (!allowFallback)
+                return (string.Empty, false);
 
-        return $"{NexusUrl}?tab=files&file_id={fileId}";
+            return ($"{NexusUrl}?tab=files&file_id={fileId}", false);
+        }
+
+        var downloadLinkResult = await _nexusModsHttpClient.GenerateDownloadLink(
+            NexusGameName,
+            NexusModId,
+            fileId,
+            key,
+            expires);
+
+        if (!string.IsNullOrWhiteSpace(downloadLinkResult.Link?.Uri))
+        {
+            if (!usesManualNxmKey && Settings.NexusPremiumDownloadAccess != true)
+            {
+                Settings.NexusPremiumDownloadAccess = true;
+                await SettingsManager.SaveAsync(Settings);
+            }
+
+            return (downloadLinkResult.Link.Uri, true);
+        }
+
+        if (!usesManualNxmKey && downloadLinkResult.StatusCode == HttpStatusCode.Forbidden)
+        {
+            Settings.NexusPremiumDownloadAccess = false;
+            await SettingsManager.SaveAsync(Settings);
+        }
+
+        if (!allowFallback)
+            return (string.Empty, false);
+
+        return ($"{NexusUrl}?tab=files&file_id={fileId}", false);
     }
     
     private void OnNavigationSelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -398,7 +465,9 @@ public partial class MainWindow : Window
         string message,
         string currentVersion,
         string latestVersion,
-        string downloadUrl)
+        string downloadUrl,
+        bool isDirectDownload,
+        int? fileId)
     {
         IsUpdateAvailable = isUpdateAvailable;
         CanInstallOrUpdate = canInstallOrUpdate;
@@ -407,6 +476,8 @@ public partial class MainWindow : Window
         UpdateCurrentVersion = currentVersion;
         UpdateLatestVersion = latestVersion;
         UpdateDownloadUrl = downloadUrl;
+        IsUpdateDownloadDirect = isDirectDownload;
+        UpdateFileId = fileId;
     }
 
     public async Task NavigateToUpdateViewAsync()
@@ -518,6 +589,26 @@ public partial class MainWindow : Window
 
         await _nexusSSO.ConnectAsync();
     }
+
+    private void OnUserMenuClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { ContextMenu: not null } button)
+        {
+            button.ContextMenu.Open(button);
+        }
+    }
+
+    private async void OnLogoutClicked(object? sender, RoutedEventArgs e)
+    {
+        Settings.NexusModsSSOApiKey = string.Empty;
+        Settings.NexusPremiumDownloadAccess = null;
+        User = null;
+        UserViewModel.User = null;
+        await SettingsManager.SaveAsync(Settings);
+        await RefreshUpdateStateAsync();
+        RefreshCurrentContent();
+        Notifications.SendNotification("Logged out of Nexus Mods.", "Success");
+    }
     
     private async Task ValidateKey()
     {
@@ -527,6 +618,16 @@ public partial class MainWindow : Window
         {
             User = await _nexusModsHttpClient.ValidateApiKeyAsync(Settings.NexusModsSSOApiKey);
             UserViewModel.User = User;
+            if (User != null && (User.IsPremium || User.IsPremiumQ == true))
+            {
+                Settings.NexusPremiumDownloadAccess = true;
+            }
+            else
+            {
+                Settings.NexusPremiumDownloadAccess = null;
+            }
+
+            await SettingsManager.SaveAsync(Settings);
             await RefreshUpdateStateAsync();
             RefreshCurrentContent();
         }
