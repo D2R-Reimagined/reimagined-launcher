@@ -1,4 +1,6 @@
+using System.Threading.Tasks;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using ReimaginedLauncher.Utilities;
 
@@ -8,6 +10,9 @@ public partial class ModTweaksView : UserControl
 {
     private const int DefaultSkillPointsPerLevel = 1;
     private const int DefaultAttributesPerLevel = 5;
+    private const int DefaultNormalResistPenalty = 0;
+    private const int DefaultNightmareResistPenalty = -60;
+    private const int DefaultHellResistPenalty = -120;
     private bool _isRefreshing;
 
     public ModTweaksView()
@@ -22,14 +27,27 @@ public partial class ModTweaksView : UserControl
 
         var skillPointsPerLevel = Clamp(MainWindow.Settings.SkillPointsPerLevel, 1, 5);
         var attributesPerLevel = Clamp(MainWindow.Settings.AttributesPerLevel, 1, 20);
+        var normalResistPenalty = MainWindow.Settings.NormalResistPenalty;
+        var nightmareResistPenalty = MainWindow.Settings.NightmareResistPenalty;
+        var hellResistPenalty = MainWindow.Settings.HellResistPenalty;
 
         MainWindow.Settings.SkillPointsPerLevel = skillPointsPerLevel;
         MainWindow.Settings.AttributesPerLevel = attributesPerLevel;
+        MainWindow.Settings.NormalResistPenalty = normalResistPenalty;
+        MainWindow.Settings.NightmareResistPenalty = nightmareResistPenalty;
+        MainWindow.Settings.HellResistPenalty = hellResistPenalty;
 
         SkillPointsComboBox.SelectedIndex = skillPointsPerLevel - 1;
         AttributesComboBox.SelectedIndex = attributesPerLevel - 1;
-        WarningBorder.IsVisible = skillPointsPerLevel != DefaultSkillPointsPerLevel
-                                  || attributesPerLevel != DefaultAttributesPerLevel;
+        NormalResistPenaltyTextBox.Text = normalResistPenalty.ToString();
+        NightmareResistPenaltyTextBox.Text = nightmareResistPenalty.ToString();
+        HellResistPenaltyTextBox.Text = hellResistPenalty.ToString();
+        WarningBorder.IsVisible = HasNonDefaultTweaks(
+            skillPointsPerLevel,
+            attributesPerLevel,
+            normalResistPenalty,
+            nightmareResistPenalty,
+            hellResistPenalty);
 
         _isRefreshing = false;
     }
@@ -43,10 +61,125 @@ public partial class ModTweaksView : UserControl
 
         MainWindow.Settings.SkillPointsPerLevel = SkillPointsComboBox.SelectedIndex + 1;
         MainWindow.Settings.AttributesPerLevel = AttributesComboBox.SelectedIndex + 1;
-        WarningBorder.IsVisible = MainWindow.Settings.SkillPointsPerLevel != DefaultSkillPointsPerLevel
-                                  || MainWindow.Settings.AttributesPerLevel != DefaultAttributesPerLevel;
+        WarningBorder.IsVisible = HasNonDefaultTweaks(
+            MainWindow.Settings.SkillPointsPerLevel,
+            MainWindow.Settings.AttributesPerLevel,
+            MainWindow.Settings.NormalResistPenalty,
+            MainWindow.Settings.NightmareResistPenalty,
+            MainWindow.Settings.HellResistPenalty);
 
         await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private async void OnResistPenaltyChanged(object? sender, RoutedEventArgs e)
+    {
+        await SaveResistPenaltyValuesAsync();
+    }
+
+    private async void OnResistPenaltyKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (sender is not TextBox textBox)
+        {
+            return;
+        }
+
+        if (e.Key == Key.Enter)
+        {
+            e.Handled = true;
+            await SaveResistPenaltyValuesAsync();
+            RootScrollViewer.Focus();
+            return;
+        }
+
+        if (e.Key != Key.Up && e.Key != Key.Down)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        StepResistPenaltyValue(textBox, e.Key == Key.Up ? 5 : -5);
+        await SaveResistPenaltyValuesAsync();
+    }
+
+    private void OnBackgroundPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (e.Source is TextBox)
+        {
+            return;
+        }
+
+        RootScrollViewer.Focus();
+    }
+
+    private async Task SaveResistPenaltyValuesAsync()
+    {
+        if (_isRefreshing)
+        {
+            return;
+        }
+
+        if (!TryApplyResistPenaltyValues())
+        {
+            RefreshTweaksState();
+            Notifications.SendNotification(
+                "Resist penalties must be whole numbers.",
+                "Use numeric values for Normal, Nightmare, and Hell resist penalties.");
+            return;
+        }
+
+        WarningBorder.IsVisible = HasNonDefaultTweaks(
+            MainWindow.Settings.SkillPointsPerLevel,
+            MainWindow.Settings.AttributesPerLevel,
+            MainWindow.Settings.NormalResistPenalty,
+            MainWindow.Settings.NightmareResistPenalty,
+            MainWindow.Settings.HellResistPenalty);
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private bool TryApplyResistPenaltyValues()
+    {
+        if (!int.TryParse(NormalResistPenaltyTextBox.Text, out var normalResistPenalty) ||
+            !int.TryParse(NightmareResistPenaltyTextBox.Text, out var nightmareResistPenalty) ||
+            !int.TryParse(HellResistPenaltyTextBox.Text, out var hellResistPenalty))
+        {
+            return false;
+        }
+
+        MainWindow.Settings.NormalResistPenalty = normalResistPenalty;
+        MainWindow.Settings.NightmareResistPenalty = nightmareResistPenalty;
+        MainWindow.Settings.HellResistPenalty = hellResistPenalty;
+        return true;
+    }
+
+    private void StepResistPenaltyValue(TextBox textBox, int step)
+    {
+        var fallbackValue = textBox.Name switch
+        {
+            nameof(NormalResistPenaltyTextBox) => MainWindow.Settings.NormalResistPenalty,
+            nameof(NightmareResistPenaltyTextBox) => MainWindow.Settings.NightmareResistPenalty,
+            nameof(HellResistPenaltyTextBox) => MainWindow.Settings.HellResistPenalty,
+            _ => 0
+        };
+
+        var currentValue = int.TryParse(textBox.Text, out var parsedValue)
+            ? parsedValue
+            : fallbackValue;
+        textBox.Text = (currentValue + step).ToString();
+        textBox.CaretIndex = textBox.Text.Length;
+    }
+
+    private static bool HasNonDefaultTweaks(
+        int skillPointsPerLevel,
+        int attributesPerLevel,
+        int normalResistPenalty,
+        int nightmareResistPenalty,
+        int hellResistPenalty)
+    {
+        return skillPointsPerLevel != DefaultSkillPointsPerLevel
+               || attributesPerLevel != DefaultAttributesPerLevel
+               || normalResistPenalty != DefaultNormalResistPenalty
+               || nightmareResistPenalty != DefaultNightmareResistPenalty
+               || hellResistPenalty != DefaultHellResistPenalty;
     }
 
     private static int Clamp(int value, int min, int max)

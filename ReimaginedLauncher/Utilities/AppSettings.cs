@@ -17,4 +17,7 @@ public class AppSettings
     public int? PlayersCount { get; set; }
     public int SkillPointsPerLevel { get; set; } = 1;
     public int AttributesPerLevel { get; set; } = 5;
+    public int NormalResistPenalty { get; set; }
+    public int NightmareResistPenalty { get; set; } = -60;
+    public int HellResistPenalty { get; set; } = -120;
 }

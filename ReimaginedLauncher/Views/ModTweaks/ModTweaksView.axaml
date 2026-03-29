@@ -4,8 +4,11 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="520"
              x:Class="ReimaginedLauncher.Views.ModTweaks.ModTweaksView">
-    <ScrollViewer HorizontalScrollBarVisibility="Disabled"
-                  VerticalScrollBarVisibility="Auto">
+    <ScrollViewer x:Name="RootScrollViewer"
+                  HorizontalScrollBarVisibility="Disabled"
+                  VerticalScrollBarVisibility="Auto"
+                  Focusable="True"
+                  PointerPressed="OnBackgroundPointerPressed">
         <StackPanel Spacing="16">
             <StackPanel Spacing="4">
                 <TextBlock Classes="view-title" Text="Mod Tweaks"/>
@@ -14,50 +17,100 @@
 
             <Border Classes="panel"
                     Padding="20">
-                <Grid ColumnDefinitions="220,220,*" ColumnSpacing="16" RowDefinitions="Auto">
-                    <StackPanel Grid.Column="0" Spacing="8">
-                        <TextBlock Text="Skill Points Per Level"
-                                   FontWeight="SemiBold"/>
-                        <ComboBox x:Name="SkillPointsComboBox"
-                                  Width="180"
-                                  SelectionChanged="OnTweaksSelectionChanged">
-                            <ComboBoxItem Content="1 (Default)"/>
-                            <ComboBoxItem Content="2"/>
-                            <ComboBoxItem Content="3"/>
-                            <ComboBoxItem Content="4"/>
-                            <ComboBoxItem Content="5"/>
-                        </ComboBox>
+                <StackPanel Spacing="14">
+                    <StackPanel Spacing="4">
+                        <TextBlock Classes="section-title"
+                                   Text="Character Tweaks"/>
+                        <TextBlock Classes="muted"
+                                   Text="Adjust level-up progression values applied through charstats."/>
                     </StackPanel>
 
-                    <StackPanel Grid.Column="1" Spacing="8">
-                        <TextBlock Text="Attributes Per Level"
-                                   FontWeight="SemiBold"/>
-                        <ComboBox x:Name="AttributesComboBox"
-                                  Width="180"
-                                  SelectionChanged="OnTweaksSelectionChanged">
-                            <ComboBoxItem Content="1"/>
-                            <ComboBoxItem Content="2"/>
-                            <ComboBoxItem Content="3"/>
-                            <ComboBoxItem Content="4"/>
-                            <ComboBoxItem Content="5 (Default)"/>
-                            <ComboBoxItem Content="6"/>
-                            <ComboBoxItem Content="7"/>
-                            <ComboBoxItem Content="8"/>
-                            <ComboBoxItem Content="9"/>
-                            <ComboBoxItem Content="10"/>
-                            <ComboBoxItem Content="11"/>
-                            <ComboBoxItem Content="12"/>
-                            <ComboBoxItem Content="13"/>
-                            <ComboBoxItem Content="14"/>
-                            <ComboBoxItem Content="15"/>
-                            <ComboBoxItem Content="16"/>
-                            <ComboBoxItem Content="17"/>
-                            <ComboBoxItem Content="18"/>
-                            <ComboBoxItem Content="19"/>
-                            <ComboBoxItem Content="20"/>
-                        </ComboBox>
+                    <Grid ColumnDefinitions="220,220,*" ColumnSpacing="16" RowDefinitions="Auto">
+                        <StackPanel Grid.Column="0" Spacing="8">
+                            <TextBlock Text="Skill Points Per Level"
+                                       FontWeight="SemiBold"/>
+                            <ComboBox x:Name="SkillPointsComboBox"
+                                      Width="180"
+                                      SelectionChanged="OnTweaksSelectionChanged">
+                                <ComboBoxItem Content="1 (Default)"/>
+                                <ComboBoxItem Content="2"/>
+                                <ComboBoxItem Content="3"/>
+                                <ComboBoxItem Content="4"/>
+                                <ComboBoxItem Content="5"/>
+                            </ComboBox>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1" Spacing="8">
+                            <TextBlock Text="Attributes Per Level"
+                                       FontWeight="SemiBold"/>
+                            <ComboBox x:Name="AttributesComboBox"
+                                      Width="180"
+                                      SelectionChanged="OnTweaksSelectionChanged">
+                                <ComboBoxItem Content="1"/>
+                                <ComboBoxItem Content="2"/>
+                                <ComboBoxItem Content="3"/>
+                                <ComboBoxItem Content="4"/>
+                                <ComboBoxItem Content="5 (Default)"/>
+                                <ComboBoxItem Content="6"/>
+                                <ComboBoxItem Content="7"/>
+                                <ComboBoxItem Content="8"/>
+                                <ComboBoxItem Content="9"/>
+                                <ComboBoxItem Content="10"/>
+                                <ComboBoxItem Content="11"/>
+                                <ComboBoxItem Content="12"/>
+                                <ComboBoxItem Content="13"/>
+                                <ComboBoxItem Content="14"/>
+                                <ComboBoxItem Content="15"/>
+                                <ComboBoxItem Content="16"/>
+                                <ComboBoxItem Content="17"/>
+                                <ComboBoxItem Content="18"/>
+                                <ComboBoxItem Content="19"/>
+                                <ComboBoxItem Content="20"/>
+                            </ComboBox>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="14">
+                    <StackPanel Spacing="4">
+                        <TextBlock Classes="section-title"
+                                   Text="Difficulty Tweaks"/>
+                        <TextBlock Classes="muted"
+                                   Text="Override the ResistPenalty values in DifficultyLevels for each difficulty."/>
                     </StackPanel>
-                </Grid>
+
+                    <Grid ColumnDefinitions="160,160,160,*" ColumnSpacing="16" RowDefinitions="Auto">
+                        <StackPanel Grid.Column="0" Spacing="8">
+                            <TextBlock Text="Normal Resist Penalty"
+                                       FontWeight="SemiBold"/>
+                            <TextBox x:Name="NormalResistPenaltyTextBox"
+                                     Width="120"
+                                     LostFocus="OnResistPenaltyChanged"
+                                     KeyDown="OnResistPenaltyKeyDown"/>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1" Spacing="8">
+                            <TextBlock Text="Nightmare Resist Penalty"
+                                       FontWeight="SemiBold"/>
+                            <TextBox x:Name="NightmareResistPenaltyTextBox"
+                                     Width="120"
+                                     LostFocus="OnResistPenaltyChanged"
+                                     KeyDown="OnResistPenaltyKeyDown"/>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2" Spacing="8">
+                            <TextBlock Text="Hell Resist Penalty"
+                                       FontWeight="SemiBold"/>
+                            <TextBox x:Name="HellResistPenaltyTextBox"
+                                     Width="120"
+                                     LostFocus="OnResistPenaltyChanged"
+                                     KeyDown="OnResistPenaltyKeyDown"/>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
             </Border>
 
             <Border x:Name="WarningBorder"
@@ -68,7 +121,7 @@
                 <TextBlock x:Name="WarningTextBlock"
                            Foreground="{StaticResource GoldTextBrush}"
                            TextWrapping="Wrap"
-                           Text="This is the unintended Reimagined experience. Balancing is around 1 skill point and 5 attributes per level."/>
+                           Text="This is the unintended Reimagined experience. Balancing is around 1 skill point, 5 attributes per level, and default difficulty resist penalties of 0, -60, and -120."/>
             </Border>
         </StackPanel>
     </ScrollViewer>

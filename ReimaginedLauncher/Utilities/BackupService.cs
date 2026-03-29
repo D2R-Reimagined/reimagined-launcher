@@ -120,7 +120,14 @@ public static class BackupService
             var backupDirectory = Path.Combine(backupRoot, backupName);
             Directory.CreateDirectory(backupDirectory);
 
-            await CopyDirectoryAsync(sourceDirectory, backupDirectory, overwrite: true);
+            await CopyDirectoryAsync(
+                sourceDirectory,
+                backupDirectory,
+                overwrite: true,
+                excludedDirectories:
+                [
+                    backupRoot
+                ]);
             TrimBackups();
 
             Notifications.SendNotification($"Backup created: {backupName}", "Success");
@@ -193,12 +200,25 @@ public static class BackupService
         }
     }
 
-    private static async Task CopyDirectoryAsync(string sourceDirectory, string destinationDirectory, bool overwrite)
+    private static async Task CopyDirectoryAsync(
+        string sourceDirectory,
+        string destinationDirectory,
+        bool overwrite,
+        IEnumerable<string>? excludedDirectories = null)
     {
         Directory.CreateDirectory(destinationDirectory);
+        var excludedDirectoryPaths = excludedDirectories?
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(NormalizeDirectoryPath)
+            .ToArray() ?? [];
 
         foreach (var filePath in Directory.GetFiles(sourceDirectory, "*", SearchOption.AllDirectories))
         {
+            if (excludedDirectoryPaths.Any(excludedDirectory => IsPathWithinDirectory(filePath, excludedDirectory)))
+            {
+                continue;
+            }
+
             var relativePath = Path.GetRelativePath(sourceDirectory, filePath);
             var destinationFilePath = Path.Combine(destinationDirectory, relativePath);
             var destinationFolder = Path.GetDirectoryName(destinationFilePath);
@@ -212,6 +232,19 @@ public static class BackupService
             await using var destinationStream = File.Open(destinationFilePath, overwrite ? FileMode.Create : FileMode.CreateNew, FileAccess.Write, FileShare.None);
             await sourceStream.CopyToAsync(destinationStream);
         }
+    }
+
+    private static string NormalizeDirectoryPath(string path)
+    {
+        return Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+    }
+
+    private static bool IsPathWithinDirectory(string path, string directoryPath)
+    {
+        var normalizedPath = Path.GetFullPath(path);
+        return normalizedPath.StartsWith(
+            directoryPath + Path.DirectorySeparatorChar,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? GetSavePathFromModInfo()

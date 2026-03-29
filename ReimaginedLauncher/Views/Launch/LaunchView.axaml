@@ -6,31 +6,42 @@
              x:Class="ReimaginedLauncher.Views.Launch.LaunchView">
     <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                   VerticalScrollBarVisibility="Auto">
-        <Grid RowDefinitions="Auto,Auto,Auto"
+        <Grid RowDefinitions="Auto,Auto,Auto,Auto"
               RowSpacing="18">
             <Border Classes="hero-panel"
                     Padding="22">
-                <Grid ColumnDefinitions="*,Auto"
-                      ColumnSpacing="18">
-                    <StackPanel Spacing="8">
-                        <TextBlock Classes="view-title"
-                                   Text="Enter The Hunt" />
-                        <TextBlock Classes="muted"
-                                   Text="Point the launcher at your Diablo II: Resurrected install, verify the Reimagined files, and launch straight into the dark."
-                                   TextWrapping="Wrap" />
-                    </StackPanel>
+                <StackPanel Spacing="8">
+                    <TextBlock Classes="view-title"
+                               Text="Enter The Hunt" />
+                    <TextBlock Classes="muted"
+                               Text="Point the launcher at your Diablo II: Resurrected install, verify the Reimagined files, and launch straight into the dark."
+                               TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
 
+            <Border Grid.Row="1"
+                    Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="12">
+                    <TextBlock Classes="section-title"
+                               Text="Launch" />
+                    <TextBlock Classes="muted"
+                               Text="The button stays available here and will enable once the install directory is valid and the mod is detected." />
                     <Button x:Name="StartGameButton"
                             Classes="accent"
                             Content="Start Game"
                             Click="OnRunClick"
-                            Width="160"
-                            IsEnabled="False"
-                            VerticalAlignment="Center" />
-                </Grid>
+                            Width="220"
+                            HorizontalAlignment="Left"
+                            HorizontalContentAlignment="Center"
+                            VerticalContentAlignment="Center"
+                            MinHeight="48"
+                            IsEnabled="False" />
+                </StackPanel>
             </Border>
 
-            <Border Classes="panel"
+            <Border Grid.Row="2"
+                    Classes="panel"
                     Padding="20">
                 <Grid RowDefinitions="Auto,Auto,Auto"
                       RowSpacing="14">
@@ -38,7 +49,7 @@
                         <TextBlock Classes="section-title"
                                    Text="Install Directory" />
                         <TextBlock Classes="muted"
-                                   Text="Select the Diablo II: Resurrected folder that contains your local mod installation." />
+                                   Text="Select the Diablo II: Resurrected folder that contains your local mod installation (Folder with .exe in it)" />
                     </StackPanel>
 
                     <Border x:Name="ValidationBanner"
@@ -64,7 +75,8 @@
                 </Grid>
             </Border>
 
-            <Border Classes="panel"
+            <Border Grid.Row="3"
+                    Classes="panel"
                     Padding="20">
                 <StackPanel Spacing="10">
                     <TextBlock Classes="section-title"

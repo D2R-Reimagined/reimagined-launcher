@@ -105,6 +105,13 @@
             <Setter Property="Background" Value="{StaticResource AccentPressedBrush}" />
         </Style>
 
+        <Style Selector="Button:disabled">
+            <Setter Property="Background" Value="{StaticResource SurfaceMutedBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+            <Setter Property="Opacity" Value="0.9" />
+        </Style>
+
         <Style Selector="Button.accent">
             <Setter Property="Background" Value="{StaticResource AccentBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource BorderStrongBrush}" />
