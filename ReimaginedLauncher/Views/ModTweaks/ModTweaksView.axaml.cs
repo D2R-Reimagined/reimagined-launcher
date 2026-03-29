@@ -10,6 +10,7 @@ public partial class ModTweaksView : UserControl
 {
     private const int DefaultSkillPointsPerLevel = 1;
     private const int DefaultAttributesPerLevel = 5;
+    private const int DefaultMaxSkillLevel = 25;
     private const int DefaultNormalResistPenalty = 0;
     private const int DefaultNightmareResistPenalty = -60;
     private const int DefaultHellResistPenalty = -120;
@@ -27,24 +28,28 @@ public partial class ModTweaksView : UserControl
 
         var skillPointsPerLevel = Clamp(MainWindow.Settings.SkillPointsPerLevel, 1, 5);
         var attributesPerLevel = Clamp(MainWindow.Settings.AttributesPerLevel, 1, 20);
+        var maxSkillLevel = Clamp(MainWindow.Settings.MaxSkillLevel, 1, 99);
         var normalResistPenalty = MainWindow.Settings.NormalResistPenalty;
         var nightmareResistPenalty = MainWindow.Settings.NightmareResistPenalty;
         var hellResistPenalty = MainWindow.Settings.HellResistPenalty;
 
         MainWindow.Settings.SkillPointsPerLevel = skillPointsPerLevel;
         MainWindow.Settings.AttributesPerLevel = attributesPerLevel;
+        MainWindow.Settings.MaxSkillLevel = maxSkillLevel;
         MainWindow.Settings.NormalResistPenalty = normalResistPenalty;
         MainWindow.Settings.NightmareResistPenalty = nightmareResistPenalty;
         MainWindow.Settings.HellResistPenalty = hellResistPenalty;
 
         SkillPointsComboBox.SelectedIndex = skillPointsPerLevel - 1;
         AttributesComboBox.SelectedIndex = attributesPerLevel - 1;
+        MaxSkillLevelTextBox.Text = maxSkillLevel.ToString();
         NormalResistPenaltyTextBox.Text = normalResistPenalty.ToString();
         NightmareResistPenaltyTextBox.Text = nightmareResistPenalty.ToString();
         HellResistPenaltyTextBox.Text = hellResistPenalty.ToString();
         WarningBorder.IsVisible = HasNonDefaultTweaks(
             skillPointsPerLevel,
             attributesPerLevel,
+            maxSkillLevel,
             normalResistPenalty,
             nightmareResistPenalty,
             hellResistPenalty);
@@ -64,11 +69,42 @@ public partial class ModTweaksView : UserControl
         WarningBorder.IsVisible = HasNonDefaultTweaks(
             MainWindow.Settings.SkillPointsPerLevel,
             MainWindow.Settings.AttributesPerLevel,
+            MainWindow.Settings.MaxSkillLevel,
             MainWindow.Settings.NormalResistPenalty,
             MainWindow.Settings.NightmareResistPenalty,
             MainWindow.Settings.HellResistPenalty);
 
         await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private async void OnMaxSkillLevelChanged(object? sender, RoutedEventArgs e)
+    {
+        await SaveMaxSkillLevelAsync();
+    }
+
+    private async void OnMaxSkillLevelKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (sender is not TextBox textBox)
+        {
+            return;
+        }
+
+        if (e.Key == Key.Enter)
+        {
+            e.Handled = true;
+            await SaveMaxSkillLevelAsync();
+            RootScrollViewer.Focus();
+            return;
+        }
+
+        if (e.Key != Key.Up && e.Key != Key.Down)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        StepNumericValue(textBox, e.Key == Key.Up ? 1 : -1, MainWindow.Settings.MaxSkillLevel);
+        await SaveMaxSkillLevelAsync();
     }
 
     private async void OnResistPenaltyChanged(object? sender, RoutedEventArgs e)
@@ -130,10 +166,49 @@ public partial class ModTweaksView : UserControl
         WarningBorder.IsVisible = HasNonDefaultTweaks(
             MainWindow.Settings.SkillPointsPerLevel,
             MainWindow.Settings.AttributesPerLevel,
+            MainWindow.Settings.MaxSkillLevel,
             MainWindow.Settings.NormalResistPenalty,
             MainWindow.Settings.NightmareResistPenalty,
             MainWindow.Settings.HellResistPenalty);
         await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private async Task SaveMaxSkillLevelAsync()
+    {
+        if (_isRefreshing)
+        {
+            return;
+        }
+
+        if (!TryApplyMaxSkillLevel())
+        {
+            RefreshTweaksState();
+            Notifications.SendNotification(
+                "Max Skill Level must be a whole number.",
+                "Use a numeric value for the global max skill level.");
+            return;
+        }
+
+        WarningBorder.IsVisible = HasNonDefaultTweaks(
+            MainWindow.Settings.SkillPointsPerLevel,
+            MainWindow.Settings.AttributesPerLevel,
+            MainWindow.Settings.MaxSkillLevel,
+            MainWindow.Settings.NormalResistPenalty,
+            MainWindow.Settings.NightmareResistPenalty,
+            MainWindow.Settings.HellResistPenalty);
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private bool TryApplyMaxSkillLevel()
+    {
+        if (!int.TryParse(MaxSkillLevelTextBox.Text, out var maxSkillLevel))
+        {
+            return false;
+        }
+
+        MainWindow.Settings.MaxSkillLevel = Clamp(maxSkillLevel, 1, 99);
+        MaxSkillLevelTextBox.Text = MainWindow.Settings.MaxSkillLevel.ToString();
+        return true;
     }
 
     private bool TryApplyResistPenaltyValues()
@@ -168,15 +243,26 @@ public partial class ModTweaksView : UserControl
         textBox.CaretIndex = textBox.Text.Length;
     }
 
+    private static void StepNumericValue(TextBox textBox, int step, int fallbackValue)
+    {
+        var currentValue = int.TryParse(textBox.Text, out var parsedValue)
+            ? parsedValue
+            : fallbackValue;
+        textBox.Text = (currentValue + step).ToString();
+        textBox.CaretIndex = textBox.Text.Length;
+    }
+
     private static bool HasNonDefaultTweaks(
         int skillPointsPerLevel,
         int attributesPerLevel,
+        int maxSkillLevel,
         int normalResistPenalty,
         int nightmareResistPenalty,
         int hellResistPenalty)
     {
         return skillPointsPerLevel != DefaultSkillPointsPerLevel
                || attributesPerLevel != DefaultAttributesPerLevel
+               || maxSkillLevel != DefaultMaxSkillLevel
                || normalResistPenalty != DefaultNormalResistPenalty
                || nightmareResistPenalty != DefaultNightmareResistPenalty
                || hellResistPenalty != DefaultHellResistPenalty;

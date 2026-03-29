@@ -13,6 +13,7 @@ public static class ModTweaksService
     private const string CleanExcelDirectoryName = "excel_launcher_clean";
     private const string CharStatsFileName = "charstats.txt";
     private const string DifficultyLevelsFileName = "DifficultyLevels.txt";
+    private const string SkillsFileName = "skills.txt";
 
     public static async Task<bool> PrepareForLaunchAsync()
     {
@@ -26,6 +27,7 @@ public static class ModTweaksService
         var cleanExcelDirectory = GetCleanExcelDirectory(excelDirectory);
         var charStatsFilePath = Path.Combine(excelDirectory, CharStatsFileName);
         var difficultyLevelsFilePath = Path.Combine(excelDirectory, DifficultyLevelsFileName);
+        var skillsFilePath = Path.Combine(excelDirectory, SkillsFileName);
         if (!File.Exists(charStatsFilePath))
         {
             Notifications.SendNotification("charstats.txt was not found in the Reimagined excel folder.", "Warning");
@@ -38,6 +40,12 @@ public static class ModTweaksService
             return false;
         }
 
+        if (!File.Exists(skillsFilePath))
+        {
+            Notifications.SendNotification("skills.txt was not found in the Reimagined excel folder.", "Warning");
+            return false;
+        }
+
         try
         {
             await EnsureCleanExcelCopyAsync(excelDirectory, cleanExcelDirectory);
@@ -46,6 +54,9 @@ public static class ModTweaksService
                 charStatsFilePath,
                 MainWindow.Settings.SkillPointsPerLevel,
                 MainWindow.Settings.AttributesPerLevel);
+            await ApplySkillsTweaksAsync(
+                skillsFilePath,
+                MainWindow.Settings.MaxSkillLevel);
             await ApplyDifficultyLevelsTweaksAsync(
                 difficultyLevelsFilePath,
                 MainWindow.Settings.NormalResistPenalty,
@@ -189,6 +200,49 @@ public static class ModTweaksService
         }
 
         await File.WriteAllLinesAsync(difficultyLevelsFilePath, lines);
+    }
+
+    private static async Task ApplySkillsTweaksAsync(string skillsFilePath, int maxSkillLevel)
+    {
+        var lines = await File.ReadAllLinesAsync(skillsFilePath);
+        if (lines.Length == 0)
+        {
+            throw new InvalidDataException("skills.txt did not contain any rows.");
+        }
+
+        var headers = lines[0].Split('\t');
+        var maxLevelIndex = Array.FindIndex(headers, header => header.Equals("maxlvl", StringComparison.OrdinalIgnoreCase));
+        if (maxLevelIndex < 0)
+        {
+            throw new InvalidDataException("skills.txt is missing the maxlvl column.");
+        }
+
+        var updatedRows = 0;
+
+        for (var i = 1; i < lines.Length; i++)
+        {
+            if (string.IsNullOrWhiteSpace(lines[i]))
+            {
+                continue;
+            }
+
+            var columns = lines[i].Split('\t');
+            if (columns.Length <= maxLevelIndex || string.IsNullOrWhiteSpace(columns[maxLevelIndex]))
+            {
+                continue;
+            }
+
+            columns[maxLevelIndex] = maxSkillLevel.ToString();
+            lines[i] = string.Join('\t', columns);
+            updatedRows++;
+        }
+
+        if (updatedRows == 0)
+        {
+            throw new InvalidDataException("skills.txt did not contain any rows with maxlvl values.");
+        }
+
+        await File.WriteAllLinesAsync(skillsFilePath, lines);
     }
 
     private static async Task CopyDirectoryAsync(string sourceDirectory, string destinationDirectory, bool overwrite)

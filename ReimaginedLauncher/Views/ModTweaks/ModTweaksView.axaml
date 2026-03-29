@@ -22,15 +22,16 @@
                         <TextBlock Classes="section-title"
                                    Text="Character Tweaks"/>
                         <TextBlock Classes="muted"
-                                   Text="Adjust level-up progression values applied through charstats."/>
+                                   Text="Adjust level-up progression values applied through charstats and skills."/>
                     </StackPanel>
 
-                    <Grid ColumnDefinitions="220,220,*" ColumnSpacing="16" RowDefinitions="Auto">
+                    <Grid ColumnDefinitions="220,220,180,*" ColumnSpacing="16" RowDefinitions="Auto">
                         <StackPanel Grid.Column="0" Spacing="8">
                             <TextBlock Text="Skill Points Per Level"
                                        FontWeight="SemiBold"/>
                             <ComboBox x:Name="SkillPointsComboBox"
                                       Width="180"
+                                      HorizontalAlignment="Left"
                                       SelectionChanged="OnTweaksSelectionChanged">
                                 <ComboBoxItem Content="1 (Default)"/>
                                 <ComboBoxItem Content="2"/>
@@ -45,6 +46,7 @@
                                        FontWeight="SemiBold"/>
                             <ComboBox x:Name="AttributesComboBox"
                                       Width="180"
+                                      HorizontalAlignment="Left"
                                       SelectionChanged="OnTweaksSelectionChanged">
                                 <ComboBoxItem Content="1"/>
                                 <ComboBoxItem Content="2"/>
@@ -68,6 +70,16 @@
                                 <ComboBoxItem Content="20"/>
                             </ComboBox>
                         </StackPanel>
+
+                        <StackPanel Grid.Column="2" Spacing="8">
+                            <TextBlock Text="Max Skill Level"
+                                       FontWeight="SemiBold"/>
+                            <TextBox x:Name="MaxSkillLevelTextBox"
+                                     Width="180"
+                                     HorizontalAlignment="Left"
+                                     LostFocus="OnMaxSkillLevelChanged"
+                                     KeyDown="OnMaxSkillLevelKeyDown"/>
+                        </StackPanel>
                     </Grid>
                 </StackPanel>
             </Border>
@@ -82,12 +94,13 @@
                                    Text="Override the ResistPenalty values in DifficultyLevels for each difficulty."/>
                     </StackPanel>
 
-                    <Grid ColumnDefinitions="160,160,160,*" ColumnSpacing="16" RowDefinitions="Auto">
+                    <Grid ColumnDefinitions="220,220,220,*" ColumnSpacing="16" RowDefinitions="Auto">
                         <StackPanel Grid.Column="0" Spacing="8">
                             <TextBlock Text="Normal Resist Penalty"
                                        FontWeight="SemiBold"/>
                             <TextBox x:Name="NormalResistPenaltyTextBox"
-                                     Width="120"
+                                     Width="180"
+                                     HorizontalAlignment="Left"
                                      LostFocus="OnResistPenaltyChanged"
                                      KeyDown="OnResistPenaltyKeyDown"/>
                         </StackPanel>
@@ -96,7 +109,8 @@
                             <TextBlock Text="Nightmare Resist Penalty"
                                        FontWeight="SemiBold"/>
                             <TextBox x:Name="NightmareResistPenaltyTextBox"
-                                     Width="120"
+                                     Width="180"
+                                     HorizontalAlignment="Left"
                                      LostFocus="OnResistPenaltyChanged"
                                      KeyDown="OnResistPenaltyKeyDown"/>
                         </StackPanel>
@@ -105,7 +119,8 @@
                             <TextBlock Text="Hell Resist Penalty"
                                        FontWeight="SemiBold"/>
                             <TextBox x:Name="HellResistPenaltyTextBox"
-                                     Width="120"
+                                     Width="180"
+                                     HorizontalAlignment="Left"
                                      LostFocus="OnResistPenaltyChanged"
                                      KeyDown="OnResistPenaltyKeyDown"/>
                         </StackPanel>
@@ -121,7 +136,7 @@
                 <TextBlock x:Name="WarningTextBlock"
                            Foreground="{StaticResource GoldTextBrush}"
                            TextWrapping="Wrap"
-                           Text="This is the unintended Reimagined experience. Balancing is around 1 skill point, 5 attributes per level, and default difficulty resist penalties of 0, -60, and -120."/>
+                           Text="This is the unintended Reimagined experience. Balancing is around 1 skill point, 5 attributes per level, max skill level 25, and default difficulty resist penalties of 0, -60, and -120."/>
             </Border>
         </StackPanel>
     </ScrollViewer>
