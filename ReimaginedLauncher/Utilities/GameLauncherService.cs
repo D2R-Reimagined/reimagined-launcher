@@ -143,11 +143,6 @@ public class GameLauncherService
             launchParameters.Add("-nosound");
         }
 
-        if (MainWindow.Settings.SkipLogoVideo)
-        {
-            launchParameters.Add("-skiplogovideo");
-        }
-
         if (MainWindow.Settings.NoRumble)
         {
             launchParameters.Add("-norumble");

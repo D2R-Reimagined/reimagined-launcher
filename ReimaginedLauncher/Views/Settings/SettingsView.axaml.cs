@@ -19,7 +19,6 @@ public partial class SettingsView : UserControl
         _isRefreshingSettings = true;
         DirectLaunchCheckBox.IsChecked = MainWindow.Settings.UseDirectLaunch;
         NoSoundCheckBox.IsChecked = MainWindow.Settings.NoSound;
-        SkipLogoVideoCheckBox.IsChecked = MainWindow.Settings.SkipLogoVideo;
         NoRumbleCheckBox.IsChecked = MainWindow.Settings.NoRumble;
         ResetOfflineMapsCheckBox.IsChecked = MainWindow.Settings.ResetOfflineMaps;
         EnableRespecCheckBox.IsChecked = MainWindow.Settings.EnableRespec;
@@ -38,7 +37,6 @@ public partial class SettingsView : UserControl
 
         MainWindow.Settings.UseDirectLaunch = DirectLaunchCheckBox.IsChecked ?? false;
         MainWindow.Settings.NoSound = NoSoundCheckBox.IsChecked ?? false;
-        MainWindow.Settings.SkipLogoVideo = SkipLogoVideoCheckBox.IsChecked ?? false;
         MainWindow.Settings.NoRumble = NoRumbleCheckBox.IsChecked ?? false;
         MainWindow.Settings.ResetOfflineMaps = ResetOfflineMapsCheckBox.IsChecked ?? false;
         MainWindow.Settings.EnableRespec = EnableRespecCheckBox.IsChecked ?? false;

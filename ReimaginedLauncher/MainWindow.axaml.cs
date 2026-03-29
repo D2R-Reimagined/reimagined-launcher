@@ -20,6 +20,7 @@ using ReimaginedLauncher.Utilities.Json;
 using ReimaginedLauncher.Utilities.ViewModels;
 using ReimaginedLauncher.Views.Backups;
 using ReimaginedLauncher.Views.Launch;
+using ReimaginedLauncher.Views.ModTweaks;
 using ReimaginedLauncher.Views.Settings;
 using ReimaginedLauncher.Views.Update;
 
@@ -94,6 +95,10 @@ public partial class MainWindow : Window
             else if (ContentArea.Content is SettingsView settingsView)
             {
                 settingsView.RefreshSettingsState();
+            }
+            else if (ContentArea.Content is ModTweaksView modTweaksView)
+            {
+                modTweaksView.RefreshTweaksState();
             }
         });
 
@@ -451,6 +456,11 @@ public partial class MainWindow : Window
                     settingsView.RefreshSettingsState();
                     ContentArea.Content = settingsView;
                     break;
+                case "Mod Tweaks":
+                    var modTweaksView = new ModTweaksView();
+                    modTweaksView.RefreshTweaksState();
+                    ContentArea.Content = modTweaksView;
+                    break;
                 case "Update":
                     _ = NavigateToUpdateViewAsync();
                     break;
@@ -531,6 +541,10 @@ public partial class MainWindow : Window
         else if (ContentArea.Content is SettingsView settingsView)
         {
             settingsView.RefreshSettingsState();
+        }
+        else if (ContentArea.Content is ModTweaksView modTweaksView)
+        {
+            modTweaksView.RefreshTweaksState();
         }
         else if (ContentArea.Content is UpdateView updateView)
         {

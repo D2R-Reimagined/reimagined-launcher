@@ -14,10 +14,6 @@
                   Content="-nosound"
                   Checked="OnLaunchSettingChanged"
                   Unchecked="OnLaunchSettingChanged"/>
-        <CheckBox x:Name="SkipLogoVideoCheckBox"
-                  Content="-skiplogovideo (may not work)"
-                  Checked="OnLaunchSettingChanged"
-                  Unchecked="OnLaunchSettingChanged"/>
         <CheckBox x:Name="NoRumbleCheckBox"
                   Content="-norumble"
                   Checked="OnLaunchSettingChanged"

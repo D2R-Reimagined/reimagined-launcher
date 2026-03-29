@@ -11,9 +11,10 @@ public class AppSettings
     public bool? NexusPremiumDownloadAccess { get; set; }
     public bool UseDirectLaunch { get; set; }
     public bool NoSound { get; set; }
-    public bool SkipLogoVideo { get; set; }
     public bool NoRumble { get; set; }
     public bool ResetOfflineMaps { get; set; }
     public bool EnableRespec { get; set; }
     public int? PlayersCount { get; set; }
+    public int SkillPointsPerLevel { get; set; } = 1;
+    public int AttributesPerLevel { get; set; } = 5;
 }

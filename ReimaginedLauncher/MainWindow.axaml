@@ -29,6 +29,7 @@
                 <ListBoxItem x:Name="LaunchNavItem" Content="Launch" />
                 <ListBoxItem Content="Backups" />
                 <ListBoxItem Content="Settings" />
+                <ListBoxItem Content="Mod Tweaks" />
                 <ListBoxItem x:Name="UpdateNavItem" Content="Update" />
             </ListBox>
 

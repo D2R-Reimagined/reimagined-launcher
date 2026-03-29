@@ -58,7 +58,12 @@ public partial class LaunchView : UserControl
 
             return;
         }
-        
+
+        if (!await ModTweaksService.PrepareForLaunchAsync())
+        {
+            return;
+        }
+
         LauncherService.LaunchGame();
         Notifications.SendNotification("Clicked Launch", "Success");
     }
