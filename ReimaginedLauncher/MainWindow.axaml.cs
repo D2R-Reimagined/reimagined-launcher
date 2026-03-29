@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Controls.Notifications;
 using Avalonia.Interactivity;
+using Avalonia.Media.Imaging;
 using Avalonia.Notification;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
@@ -58,6 +59,7 @@ public partial class MainWindow : Window
     {
         _nexusModsHttpClient = Program.ServiceProvider.GetRequiredService<NexusModsHttpClient>();;
         InitializeComponent();
+        LogoImage.Source = new Bitmap("Assets/ReimaginedLauncher.ico");
         
         DataContext = UserViewModel;
         _ = LoadSettingsAsync();
@@ -492,11 +494,12 @@ public partial class MainWindow : Window
 
     public async Task NavigateToUpdateViewAsync()
     {
-        await RefreshUpdateStateAsync();
+        UpdateView? updateView = null;
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
-            var updateView = new UpdateView();
+            updateView = new UpdateView();
+            updateView.SetLoadingState(true);
             updateView.RefreshUpdateState();
             ContentArea.Content = updateView;
 
@@ -505,6 +508,21 @@ public partial class MainWindow : Window
                 NavigationList.SelectedItem = UpdateNavItem;
             }
         });
+
+        try
+        {
+            await RefreshUpdateStateAsync();
+        }
+        finally
+        {
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (updateView != null && ReferenceEquals(ContentArea.Content, updateView))
+                {
+                    updateView.SetLoadingState(false);
+                }
+            });
+        }
     }
 
     public async Task NavigateToLaunchViewAsync()
@@ -597,7 +615,7 @@ public partial class MainWindow : Window
             {
                 Settings.NexusModsSSOApiKey = apiKey;
                 _ = ValidateKey();
-                Notifications.SendNotification($"Nexus Login API Key: {apiKey}");
+                Notifications.SendNotification($"Logged in Via Nexus Mods");
             });
         };
 

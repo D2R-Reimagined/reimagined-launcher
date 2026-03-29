@@ -2,14 +2,167 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:valueConverters="clr-namespace:ReimaginedLauncher.Utilities.ValueConverters"
              x:Class="ReimaginedLauncher.App"
-             RequestedThemeVariant="Default">
-    <!-- "Default" ThemeVariant follows system theme variant. "Dark" or "Light" are other available options. -->
-
+             RequestedThemeVariant="Dark">
+    <Application.Resources>
+        <SolidColorBrush x:Key="AppBackgroundBrush" Color="#050505" />
+        <SolidColorBrush x:Key="SurfaceBrush" Color="#120A0A" />
+        <SolidColorBrush x:Key="SurfaceRaisedBrush" Color="#1A1010" />
+        <SolidColorBrush x:Key="SurfaceMutedBrush" Color="#241414" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#6E0F12" />
+        <SolidColorBrush x:Key="AccentHoverBrush" Color="#8C171B" />
+        <SolidColorBrush x:Key="AccentPressedBrush" Color="#560B0E" />
+        <SolidColorBrush x:Key="AccentSoftBrush" Color="#311010" />
+        <SolidColorBrush x:Key="BorderBrush" Color="#4A1B1C" />
+        <SolidColorBrush x:Key="BorderStrongBrush" Color="#7B2326" />
+        <SolidColorBrush x:Key="TextBrush" Color="#F4E9E2" />
+        <SolidColorBrush x:Key="MutedTextBrush" Color="#C0AAA2" />
+        <SolidColorBrush x:Key="GoldBrush" Color="#C89A4B" />
+        <SolidColorBrush x:Key="GoldTextBrush" Color="#F3D8A8" />
+        <LinearGradientBrush x:Key="WindowBackgroundBrush" StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Color="#080607" Offset="0" />
+            <GradientStop Color="#180809" Offset="0.55" />
+            <GradientStop Color="#040404" Offset="1" />
+        </LinearGradientBrush>
+        <LinearGradientBrush x:Key="PanelBackgroundBrush" StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Color="#1A0F10" Offset="0" />
+            <GradientStop Color="#0F0909" Offset="1" />
+        </LinearGradientBrush>
+        <LinearGradientBrush x:Key="HeroBackgroundBrush" StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Color="#261012" Offset="0" />
+            <GradientStop Color="#140B0C" Offset="0.5" />
+            <GradientStop Color="#090707" Offset="1" />
+        </LinearGradientBrush>
+        <valueConverters:InverseBooleanConverter x:Key="InverseBooleanConverter" />
+    </Application.Resources>
     <Application.Styles>
         <FluentTheme />
         <StyleInclude Source="avares://Notification.Avalonia/Themes/Generic.xaml" />
+
+        <Style Selector="Window">
+            <Setter Property="Background" Value="{StaticResource WindowBackgroundBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="FontFamily" Value="Segoe UI" />
+        </Style>
+
+        <Style Selector="Border.panel">
+            <Setter Property="Background" Value="{StaticResource PanelBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="14" />
+        </Style>
+
+        <Style Selector="Border.hero-panel">
+            <Setter Property="Background" Value="{StaticResource HeroBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderStrongBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="18" />
+        </Style>
+
+        <Style Selector="Border.warning-banner">
+            <Setter Property="Background" Value="#2A1813" />
+            <Setter Property="BorderBrush" Value="{StaticResource GoldBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+        </Style>
+
+        <Style Selector="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+        </Style>
+
+        <Style Selector="TextBlock.muted">
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+        </Style>
+
+        <Style Selector="TextBlock.view-title">
+            <Setter Property="FontFamily" Value="Georgia" />
+            <Setter Property="FontSize" Value="28" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Foreground" Value="{StaticResource GoldTextBrush}" />
+        </Style>
+
+        <Style Selector="TextBlock.section-title">
+            <Setter Property="FontFamily" Value="Georgia" />
+            <Setter Property="FontSize" Value="21" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{StaticResource GoldTextBrush}" />
+        </Style>
+
+        <Style Selector="Button">
+            <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="14,10" />
+            <Setter Property="MinHeight" Value="40" />
+        </Style>
+
+        <Style Selector="Button:pointerover">
+            <Setter Property="Background" Value="{StaticResource AccentSoftBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderStrongBrush}" />
+        </Style>
+
+        <Style Selector="Button:pressed">
+            <Setter Property="Background" Value="{StaticResource AccentPressedBrush}" />
+        </Style>
+
+        <Style Selector="Button.accent">
+            <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderStrongBrush}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+
+        <Style Selector="Button.accent:pointerover">
+            <Setter Property="Background" Value="{StaticResource AccentHoverBrush}" />
+        </Style>
+
+        <Style Selector="Button.link-button">
+            <Setter Property="Background" Value="#140B0C" />
+            <Setter Property="BorderBrush" Value="#3A1617" />
+            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+        </Style>
+
+        <Style Selector="TextBox">
+            <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="MinHeight" Value="40" />
+        </Style>
+
+        <Style Selector="ComboBox">
+            <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="MinHeight" Value="40" />
+        </Style>
+
+        <Style Selector="CheckBox">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+        </Style>
+
+        <Style Selector="ListBox.nav-list">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+
+        <Style Selector="ListBox.nav-list ListBoxItem">
+            <Setter Property="Background" Value="#140B0C" />
+            <Setter Property="BorderBrush" Value="#2C1213" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="14,12" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+
+        <Style Selector="ListBox.nav-list ListBoxItem:pointerover">
+            <Setter Property="Background" Value="{StaticResource AccentSoftBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderStrongBrush}" />
+        </Style>
+
+        <Style Selector="ListBox.nav-list ListBoxItem:selected">
+            <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderStrongBrush}" />
+        </Style>
     </Application.Styles>
-    <Application.Resources>
-        <valueConverters:InverseBooleanConverter x:Key="InverseBooleanConverter" />
-    </Application.Resources>
 </Application>

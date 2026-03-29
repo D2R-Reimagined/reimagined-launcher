@@ -8,62 +8,65 @@
                   VerticalScrollBarVisibility="Auto">
         <StackPanel Spacing="16">
             <StackPanel Spacing="4">
-                <TextBlock Text="Mod Tweaks" FontSize="22" FontWeight="Bold"/>
-                <TextBlock Text="Customize leveling rewards for your local launcher configuration." Opacity="0.75"/>
+                <TextBlock Classes="view-title" Text="Mod Tweaks"/>
+                <TextBlock Classes="muted" Text="Customize leveling rewards for your local launcher configuration."/>
             </StackPanel>
 
-            <Grid ColumnDefinitions="220,220,*" ColumnSpacing="16" RowDefinitions="Auto">
-                <StackPanel Grid.Column="0" Spacing="8">
-                    <TextBlock Text="Skill Points Per Level"/>
-                    <ComboBox x:Name="SkillPointsComboBox"
-                              Width="180"
-                              SelectionChanged="OnTweaksSelectionChanged">
-                        <ComboBoxItem Content="1 (Default)"/>
-                        <ComboBoxItem Content="2"/>
-                        <ComboBoxItem Content="3"/>
-                        <ComboBoxItem Content="4"/>
-                        <ComboBoxItem Content="5"/>
-                    </ComboBox>
-                </StackPanel>
+            <Border Classes="panel"
+                    Padding="20">
+                <Grid ColumnDefinitions="220,220,*" ColumnSpacing="16" RowDefinitions="Auto">
+                    <StackPanel Grid.Column="0" Spacing="8">
+                        <TextBlock Text="Skill Points Per Level"
+                                   FontWeight="SemiBold"/>
+                        <ComboBox x:Name="SkillPointsComboBox"
+                                  Width="180"
+                                  SelectionChanged="OnTweaksSelectionChanged">
+                            <ComboBoxItem Content="1 (Default)"/>
+                            <ComboBoxItem Content="2"/>
+                            <ComboBoxItem Content="3"/>
+                            <ComboBoxItem Content="4"/>
+                            <ComboBoxItem Content="5"/>
+                        </ComboBox>
+                    </StackPanel>
 
-                <StackPanel Grid.Column="1" Spacing="8">
-                    <TextBlock Text="Attributes Per Level"/>
-                    <ComboBox x:Name="AttributesComboBox"
-                              Width="180"
-                              SelectionChanged="OnTweaksSelectionChanged">
-                        <ComboBoxItem Content="1"/>
-                        <ComboBoxItem Content="2"/>
-                        <ComboBoxItem Content="3"/>
-                        <ComboBoxItem Content="4"/>
-                        <ComboBoxItem Content="5 (Default)"/>
-                        <ComboBoxItem Content="6"/>
-                        <ComboBoxItem Content="7"/>
-                        <ComboBoxItem Content="8"/>
-                        <ComboBoxItem Content="9"/>
-                        <ComboBoxItem Content="10"/>
-                        <ComboBoxItem Content="11"/>
-                        <ComboBoxItem Content="12"/>
-                        <ComboBoxItem Content="13"/>
-                        <ComboBoxItem Content="14"/>
-                        <ComboBoxItem Content="15"/>
-                        <ComboBoxItem Content="16"/>
-                        <ComboBoxItem Content="17"/>
-                        <ComboBoxItem Content="18"/>
-                        <ComboBoxItem Content="19"/>
-                        <ComboBoxItem Content="20"/>
-                    </ComboBox>
-                </StackPanel>
-            </Grid>
+                    <StackPanel Grid.Column="1" Spacing="8">
+                        <TextBlock Text="Attributes Per Level"
+                                   FontWeight="SemiBold"/>
+                        <ComboBox x:Name="AttributesComboBox"
+                                  Width="180"
+                                  SelectionChanged="OnTweaksSelectionChanged">
+                            <ComboBoxItem Content="1"/>
+                            <ComboBoxItem Content="2"/>
+                            <ComboBoxItem Content="3"/>
+                            <ComboBoxItem Content="4"/>
+                            <ComboBoxItem Content="5 (Default)"/>
+                            <ComboBoxItem Content="6"/>
+                            <ComboBoxItem Content="7"/>
+                            <ComboBoxItem Content="8"/>
+                            <ComboBoxItem Content="9"/>
+                            <ComboBoxItem Content="10"/>
+                            <ComboBoxItem Content="11"/>
+                            <ComboBoxItem Content="12"/>
+                            <ComboBoxItem Content="13"/>
+                            <ComboBoxItem Content="14"/>
+                            <ComboBoxItem Content="15"/>
+                            <ComboBoxItem Content="16"/>
+                            <ComboBoxItem Content="17"/>
+                            <ComboBoxItem Content="18"/>
+                            <ComboBoxItem Content="19"/>
+                            <ComboBoxItem Content="20"/>
+                        </ComboBox>
+                    </StackPanel>
+                </Grid>
+            </Border>
 
             <Border x:Name="WarningBorder"
-                    Background="#4A2F16"
-                    BorderBrush="#D7A24B"
+                    Classes="warning-banner"
                     IsVisible="False"
                     Padding="12"
-                    CornerRadius="6"
-                    BorderThickness="1">
+                    >
                 <TextBlock x:Name="WarningTextBlock"
-                           Foreground="#F6D8A8"
+                           Foreground="{StaticResource GoldTextBrush}"
                            TextWrapping="Wrap"
                            Text="This is the unintended Reimagined experience. Balancing is around 1 skill point and 5 attributes per level."/>
             </Border>

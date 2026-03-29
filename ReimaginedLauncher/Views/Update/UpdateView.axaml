@@ -4,53 +4,68 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
              x:Class="ReimaginedLauncher.Views.Update.UpdateView">
-    <StackPanel Spacing="12">
-        <TextBlock Text="Update" FontSize="18" FontWeight="Bold"/>
-        <Border Background="#1E293B"
-                BorderBrush="#334155"
-                BorderThickness="1"
-                CornerRadius="6"
-                Padding="12">
-            <StackPanel Spacing="6">
-                <TextBlock x:Name="StatusTitleText" FontWeight="Bold"/>
-                <TextBlock x:Name="StatusMessageText" TextWrapping="Wrap"/>
+    <StackPanel Spacing="16">
+        <StackPanel Spacing="4">
+            <TextBlock Classes="view-title" Text="Update"/>
+            <TextBlock Classes="muted" Text="Check the local install state and pull the newest Reimagined release."/>
+        </StackPanel>
+        <Border x:Name="LoadingBanner"
+                Classes="panel"
+                Padding="16"
+                IsVisible="False">
+            <StackPanel Spacing="10">
+                <TextBlock Text="Checking for updates..."
+                           FontWeight="SemiBold"/>
+                <ProgressBar IsIndeterminate="True"
+                             Height="8"/>
+                <TextBlock Classes="muted"
+                           Text="Loading the latest local and Nexus state."/>
             </StackPanel>
         </Border>
-        <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto" Margin="0,8,0,0">
-            <TextBlock Grid.Row="0" Grid.Column="0" Text="Current Version:" Margin="0,0,10,8"/>
-            <TextBlock x:Name="CurrentVersionText" Grid.Row="0" Grid.Column="1" FontWeight="Bold"/>
-            <TextBlock Grid.Row="1" Grid.Column="0" Text="Latest Version:" Margin="0,0,10,0"/>
-            <TextBlock x:Name="LatestVersionText" Grid.Row="1" Grid.Column="1" FontWeight="Bold"/>
-        </Grid>
+        <Border Classes="panel"
+                x:Name="StatusBorder"
+                Padding="16">
+            <StackPanel Spacing="6">
+                <TextBlock x:Name="StatusTitleText" FontWeight="Bold"/>
+                <TextBlock x:Name="StatusMessageText" Classes="muted" TextWrapping="Wrap"/>
+            </StackPanel>
+        </Border>
+        <Border Classes="panel"
+                x:Name="VersionsBorder"
+                Padding="16">
+            <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto">
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Current Version:" Margin="0,0,10,8"/>
+                <TextBlock x:Name="CurrentVersionText" Grid.Row="0" Grid.Column="1" FontWeight="Bold"/>
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Latest Version:" Margin="0,0,10,0"/>
+                <TextBlock x:Name="LatestVersionText" Grid.Row="1" Grid.Column="1" FontWeight="Bold"/>
+            </Grid>
+        </Border>
         <Border x:Name="AuthWarningBanner"
-                Background="#4A2F16"
-                BorderBrush="#D7A24B"
-                BorderThickness="1"
-                CornerRadius="6"
+                Classes="warning-banner"
                 Padding="10"
                 IsVisible="False">
             <TextBlock Text="Authenticate with Nexus Mods first to use Download and Install."
-                       Foreground="#F6D8A8"
+                       Foreground="{StaticResource GoldTextBrush}"
                        TextWrapping="Wrap"/>
         </Border>
         <Border x:Name="NonPremiumWarningBanner"
-                Background="#3B2C12"
-                BorderBrush="#C8902E"
-                BorderThickness="1"
-                CornerRadius="6"
+                Classes="warning-banner"
                 Padding="10"
                 IsVisible="False">
             <TextBlock Text="Non-premium workflow: click Download and Install, complete Manual Download in your browser, and keep this launcher open. It will watch Downloads for the new zip and install it automatically."
-                       Foreground="#F6D8A8"
+                       Foreground="{StaticResource GoldTextBrush}"
                        TextWrapping="Wrap"/>
         </Border>
         <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
             <Button x:Name="InstallOrUpdateButton"
+                    Classes="accent"
                     Content="Download and Install"
                     Click="OnInstallOrUpdateClick"/>
             <Button Content="Open Download Page"
+                    x:Name="OpenDownloadPageButton"
                     Click="OnOpenDownloadPageClick"/>
             <Button Content="Re-check"
+                    x:Name="RecheckButton"
                     Click="OnRecheckClick"/>
         </StackPanel>
     </StackPanel>

@@ -4,27 +4,84 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
              x:Class="ReimaginedLauncher.Views.Launch.LaunchView">
-    <StackPanel Spacing="16">
-        <Border x:Name="ValidationBanner"
-                Background="#4A2F16"
-                BorderBrush="#D7A24B"
-                BorderThickness="1"
-                CornerRadius="6"
-                Padding="12"
-                IsVisible="False">
-            <TextBlock x:Name="ValidationBannerText"
-                       Foreground="#F6D8A8"
-                       TextWrapping="Wrap"/>
-        </Border>
-        <TextBlock Text="Install Directory" Margin="0,0,0,8"/>
-        <DockPanel>
-            <TextBox x:Name="DirectoryTextBox" Width="500" IsReadOnly="True" Margin="0,0,8,0"/>
-            <Button Content="Browse" Click="OnInstallDirectoryClick" Height="40" VerticalContentAlignment="Center"/>
-        </DockPanel>
-        <Button x:Name="StartGameButton" Content="Start Game" Margin="0,16,0,0" Padding="12,6" Click="OnRunClick" Height="40" VerticalContentAlignment="Center" IsEnabled="False"/>
-        <TextBlock Text="Launch Command" Margin="0,12,0,0"/>
-        <TextBlock x:Name="LaunchCommandText"
-                   TextWrapping="Wrap"
-                   FontFamily="Cascadia Code,Consolas,Monaco,monospace"/>
-    </StackPanel>
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                  VerticalScrollBarVisibility="Auto">
+        <Grid RowDefinitions="Auto,Auto,Auto"
+              RowSpacing="18">
+            <Border Classes="hero-panel"
+                    Padding="22">
+                <Grid ColumnDefinitions="*,Auto"
+                      ColumnSpacing="18">
+                    <StackPanel Spacing="8">
+                        <TextBlock Classes="view-title"
+                                   Text="Enter The Hunt" />
+                        <TextBlock Classes="muted"
+                                   Text="Point the launcher at your Diablo II: Resurrected install, verify the Reimagined files, and launch straight into the dark."
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <Button x:Name="StartGameButton"
+                            Classes="accent"
+                            Content="Start Game"
+                            Click="OnRunClick"
+                            Width="160"
+                            IsEnabled="False"
+                            VerticalAlignment="Center" />
+                </Grid>
+            </Border>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <Grid RowDefinitions="Auto,Auto,Auto"
+                      RowSpacing="14">
+                    <StackPanel Spacing="4">
+                        <TextBlock Classes="section-title"
+                                   Text="Install Directory" />
+                        <TextBlock Classes="muted"
+                                   Text="Select the Diablo II: Resurrected folder that contains your local mod installation." />
+                    </StackPanel>
+
+                    <Border x:Name="ValidationBanner"
+                            Grid.Row="1"
+                            Classes="warning-banner"
+                            Padding="12"
+                            IsVisible="False">
+                        <TextBlock x:Name="ValidationBannerText"
+                                   Foreground="{StaticResource GoldTextBrush}"
+                                   TextWrapping="Wrap" />
+                    </Border>
+
+                    <Grid Grid.Row="2"
+                          ColumnDefinitions="*,Auto"
+                          ColumnSpacing="10">
+                        <TextBox x:Name="DirectoryTextBox"
+                                 IsReadOnly="True" />
+                        <Button Grid.Column="1"
+                                Content="Browse"
+                                Click="OnInstallDirectoryClick"
+                                VerticalContentAlignment="Center" />
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="10">
+                    <TextBlock Classes="section-title"
+                               Text="Launch Command" />
+                    <TextBlock Classes="muted"
+                               Text="The exact command the launcher will send to the game process." />
+                    <Border Background="#110A0A"
+                            BorderBrush="#341516"
+                            BorderThickness="1"
+                            CornerRadius="10"
+                            Padding="14">
+                        <TextBlock x:Name="LaunchCommandText"
+                                   TextWrapping="Wrap"
+                                   FontFamily="Cascadia Code,Consolas,Monaco,monospace" />
+                    </Border>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </ScrollViewer>
 </UserControl>

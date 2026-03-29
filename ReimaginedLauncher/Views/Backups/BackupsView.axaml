@@ -10,24 +10,32 @@
                   VerticalScrollBarVisibility="Auto">
         <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="12" ColumnSpacing="12">
             <StackPanel Grid.Row="0" Grid.ColumnSpan="2" Spacing="4">
-                <TextBlock Text="Backups" FontSize="22" FontWeight="Bold"/>
-                <TextBlock Text="Create scheduled save backups and restore any saved snapshot." Opacity="0.75"/>
+                <TextBlock Classes="view-title" Text="Backups"/>
+                <TextBlock Classes="muted" Text="Create scheduled save backups and restore any saved snapshot."/>
             </StackPanel>
 
-            <Grid Grid.Row="1" Grid.ColumnSpan="2" ColumnDefinitions="*,140,140" ColumnSpacing="12">
-                <StackPanel Grid.Column="0" Spacing="6">
-                    <TextBlock Text="Backup Directory"/>
-                    <TextBox x:Name="BackupDirectoryTextBox" IsReadOnly="True"/>
-                </StackPanel>
-                <StackPanel Grid.Column="1" Spacing="6">
-                    <TextBlock Text="Time in minute"/>
-                    <TextBox x:Name="BackupIntervalTextBox" Watermark="15" LostFocus="OnBackupConfigurationChanged"/>
-                </StackPanel>
-                <StackPanel Grid.Column="2" Spacing="6">
-                    <TextBlock Text="Backup Amount"/>
-                    <TextBox x:Name="BackupAmountTextBox" Watermark="10" LostFocus="OnBackupConfigurationChanged"/>
-                </StackPanel>
-            </Grid>
+            <Border Grid.Row="1"
+                    Grid.ColumnSpan="2"
+                    Classes="panel"
+                    Padding="18">
+                <Grid ColumnDefinitions="*,140,140" ColumnSpacing="12">
+                    <StackPanel Grid.Column="0" Spacing="6">
+                        <TextBlock Text="Backup Directory"
+                                   FontWeight="SemiBold"/>
+                        <TextBox x:Name="BackupDirectoryTextBox" IsReadOnly="True"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="6">
+                        <TextBlock Text="Time in minute"
+                                   FontWeight="SemiBold"/>
+                        <TextBox x:Name="BackupIntervalTextBox" Watermark="15" LostFocus="OnBackupConfigurationChanged"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Spacing="6">
+                        <TextBlock Text="Backup Amount"
+                                   FontWeight="SemiBold"/>
+                        <TextBox x:Name="BackupAmountTextBox" Watermark="10" LostFocus="OnBackupConfigurationChanged"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
 
             <Grid Grid.Row="2" Grid.ColumnSpan="2" ColumnDefinitions="Auto,Auto,Auto,Auto,*" ColumnSpacing="8">
                 <Button Grid.Column="0" Content="Browse" Click="OnBackupDirectoryClick"/>
@@ -40,7 +48,7 @@
                            TextWrapping="Wrap"/>
             </Grid>
 
-            <Border Grid.Row="3" Grid.ColumnSpan="2" Padding="12" BorderThickness="1" CornerRadius="6">
+            <Border Grid.Row="3" Grid.ColumnSpan="2" Classes="panel" Padding="12">
                 <ListBox x:Name="BackupsListBox"
                          MinHeight="260"
                          MaxHeight="360"

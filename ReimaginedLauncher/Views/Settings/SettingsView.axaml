@@ -4,42 +4,59 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
              x:Class="ReimaginedLauncher.Views.Settings.SettingsView">
-    <StackPanel Spacing="16">
-        <TextBlock Text="Launch Parameters" Margin="0,8,0,0"/>
-        <CheckBox x:Name="DirectLaunchCheckBox"
-                  Content="-direct"
-                  Checked="OnLaunchSettingChanged"
-                  Unchecked="OnLaunchSettingChanged"/>
-        <CheckBox x:Name="NoSoundCheckBox"
-                  Content="-nosound"
-                  Checked="OnLaunchSettingChanged"
-                  Unchecked="OnLaunchSettingChanged"/>
-        <CheckBox x:Name="NoRumbleCheckBox"
-                  Content="-norumble"
-                  Checked="OnLaunchSettingChanged"
-                  Unchecked="OnLaunchSettingChanged"/>
-        <CheckBox x:Name="ResetOfflineMapsCheckBox"
-                  Content="-resetofflinemaps"
-                  Checked="OnLaunchSettingChanged"
-                  Unchecked="OnLaunchSettingChanged"/>
-        <CheckBox x:Name="EnableRespecCheckBox"
-                  Content="-enablerespec"
-                  Checked="OnLaunchSettingChanged"
-                  Unchecked="OnLaunchSettingChanged"/>
-        <StackPanel Spacing="8">
-            <TextBlock Text="-players"/>
-            <ComboBox x:Name="PlayersComboBox"
-                      Width="160"
-                      SelectionChanged="OnPlayersSelectionChanged">
-                <ComboBoxItem Content="Disabled"/>
-                <ComboBoxItem Content="2"/>
-                <ComboBoxItem Content="3"/>
-                <ComboBoxItem Content="4"/>
-                <ComboBoxItem Content="5"/>
-                <ComboBoxItem Content="6"/>
-                <ComboBoxItem Content="7"/>
-                <ComboBoxItem Content="8"/>
-            </ComboBox>
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                  VerticalScrollBarVisibility="Auto">
+        <StackPanel Spacing="18">
+            <StackPanel Spacing="4">
+                <TextBlock Classes="view-title"
+                           Text="Settings" />
+                <TextBlock Classes="muted"
+                           Text="Tune launch flags before you descend into Sanctuary." />
+            </StackPanel>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="14">
+                    <TextBlock Classes="section-title"
+                               Text="Launch Parameters" />
+                    <CheckBox x:Name="DirectLaunchCheckBox"
+                              Content="-direct"
+                              Checked="OnLaunchSettingChanged"
+                              Unchecked="OnLaunchSettingChanged"/>
+                    <CheckBox x:Name="NoSoundCheckBox"
+                              Content="-nosound"
+                              Checked="OnLaunchSettingChanged"
+                              Unchecked="OnLaunchSettingChanged"/>
+                    <CheckBox x:Name="NoRumbleCheckBox"
+                              Content="-norumble"
+                              Checked="OnLaunchSettingChanged"
+                              Unchecked="OnLaunchSettingChanged"/>
+                    <CheckBox x:Name="ResetOfflineMapsCheckBox"
+                              Content="-resetofflinemaps"
+                              Checked="OnLaunchSettingChanged"
+                              Unchecked="OnLaunchSettingChanged"/>
+                    <CheckBox x:Name="EnableRespecCheckBox"
+                              Content="-enablerespec"
+                              Checked="OnLaunchSettingChanged"
+                              Unchecked="OnLaunchSettingChanged"/>
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="-players"
+                                   FontWeight="SemiBold" />
+                        <ComboBox x:Name="PlayersComboBox"
+                                  Width="180"
+                                  SelectionChanged="OnPlayersSelectionChanged">
+                            <ComboBoxItem Content="Disabled"/>
+                            <ComboBoxItem Content="2"/>
+                            <ComboBoxItem Content="3"/>
+                            <ComboBoxItem Content="4"/>
+                            <ComboBoxItem Content="5"/>
+                            <ComboBoxItem Content="6"/>
+                            <ComboBoxItem Content="7"/>
+                            <ComboBoxItem Content="8"/>
+                        </ComboBox>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
         </StackPanel>
-    </StackPanel>
+    </ScrollViewer>
 </UserControl>

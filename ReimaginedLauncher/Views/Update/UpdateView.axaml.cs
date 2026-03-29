@@ -15,6 +15,7 @@ namespace ReimaginedLauncher.Views.Update;
 public partial class UpdateView : UserControl
 {
     private bool _isInstalling;
+    private bool _isLoading;
 
     public UpdateView()
     {
@@ -28,19 +29,33 @@ public partial class UpdateView : UserControl
         var usesDownloadsWatcher = isAuthenticated && MainWindow.Settings.NexusPremiumDownloadAccess == false;
         var isInstallMissing = MainWindow.UpdateCurrentVersion.Equals("Not detected", StringComparison.OrdinalIgnoreCase);
         var canDownload = isInstallMissing || MainWindow.IsUpdateAvailable;
+
+        LoadingBanner.IsVisible = _isLoading;
+        StatusBorder.IsVisible = !_isLoading;
+        VersionsBorder.IsVisible = !_isLoading;
+        AuthWarningBanner.IsVisible = !_isLoading && !isAuthenticated;
+        NonPremiumWarningBanner.IsVisible = !_isLoading && usesDownloadsWatcher && canDownload;
+
         StatusTitleText.Text = MainWindow.UpdateStatusTitle;
         StatusMessageText.Text = MainWindow.UpdateStatusMessage;
         CurrentVersionText.Text = MainWindow.UpdateCurrentVersion;
         LatestVersionText.Text = MainWindow.UpdateLatestVersion;
-        InstallOrUpdateButton.IsEnabled = MainWindow.CanInstallOrUpdate &&
+        InstallOrUpdateButton.IsEnabled = !_isLoading &&
+                                          MainWindow.CanInstallOrUpdate &&
                                           !_isInstalling &&
                                           isAuthenticated &&
                                           canDownload;
+        OpenDownloadPageButton.IsEnabled = !_isLoading && !string.IsNullOrWhiteSpace(MainWindow.UpdateDownloadUrl);
+        RecheckButton.IsEnabled = !_isLoading;
         InstallOrUpdateButton.Content = MainWindow.UpdateCurrentVersion.Equals("Not detected", StringComparison.OrdinalIgnoreCase)
             ? "Download and Install"
             : "Download and Update";
-        AuthWarningBanner.IsVisible = !isAuthenticated;
-        NonPremiumWarningBanner.IsVisible = usesDownloadsWatcher && canDownload;
+    }
+
+    public void SetLoadingState(bool isLoading)
+    {
+        _isLoading = isLoading;
+        RefreshUpdateState();
     }
 
     private async void OnInstallOrUpdateClick(object? sender, RoutedEventArgs e)
@@ -124,8 +139,15 @@ public partial class UpdateView : UserControl
     {
         if (this.GetVisualRoot() is MainWindow mainWindow)
         {
-            await mainWindow.RefreshUpdateStateAsync();
-            RefreshUpdateState();
+            SetLoadingState(true);
+            try
+            {
+                await mainWindow.RefreshUpdateStateAsync();
+            }
+            finally
+            {
+                SetLoadingState(false);
+            }
         }
     }
 
