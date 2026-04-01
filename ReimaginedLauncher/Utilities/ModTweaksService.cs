@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -10,6 +11,7 @@ public static class ModTweaksService
 {
     private const string ModDirectoryName = "Reimagined";
     private const string ExcelDirectoryName = "excel";
+    private const string BaseExcelDirectoryName = "base";
     private const string CleanExcelDirectoryName = "excel_launcher_clean";
     private const string CharStatsFileName = "charstats.txt";
     private const string DifficultyLevelsFileName = "DifficultyLevels.txt";
@@ -25,43 +27,20 @@ public static class ModTweaksService
         }
 
         var cleanExcelDirectory = GetCleanExcelDirectory(excelDirectory);
-        var charStatsFilePath = Path.Combine(excelDirectory, CharStatsFileName);
-        var difficultyLevelsFilePath = Path.Combine(excelDirectory, DifficultyLevelsFileName);
-        var skillsFilePath = Path.Combine(excelDirectory, SkillsFileName);
-        if (!File.Exists(charStatsFilePath))
-        {
-            Notifications.SendNotification("charstats.txt was not found in the Reimagined excel folder.", "Warning");
-            return false;
-        }
-
-        if (!File.Exists(difficultyLevelsFilePath))
-        {
-            Notifications.SendNotification("DifficultyLevels.txt was not found in the Reimagined excel folder.", "Warning");
-            return false;
-        }
-
-        if (!File.Exists(skillsFilePath))
-        {
-            Notifications.SendNotification("skills.txt was not found in the Reimagined excel folder.", "Warning");
-            return false;
-        }
+        var excelDirectories = GetExcelDirectories(excelDirectory).ToList();
 
         try
         {
             await EnsureCleanExcelCopyAsync(excelDirectory, cleanExcelDirectory);
-            await CopyDirectoryAsync(cleanExcelDirectory, excelDirectory, overwrite: true);
-            await ApplyCharStatsTweaksAsync(
-                charStatsFilePath,
-                MainWindow.Settings.SkillPointsPerLevel,
-                MainWindow.Settings.AttributesPerLevel);
-            await ApplySkillsTweaksAsync(
-                skillsFilePath,
-                MainWindow.Settings.MaxSkillLevel);
-            await ApplyDifficultyLevelsTweaksAsync(
-                difficultyLevelsFilePath,
-                MainWindow.Settings.NormalResistPenalty,
-                MainWindow.Settings.NightmareResistPenalty,
-                MainWindow.Settings.HellResistPenalty);
+
+            foreach (var targetExcelDirectory in excelDirectories)
+            {
+                var sourceExcelDirectory = GetCleanVariantDirectory(targetExcelDirectory, excelDirectory, cleanExcelDirectory);
+                await ValidateExcelFilesAsync(sourceExcelDirectory);
+                await CopyDirectoryAsync(sourceExcelDirectory, targetExcelDirectory, overwrite: true);
+                await ApplyTweaksAsync(targetExcelDirectory);
+            }
+
             return true;
         }
         catch (Exception ex)
@@ -108,6 +87,64 @@ public static class ModTweaksService
         }
 
         await CopyDirectoryAsync(excelDirectory, cleanExcelDirectory, overwrite: true);
+    }
+
+    private static IEnumerable<string> GetExcelDirectories(string excelDirectory)
+    {
+        yield return excelDirectory;
+
+        var baseExcelDirectory = Path.Combine(excelDirectory, BaseExcelDirectoryName);
+        if (Directory.Exists(baseExcelDirectory))
+        {
+            yield return baseExcelDirectory;
+        }
+    }
+
+    private static string GetCleanVariantDirectory(string targetExcelDirectory, string excelDirectory, string cleanExcelDirectory)
+    {
+        var relativePath = Path.GetRelativePath(excelDirectory, targetExcelDirectory);
+        return relativePath == "."
+            ? cleanExcelDirectory
+            : Path.Combine(cleanExcelDirectory, relativePath);
+    }
+
+    private static Task ValidateExcelFilesAsync(string excelDirectory)
+    {
+        var charStatsFilePath = Path.Combine(excelDirectory, CharStatsFileName);
+        if (!File.Exists(charStatsFilePath))
+        {
+            throw new FileNotFoundException($"charstats.txt was not found in the Reimagined excel folder: {excelDirectory}");
+        }
+
+        var difficultyLevelsFilePath = Path.Combine(excelDirectory, DifficultyLevelsFileName);
+        if (!File.Exists(difficultyLevelsFilePath))
+        {
+            throw new FileNotFoundException($"DifficultyLevels.txt was not found in the Reimagined excel folder: {excelDirectory}");
+        }
+
+        var skillsFilePath = Path.Combine(excelDirectory, SkillsFileName);
+        if (!File.Exists(skillsFilePath))
+        {
+            throw new FileNotFoundException($"skills.txt was not found in the Reimagined excel folder: {excelDirectory}");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private static async Task ApplyTweaksAsync(string excelDirectory)
+    {
+        await ApplyCharStatsTweaksAsync(
+            Path.Combine(excelDirectory, CharStatsFileName),
+            MainWindow.Settings.SkillPointsPerLevel,
+            MainWindow.Settings.AttributesPerLevel);
+        await ApplySkillsTweaksAsync(
+            Path.Combine(excelDirectory, SkillsFileName),
+            MainWindow.Settings.MaxSkillLevel);
+        await ApplyDifficultyLevelsTweaksAsync(
+            Path.Combine(excelDirectory, DifficultyLevelsFileName),
+            MainWindow.Settings.NormalResistPenalty,
+            MainWindow.Settings.NightmareResistPenalty,
+            MainWindow.Settings.HellResistPenalty);
     }
 
     private static async Task ApplyCharStatsTweaksAsync(
