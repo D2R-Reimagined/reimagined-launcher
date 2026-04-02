@@ -11,28 +11,38 @@
         <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="12" ColumnSpacing="12">
             <StackPanel Grid.Row="0" Grid.ColumnSpan="2" Spacing="4">
                 <TextBlock Classes="view-title" Text="Backups"/>
-                <TextBlock Classes="muted" Text="Create scheduled save backups and restore any saved snapshot."/>
+                <TextBlock Classes="muted" Text="Configure the backup system, choose how often backups run, and restore any saved snapshot."/>
             </StackPanel>
 
             <Border Grid.Row="1"
                     Grid.ColumnSpan="2"
                     Classes="panel"
                     Padding="18">
-                <Grid ColumnDefinitions="*,140,140" ColumnSpacing="12">
+                <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="*,140,140" ColumnSpacing="12" RowSpacing="14">
                     <StackPanel Grid.Column="0" Spacing="6">
                         <TextBlock Text="Backup Directory"
                                    FontWeight="SemiBold"/>
                         <TextBox x:Name="BackupDirectoryTextBox" IsReadOnly="True"/>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Spacing="6">
-                        <TextBlock Text="Time in minute"
+                        <TextBlock Text="Interval (minutes)"
                                    FontWeight="SemiBold"/>
-                        <TextBox x:Name="BackupIntervalTextBox" Watermark="15" LostFocus="OnBackupConfigurationChanged"/>
+                        <TextBox x:Name="BackupIntervalTextBox" Watermark="60" LostFocus="OnBackupConfigurationChanged"/>
                     </StackPanel>
                     <StackPanel Grid.Column="2" Spacing="6">
                         <TextBlock Text="Backup Amount"
                                    FontWeight="SemiBold"/>
                         <TextBox x:Name="BackupAmountTextBox" Watermark="10" LostFocus="OnBackupConfigurationChanged"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="1" Grid.ColumnSpan="3" Spacing="4">
+                        <CheckBox x:Name="AutomaticBackupsCheckBox"
+                                  Content="Enable automatic backup system"
+                                  Checked="OnAutomaticBackupsChanged"
+                                  Unchecked="OnAutomaticBackupsChanged"/>
+                        <TextBlock Classes="muted"
+                                   Text="When enabled, the launcher runs backups using the interval and retention settings below, including a backup before launch. Uncheck this to disable all automatic backups."
+                                   TextWrapping="Wrap"/>
                     </StackPanel>
                 </Grid>
             </Border>

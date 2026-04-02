@@ -64,6 +64,11 @@ public partial class LaunchView : UserControl
             return;
         }
 
+        if (MainWindow.Settings.AutomaticBackupsEnabled)
+        {
+            await BackupService.CreateLaunchBackupAsync();
+        }
+
         LauncherService.LaunchGame();
         Notifications.SendNotification("Clicked Launch", "Success");
     }

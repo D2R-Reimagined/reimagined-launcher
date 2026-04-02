@@ -93,6 +93,7 @@ public partial class MainWindow : Window
         Settings = await SettingsManager.LoadAsync();
         Settings.InstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(Settings.InstallDirectory);
         Settings.IsInstallDirectoryValidated = InstallDirectoryValidator.IsValidInstallDirectory(Settings.InstallDirectory);
+        BackupService.ApplyDefaultSettings();
         
         if (!string.IsNullOrWhiteSpace(Settings.NexusModsSSOApiKey))
         {

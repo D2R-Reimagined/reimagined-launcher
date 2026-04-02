@@ -20,12 +20,44 @@ public sealed class BackupEntry
 
 public static class BackupService
 {
+    private const int DefaultBackupIntervalMinutes = 60;
+    private const int DefaultBackupAmount = 10;
+    private const string DefaultBackupDirectoryName = "ReimaginedLauncherBackups";
     private static readonly DispatcherTimer BackupTimer = new();
     private static bool _isCreatingBackup;
 
     static BackupService()
     {
-        BackupTimer.Tick += async (_, _) => await CreateBackupAsync();
+        BackupTimer.Tick += async (_, _) => await CreateBackupAsync("scheduled");
+    }
+
+    public static bool ApplyDefaultSettings()
+    {
+        var settingsChanged = false;
+
+        if (MainWindow.Settings.BackupIntervalMinutes <= 0)
+        {
+            MainWindow.Settings.BackupIntervalMinutes = DefaultBackupIntervalMinutes;
+            settingsChanged = true;
+        }
+
+        if (MainWindow.Settings.BackupAmount <= 0)
+        {
+            MainWindow.Settings.BackupAmount = DefaultBackupAmount;
+            settingsChanged = true;
+        }
+
+        if (string.IsNullOrWhiteSpace(MainWindow.Settings.BackupSaveDirectory))
+        {
+            var defaultBackupDirectory = GetDefaultBackupDirectory();
+            if (!string.IsNullOrWhiteSpace(defaultBackupDirectory))
+            {
+                MainWindow.Settings.BackupSaveDirectory = defaultBackupDirectory;
+                settingsChanged = true;
+            }
+        }
+
+        return settingsChanged;
     }
 
     public static void UpdateSchedule()
@@ -84,7 +116,12 @@ public static class BackupService
         return Path.Combine(userProfile, "Saved Games", "Diablo II Resurrected", "mods", trimmedSavePath);
     }
 
-    public static async Task<bool> CreateBackupAsync()
+    public static Task<bool> CreateLaunchBackupAsync()
+    {
+        return CreateBackupAsync("launch");
+    }
+
+    public static async Task<bool> CreateBackupAsync(string? backupReason = null)
     {
         if (_isCreatingBackup)
         {
@@ -116,7 +153,7 @@ public static class BackupService
         _isCreatingBackup = true;
         try
         {
-            var backupName = $"{DateTime.Now:yyyyMMdd-HHmmss}-backup";
+            var backupName = BuildBackupName(backupReason);
             var backupDirectory = Path.Combine(backupRoot, backupName);
             Directory.CreateDirectory(backupDirectory);
 
@@ -180,10 +217,38 @@ public static class BackupService
 
     private static bool CanRunAutomaticBackups()
     {
-        return MainWindow.Settings.BackupIntervalMinutes > 0
+        return MainWindow.Settings.AutomaticBackupsEnabled
+               && MainWindow.Settings.BackupIntervalMinutes > 0
                && MainWindow.Settings.BackupAmount > 0
                && !string.IsNullOrWhiteSpace(MainWindow.Settings.BackupSaveDirectory)
                && !string.IsNullOrWhiteSpace(GetResolvedSaveDirectory());
+    }
+
+    private static string BuildBackupName(string? backupReason)
+    {
+        var timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+
+        return backupReason switch
+        {
+            "launch" => $"{timestamp}-launch-backup",
+            "scheduled" => $"{timestamp}-scheduled-backup",
+            _ => $"{timestamp}-backup"
+        };
+    }
+
+    private static string GetDefaultBackupDirectory()
+    {
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(userProfile))
+        {
+            return string.Empty;
+        }
+
+        return Path.Combine(
+            userProfile,
+            "Saved Games",
+            "Diablo II Resurrected",
+            DefaultBackupDirectoryName);
     }
 
     private static void TrimBackups()

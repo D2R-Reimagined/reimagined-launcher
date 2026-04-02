@@ -23,6 +23,7 @@ public partial class BackupsView : UserControl
     {
         _isRefreshing = true;
         BackupDirectoryTextBox.Text = MainWindow.Settings.BackupSaveDirectory ?? string.Empty;
+        AutomaticBackupsCheckBox.IsChecked = MainWindow.Settings.AutomaticBackupsEnabled;
         BackupIntervalTextBox.Text = MainWindow.Settings.BackupIntervalMinutes.ToString(CultureInfo.InvariantCulture);
         BackupAmountTextBox.Text = MainWindow.Settings.BackupAmount.ToString(CultureInfo.InvariantCulture);
         SaveDirectoryTextBlock.Text = BuildSaveDirectoryText();
@@ -98,6 +99,17 @@ public partial class BackupsView : UserControl
         await PersistBackupSettingsAsync();
     }
 
+    private async void OnAutomaticBackupsChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_isRefreshing)
+        {
+            return;
+        }
+
+        MainWindow.Settings.AutomaticBackupsEnabled = AutomaticBackupsCheckBox.IsChecked == true;
+        await PersistBackupSettingsAsync();
+    }
+
     private void OnBackupSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (BackupsListBox.SelectedItem is BackupEntry backupEntry)
@@ -113,7 +125,7 @@ public partial class BackupsView : UserControl
     {
         if (!int.TryParse(BackupIntervalTextBox.Text, CultureInfo.InvariantCulture, out var intervalMinutes) || intervalMinutes <= 0)
         {
-            Notifications.SendNotification("Time in minute must be a whole number greater than 0.", "Warning");
+            Notifications.SendNotification("Interval must be a whole number greater than 0.", "Warning");
             return false;
         }
 
