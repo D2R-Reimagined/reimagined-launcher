@@ -81,44 +81,49 @@
                     </StackPanel>
                 </StackPanel>
 
-                <Grid Grid.Row="2"
-                      ColumnDefinitions="*,*"
-                      RowDefinitions="*,*"
-                      ColumnSpacing="8"
-                      RowSpacing="8">
-                    <Button Grid.Row="0"
-                            Grid.Column="0"
-                            Classes="link-button"
-                            Content="{materialIcons:MaterialIconTextExt Text=Website, Kind=OpenInNew, IconPlacement=Right}"
-                            Name="WebsiteButton"
-                            HorizontalAlignment="Stretch"
-                            VerticalAlignment="Stretch"
-                            Click="OnVisitWebsiteClicked" />
-                    <Button Grid.Row="0"
-                            Grid.Column="1"
-                            Classes="link-button"
-                            Content="{materialIcons:MaterialIconTextExt Text=Wiki, Kind=OpenInNew, IconPlacement=Right}"
-                            Name="WikiButton"
-                            HorizontalAlignment="Stretch"
-                            VerticalAlignment="Stretch"
-                            Click="OnVisitWebsiteClicked" />
-                    <Button Grid.Row="1"
-                            Grid.Column="0"
-                            Classes="link-button"
-                            Content="{materialIcons:MaterialIconTextExt Text=Nexus, Kind=OpenInNew, IconPlacement=Right}"
-                            Name="NexusButton"
-                            HorizontalAlignment="Stretch"
-                            VerticalAlignment="Stretch"
-                            Click="OnVisitWebsiteClicked" />
-                    <Button Grid.Row="1"
-                            Grid.Column="1"
-                            Classes="link-button"
-                            Content="{materialIcons:MaterialIconTextExt Text=Discord, Kind=OpenInNew, IconPlacement=Right}"
-                            Name="DiscordButton"
-                            HorizontalAlignment="Stretch"
-                            VerticalAlignment="Stretch"
-                            Click="OnVisitWebsiteClicked" />
-                </Grid>
+                <StackPanel Grid.Row="2"
+                            Spacing="10">
+                    <TextBlock x:Name="LauncherVersionTextBlock"
+                               Classes="muted"
+                               HorizontalAlignment="Center" />
+                    <Grid ColumnDefinitions="*,*"
+                          RowDefinitions="*,*"
+                          ColumnSpacing="8"
+                          RowSpacing="8">
+                        <Button Grid.Row="0"
+                                Grid.Column="0"
+                                Classes="link-button"
+                                Content="{materialIcons:MaterialIconTextExt Text=Website, Kind=OpenInNew, IconPlacement=Right}"
+                                Name="WebsiteButton"
+                                HorizontalAlignment="Stretch"
+                                VerticalAlignment="Stretch"
+                                Click="OnVisitWebsiteClicked" />
+                        <Button Grid.Row="0"
+                                Grid.Column="1"
+                                Classes="link-button"
+                                Content="{materialIcons:MaterialIconTextExt Text=Wiki, Kind=OpenInNew, IconPlacement=Right}"
+                                Name="WikiButton"
+                                HorizontalAlignment="Stretch"
+                                VerticalAlignment="Stretch"
+                                Click="OnVisitWebsiteClicked" />
+                        <Button Grid.Row="1"
+                                Grid.Column="0"
+                                Classes="link-button"
+                                Content="{materialIcons:MaterialIconTextExt Text=Nexus, Kind=OpenInNew, IconPlacement=Right}"
+                                Name="NexusButton"
+                                HorizontalAlignment="Stretch"
+                                VerticalAlignment="Stretch"
+                                Click="OnVisitWebsiteClicked" />
+                        <Button Grid.Row="1"
+                                Grid.Column="1"
+                                Classes="link-button"
+                                Content="{materialIcons:MaterialIconTextExt Text=Discord, Kind=OpenInNew, IconPlacement=Right}"
+                                Name="DiscordButton"
+                                HorizontalAlignment="Stretch"
+                                VerticalAlignment="Stretch"
+                                Click="OnVisitWebsiteClicked" />
+                    </Grid>
+                </StackPanel>
             </Grid>
         </Border>
 

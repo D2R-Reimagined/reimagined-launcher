@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text.Json;
+using System.Reflection;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Controls.Notifications;
@@ -36,6 +37,7 @@ public partial class MainWindow : Window
     private const string WikiUrl = "https://wiki.d2r-reimagined.com";
     private const string NexusUrl = "https://www.nexusmods.com/diablo2resurrected/mods/503";
     private const string DiscordUrl = "https://discord.gg/5bbjneJCrr";
+    private static readonly string LauncherVersion = ResolveLauncherVersion();
     private readonly INexusModsHttpClient _nexusModsHttpClient;
     public NexusModsValidateResponse? User { get; set; }
     public static NexusUserViewModel UserViewModel { get; } = new();
@@ -60,6 +62,7 @@ public partial class MainWindow : Window
         _nexusModsHttpClient = Program.ServiceProvider.GetRequiredService<NexusModsHttpClient>();;
         InitializeComponent();
         LogoImage.Source = new Bitmap("Assets/ReimaginedLauncher.ico");
+        LauncherVersionTextBlock.Text = $"Launcher v{LauncherVersion}";
         
         DataContext = UserViewModel;
         _ = LoadSettingsAsync();
@@ -67,6 +70,22 @@ public partial class MainWindow : Window
         
         // Set the window icon
         Icon = new WindowIcon("Assets/ReimaginedLauncher.ico");
+    }
+
+    private static string ResolveLauncherVersion()
+    {
+        var assembly = typeof(MainWindow).Assembly;
+        var informationalVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (!string.IsNullOrWhiteSpace(informationalVersion))
+        {
+            var normalizedVersion = informationalVersion.Split('+', 2)[0];
+            if (!string.IsNullOrWhiteSpace(normalizedVersion))
+            {
+                return normalizedVersion;
+            }
+        }
+
+        return assembly.GetName().Version?.ToString(3) ?? "Unknown";
     }
     
     private async Task LoadSettingsAsync()
