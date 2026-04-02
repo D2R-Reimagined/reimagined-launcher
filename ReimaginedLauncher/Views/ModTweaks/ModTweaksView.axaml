@@ -12,7 +12,7 @@
         <StackPanel Spacing="16">
             <StackPanel Spacing="4">
                 <TextBlock Classes="view-title" Text="Mod Tweaks"/>
-                <TextBlock Classes="muted" Text="Customize leveling rewards for your local launcher configuration."/>
+                <TextBlock Classes="muted" Text="Customize gameplay and visual tweaks for your local launcher configuration."/>
             </StackPanel>
 
             <Border Classes="panel"
@@ -128,6 +128,28 @@
                 </StackPanel>
             </Border>
 
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="14">
+                    <StackPanel Spacing="4">
+                        <TextBlock Classes="section-title"
+                                   Text="Visual Tweaks"/>
+                        <TextBlock Classes="muted"
+                                   Text="Optional local visual changes applied to hd JSON data before launch."/>
+                    </StackPanel>
+
+                    <StackPanel Spacing="4">
+                        <CheckBox x:Name="RemoveSplashVfxCheckBox"
+                                  Content="Remove Splash VFX"
+                                  Checked="OnVisualTweaksChanged"
+                                  Unchecked="OnVisualTweaksChanged"/>
+                        <TextBlock Classes="muted"
+                                   Margin="28,0,0,0"
+                                   Text="Blanks proc_splash_explode in missiles.json to remove the splash visual effect."/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
             <Border x:Name="WarningBorder"
                     Classes="warning-banner"
                     IsVisible="False"
@@ -136,7 +158,7 @@
                 <TextBlock x:Name="WarningTextBlock"
                            Foreground="{StaticResource GoldTextBrush}"
                            TextWrapping="Wrap"
-                           Text="This is the unintended Reimagined experience. Balancing is around 1 skill point, 5 attributes per level, max skill level 25, and default difficulty resist penalties of 0, -60, and -120."/>
+                           Text="This is the unintended Reimagined experience. Defaults are 1 skill point, 5 attributes per level, max skill level 25, default difficulty resist penalties of 0, -60, and -120, with Remove Splash VFX turned off."/>
             </Border>
         </StackPanel>
     </ScrollViewer>

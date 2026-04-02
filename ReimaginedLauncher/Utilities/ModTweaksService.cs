@@ -4,15 +4,21 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using D2RReimaginedTools.TextFileParsers;
+using ReimaginedLauncher.Utilities.Json;
 
 namespace ReimaginedLauncher.Utilities;
 
 public static class ModTweaksService
 {
     private const string ModDirectoryName = "Reimagined";
+    private const string DataDirectoryName = "data";
     private const string ExcelDirectoryName = "excel";
     private const string BaseExcelDirectoryName = "base";
     private const string CleanExcelDirectoryName = "excel_launcher_clean";
+    private const string HdDirectoryName = "hd";
+    private const string MissilesDirectoryName = "missiles";
+    private const string MissilesFileName = "missiles.json";
+    private const string CleanMissilesFileName = "missiles_launcher_clean.json";
     private const string CharStatsFileName = "charstats.txt";
     private const string DifficultyLevelsFileName = "DifficultyLevels.txt";
     private const string SkillsFileName = "skills.txt";
@@ -26,12 +32,15 @@ public static class ModTweaksService
             return false;
         }
 
+        var missilesFilePath = GetMissilesFilePath();
         var cleanExcelDirectory = GetCleanExcelDirectory(excelDirectory);
+        var cleanMissilesFilePath = GetCleanMissilesFilePath(missilesFilePath);
         var excelDirectories = GetExcelDirectories(excelDirectory).ToList();
 
         try
         {
             await EnsureCleanExcelCopyAsync(excelDirectory, cleanExcelDirectory);
+            await EnsureCleanMissilesCopyAsync(missilesFilePath, cleanMissilesFilePath);
 
             foreach (var targetExcelDirectory in excelDirectories)
             {
@@ -40,6 +49,9 @@ public static class ModTweaksService
                 await CopyDirectoryAsync(sourceExcelDirectory, targetExcelDirectory, overwrite: true);
                 await ApplyTweaksAsync(targetExcelDirectory);
             }
+
+            await RestoreMissilesFileAsync(cleanMissilesFilePath, missilesFilePath);
+            await ApplyMissilesTweaksAsync(missilesFilePath, MainWindow.Settings.RemoveSplashVfx);
 
             return true;
         }
@@ -63,9 +75,28 @@ public static class ModTweaksService
             "mods",
             ModDirectoryName,
             $"{ModDirectoryName}.mpq",
-            "data",
+            DataDirectoryName,
             "global",
             ExcelDirectoryName);
+    }
+
+    private static string? GetMissilesFilePath()
+    {
+        var installDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(MainWindow.Settings.InstallDirectory);
+        if (string.IsNullOrWhiteSpace(installDirectory))
+        {
+            return null;
+        }
+
+        return Path.Combine(
+            installDirectory,
+            "mods",
+            ModDirectoryName,
+            $"{ModDirectoryName}.mpq",
+            DataDirectoryName,
+            HdDirectoryName,
+            MissilesDirectoryName,
+            MissilesFileName);
     }
 
     private static string GetCleanExcelDirectory(string excelDirectory)
@@ -87,6 +118,37 @@ public static class ModTweaksService
         }
 
         await CopyDirectoryAsync(excelDirectory, cleanExcelDirectory, overwrite: true);
+    }
+
+    private static string GetCleanMissilesFilePath(string? missilesFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(missilesFilePath))
+        {
+            throw new FileNotFoundException("missiles.json path could not be resolved.");
+        }
+
+        var missilesDirectory = Path.GetDirectoryName(missilesFilePath);
+        if (string.IsNullOrWhiteSpace(missilesDirectory))
+        {
+            throw new DirectoryNotFoundException("Missiles folder could not be resolved.");
+        }
+
+        return Path.Combine(missilesDirectory, CleanMissilesFileName);
+    }
+
+    private static async Task EnsureCleanMissilesCopyAsync(string? missilesFilePath, string cleanMissilesFilePath)
+    {
+        if (File.Exists(cleanMissilesFilePath))
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(missilesFilePath) || !File.Exists(missilesFilePath))
+        {
+            throw new FileNotFoundException("missiles.json was not found in the Reimagined hd missiles folder.");
+        }
+
+        await CopyFileAsync(missilesFilePath, cleanMissilesFilePath, overwrite: true);
     }
 
     private static IEnumerable<string> GetExcelDirectories(string excelDirectory)
@@ -145,6 +207,40 @@ public static class ModTweaksService
             MainWindow.Settings.NormalResistPenalty,
             MainWindow.Settings.NightmareResistPenalty,
             MainWindow.Settings.HellResistPenalty);
+    }
+
+    private static async Task RestoreMissilesFileAsync(string cleanMissilesFilePath, string? missilesFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(missilesFilePath))
+        {
+            throw new FileNotFoundException("missiles.json path could not be resolved.");
+        }
+
+        if (!File.Exists(cleanMissilesFilePath))
+        {
+            throw new FileNotFoundException("Clean missiles.json copy was not found.");
+        }
+
+        await CopyFileAsync(cleanMissilesFilePath, missilesFilePath, overwrite: true);
+    }
+
+    private static async Task ApplyMissilesTweaksAsync(string? missilesFilePath, bool removeSplashVfx)
+    {
+        if (string.IsNullOrWhiteSpace(missilesFilePath) || !File.Exists(missilesFilePath))
+        {
+            throw new FileNotFoundException("missiles.json was not found in the Reimagined hd missiles folder.");
+        }
+
+        if (!removeSplashVfx)
+        {
+            return;
+        }
+
+        var updatedEntries = await MissilesJsonService.ClearProcSplashExplodeAsync(missilesFilePath);
+        if (updatedEntries == 0)
+        {
+            throw new InvalidDataException("missiles.json did not contain a proc_splash_explode entry to update.");
+        }
     }
 
     private static async Task ApplyCharStatsTweaksAsync(
@@ -305,5 +401,22 @@ public static class ModTweaksService
                 FileShare.None);
             await sourceStream.CopyToAsync(destinationStream);
         }
+    }
+
+    private static async Task CopyFileAsync(string sourceFilePath, string destinationFilePath, bool overwrite)
+    {
+        var destinationFolder = Path.GetDirectoryName(destinationFilePath);
+        if (!string.IsNullOrWhiteSpace(destinationFolder))
+        {
+            Directory.CreateDirectory(destinationFolder);
+        }
+
+        await using var sourceStream = File.Open(sourceFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        await using var destinationStream = File.Open(
+            destinationFilePath,
+            overwrite ? FileMode.Create : FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.None);
+        await sourceStream.CopyToAsync(destinationStream);
     }
 }

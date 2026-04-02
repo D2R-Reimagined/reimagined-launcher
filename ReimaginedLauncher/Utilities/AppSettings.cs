@@ -21,4 +21,5 @@ public class AppSettings
     public int NormalResistPenalty { get; set; }
     public int NightmareResistPenalty { get; set; } = -60;
     public int HellResistPenalty { get; set; } = -120;
+    public bool RemoveSplashVfx { get; set; }
 }

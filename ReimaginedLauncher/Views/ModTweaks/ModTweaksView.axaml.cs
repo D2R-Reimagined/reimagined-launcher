@@ -32,6 +32,7 @@ public partial class ModTweaksView : UserControl
         var normalResistPenalty = MainWindow.Settings.NormalResistPenalty;
         var nightmareResistPenalty = MainWindow.Settings.NightmareResistPenalty;
         var hellResistPenalty = MainWindow.Settings.HellResistPenalty;
+        var removeSplashVfx = MainWindow.Settings.RemoveSplashVfx;
 
         MainWindow.Settings.SkillPointsPerLevel = skillPointsPerLevel;
         MainWindow.Settings.AttributesPerLevel = attributesPerLevel;
@@ -39,6 +40,7 @@ public partial class ModTweaksView : UserControl
         MainWindow.Settings.NormalResistPenalty = normalResistPenalty;
         MainWindow.Settings.NightmareResistPenalty = nightmareResistPenalty;
         MainWindow.Settings.HellResistPenalty = hellResistPenalty;
+        MainWindow.Settings.RemoveSplashVfx = removeSplashVfx;
 
         SkillPointsComboBox.SelectedIndex = skillPointsPerLevel - 1;
         AttributesComboBox.SelectedIndex = attributesPerLevel - 1;
@@ -46,13 +48,15 @@ public partial class ModTweaksView : UserControl
         NormalResistPenaltyTextBox.Text = normalResistPenalty.ToString();
         NightmareResistPenaltyTextBox.Text = nightmareResistPenalty.ToString();
         HellResistPenaltyTextBox.Text = hellResistPenalty.ToString();
+        RemoveSplashVfxCheckBox.IsChecked = removeSplashVfx;
         WarningBorder.IsVisible = HasNonDefaultTweaks(
             skillPointsPerLevel,
             attributesPerLevel,
             maxSkillLevel,
             normalResistPenalty,
             nightmareResistPenalty,
-            hellResistPenalty);
+            hellResistPenalty,
+            removeSplashVfx);
 
         _isRefreshing = false;
     }
@@ -72,8 +76,28 @@ public partial class ModTweaksView : UserControl
             MainWindow.Settings.MaxSkillLevel,
             MainWindow.Settings.NormalResistPenalty,
             MainWindow.Settings.NightmareResistPenalty,
-            MainWindow.Settings.HellResistPenalty);
+            MainWindow.Settings.HellResistPenalty,
+            MainWindow.Settings.RemoveSplashVfx);
 
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private async void OnVisualTweaksChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_isRefreshing)
+        {
+            return;
+        }
+
+        MainWindow.Settings.RemoveSplashVfx = RemoveSplashVfxCheckBox.IsChecked ?? false;
+        WarningBorder.IsVisible = HasNonDefaultTweaks(
+            MainWindow.Settings.SkillPointsPerLevel,
+            MainWindow.Settings.AttributesPerLevel,
+            MainWindow.Settings.MaxSkillLevel,
+            MainWindow.Settings.NormalResistPenalty,
+            MainWindow.Settings.NightmareResistPenalty,
+            MainWindow.Settings.HellResistPenalty,
+            MainWindow.Settings.RemoveSplashVfx);
         await SettingsManager.SaveAsync(MainWindow.Settings);
     }
 
@@ -169,7 +193,8 @@ public partial class ModTweaksView : UserControl
             MainWindow.Settings.MaxSkillLevel,
             MainWindow.Settings.NormalResistPenalty,
             MainWindow.Settings.NightmareResistPenalty,
-            MainWindow.Settings.HellResistPenalty);
+            MainWindow.Settings.HellResistPenalty,
+            MainWindow.Settings.RemoveSplashVfx);
         await SettingsManager.SaveAsync(MainWindow.Settings);
     }
 
@@ -195,7 +220,8 @@ public partial class ModTweaksView : UserControl
             MainWindow.Settings.MaxSkillLevel,
             MainWindow.Settings.NormalResistPenalty,
             MainWindow.Settings.NightmareResistPenalty,
-            MainWindow.Settings.HellResistPenalty);
+            MainWindow.Settings.HellResistPenalty,
+            MainWindow.Settings.RemoveSplashVfx);
         await SettingsManager.SaveAsync(MainWindow.Settings);
     }
 
@@ -258,7 +284,8 @@ public partial class ModTweaksView : UserControl
         int maxSkillLevel,
         int normalResistPenalty,
         int nightmareResistPenalty,
-        int hellResistPenalty)
+        int hellResistPenalty,
+        bool removeSplashVfx)
     {
         return skillPointsPerLevel != DefaultSkillPointsPerLevel
                || attributesPerLevel != DefaultAttributesPerLevel
