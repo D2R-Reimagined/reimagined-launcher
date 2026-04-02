@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -12,10 +13,29 @@ namespace ReimaginedLauncher.Utilities;
 public sealed class BackupEntry
 {
     public required string Name { get; init; }
-    public required string DirectoryPath { get; init; }
+    public required string BackupPath { get; init; }
     public required DateTime CreatedAt { get; init; }
     public int FileCount { get; init; }
-    public string Summary => $"{CreatedAt:g} · {FileCount} files";
+    public bool IsArchive { get; init; }
+    public long SizeBytes { get; init; }
+    public string Summary => $"{CreatedAt:g} · {FileCount} files · {FormatSize(SizeBytes)} · {(IsArchive ? "zip" : "folder")}";
+
+    private static string FormatSize(long sizeBytes)
+    {
+        string[] suffixes = ["B", "KB", "MB", "GB", "TB"];
+        var size = (double)Math.Max(sizeBytes, 0);
+        var suffixIndex = 0;
+
+        while (size >= 1024 && suffixIndex < suffixes.Length - 1)
+        {
+            size /= 1024;
+            suffixIndex++;
+        }
+
+        return suffixIndex == 0
+            ? $"{size:0} {suffixes[suffixIndex]}"
+            : $"{size:0.##} {suffixes[suffixIndex]}";
+    }
 }
 
 public static class BackupService
@@ -82,18 +102,38 @@ public static class BackupService
             return [];
         }
 
-        return Directory.GetDirectories(backupRoot, "*-backup", SearchOption.TopDirectoryOnly)
+        var directoryBackups = Directory.GetDirectories(backupRoot, "*-backup", SearchOption.TopDirectoryOnly)
             .Select(directoryPath =>
             {
                 var directoryInfo = new DirectoryInfo(directoryPath);
                 return new BackupEntry
                 {
                     Name = directoryInfo.Name,
-                    DirectoryPath = directoryPath,
+                    BackupPath = directoryPath,
                     CreatedAt = directoryInfo.CreationTime,
-                    FileCount = Directory.GetFiles(directoryPath, "*", SearchOption.AllDirectories).Length
+                    FileCount = Directory.GetFiles(directoryPath, "*", SearchOption.AllDirectories).Length,
+                    SizeBytes = GetDirectorySize(directoryPath),
+                    IsArchive = false
                 };
-            })
+            });
+
+        var archiveBackups = Directory.GetFiles(backupRoot, "*-backup.zip", SearchOption.TopDirectoryOnly)
+            .Select(archivePath =>
+            {
+                var fileInfo = new FileInfo(archivePath);
+                return new BackupEntry
+                {
+                    Name = Path.GetFileNameWithoutExtension(fileInfo.Name),
+                    BackupPath = archivePath,
+                    CreatedAt = fileInfo.CreationTime,
+                    FileCount = GetArchiveFileCount(archivePath),
+                    SizeBytes = fileInfo.Length,
+                    IsArchive = true
+                };
+            });
+
+        return directoryBackups
+            .Concat(archiveBackups)
             .OrderByDescending(entry => entry.CreatedAt)
             .ToList();
     }
@@ -154,13 +194,10 @@ public static class BackupService
         try
         {
             var backupName = BuildBackupName(backupReason);
-            var backupDirectory = Path.Combine(backupRoot, backupName);
-            Directory.CreateDirectory(backupDirectory);
-
-            await CopyDirectoryAsync(
+            var backupFilePath = Path.Combine(backupRoot, $"{backupName}.zip");
+            await CreateZipBackupAsync(
                 sourceDirectory,
-                backupDirectory,
-                overwrite: true,
+                backupFilePath,
                 excludedDirectories:
                 [
                     backupRoot
@@ -183,7 +220,7 @@ public static class BackupService
 
     public static async Task<bool> RestoreBackupAsync(BackupEntry? backupEntry)
     {
-        if (backupEntry == null || !Directory.Exists(backupEntry.DirectoryPath))
+        if (backupEntry == null || !BackupExists(backupEntry))
         {
             Notifications.SendNotification("Select a backup to restore.", "Warning");
             return false;
@@ -199,7 +236,15 @@ public static class BackupService
         try
         {
             Directory.CreateDirectory(destinationDirectory);
-            await CopyDirectoryAsync(backupEntry.DirectoryPath, destinationDirectory, overwrite: true);
+            if (backupEntry.IsArchive)
+            {
+                await ExtractArchiveAsync(backupEntry.BackupPath, destinationDirectory);
+            }
+            else
+            {
+                await CopyDirectoryAsync(backupEntry.BackupPath, destinationDirectory, overwrite: true);
+            }
+
             Notifications.SendNotification($"Restored backup: {backupEntry.Name}", "Success");
             return true;
         }
@@ -261,7 +306,32 @@ public static class BackupService
 
         foreach (var backup in GetBackups().Skip(maxBackups))
         {
-            Directory.Delete(backup.DirectoryPath, recursive: true);
+            DeleteBackup(backup);
+        }
+    }
+
+    private static bool BackupExists(BackupEntry backupEntry)
+    {
+        return backupEntry.IsArchive
+            ? File.Exists(backupEntry.BackupPath)
+            : Directory.Exists(backupEntry.BackupPath);
+    }
+
+    private static void DeleteBackup(BackupEntry backupEntry)
+    {
+        if (backupEntry.IsArchive)
+        {
+            if (File.Exists(backupEntry.BackupPath))
+            {
+                File.Delete(backupEntry.BackupPath);
+            }
+
+            return;
+        }
+
+        if (Directory.Exists(backupEntry.BackupPath))
+        {
+            Directory.Delete(backupEntry.BackupPath, recursive: true);
         }
     }
 
@@ -296,6 +366,86 @@ public static class BackupService
             await using var sourceStream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             await using var destinationStream = File.Open(destinationFilePath, overwrite ? FileMode.Create : FileMode.CreateNew, FileAccess.Write, FileShare.None);
             await sourceStream.CopyToAsync(destinationStream);
+        }
+    }
+
+    private static Task CreateZipBackupAsync(
+        string sourceDirectory,
+        string destinationArchivePath,
+        IEnumerable<string>? excludedDirectories = null)
+    {
+        return Task.Run(async () =>
+        {
+            var excludedDirectoryPaths = excludedDirectories?
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Select(NormalizeDirectoryPath)
+                .ToArray() ?? [];
+
+            await using var destinationStream = File.Open(destinationArchivePath, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+            using var archive = new ZipArchive(destinationStream, ZipArchiveMode.Create);
+
+            foreach (var filePath in Directory.GetFiles(sourceDirectory, "*", SearchOption.AllDirectories))
+            {
+                if (excludedDirectoryPaths.Any(excludedDirectory => IsPathWithinDirectory(filePath, excludedDirectory)))
+                {
+                    continue;
+                }
+
+                var relativePath = Path.GetRelativePath(sourceDirectory, filePath)
+                    .Replace(Path.DirectorySeparatorChar, '/');
+                var entry = archive.CreateEntry(relativePath, CompressionLevel.Optimal);
+
+                await using var sourceStream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                await using var entryStream = entry.Open();
+                await sourceStream.CopyToAsync(entryStream);
+            }
+        });
+    }
+
+    private static Task ExtractArchiveAsync(string archivePath, string destinationDirectory)
+    {
+        return Task.Run(() =>
+        {
+            using var archive = ZipFile.OpenRead(archivePath);
+            foreach (var entry in archive.Entries.Where(entry => !string.IsNullOrEmpty(entry.Name)))
+            {
+                var destinationPath = Path.Combine(destinationDirectory, entry.FullName.Replace('/', Path.DirectorySeparatorChar));
+                var destinationFolder = Path.GetDirectoryName(destinationPath);
+
+                if (!string.IsNullOrWhiteSpace(destinationFolder))
+                {
+                    Directory.CreateDirectory(destinationFolder);
+                }
+
+                entry.ExtractToFile(destinationPath, overwrite: true);
+            }
+        });
+    }
+
+    private static int GetArchiveFileCount(string archivePath)
+    {
+        try
+        {
+            using var archive = ZipFile.OpenRead(archivePath);
+            return archive.Entries.Count(entry => !string.IsNullOrEmpty(entry.Name));
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static long GetDirectorySize(string directoryPath)
+    {
+        try
+        {
+            return Directory.GetFiles(directoryPath, "*", SearchOption.AllDirectories)
+                .Select(filePath => new FileInfo(filePath).Length)
+                .Sum();
+        }
+        catch
+        {
+            return 0;
         }
     }
 
