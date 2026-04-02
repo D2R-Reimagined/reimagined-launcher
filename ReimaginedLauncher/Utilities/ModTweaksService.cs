@@ -26,9 +26,11 @@ public static class ModTweaksService
     private const string StatesFileName = "states.txt";
     private const string GeneratedTweaksFolderName = "mod-tweaks";
 
-    public static async Task<bool> PrepareForLaunchAsync()
+    public static async Task<bool> PrepareForLaunchAsync(IProgress<string>? progress = null)
     {
+        ReportProgress(progress, "Resolving mod directories...");
         var excelDirectory = GetExcelDirectory();
+        LaunchDiagnostics.Log($"Resolved excel directory: {excelDirectory ?? "<null>"}");
         if (string.IsNullOrWhiteSpace(excelDirectory) || !Directory.Exists(excelDirectory))
         {
             Notifications.SendNotification("Excel folder not found in the Reimagined mod directory.", "Warning");
@@ -39,27 +41,42 @@ public static class ModTweaksService
         var cleanExcelDirectory = GetCleanExcelDirectory(excelDirectory);
         var cleanMissilesFilePath = GetCleanMissilesFilePath(missilesFilePath);
         var excelDirectories = GetExcelDirectories(excelDirectory).ToList();
+        LaunchDiagnostics.Log($"Resolved missiles file path: {missilesFilePath ?? "<null>"}");
+        LaunchDiagnostics.Log($"Excel directories to process: {string.Join(", ", excelDirectories)}");
 
         try
         {
+            ReportProgress(progress, "Preparing clean excel copy...");
+            LaunchDiagnostics.Log("Ensuring clean excel copy.");
             await EnsureCleanExcelCopyAsync(excelDirectory, cleanExcelDirectory);
+            ReportProgress(progress, "Preparing clean missiles copy...");
+            LaunchDiagnostics.Log("Ensuring clean missiles copy.");
             await EnsureCleanMissilesCopyAsync(missilesFilePath, cleanMissilesFilePath);
 
             foreach (var targetExcelDirectory in excelDirectories)
             {
                 var sourceExcelDirectory = GetCleanVariantDirectory(targetExcelDirectory, excelDirectory, cleanExcelDirectory);
+                var targetLabel = Path.GetFileName(targetExcelDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                ReportProgress(progress, $"Applying tweaks in {targetLabel}...");
+                LaunchDiagnostics.Log($"Processing excel directory. Source={sourceExcelDirectory}, Target={targetExcelDirectory}");
                 await ValidateExcelFilesAsync(sourceExcelDirectory);
                 await CopyDirectoryAsync(sourceExcelDirectory, targetExcelDirectory, overwrite: true);
-                await ApplyTweaksAsync(targetExcelDirectory);
+                await ApplyTweaksAsync(targetExcelDirectory, progress);
             }
 
+            ReportProgress(progress, "Restoring missiles.json...");
+            LaunchDiagnostics.Log("Restoring missiles file from clean copy.");
             await RestoreMissilesFileAsync(cleanMissilesFilePath, missilesFilePath);
+            ReportProgress(progress, "Applying missiles tweaks...");
+            LaunchDiagnostics.Log("Applying missiles tweaks.");
             await ApplyMissilesTweaksAsync(missilesFilePath, MainWindow.Settings.RemoveSplashVfx);
+            LaunchDiagnostics.Log("Mod tweak preparation succeeded.");
 
             return true;
         }
         catch (Exception ex)
         {
+            LaunchDiagnostics.LogException("Failed to prepare mod tweaks", ex);
             Notifications.SendNotification($"Failed to prepare mod tweaks: {ex.Message}", "Warning");
             return false;
         }
@@ -202,23 +219,46 @@ public static class ModTweaksService
         return Task.CompletedTask;
     }
 
-    private static async Task ApplyTweaksAsync(string excelDirectory)
+    private static async Task ApplyTweaksAsync(string excelDirectory, IProgress<string>? progress)
     {
+        ReportProgress(progress, "Updating charstats.txt...");
+        LaunchDiagnostics.Log($"Applying charstats tweaks in {excelDirectory}.");
         await ApplyCharStatsTweaksAsync(
             Path.Combine(excelDirectory, CharStatsFileName),
             MainWindow.Settings.SkillPointsPerLevel,
             MainWindow.Settings.AttributesPerLevel);
+        ReportProgress(progress, "Updating skills.txt...");
+        LaunchDiagnostics.Log($"Applying skills tweaks in {excelDirectory}.");
         await ApplySkillsTweaksAsync(
             Path.Combine(excelDirectory, SkillsFileName),
             MainWindow.Settings.MaxSkillLevel);
+        ReportProgress(progress, "Updating DifficultyLevels.txt...");
+        LaunchDiagnostics.Log($"Applying difficulty tweaks in {excelDirectory}.");
         await ApplyDifficultyLevelsTweaksAsync(
             Path.Combine(excelDirectory, DifficultyLevelsFileName),
             MainWindow.Settings.NormalResistPenalty,
             MainWindow.Settings.NightmareResistPenalty,
             MainWindow.Settings.HellResistPenalty);
+        ReportProgress(progress, "Updating states.txt...");
+        LaunchDiagnostics.Log($"Applying states tweaks in {excelDirectory}.");
         await ApplyStatesTweaksAsync(
             Path.Combine(excelDirectory, StatesFileName),
             MainWindow.Settings.RemovePaladinAuraSound);
+    }
+
+    private static void ReportProgress(IProgress<string>? progress, string message)
+    {
+        progress?.Report(message);
+        LaunchDiagnostics.Log($"STATUS: {message}");
+    }
+
+    private static string NormalizeColumnName(string name)
+    {
+        return new string(name
+            .Trim()
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToLowerInvariant)
+            .ToArray());
     }
 
     private static async Task RestoreMissilesFileAsync(string cleanMissilesFilePath, string? missilesFilePath)
@@ -332,24 +372,43 @@ public static class ModTweaksService
 
     private static async Task ApplySkillsTweaksAsync(string skillsFilePath, int maxSkillLevel)
     {
-        var entries = (await SkillsParser.GetEntries(skillsFilePath)).ToList();
-        if (entries.Count == 0)
+        var lines = await File.ReadAllLinesAsync(skillsFilePath);
+        if (lines.Length == 0)
         {
-            throw new InvalidDataException("skills.txt did not contain any editable rows.");
+            throw new InvalidDataException("skills.txt did not contain any rows.");
+        }
+
+        var header = lines[0].Split('\t');
+        var maxLevelColumnIndex = Array.FindIndex(
+            header,
+            columnName => NormalizeColumnName(columnName).Equals("maxlvl", StringComparison.OrdinalIgnoreCase));
+        if (maxLevelColumnIndex < 0)
+        {
+            throw new InvalidDataException("skills.txt did not contain a maxlvl column.");
         }
 
         var updatedRows = 0;
-        var updatedEntries = new List<D2RReimaginedTools.Models.Skills>(entries.Count);
+        var updatedLines = new List<string>(lines.Length) { lines[0] };
 
-        foreach (var entry in entries)
+        foreach (var line in lines.Skip(1))
         {
-            if (!int.TryParse(entry.MaxLvl, out var currentMaxLevel) || currentMaxLevel <= 0)
+            if (string.IsNullOrWhiteSpace(line))
             {
-                updatedEntries.Add(entry);
+                updatedLines.Add(line);
                 continue;
             }
 
-            updatedEntries.Add(entry with { MaxLvl = maxSkillLevel.ToString() });
+            var columns = line.Split('\t');
+            if (maxLevelColumnIndex >= columns.Length ||
+                !int.TryParse(columns[maxLevelColumnIndex], out var currentMaxLevel) ||
+                currentMaxLevel <= 0)
+            {
+                updatedLines.Add(line);
+                continue;
+            }
+
+            columns[maxLevelColumnIndex] = maxSkillLevel.ToString();
+            updatedLines.Add(string.Join('\t', columns));
             updatedRows++;
         }
 
@@ -358,11 +417,7 @@ public static class ModTweaksService
             throw new InvalidDataException("skills.txt did not contain any rows with maxlvl values.");
         }
 
-        await SaveGeneratedEntriesAsync(
-            updatedEntries,
-            skillsFilePath,
-            (updatedEntriesList, filePath, outputDirectory, cancellationToken) =>
-                SkillsParser.SaveEntries(updatedEntriesList, filePath, outputDirectory, cancellationToken));
+        await File.WriteAllLinesAsync(skillsFilePath, updatedLines);
     }
 
     private static async Task ApplyStatesTweaksAsync(string statesFilePath, bool removePaladinAuraSound)

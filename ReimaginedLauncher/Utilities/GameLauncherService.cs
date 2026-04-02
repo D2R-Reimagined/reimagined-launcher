@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -180,6 +181,7 @@ public class GameLauncherService
         }
 
         var executablePath = ResolveExecutablePath(GamePathOverride);
+        LaunchDiagnostics.Log($"Resolved executable path: {executablePath ?? "<null>"}");
         if (string.IsNullOrWhiteSpace(executablePath))
         {
             Notifications.SendNotification("No valid game path found. Please set the game path in settings.");
@@ -189,6 +191,7 @@ public class GameLauncherService
         var launchParameters = string.IsNullOrWhiteSpace(launchParamOverride)
             ? LaunchParameters
             : launchParamOverride;
+        LaunchDiagnostics.Log($"Launch parameters: {launchParameters}");
             
         if (!OperatingSystem.IsWindows())
         {
@@ -196,11 +199,29 @@ public class GameLauncherService
             return;
         }
 
-        Process.Start(new ProcessStartInfo(executablePath)
+        var processStartInfo = new ProcessStartInfo(executablePath)
         {
             UseShellExecute = true,
             Arguments = launchParameters
-        });
+        };
+
+        try
+        {
+            var process = Process.Start(processStartInfo);
+            if (process == null)
+            {
+                LaunchDiagnostics.Log("Process.Start returned null.");
+                Notifications.SendNotification("Failed to start D2R.exe.", "Warning");
+                return;
+            }
+
+            LaunchDiagnostics.Log($"Process started with PID {process.Id}.");
+        }
+        catch (Win32Exception ex)
+        {
+            LaunchDiagnostics.LogException("Process.Start failed", ex);
+            Notifications.SendNotification($"Failed to start D2R.exe: {ex.Message}", "Warning");
+        }
     }
 
     private string? ResolveExecutablePath(string? gamePathOverride = null)

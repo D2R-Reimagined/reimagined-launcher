@@ -32,6 +32,7 @@ public partial class MainWindow : Window
 {
     private const string NexusGameName = "diablo2resurrected";
     private const int NexusModId = 503;
+    private const string LauncherFileMarker = "launcher";
     // Make URLs readonly for safe reuse across the file
     private const string WebsiteUrl = "https://www.d2r-reimagined.com";
     private const string WikiUrl = "https://wiki.d2r-reimagined.com";
@@ -393,10 +394,18 @@ public partial class MainWindow : Window
         if (filesResponse?.Files == null || filesResponse.Files.Count == 0)
             return null;
 
+        var modFiles = filesResponse.Files
+            .Where(IsModReleaseFile)
+            .ToList();
+
+        if (modFiles.Count == 0)
+            return null;
+
         if (filesResponse.FileUpdates.Count > 0)
         {
-            var filesById = filesResponse.Files.ToDictionary(file => file.FileId);
+            var filesById = modFiles.ToDictionary(file => file.FileId);
             var newestUpdate = filesResponse.FileUpdates
+                .Where(update => filesById.ContainsKey(update.NewFileId))
                 .OrderByDescending(update => update.UploadedTimestamp)
                 .ThenByDescending(update => update.NewFileId)
                 .FirstOrDefault();
@@ -407,10 +416,19 @@ public partial class MainWindow : Window
             }
         }
 
-        return filesResponse.Files
+        return modFiles
             .OrderByDescending(file => file.UploadedTimestamp)
             .ThenByDescending(file => file.FileId)
             .FirstOrDefault();
+    }
+
+    private static bool IsModReleaseFile(NexusModsFileResponse file)
+    {
+        var name = file.Name ?? string.Empty;
+        var fileName = file.FileName ?? string.Empty;
+
+        return !name.Contains(LauncherFileMarker, StringComparison.OrdinalIgnoreCase) &&
+               !fileName.Contains(LauncherFileMarker, StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<(string Url, bool IsDirect)> GetUpdateUrlAsync(

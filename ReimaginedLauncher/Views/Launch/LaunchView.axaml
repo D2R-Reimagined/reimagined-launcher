@@ -6,7 +6,7 @@
              x:Class="ReimaginedLauncher.Views.Launch.LaunchView">
     <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                   VerticalScrollBarVisibility="Auto">
-        <Grid RowDefinitions="Auto,Auto,Auto,Auto"
+        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto"
               RowSpacing="18">
             <StackPanel Spacing="4">
                 <TextBlock Classes="view-title"
@@ -89,6 +89,23 @@
                                    TextWrapping="Wrap"
                                    FontFamily="Cascadia Code,Consolas,Monaco,monospace" />
                     </Border>
+                </StackPanel>
+            </Border>
+
+            <Border x:Name="LaunchStatusPanel"
+                    Grid.Row="4"
+                    Classes="panel"
+                    Padding="20"
+                    IsVisible="False">
+                <StackPanel Spacing="10">
+                    <TextBlock Classes="section-title"
+                               Text="Launch Status" />
+                    <TextBlock x:Name="LaunchStatusText"
+                               Classes="muted"
+                               Text="Preparing launch..." />
+                    <ProgressBar x:Name="LaunchProgressBar"
+                                 IsIndeterminate="True"
+                                 Height="8" />
                 </StackPanel>
             </Border>
         </Grid>
