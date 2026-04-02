@@ -8,16 +8,13 @@
                   VerticalScrollBarVisibility="Auto">
         <Grid RowDefinitions="Auto,Auto,Auto,Auto"
               RowSpacing="18">
-            <Border Classes="hero-panel"
-                    Padding="22">
-                <StackPanel Spacing="8">
-                    <TextBlock Classes="view-title"
-                               Text="Enter The Hunt" />
-                    <TextBlock Classes="muted"
-                               Text="Point the launcher at your Diablo II: Resurrected install, verify the Reimagined files, and launch straight into the dark."
-                               TextWrapping="Wrap" />
-                </StackPanel>
-            </Border>
+            <StackPanel Spacing="4">
+                <TextBlock Classes="view-title"
+                           Text="Enter The Hunt" />
+                <TextBlock Classes="muted"
+                           Text="Point the launcher at your Diablo II: Resurrected install, verify the Reimagined files, and launch straight into the dark."
+                           TextWrapping="Wrap" />
+            </StackPanel>
 
             <Border Grid.Row="1"
                     Classes="panel"

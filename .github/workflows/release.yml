@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version without the leading v"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -16,6 +21,44 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release version
+        id: release_version
+        shell: pwsh
+        run: |
+          if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+            $version = '${{ github.event.inputs.version }}'.Trim()
+          } else {
+            $version = '${{ github.ref_name }}'.Trim()
+          }
+
+          if ($version.StartsWith('v')) {
+            $version = $version.Substring(1)
+          }
+
+          if ($version -notmatch '^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') {
+            throw "Invalid version format: $version"
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version" >> $env:GITHUB_OUTPUT
+
+      - name: Update project version
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          $projectFile = 'ReimaginedLauncher/ReimaginedLauncher.csproj'
+          $version = '${{ steps.release_version.outputs.version }}'
+          $content = Get-Content -Path $projectFile -Raw
+
+          if ($content -notmatch '<Version>[^<]+</Version>') {
+            throw "Unable to find <Version> in $projectFile"
+          }
+
+          $updated = [regex]::Replace($content, '<Version>[^<]+</Version>', "<Version>$version</Version>", 1)
+          Set-Content -Path $projectFile -Value $updated
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v5
@@ -36,23 +79,53 @@ jobs:
           -r win-x64
           --output "${{ github.workspace }}\artifacts\ReimaginedLauncher"
 
+      - name: Commit version update
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ReimaginedLauncher/ReimaginedLauncher.csproj
+
+          if (git diff --cached --quiet) {
+            Write-Host "Project version already matches ${{ steps.release_version.outputs.version }}"
+            exit 0
+          }
+
+          git commit -m "Release ${{ steps.release_version.outputs.tag }}"
+          git push origin HEAD:${{ github.ref_name }}
+
+      - name: Create release tag
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          $tag = '${{ steps.release_version.outputs.tag }}'
+
+          git show-ref --verify --quiet "refs/tags/$tag"
+          if ($LASTEXITCODE -eq 0) {
+            throw "Tag $tag already exists"
+          }
+
+          git tag $tag
+          git push origin $tag
+
       - name: Create release zip
-        if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         run: |
           Compress-Archive `
             -Path "${{ github.workspace }}\artifacts\ReimaginedLauncher\*" `
-            -DestinationPath "${{ github.workspace }}\artifacts\ReimaginedLauncher-win-x64.zip" `
+            -DestinationPath "${{ github.workspace }}\artifacts\ReimaginedLauncher-${{ steps.release_version.outputs.tag }}-win-x64.zip" `
             -Force
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v7
         with:
-          name: ReimaginedLauncher-win-x64
+          name: ReimaginedLauncher-${{ steps.release_version.outputs.tag }}-win-x64
           path: ${{ github.workspace }}\artifacts\ReimaginedLauncher
 
       - name: Create GitHub release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ github.workspace }}\artifacts\ReimaginedLauncher-win-x64.zip
+          tag_name: ${{ steps.release_version.outputs.tag }}
+          name: ${{ steps.release_version.outputs.tag }}
+          files: ${{ github.workspace }}\artifacts\ReimaginedLauncher-${{ steps.release_version.outputs.tag }}-win-x64.zip
