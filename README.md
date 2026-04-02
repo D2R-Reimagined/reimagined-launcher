@@ -7,7 +7,8 @@ This is a launcher built by the Reimagined team for D2R.
 * Easy Launch Parameter Editing
 * Modify Skill Hard Point Caps
 * Modify Resist Penalties for Difficulties
-* Ability to modifiy Skills and Attributes awarded per level
+* Ability to modify Skills and Attributes awarded per level
+* Modify the visuals of the game. Such as removing splash image, vignette, etc
 
 ## Contributing
 This is a .NET project and utilizes our D2RReimagined.FileExtensions Nuget. Contributing can be done on either repo.
