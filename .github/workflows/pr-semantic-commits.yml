@@ -1,0 +1,23 @@
+name: PR Semantic Commits
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate-commits:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate semantic commit messages
+        shell: pwsh
+        run: ./.github/scripts/Test-SemanticCommits.ps1 -BaseRef '${{ github.base_ref }}'

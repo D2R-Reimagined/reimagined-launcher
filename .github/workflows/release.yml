@@ -130,7 +130,7 @@ jobs:
             exit 0
           }
 
-          git commit -m "Release ${{ steps.release_version.outputs.tag }}"
+          git commit -m "chore(release): ${{ steps.release_version.outputs.tag }}"
           git push origin HEAD:${{ github.ref_name }}
 
       - name: Create release tag
@@ -154,6 +154,20 @@ jobs:
             -Path "${{ github.workspace }}\artifacts\ReimaginedLauncher\*" `
             -DestinationPath "${{ github.workspace }}\artifacts\ReimaginedLauncher-${{ steps.release_version.outputs.tag }}-win-x64.zip" `
             -Force
+
+      - name: Generate release notes
+        id: release_notes
+        shell: pwsh
+        run: |
+          $outputPath = "${{ github.workspace }}\artifacts\release-notes.md"
+          ./.github/scripts/Generate-ReleaseNotes.ps1 `
+            -CurrentTag '${{ steps.release_version.outputs.tag }}' `
+            -OutputPath $outputPath
+
+          $content = Get-Content -Path $outputPath -Raw
+          "body<<EOF" >> $env:GITHUB_OUTPUT
+          $content >> $env:GITHUB_OUTPUT
+          "EOF" >> $env:GITHUB_OUTPUT
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v7
@@ -191,5 +205,6 @@ jobs:
         with:
           tag_name: ${{ steps.release_version.outputs.tag }}
           name: ${{ steps.release_version.outputs.tag }}
+          body: ${{ steps.release_notes.outputs.body }}
           overwrite_files: true
           files: ${{ github.workspace }}\artifacts\ReimaginedLauncher-${{ steps.release_version.outputs.tag }}-win-x64.zip
