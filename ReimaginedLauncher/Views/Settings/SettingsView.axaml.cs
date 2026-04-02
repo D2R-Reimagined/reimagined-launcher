@@ -17,7 +17,6 @@ public partial class SettingsView : UserControl
     public void RefreshSettingsState()
     {
         _isRefreshingSettings = true;
-        DirectLaunchCheckBox.IsChecked = MainWindow.Settings.UseDirectLaunch;
         NoSoundCheckBox.IsChecked = MainWindow.Settings.NoSound;
         NoRumbleCheckBox.IsChecked = MainWindow.Settings.NoRumble;
         ResetOfflineMapsCheckBox.IsChecked = MainWindow.Settings.ResetOfflineMaps;
@@ -35,7 +34,6 @@ public partial class SettingsView : UserControl
             return;
         }
 
-        MainWindow.Settings.UseDirectLaunch = DirectLaunchCheckBox.IsChecked ?? false;
         MainWindow.Settings.NoSound = NoSoundCheckBox.IsChecked ?? false;
         MainWindow.Settings.NoRumble = NoRumbleCheckBox.IsChecked ?? false;
         MainWindow.Settings.ResetOfflineMaps = ResetOfflineMapsCheckBox.IsChecked ?? false;
