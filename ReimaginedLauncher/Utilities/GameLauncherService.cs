@@ -133,19 +133,9 @@ public class GameLauncherService
             "-txt"
         };
 
-        if (MainWindow.Settings.UseDirectLaunch)
+        if (MainWindow.Settings.EnableRespec)
         {
-            launchParameters.Add("-direct");
-        }
-
-        if (MainWindow.Settings.NoSound)
-        {
-            launchParameters.Add("-nosound");
-        }
-
-        if (MainWindow.Settings.NoRumble)
-        {
-            launchParameters.Add("-norumble");
+            launchParameters.Add("-enablerespec");
         }
 
         if (MainWindow.Settings.ResetOfflineMaps)
@@ -153,15 +143,25 @@ public class GameLauncherService
             launchParameters.Add("-resetofflinemaps");
         }
 
-        if (MainWindow.Settings.EnableRespec)
-        {
-            launchParameters.Add("-enablerespec");
-        }
-
         if (MainWindow.Settings.PlayersCount is >= 2 and <= 8)
         {
             launchParameters.Add("-players");
             launchParameters.Add(MainWindow.Settings.PlayersCount.Value.ToString());
+        }
+
+        if (MainWindow.Settings.UseDirectLaunch)
+        {
+            launchParameters.Add("-direct");
+        }
+
+        if (MainWindow.Settings.NoRumble)
+        {
+            launchParameters.Add("-norumble");
+        }
+
+        if (MainWindow.Settings.NoSound)
+        {
+            launchParameters.Add("-nosound");
         }
 
         return string.Join(" ", launchParameters);

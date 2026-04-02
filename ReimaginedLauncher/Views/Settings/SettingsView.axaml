@@ -19,29 +19,29 @@
                 <StackPanel Spacing="14">
                     <TextBlock Classes="section-title"
                                Text="Launch Parameters" />
-                    <CheckBox x:Name="DirectLaunchCheckBox"
-                              Content="-direct"
-                              Checked="OnLaunchSettingChanged"
-                              Unchecked="OnLaunchSettingChanged"/>
-                    <CheckBox x:Name="NoSoundCheckBox"
-                              Content="-nosound"
-                              Checked="OnLaunchSettingChanged"
-                              Unchecked="OnLaunchSettingChanged"/>
-                    <CheckBox x:Name="NoRumbleCheckBox"
-                              Content="-norumble"
-                              Checked="OnLaunchSettingChanged"
-                              Unchecked="OnLaunchSettingChanged"/>
-                    <CheckBox x:Name="ResetOfflineMapsCheckBox"
-                              Content="-resetofflinemaps"
-                              Checked="OnLaunchSettingChanged"
-                              Unchecked="OnLaunchSettingChanged"/>
-                    <CheckBox x:Name="EnableRespecCheckBox"
-                              Content="-enablerespec"
-                              Checked="OnLaunchSettingChanged"
-                              Unchecked="OnLaunchSettingChanged"/>
+                    <StackPanel Spacing="4">
+                        <CheckBox x:Name="EnableRespecCheckBox"
+                                  Content="-enablerespec"
+                                  Checked="OnLaunchSettingChanged"
+                                  Unchecked="OnLaunchSettingChanged"/>
+                        <TextBlock Classes="muted"
+                                   Margin="28,0,0,0"
+                                   Text="Enables unlimited stat and skill respecs in-game." />
+                    </StackPanel>
+                    <StackPanel Spacing="4">
+                        <CheckBox x:Name="ResetOfflineMapsCheckBox"
+                                  Content="-resetofflinemaps"
+                                  Checked="OnLaunchSettingChanged"
+                                  Unchecked="OnLaunchSettingChanged"/>
+                        <TextBlock Classes="muted"
+                                   Margin="28,0,0,0"
+                                   Text="Generates fresh offline map layouts the next time the game starts." />
+                    </StackPanel>
                     <StackPanel Spacing="8">
                         <TextBlock Text="-players"
                                    FontWeight="SemiBold" />
+                        <TextBlock Classes="muted"
+                                   Text="Simulates higher player counts offline to increase difficulty and drops." />
                         <ComboBox x:Name="PlayersComboBox"
                                   Width="180"
                                   SelectionChanged="OnPlayersSelectionChanged">
@@ -54,6 +54,33 @@
                             <ComboBoxItem Content="7"/>
                             <ComboBoxItem Content="8"/>
                         </ComboBox>
+                    </StackPanel>
+                    <StackPanel Spacing="4">
+                        <CheckBox x:Name="DirectLaunchCheckBox"
+                                  Content="-direct"
+                                  Checked="OnLaunchSettingChanged"
+                                  Unchecked="OnLaunchSettingChanged"/>
+                        <TextBlock Classes="muted"
+                                   Margin="28,0,0,0"
+                                   Text="Launches directly with local mod files instead of packaged data." />
+                    </StackPanel>
+                    <StackPanel Spacing="4">
+                        <CheckBox x:Name="NoRumbleCheckBox"
+                                  Content="-norumble"
+                                  Checked="OnLaunchSettingChanged"
+                                  Unchecked="OnLaunchSettingChanged"/>
+                        <TextBlock Classes="muted"
+                                   Margin="28,0,0,0"
+                                   Text="Disables controller vibration." />
+                    </StackPanel>
+                    <StackPanel Spacing="4">
+                        <CheckBox x:Name="NoSoundCheckBox"
+                                  Content="-nosound"
+                                  Checked="OnLaunchSettingChanged"
+                                  Unchecked="OnLaunchSettingChanged"/>
+                        <TextBlock Classes="muted"
+                                   Margin="28,0,0,0"
+                                   Text="Starts the game without audio output." />
                     </StackPanel>
                 </StackPanel>
             </Border>
