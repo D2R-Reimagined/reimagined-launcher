@@ -19,10 +19,20 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      - name: Create GitHub App token
+        id: app_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.D2RR_GH_APP_ID }}
+          private-key: ${{ secrets.D2RR_GH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: write
+
       - name: Check out repository
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          token: ${{ steps.app_token.outputs.token }}
 
       - name: Resolve release version
         id: release_version
@@ -100,7 +110,7 @@ jobs:
         run: |
           dnx --yes vpk --version "${{ steps.velopack_version.outputs.version }}" download github `
             --repoUrl "https://github.com/${{ github.repository }}" `
-            --token "${{ secrets.GITHUB_TOKEN }}" `
+            --token "${{ steps.app_token.outputs.token }}" `
             --outputDir "${{ github.workspace }}\artifacts\velopack"
 
       - name: Package Velopack release
@@ -191,7 +201,7 @@ jobs:
             'upload', 'github',
             '--outputDir', '${{ github.workspace }}\artifacts\velopack',
             '--repoUrl', 'https://github.com/${{ github.repository }}',
-            '--token', '${{ secrets.GITHUB_TOKEN }}',
+            '--token', '${{ steps.app_token.outputs.token }}',
             '--publish',
             '--merge',
             '--releaseName', '${{ steps.release_version.outputs.tag }}',
@@ -203,6 +213,7 @@ jobs:
       - name: Upload zip to GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          token: ${{ steps.app_token.outputs.token }}
           tag_name: ${{ steps.release_version.outputs.tag }}
           name: ${{ steps.release_version.outputs.tag }}
           body: ${{ steps.release_notes.outputs.body }}
