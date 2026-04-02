@@ -3,6 +3,7 @@ using Avalonia;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using ReimaginedLauncher.HttpClients;
+using Velopack;
 
 namespace ReimaginedLauncher;
 
@@ -16,6 +17,8 @@ class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        VelopackApp.Build().Run();
+
         var services = new ServiceCollection();
         services.AddHttpClient<NexusModsHttpClient>();
         

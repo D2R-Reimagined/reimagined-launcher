@@ -128,6 +128,7 @@ public partial class MainWindow : Window
         await SettingsManager.SaveAsync(Settings);
 
         await RefreshUpdateStateAsync();
+        _ = LauncherUpdateService.CheckForUpdatesAsync();
 
         // Subscribe to UserViewModel.User property changed to trigger check when user logs in
         UserViewModel.PropertyChanged -= UserViewModelOnPropertyChanged;

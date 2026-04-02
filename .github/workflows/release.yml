@@ -60,6 +60,21 @@ jobs:
           $updated = [regex]::Replace($content, '<Version>[^<]+</Version>', "<Version>$version</Version>", 1)
           Set-Content -Path $projectFile -Value $updated
 
+      - name: Resolve Velopack version
+        id: velopack_version
+        shell: pwsh
+        run: |
+          $projectFile = 'ReimaginedLauncher/ReimaginedLauncher.csproj'
+          $content = Get-Content -Path $projectFile -Raw
+
+          if ($content -notmatch '<VelopackVersion>([^<]+)</VelopackVersion>') {
+            throw "Unable to find <VelopackVersion> in $projectFile"
+          }
+
+          $velopackVersion = $Matches[1].Trim()
+
+          "version=$velopackVersion" >> $env:GITHUB_OUTPUT
+
       - name: Set up .NET
         uses: actions/setup-dotnet@v5
         with:
@@ -78,6 +93,29 @@ jobs:
           --no-build
           -r win-x64
           --output "${{ github.workspace }}\artifacts\ReimaginedLauncher"
+
+      - name: Download previous Velopack releases
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          dnx vpk --version "${{ steps.velopack_version.outputs.version }}" download github `
+            --repoUrl "https://github.com/${{ github.repository }}" `
+            --token "${{ secrets.GITHUB_TOKEN }}" `
+            --outputDir "${{ github.workspace }}\artifacts\velopack"
+
+      - name: Package Velopack release
+        shell: pwsh
+        run: |
+          dnx vpk --version "${{ steps.velopack_version.outputs.version }}" pack `
+            --packId "D2RReimagined.ReimaginedLauncher" `
+            --packVersion "${{ steps.release_version.outputs.version }}" `
+            --packDir "${{ github.workspace }}\artifacts\ReimaginedLauncher" `
+            --mainExe "ReimaginedLauncher.exe" `
+            --packTitle "D2R Reimagined Launcher" `
+            --packAuthors "D2R Reimagined" `
+            --icon "ReimaginedLauncher/Assets/ReimaginedLauncher.ico" `
+            --runtime "win-x64" `
+            --outputDir "${{ github.workspace }}\artifacts\velopack"
 
       - name: Commit version update
         if: github.event_name == 'workflow_dispatch'
@@ -123,9 +161,34 @@ jobs:
           name: ReimaginedLauncher-${{ steps.release_version.outputs.tag }}-win-x64
           path: ${{ github.workspace }}\artifacts\ReimaginedLauncher
 
-      - name: Create GitHub release
+      - name: Upload Velopack artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ReimaginedLauncher-${{ steps.release_version.outputs.tag }}-velopack
+          path: ${{ github.workspace }}\artifacts\velopack
+
+      - name: Upload Velopack release assets
+        shell: pwsh
+        run: |
+          $arguments = @(
+            'vpk',
+            '--version', '${{ steps.velopack_version.outputs.version }}',
+            'upload', 'github',
+            '--outputDir', '${{ github.workspace }}\artifacts\velopack',
+            '--repoUrl', 'https://github.com/${{ github.repository }}',
+            '--token', '${{ secrets.GITHUB_TOKEN }}',
+            '--publish',
+            '--merge',
+            '--releaseName', '${{ steps.release_version.outputs.tag }}',
+            '--tag', '${{ steps.release_version.outputs.tag }}'
+          )
+
+          & dnx @arguments
+
+      - name: Upload zip to GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release_version.outputs.tag }}
           name: ${{ steps.release_version.outputs.tag }}
+          overwrite_files: true
           files: ${{ github.workspace }}\artifacts\ReimaginedLauncher-${{ steps.release_version.outputs.tag }}-win-x64.zip

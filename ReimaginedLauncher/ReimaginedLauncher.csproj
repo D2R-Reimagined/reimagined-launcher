@@ -4,6 +4,7 @@
         <TargetFramework>net10.0</TargetFramework>
         <Nullable>enable</Nullable>
         <Version>0.3.0</Version>
+        <VelopackVersion>0.0.1298</VelopackVersion>
         <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
         <ApplicationManifest>app.manifest</ApplicationManifest>
         <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
@@ -35,6 +36,7 @@
         <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.5" />
         <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.5" />
         <PackageReference Include="Notification.Avalonia" Version="2.2.0" />
+        <PackageReference Include="Velopack" Version="$(VelopackVersion)" />
     </ItemGroup>
 
     <ItemGroup>
@@ -48,4 +50,3 @@
      </ItemGroup>
 
 </Project>
-
