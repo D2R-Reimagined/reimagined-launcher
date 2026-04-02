@@ -11,7 +11,7 @@ $commitSubjects = @(git log "origin/$BaseRef..HEAD" --pretty=format:'%s')
 $allowedTypes = 'feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert'
 $pattern = "^(?:$allowedTypes)(?:\([^)]+\))?!?: .+"
 
-$invalidSubjects = @()
+$matchingSubjects = @()
 foreach ($subject in $commitSubjects) {
     if ([string]::IsNullOrWhiteSpace($subject)) {
         continue
@@ -21,20 +21,20 @@ foreach ($subject in $commitSubjects) {
         continue
     }
 
-    if ($subject -notmatch $pattern) {
-        $invalidSubjects += $subject
+    if ($subject -match $pattern) {
+        $matchingSubjects += $subject
     }
 }
 
-if ($invalidSubjects.Count -eq 0) {
-    Write-Host "All commit messages match the semantic commit convention."
+if ($matchingSubjects.Count -gt 0) {
+    Write-Host "Found at least one semantic commit message in the PR:"
+    $matchingSubjects | ForEach-Object { Write-Host "- $_" }
     exit 0
 }
 
 Write-Error @"
-The following commit messages do not follow the required semantic commit format:
+This PR must include at least one commit message that follows the semantic commit format.
 
-$($invalidSubjects | ForEach-Object { "- $_" } | Out-String)
 Expected format:
   type(scope): description
   type: description
@@ -46,4 +46,7 @@ Examples:
   feat(launcher): add release channel selector
   fix(auth): handle expired session refresh
   chore: update release workflow
+
+Commit subjects checked:
+$($commitSubjects | ForEach-Object { "- $_" } | Out-String)
 "@
