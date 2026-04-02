@@ -7,6 +7,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Platform.Storage;
 using Avalonia.VisualTree;
 using ReimaginedLauncher.Utilities;
 
@@ -45,6 +46,10 @@ public partial class UpdateView : UserControl
                                           !_isInstalling &&
                                           isAuthenticated &&
                                           canDownload;
+        SelectZipManuallyButton.IsEnabled = !_isLoading &&
+                                            !_isInstalling &&
+                                            MainWindow.Settings.IsInstallDirectoryValidated &&
+                                            !string.IsNullOrWhiteSpace(MainWindow.Settings.InstallDirectory);
         OpenDownloadPageButton.IsEnabled = !_isLoading && !string.IsNullOrWhiteSpace(MainWindow.UpdateDownloadUrl);
         RecheckButton.IsEnabled = !_isLoading;
         InstallOrUpdateButton.Content = MainWindow.UpdateCurrentVersion.Equals("Not detected", StringComparison.OrdinalIgnoreCase)
@@ -132,6 +137,67 @@ public partial class UpdateView : UserControl
         catch (Exception)
         {
             // Keep launcher stable if shell open fails.
+        }
+    }
+
+    private async void OnSelectZipManuallyClick(object? sender, RoutedEventArgs e)
+    {
+        if (_isInstalling)
+            return;
+
+        var installDirectory = MainWindow.Settings.InstallDirectory;
+        if (!MainWindow.Settings.IsInstallDirectoryValidated || string.IsNullOrWhiteSpace(installDirectory))
+        {
+            Notifications.SendNotification(
+                "Install directory not validated",
+                "Select the Diablo II: Resurrected folder before installing the mod.");
+            return;
+        }
+
+        if (this.GetVisualRoot() is not Window window)
+        {
+            return;
+        }
+
+        var files = await window.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Select D2R Reimagined Zip",
+            AllowMultiple = false,
+            FileTypeFilter =
+            [
+                new FilePickerFileType("Zip Archives")
+                {
+                    Patterns = ["*.zip"]
+                }
+            ]
+        });
+
+        if (files.Count <= 0)
+        {
+            return;
+        }
+
+        var zipPath = files[0].Path.LocalPath;
+        if (string.IsNullOrWhiteSpace(zipPath))
+        {
+            Notifications.SendNotification("Selected file could not be accessed locally.", "Warning");
+            return;
+        }
+
+        try
+        {
+            _isInstalling = true;
+            RefreshUpdateState();
+            await ExtractAndFinalizeInstallAsync(zipPath, installDirectory);
+        }
+        catch (Exception ex)
+        {
+            Notifications.SendNotification($"Install failed: {ex.Message}", "Warning");
+        }
+        finally
+        {
+            _isInstalling = false;
+            RefreshUpdateState();
         }
     }
 

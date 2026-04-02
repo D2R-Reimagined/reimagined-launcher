@@ -61,6 +61,9 @@
                     Classes="accent"
                     Content="Download and Install"
                     Click="OnInstallOrUpdateClick"/>
+            <Button Content="Select Zip Manually"
+                    x:Name="SelectZipManuallyButton"
+                    Click="OnSelectZipManuallyClick"/>
             <Button Content="Open Download Page"
                     x:Name="OpenDownloadPageButton"
                     Click="OnOpenDownloadPageClick"/>
