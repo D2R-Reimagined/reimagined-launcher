@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using D2RReimaginedTools.TextFileParsers;
 using ReimaginedLauncher.Utilities.Json;
@@ -22,6 +23,8 @@ public static class ModTweaksService
     private const string CharStatsFileName = "charstats.txt";
     private const string DifficultyLevelsFileName = "DifficultyLevels.txt";
     private const string SkillsFileName = "skills.txt";
+    private const string StatesFileName = "states.txt";
+    private const string GeneratedTweaksFolderName = "mod-tweaks";
 
     public static async Task<bool> PrepareForLaunchAsync()
     {
@@ -190,6 +193,12 @@ public static class ModTweaksService
             throw new FileNotFoundException($"skills.txt was not found in the Reimagined excel folder: {excelDirectory}");
         }
 
+        var statesFilePath = Path.Combine(excelDirectory, StatesFileName);
+        if (!File.Exists(statesFilePath))
+        {
+            throw new FileNotFoundException($"states.txt was not found in the Reimagined excel folder: {excelDirectory}");
+        }
+
         return Task.CompletedTask;
     }
 
@@ -207,6 +216,9 @@ public static class ModTweaksService
             MainWindow.Settings.NormalResistPenalty,
             MainWindow.Settings.NightmareResistPenalty,
             MainWindow.Settings.HellResistPenalty);
+        await ApplyStatesTweaksAsync(
+            Path.Combine(excelDirectory, StatesFileName),
+            MainWindow.Settings.RemovePaladinAuraSound);
     }
 
     private static async Task RestoreMissilesFileAsync(string cleanMissilesFilePath, string? missilesFilePath)
@@ -263,7 +275,7 @@ public static class ModTweaksService
         var outputDirectory = Path.Combine(
             Path.GetTempPath(),
             "d2r-reimagined-launcher",
-            "mod-tweaks",
+            GeneratedTweaksFolderName,
             Guid.NewGuid().ToString("N"));
         var generatedFile = await CharStatsParser.SaveEntries(entries, charStatsFilePath, outputDirectory);
         File.Copy(generatedFile.FullName, charStatsFilePath, overwrite: true);
@@ -275,56 +287,35 @@ public static class ModTweaksService
         int nightmareResistPenalty,
         int hellResistPenalty)
     {
-        var lines = await File.ReadAllLinesAsync(difficultyLevelsFilePath);
-        if (lines.Length == 0)
+        var entries = (await DifficultyLevelParser.GetEntries(difficultyLevelsFilePath)).ToList();
+        if (entries.Count == 0)
         {
-            throw new InvalidDataException("DifficultyLevels.txt did not contain any rows.");
-        }
-
-        var headers = lines[0].Split('\t');
-        var nameIndex = Array.FindIndex(headers, header => header.Equals("Name", StringComparison.OrdinalIgnoreCase));
-        var resistPenaltyIndex = Array.FindIndex(headers, header => header.Equals("ResistPenalty", StringComparison.OrdinalIgnoreCase));
-        if (nameIndex < 0 || resistPenaltyIndex < 0)
-        {
-            throw new InvalidDataException("DifficultyLevels.txt is missing Name or ResistPenalty columns.");
+            throw new InvalidDataException("DifficultyLevels.txt did not contain any editable rows.");
         }
 
         var normalFound = false;
         var nightmareFound = false;
         var hellFound = false;
 
-        for (var i = 1; i < lines.Length; i++)
+        foreach (var entry in entries)
         {
-            if (string.IsNullOrWhiteSpace(lines[i]))
-            {
-                continue;
-            }
-
-            var columns = lines[i].Split('\t');
-            if (columns.Length <= Math.Max(nameIndex, resistPenaltyIndex))
-            {
-                continue;
-            }
-
-            switch (columns[nameIndex])
+            switch (entry.Name)
             {
                 case "Normal":
-                    columns[resistPenaltyIndex] = normalResistPenalty.ToString();
+                    entry.ResistPenalty = normalResistPenalty;
                     normalFound = true;
                     break;
                 case "Nightmare":
-                    columns[resistPenaltyIndex] = nightmareResistPenalty.ToString();
+                    entry.ResistPenalty = nightmareResistPenalty;
                     nightmareFound = true;
                     break;
                 case "Hell":
-                    columns[resistPenaltyIndex] = hellResistPenalty.ToString();
+                    entry.ResistPenalty = hellResistPenalty;
                     hellFound = true;
                     break;
                 default:
                     continue;
             }
-
-            lines[i] = string.Join('\t', columns);
         }
 
         if (!normalFound || !nightmareFound || !hellFound)
@@ -332,41 +323,33 @@ public static class ModTweaksService
             throw new InvalidDataException("DifficultyLevels.txt did not contain Normal, Nightmare, and Hell rows.");
         }
 
-        await File.WriteAllLinesAsync(difficultyLevelsFilePath, lines);
+        await SaveGeneratedEntriesAsync(
+            entries,
+            difficultyLevelsFilePath,
+            (updatedEntries, filePath, outputDirectory, cancellationToken) =>
+                DifficultyLevelParser.SaveEntries(updatedEntries, filePath, outputDirectory, cancellationToken));
     }
 
     private static async Task ApplySkillsTweaksAsync(string skillsFilePath, int maxSkillLevel)
     {
-        var lines = await File.ReadAllLinesAsync(skillsFilePath);
-        if (lines.Length == 0)
+        var entries = (await SkillsParser.GetEntries(skillsFilePath)).ToList();
+        if (entries.Count == 0)
         {
-            throw new InvalidDataException("skills.txt did not contain any rows.");
-        }
-
-        var headers = lines[0].Split('\t');
-        var maxLevelIndex = Array.FindIndex(headers, header => header.Equals("maxlvl", StringComparison.OrdinalIgnoreCase));
-        if (maxLevelIndex < 0)
-        {
-            throw new InvalidDataException("skills.txt is missing the maxlvl column.");
+            throw new InvalidDataException("skills.txt did not contain any editable rows.");
         }
 
         var updatedRows = 0;
+        var updatedEntries = new List<D2RReimaginedTools.Models.Skills>(entries.Count);
 
-        for (var i = 1; i < lines.Length; i++)
+        foreach (var entry in entries)
         {
-            if (string.IsNullOrWhiteSpace(lines[i]))
+            if (!int.TryParse(entry.MaxLvl, out var currentMaxLevel) || currentMaxLevel <= 0)
             {
+                updatedEntries.Add(entry);
                 continue;
             }
 
-            var columns = lines[i].Split('\t');
-            if (columns.Length <= maxLevelIndex || string.IsNullOrWhiteSpace(columns[maxLevelIndex]))
-            {
-                continue;
-            }
-
-            columns[maxLevelIndex] = maxSkillLevel.ToString();
-            lines[i] = string.Join('\t', columns);
+            updatedEntries.Add(entry with { MaxLvl = maxSkillLevel.ToString() });
             updatedRows++;
         }
 
@@ -375,7 +358,66 @@ public static class ModTweaksService
             throw new InvalidDataException("skills.txt did not contain any rows with maxlvl values.");
         }
 
-        await File.WriteAllLinesAsync(skillsFilePath, lines);
+        await SaveGeneratedEntriesAsync(
+            updatedEntries,
+            skillsFilePath,
+            (updatedEntriesList, filePath, outputDirectory, cancellationToken) =>
+                SkillsParser.SaveEntries(updatedEntriesList, filePath, outputDirectory, cancellationToken));
+    }
+
+    private static async Task ApplyStatesTweaksAsync(string statesFilePath, bool removePaladinAuraSound)
+    {
+        if (!removePaladinAuraSound)
+        {
+            return;
+        }
+
+        var entries = (await StatesParser.GetEntries(statesFilePath)).ToList();
+        if (entries.Count == 0)
+        {
+            throw new InvalidDataException("states.txt did not contain any editable rows.");
+        }
+
+        var updatedRows = 0;
+        var updatedEntries = new List<D2RReimaginedTools.Models.States>(entries.Count);
+
+        foreach (var entry in entries)
+        {
+            if (string.IsNullOrWhiteSpace(entry.StateId) ||
+                !entry.StateId.StartsWith("paladin_aura_", StringComparison.OrdinalIgnoreCase))
+            {
+                updatedEntries.Add(entry);
+                continue;
+            }
+
+            updatedEntries.Add(entry with { OnSound = string.Empty });
+            updatedRows++;
+        }
+
+        if (updatedRows == 0)
+        {
+            throw new InvalidDataException("states.txt did not contain any paladin_aura_ rows to update.");
+        }
+
+        await SaveGeneratedEntriesAsync(
+            updatedEntries,
+            statesFilePath,
+            (updatedEntriesList, filePath, outputDirectory, cancellationToken) =>
+                StatesParser.SaveEntries(updatedEntriesList, filePath, outputDirectory, cancellationToken));
+    }
+
+    private static async Task SaveGeneratedEntriesAsync<TEntry>(
+        IList<TEntry> entries,
+        string sourceFilePath,
+        Func<IList<TEntry>, string, string, CancellationToken, Task<FileInfo>> saveEntriesAsync)
+    {
+        var outputDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "d2r-reimagined-launcher",
+            GeneratedTweaksFolderName,
+            Guid.NewGuid().ToString("N"));
+        var generatedFile = await saveEntriesAsync(entries, sourceFilePath, outputDirectory, CancellationToken.None);
+        File.Copy(generatedFile.FullName, sourceFilePath, overwrite: true);
     }
 
     private static async Task CopyDirectoryAsync(string sourceDirectory, string destinationDirectory, bool overwrite)

@@ -32,6 +32,7 @@ public partial class ModTweaksView : UserControl
         var normalResistPenalty = MainWindow.Settings.NormalResistPenalty;
         var nightmareResistPenalty = MainWindow.Settings.NightmareResistPenalty;
         var hellResistPenalty = MainWindow.Settings.HellResistPenalty;
+        var removePaladinAuraSound = MainWindow.Settings.RemovePaladinAuraSound;
         var removeSplashVfx = MainWindow.Settings.RemoveSplashVfx;
 
         MainWindow.Settings.SkillPointsPerLevel = skillPointsPerLevel;
@@ -40,6 +41,7 @@ public partial class ModTweaksView : UserControl
         MainWindow.Settings.NormalResistPenalty = normalResistPenalty;
         MainWindow.Settings.NightmareResistPenalty = nightmareResistPenalty;
         MainWindow.Settings.HellResistPenalty = hellResistPenalty;
+        MainWindow.Settings.RemovePaladinAuraSound = removePaladinAuraSound;
         MainWindow.Settings.RemoveSplashVfx = removeSplashVfx;
 
         SkillPointsComboBox.SelectedIndex = skillPointsPerLevel - 1;
@@ -48,6 +50,7 @@ public partial class ModTweaksView : UserControl
         NormalResistPenaltyTextBox.Text = normalResistPenalty.ToString();
         NightmareResistPenaltyTextBox.Text = nightmareResistPenalty.ToString();
         HellResistPenaltyTextBox.Text = hellResistPenalty.ToString();
+        RemovePaladinAuraSoundCheckBox.IsChecked = removePaladinAuraSound;
         RemoveSplashVfxCheckBox.IsChecked = removeSplashVfx;
         WarningBorder.IsVisible = HasNonDefaultTweaks(
             skillPointsPerLevel,
@@ -56,6 +59,7 @@ public partial class ModTweaksView : UserControl
             normalResistPenalty,
             nightmareResistPenalty,
             hellResistPenalty,
+            removePaladinAuraSound,
             removeSplashVfx);
 
         _isRefreshing = false;
@@ -77,8 +81,29 @@ public partial class ModTweaksView : UserControl
             MainWindow.Settings.NormalResistPenalty,
             MainWindow.Settings.NightmareResistPenalty,
             MainWindow.Settings.HellResistPenalty,
+            MainWindow.Settings.RemovePaladinAuraSound,
             MainWindow.Settings.RemoveSplashVfx);
 
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private async void OnSoundTweaksChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_isRefreshing)
+        {
+            return;
+        }
+
+        MainWindow.Settings.RemovePaladinAuraSound = RemovePaladinAuraSoundCheckBox.IsChecked ?? false;
+        WarningBorder.IsVisible = HasNonDefaultTweaks(
+            MainWindow.Settings.SkillPointsPerLevel,
+            MainWindow.Settings.AttributesPerLevel,
+            MainWindow.Settings.MaxSkillLevel,
+            MainWindow.Settings.NormalResistPenalty,
+            MainWindow.Settings.NightmareResistPenalty,
+            MainWindow.Settings.HellResistPenalty,
+            MainWindow.Settings.RemovePaladinAuraSound,
+            MainWindow.Settings.RemoveSplashVfx);
         await SettingsManager.SaveAsync(MainWindow.Settings);
     }
 
@@ -97,6 +122,7 @@ public partial class ModTweaksView : UserControl
             MainWindow.Settings.NormalResistPenalty,
             MainWindow.Settings.NightmareResistPenalty,
             MainWindow.Settings.HellResistPenalty,
+            MainWindow.Settings.RemovePaladinAuraSound,
             MainWindow.Settings.RemoveSplashVfx);
         await SettingsManager.SaveAsync(MainWindow.Settings);
     }
@@ -194,6 +220,7 @@ public partial class ModTweaksView : UserControl
             MainWindow.Settings.NormalResistPenalty,
             MainWindow.Settings.NightmareResistPenalty,
             MainWindow.Settings.HellResistPenalty,
+            MainWindow.Settings.RemovePaladinAuraSound,
             MainWindow.Settings.RemoveSplashVfx);
         await SettingsManager.SaveAsync(MainWindow.Settings);
     }
@@ -221,6 +248,7 @@ public partial class ModTweaksView : UserControl
             MainWindow.Settings.NormalResistPenalty,
             MainWindow.Settings.NightmareResistPenalty,
             MainWindow.Settings.HellResistPenalty,
+            MainWindow.Settings.RemovePaladinAuraSound,
             MainWindow.Settings.RemoveSplashVfx);
         await SettingsManager.SaveAsync(MainWindow.Settings);
     }
@@ -285,6 +313,7 @@ public partial class ModTweaksView : UserControl
         int normalResistPenalty,
         int nightmareResistPenalty,
         int hellResistPenalty,
+        bool removePaladinAuraSound,
         bool removeSplashVfx)
     {
         return skillPointsPerLevel != DefaultSkillPointsPerLevel
@@ -292,7 +321,9 @@ public partial class ModTweaksView : UserControl
                || maxSkillLevel != DefaultMaxSkillLevel
                || normalResistPenalty != DefaultNormalResistPenalty
                || nightmareResistPenalty != DefaultNightmareResistPenalty
-               || hellResistPenalty != DefaultHellResistPenalty;
+               || hellResistPenalty != DefaultHellResistPenalty
+               || removePaladinAuraSound
+               || removeSplashVfx;
     }
 
     private static int Clamp(int value, int min, int max)

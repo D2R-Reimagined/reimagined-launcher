@@ -10,7 +10,6 @@ public class AppSettings
     public int BackupAmount { get; set; } = 10;
     public string? NexusModsSSOApiKey { get; set; }
     public bool? NexusPremiumDownloadAccess { get; set; }
-    public bool UseDirectLaunch { get; set; }
     public bool NoSound { get; set; }
     public bool NoRumble { get; set; }
     public bool ResetOfflineMaps { get; set; }
@@ -22,5 +21,6 @@ public class AppSettings
     public int NormalResistPenalty { get; set; }
     public int NightmareResistPenalty { get; set; } = -60;
     public int HellResistPenalty { get; set; } = -120;
+    public bool RemovePaladinAuraSound { get; set; }
     public bool RemoveSplashVfx { get; set; }
 }

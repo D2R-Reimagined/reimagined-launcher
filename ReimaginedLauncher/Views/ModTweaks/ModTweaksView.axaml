@@ -133,6 +133,28 @@
                 <StackPanel Spacing="14">
                     <StackPanel Spacing="4">
                         <TextBlock Classes="section-title"
+                                   Text="Sound Tweaks"/>
+                        <TextBlock Classes="muted"
+                                   Text="Optional local audio changes applied to excel data before launch."/>
+                    </StackPanel>
+
+                    <StackPanel Spacing="4">
+                        <CheckBox x:Name="RemovePaladinAuraSoundCheckBox"
+                                  Content="Remove Paladin Aura Sound"
+                                  Checked="OnSoundTweaksChanged"
+                                  Unchecked="OnSoundTweaksChanged"/>
+                        <TextBlock Classes="muted"
+                                   Margin="28,0,0,0"
+                                   Text="Blanks onsound for paladin_aura_* rows in states.txt for both excel variants."/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="14">
+                    <StackPanel Spacing="4">
+                        <TextBlock Classes="section-title"
                                    Text="Visual Tweaks"/>
                         <TextBlock Classes="muted"
                                    Text="Optional local visual changes applied to hd JSON data before launch."/>
@@ -158,7 +180,7 @@
                 <TextBlock x:Name="WarningTextBlock"
                            Foreground="{StaticResource GoldTextBrush}"
                            TextWrapping="Wrap"
-                           Text="This is the unintended Reimagined experience. Defaults are 1 skill point, 5 attributes per level, max skill level 25, default difficulty resist penalties of 0, -60, and -120, with Remove Splash VFX turned off."/>
+                           Text="This is the unintended Reimagined experience. Defaults are 1 skill point, 5 attributes per level, max skill level 25, default difficulty resist penalties of 0, -60, and -120, with Remove Paladin Aura Sound and Remove Splash VFX turned off."/>
             </Border>
         </StackPanel>
     </ScrollViewer>

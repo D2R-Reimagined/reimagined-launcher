@@ -149,11 +149,6 @@ public class GameLauncherService
             launchParameters.Add(MainWindow.Settings.PlayersCount.Value.ToString());
         }
 
-        if (MainWindow.Settings.UseDirectLaunch)
-        {
-            launchParameters.Add("-direct");
-        }
-
         if (MainWindow.Settings.NoRumble)
         {
             launchParameters.Add("-norumble");
