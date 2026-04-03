@@ -26,7 +26,8 @@
                                   Unchecked="OnLaunchSettingChanged"/>
                         <TextBlock Classes="muted"
                                    Margin="28,0,0,0"
-                                   Text="Enables unlimited stat and skill respecs in-game." />
+                                   TextWrapping="Wrap"
+                                   Text="Enables unlimited stat and skill respecs in-game. Hold ALT and left-click any STR/DEX/VIT/ENERGY plus button to trigger a stat reset." />
                     </StackPanel>
                     <StackPanel Spacing="4">
                         <CheckBox x:Name="ResetOfflineMapsCheckBox"
@@ -35,13 +36,15 @@
                                   Unchecked="OnLaunchSettingChanged"/>
                         <TextBlock Classes="muted"
                                    Margin="28,0,0,0"
-                                   Text="Generates fresh offline map layouts the next time the game starts." />
+                                   TextWrapping="Wrap"
+                                   Text="Generates fresh offline map layouts every time the game starts. If you only want to reset all maps once, you can also switch difficulties (Normal/Nightmare/Hell) on a single character." />
                     </StackPanel>
                     <StackPanel Spacing="8">
                         <TextBlock Text="-players"
                                    FontWeight="SemiBold" />
                         <TextBlock Classes="muted"
-                                   Text="Simulates higher player counts offline to increase difficulty and drops." />
+                                   TextWrapping="Wrap"
+                                   Text="Simulates higher player counts offline to increase difficulty and drops. The game sets /players to this value whenever you enter a game. You can change it in-game, but it resets to this value after returning to the character select screen." />
                         <ComboBox x:Name="PlayersComboBox"
                                   Width="180"
                                   SelectionChanged="OnPlayersSelectionChanged">
@@ -62,6 +65,7 @@
                                   Unchecked="OnLaunchSettingChanged"/>
                         <TextBlock Classes="muted"
                                    Margin="28,0,0,0"
+                                   TextWrapping="Wrap"
                                    Text="Disables controller vibration." />
                     </StackPanel>
                     <StackPanel Spacing="4">
@@ -71,6 +75,7 @@
                                   Unchecked="OnLaunchSettingChanged"/>
                         <TextBlock Classes="muted"
                                    Margin="28,0,0,0"
+                                   TextWrapping="Wrap"
                                    Text="Starts the game without audio output." />
                     </StackPanel>
                 </StackPanel>
