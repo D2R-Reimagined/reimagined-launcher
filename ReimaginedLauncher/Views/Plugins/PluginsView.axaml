@@ -1,0 +1,225 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:avaloniaEdit="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
+             xmlns:plugins="clr-namespace:ReimaginedLauncher.Utilities"
+             mc:Ignorable="d" d:DesignWidth="980" d:DesignHeight="560"
+             x:Class="ReimaginedLauncher.Views.Plugins.PluginsView">
+    <ScrollViewer x:Name="RootScrollViewer"
+                  HorizontalScrollBarVisibility="Disabled"
+                  VerticalScrollBarVisibility="Auto"
+                  Focusable="True"
+                  PointerPressed="OnBackgroundPointerPressed">
+        <StackPanel Spacing="18">
+            <StackPanel Spacing="4">
+                <TextBlock Classes="view-title"
+                           Text="Plugins" />
+                <TextBlock Classes="muted"
+                           Text="Import zip-based plugins, control execution order, and edit the JSON files that drive launcher-side patching." />
+            </StackPanel>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto"
+                      ColumnSpacing="12"
+                      RowDefinitions="Auto,Auto"
+                      RowSpacing="12">
+                    <StackPanel Grid.Row="0"
+                                Grid.Column="0"
+                                Spacing="4">
+                        <TextBlock Classes="section-title"
+                                   Text="Installed Plugins" />
+                        <TextBlock x:Name="PluginsSummaryTextBlock"
+                                   Classes="muted"
+                                   Text="Imported plugin zips appear here. Enable them to apply their JSON changes before launch." />
+                    </StackPanel>
+
+                    <Button Grid.Row="0"
+                            Grid.Column="1"
+                            Content="How To Write a Plugin"
+                            Click="OnOpenAuthoringGuideClicked" />
+                    <Button Grid.Row="0"
+                            Grid.Column="2"
+                            Content="Refresh"
+                            Click="OnRefreshClicked" />
+                    <Button Grid.Row="0"
+                            Grid.Column="3"
+                            Classes="accent"
+                            Content="Import Plugin Zip"
+                            Click="OnImportPluginClicked" />
+
+                    <StackPanel x:Name="EmptyStatePanel"
+                                Grid.Row="1"
+                                Grid.ColumnSpan="4"
+                                Spacing="4"
+                                IsVisible="False">
+                        <TextBlock Text="No plugins have been imported yet."
+                                   FontWeight="SemiBold" />
+                        <TextBlock Classes="muted"
+                                   Text="Import a zip that contains plugininfo.json plus one or more plugin JSON files." />
+                    </StackPanel>
+
+                    <ItemsControl x:Name="PluginsItemsControl"
+                                  Grid.Row="1"
+                                  Grid.ColumnSpan="4">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="plugins:PluginCatalogItem">
+                                <Border Classes="panel"
+                                        Margin="0,0,0,12"
+                                        Padding="16">
+                                    <StackPanel Spacing="12">
+                                        <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto"
+                                              ColumnSpacing="12">
+                                            <CheckBox Grid.Column="0"
+                                                      VerticalAlignment="Center"
+                                                      IsChecked="{Binding IsEnabled, Mode=OneWay}"
+                                                      Click="OnPluginEnabledClicked" />
+
+                                            <StackPanel Grid.Column="1"
+                                                        Spacing="3">
+                                                <TextBlock FontWeight="SemiBold"
+                                                           Text="{Binding Name}" />
+                                                <TextBlock Classes="muted"
+                                                           Text="{Binding Version, StringFormat=Version {0}}" />
+                                                <TextBlock Classes="muted"
+                                                           Text="{Binding Order, StringFormat=Execution order {0}}" />
+                                            </StackPanel>
+
+                                            <Button Grid.Column="2"
+                                                    Content="Up"
+                                                    Click="OnMovePluginUpClicked" />
+                                            <Button Grid.Column="3"
+                                                    Content="Down"
+                                                    Click="OnMovePluginDownClicked" />
+                                            <TextBlock Grid.Column="4"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="{StaticResource GoldTextBrush}"
+                                                       FontWeight="SemiBold"
+                                                       Text="{Binding StatusText}" />
+                                        </Grid>
+
+                                        <StackPanel Spacing="6">
+                                            <TextBlock Text="Parameters"
+                                                       FontWeight="SemiBold"
+                                                       IsVisible="{Binding HasParameters}" />
+
+                                            <ItemsControl ItemsSource="{Binding Parameters}"
+                                                          IsVisible="{Binding HasParameters}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="plugins:PluginParameterItem">
+                                                        <Grid ColumnDefinitions="220,*,Auto"
+                                                              ColumnSpacing="12"
+                                                              Margin="0,0,0,6">
+                                                            <StackPanel Grid.Column="0"
+                                                                        Spacing="2">
+                                                                <TextBlock Text="{Binding DisplayName}"
+                                                                           FontWeight="SemiBold" />
+                                                                <TextBlock Classes="muted"
+                                                                           Text="{Binding Description}"
+                                                                           TextWrapping="Wrap" />
+                                                            </StackPanel>
+
+                                                            <TextBox Grid.Column="1"
+                                                                     Text="{Binding Value, Mode=OneWay}"
+                                                                     VerticalAlignment="Center"
+                                                                     LostFocus="OnParameterValueChanged" />
+
+                                                            <TextBlock Grid.Column="2"
+                                                                       Classes="muted"
+                                                                       VerticalAlignment="Center"
+                                                                       Text="{Binding DefaultValue, StringFormat=Default {0}}" />
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+
+                                        <StackPanel Spacing="6">
+                                            <TextBlock Text="Plugin JSON Files"
+                                                       FontWeight="SemiBold" />
+
+                                            <ItemsControl ItemsSource="{Binding Files}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="plugins:PluginCatalogFileItem">
+                                                        <Grid ColumnDefinitions="*,Auto"
+                                                              ColumnSpacing="12">
+                                                            <TextBlock VerticalAlignment="Center"
+                                                                       Text="{Binding DisplayName}" />
+                                                            <Button Grid.Column="1"
+                                                                    Content="Edit JSON"
+                                                                    Click="OnEditPluginFileClicked" />
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+
+                                        <ItemsControl ItemsSource="{Binding Errors}"
+                                                      IsVisible="{Binding HasErrors}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="x:String">
+                                                    <Border Classes="warning-banner"
+                                                            Margin="0,0,0,8"
+                                                            Padding="10">
+                                                        <TextBlock Text="{Binding .}"
+                                                                   TextWrapping="Wrap" />
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Grid>
+            </Border>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="*,Auto"
+                          ColumnSpacing="12">
+                        <StackPanel Spacing="4">
+                            <TextBlock Classes="section-title"
+                                       Text="JSON Editor" />
+                            <TextBlock x:Name="EditorTitleTextBlock"
+                                       Classes="muted"
+                                       Text="Select a plugin JSON file to edit it here." />
+                        </StackPanel>
+
+                        <Border Grid.Column="1"
+                                Classes="warning-banner"
+                                Padding="10,6"
+                                VerticalAlignment="Center">
+                            <TextBlock x:Name="EditorStatusTextBlock"
+                                       Text="No file selected." />
+                        </Border>
+                    </Grid>
+                    <Grid ColumnDefinitions="*,Auto"
+                          ColumnSpacing="12">
+                        <TextBlock Classes="muted"
+                                   Text="Cmd/Ctrl+S saves changes. The editor tracks unsaved changes and only saves when content changed." />
+                        <Button x:Name="SaveJsonButton"
+                                Grid.Column="1"
+                                Classes="accent"
+                                Content="Save JSON"
+                                Click="OnSaveJsonClicked"
+                                IsEnabled="False" />
+                    </Grid>
+                    <avaloniaEdit:TextEditor x:Name="EditorTextBox"
+                                             Classes="code-editor"
+                                             MinHeight="420"
+                                             ShowLineNumbers="True"
+                                             WordWrap="False"
+                                             TextChanged="OnEditorTextChanged"
+                                             KeyDown="OnEditorKeyDown" />
+                    <TextBlock x:Name="SupportedTargetsTextBlock"
+                               Classes="muted"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

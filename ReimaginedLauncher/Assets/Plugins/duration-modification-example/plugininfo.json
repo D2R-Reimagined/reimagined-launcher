@@ -1,0 +1,16 @@
+{
+  "name": "Duration Modification",
+  "version": "1.0.0",
+  "files": [
+    "duration-modifier.json"
+  ],
+  "parameters": [
+    {
+      "key": "durationMultiplier",
+      "name": "Duration Multiplier",
+      "description": "Multiplies the existing Param4 duration value for Chilling Armor.",
+      "defaultValue": "2.0",
+      "value": "2.0"
+    }
+  ]
+}

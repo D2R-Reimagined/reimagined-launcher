@@ -12,6 +12,7 @@ public static class SettingsManager
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ReimaginedLauncher");
 
     private static readonly string SettingsFilePath = Path.Combine(AppDir, "settings.json");
+    public static string AppDirectoryPath => AppDir;
 
     public static async Task<AppSettings> LoadAsync()
     {
