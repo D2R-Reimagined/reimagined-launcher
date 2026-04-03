@@ -252,15 +252,6 @@ public static class ModTweaksService
         LaunchDiagnostics.Log($"STATUS: {message}");
     }
 
-    private static string NormalizeColumnName(string name)
-    {
-        return new string(name
-            .Trim()
-            .Where(char.IsLetterOrDigit)
-            .Select(char.ToLowerInvariant)
-            .ToArray());
-    }
-
     private static async Task RestoreMissilesFileAsync(string cleanMissilesFilePath, string? missilesFilePath)
     {
         if (string.IsNullOrWhiteSpace(missilesFilePath))
@@ -372,43 +363,26 @@ public static class ModTweaksService
 
     private static async Task ApplySkillsTweaksAsync(string skillsFilePath, int maxSkillLevel)
     {
-        var lines = await File.ReadAllLinesAsync(skillsFilePath);
-        if (lines.Length == 0)
+        var entries = (await SkillsParser.GetEntries(skillsFilePath)).ToList();
+        if (entries.Count == 0)
         {
-            throw new InvalidDataException("skills.txt did not contain any rows.");
-        }
-
-        var header = lines[0].Split('\t');
-        var maxLevelColumnIndex = Array.FindIndex(
-            header,
-            columnName => NormalizeColumnName(columnName).Equals("maxlvl", StringComparison.OrdinalIgnoreCase));
-        if (maxLevelColumnIndex < 0)
-        {
-            throw new InvalidDataException("skills.txt did not contain a maxlvl column.");
+            throw new InvalidDataException("skills.txt did not contain any editable rows.");
         }
 
         var updatedRows = 0;
-        var updatedLines = new List<string>(lines.Length) { lines[0] };
+        var updatedEntries = new List<D2RReimaginedTools.Models.Skills>(entries.Count);
 
-        foreach (var line in lines.Skip(1))
+        foreach (var entry in entries)
         {
-            if (string.IsNullOrWhiteSpace(line))
-            {
-                updatedLines.Add(line);
-                continue;
-            }
-
-            var columns = line.Split('\t');
-            if (maxLevelColumnIndex >= columns.Length ||
-                !int.TryParse(columns[maxLevelColumnIndex], out var currentMaxLevel) ||
+            if (string.IsNullOrWhiteSpace(entry.CharClass) ||
+                !int.TryParse(entry.MaxLvl, out var currentMaxLevel) ||
                 currentMaxLevel <= 0)
             {
-                updatedLines.Add(line);
+                updatedEntries.Add(entry);
                 continue;
             }
 
-            columns[maxLevelColumnIndex] = maxSkillLevel.ToString();
-            updatedLines.Add(string.Join('\t', columns));
+            updatedEntries.Add(entry with { MaxLvl = maxSkillLevel.ToString() });
             updatedRows++;
         }
 
@@ -417,7 +391,11 @@ public static class ModTweaksService
             throw new InvalidDataException("skills.txt did not contain any rows with maxlvl values.");
         }
 
-        await File.WriteAllLinesAsync(skillsFilePath, updatedLines);
+        await SaveGeneratedEntriesAsync(
+            updatedEntries,
+            skillsFilePath,
+            (updatedEntriesList, filePath, outputDirectory, cancellationToken) =>
+                SkillsParser.SaveEntries(updatedEntriesList, filePath, outputDirectory, cancellationToken));
     }
 
     private static async Task ApplyStatesTweaksAsync(string statesFilePath, bool removePaladinAuraSound)
