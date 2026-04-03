@@ -17,9 +17,13 @@ public static class ModTweaksService
     private const string BaseExcelDirectoryName = "base";
     private const string CleanExcelDirectoryName = "excel_launcher_clean";
     private const string HdDirectoryName = "hd";
+    private const string GlobalDirectoryName = "global";
+    private const string UiDirectoryName = "ui";
     private const string MissilesDirectoryName = "missiles";
     private const string MissilesFileName = "missiles.json";
     private const string CleanMissilesFileName = "missiles_launcher_clean.json";
+    private const string LayoutsProfileHdFileName = "layouts_profilehd.json";
+    private const string CleanLayoutsProfileHdFileName = "layouts_profilehd_launcher_clean.json";
     private const string CharStatsFileName = "charstats.txt";
     private const string DifficultyLevelsFileName = "DifficultyLevels.txt";
     private const string SkillsFileName = "skills.txt";
@@ -38,10 +42,13 @@ public static class ModTweaksService
         }
 
         var missilesFilePath = GetMissilesFilePath();
+        var layoutsProfileHdFilePath = GetLayoutsProfileHdFilePath();
         var cleanExcelDirectory = GetCleanExcelDirectory(excelDirectory);
         var cleanMissilesFilePath = GetCleanMissilesFilePath(missilesFilePath);
+        var cleanLayoutsProfileHdFilePath = GetCleanLayoutsProfileHdFilePath(layoutsProfileHdFilePath);
         var excelDirectories = GetExcelDirectories(excelDirectory).ToList();
         LaunchDiagnostics.Log($"Resolved missiles file path: {missilesFilePath ?? "<null>"}");
+        LaunchDiagnostics.Log($"Resolved layouts_profilehd.json path: {layoutsProfileHdFilePath ?? "<null>"}");
         LaunchDiagnostics.Log($"Excel directories to process: {string.Join(", ", excelDirectories)}");
 
         try
@@ -52,6 +59,9 @@ public static class ModTweaksService
             ReportProgress(progress, "Preparing clean missiles copy...");
             LaunchDiagnostics.Log("Ensuring clean missiles copy.");
             await EnsureCleanMissilesCopyAsync(missilesFilePath, cleanMissilesFilePath);
+            ReportProgress(progress, "Preparing clean tooltip layout copy...");
+            LaunchDiagnostics.Log("Ensuring clean layouts_profilehd.json copy.");
+            await EnsureCleanLayoutsProfileHdCopyAsync(layoutsProfileHdFilePath, cleanLayoutsProfileHdFilePath);
 
             foreach (var targetExcelDirectory in excelDirectories)
             {
@@ -70,6 +80,12 @@ public static class ModTweaksService
             ReportProgress(progress, "Applying missiles tweaks...");
             LaunchDiagnostics.Log("Applying missiles tweaks.");
             await ApplyMissilesTweaksAsync(missilesFilePath, MainWindow.Settings.RemoveSplashVfx);
+            ReportProgress(progress, "Restoring layouts_profilehd.json...");
+            LaunchDiagnostics.Log("Restoring tooltip layout file from clean copy.");
+            await RestoreLayoutsProfileHdFileAsync(cleanLayoutsProfileHdFilePath, layoutsProfileHdFilePath);
+            ReportProgress(progress, "Applying tooltip layout tweaks...");
+            LaunchDiagnostics.Log("Applying tooltip layout tweaks.");
+            await ApplyTooltipLayoutTweaksAsync(layoutsProfileHdFilePath, MainWindow.Settings.MakeTooltipBackgroundOpaque);
             LaunchDiagnostics.Log("Mod tweak preparation succeeded.");
 
             return true;
@@ -117,6 +133,25 @@ public static class ModTweaksService
             HdDirectoryName,
             MissilesDirectoryName,
             MissilesFileName);
+    }
+
+    private static string? GetLayoutsProfileHdFilePath()
+    {
+        var installDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(MainWindow.Settings.InstallDirectory);
+        if (string.IsNullOrWhiteSpace(installDirectory))
+        {
+            return null;
+        }
+
+        return Path.Combine(
+            installDirectory,
+            "mods",
+            ModDirectoryName,
+            $"{ModDirectoryName}.mpq",
+            DataDirectoryName,
+            GlobalDirectoryName,
+            UiDirectoryName,
+            LayoutsProfileHdFileName);
     }
 
     private static string GetCleanExcelDirectory(string excelDirectory)
@@ -169,6 +204,37 @@ public static class ModTweaksService
         }
 
         await CopyFileAsync(missilesFilePath, cleanMissilesFilePath, overwrite: true);
+    }
+
+    private static string GetCleanLayoutsProfileHdFilePath(string? layoutsProfileHdFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(layoutsProfileHdFilePath))
+        {
+            throw new FileNotFoundException("layouts_profilehd.json path could not be resolved.");
+        }
+
+        var layoutsDirectory = Path.GetDirectoryName(layoutsProfileHdFilePath);
+        if (string.IsNullOrWhiteSpace(layoutsDirectory))
+        {
+            throw new DirectoryNotFoundException("UI layouts folder could not be resolved.");
+        }
+
+        return Path.Combine(layoutsDirectory, CleanLayoutsProfileHdFileName);
+    }
+
+    private static async Task EnsureCleanLayoutsProfileHdCopyAsync(string? layoutsProfileHdFilePath, string cleanLayoutsProfileHdFilePath)
+    {
+        if (File.Exists(cleanLayoutsProfileHdFilePath))
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(layoutsProfileHdFilePath) || !File.Exists(layoutsProfileHdFilePath))
+        {
+            throw new FileNotFoundException("layouts_profilehd.json was not found in the Reimagined global ui folder.");
+        }
+
+        await CopyFileAsync(layoutsProfileHdFilePath, cleanLayoutsProfileHdFilePath, overwrite: true);
     }
 
     private static IEnumerable<string> GetExcelDirectories(string excelDirectory)
@@ -283,6 +349,40 @@ public static class ModTweaksService
         if (updatedEntries == 0)
         {
             throw new InvalidDataException("missiles.json did not contain a proc_splash_explode entry to update.");
+        }
+    }
+
+    private static async Task RestoreLayoutsProfileHdFileAsync(string cleanLayoutsProfileHdFilePath, string? layoutsProfileHdFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(layoutsProfileHdFilePath))
+        {
+            throw new FileNotFoundException("layouts_profilehd.json path could not be resolved.");
+        }
+
+        if (!File.Exists(cleanLayoutsProfileHdFilePath))
+        {
+            throw new FileNotFoundException("Clean layouts_profilehd.json copy was not found.");
+        }
+
+        await CopyFileAsync(cleanLayoutsProfileHdFilePath, layoutsProfileHdFilePath, overwrite: true);
+    }
+
+    private static async Task ApplyTooltipLayoutTweaksAsync(string? layoutsProfileHdFilePath, bool makeTooltipBackgroundOpaque)
+    {
+        if (string.IsNullOrWhiteSpace(layoutsProfileHdFilePath) || !File.Exists(layoutsProfileHdFilePath))
+        {
+            throw new FileNotFoundException("layouts_profilehd.json was not found in the Reimagined global ui folder.");
+        }
+
+        if (!makeTooltipBackgroundOpaque)
+        {
+            return;
+        }
+
+        var updatedValues = await TooltipStyleJsonService.MakeTooltipBackgroundOpaqueAsync(layoutsProfileHdFilePath);
+        if (updatedValues == 0)
+        {
+            throw new InvalidDataException("layouts_profilehd.json did not contain TooltipStyle background colors to update.");
         }
     }
 

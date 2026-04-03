@@ -23,4 +23,5 @@ public class AppSettings
     public int HellResistPenalty { get; set; } = -120;
     public bool RemovePaladinAuraSound { get; set; }
     public bool RemoveSplashVfx { get; set; }
+    public bool MakeTooltipBackgroundOpaque { get; set; }
 }
