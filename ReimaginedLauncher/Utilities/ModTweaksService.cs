@@ -438,8 +438,8 @@ public static class ModTweaksService
 
         foreach (var entry in entries)
         {
-            if (string.IsNullOrWhiteSpace(entry.StateId) ||
-                !entry.StateId.StartsWith("paladin_aura_", StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrWhiteSpace(entry.OnSound) ||
+                !entry.OnSound.StartsWith("paladin_aura_", StringComparison.OrdinalIgnoreCase))
             {
                 updatedEntries.Add(entry);
                 continue;
