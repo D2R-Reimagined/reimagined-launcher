@@ -74,18 +74,39 @@
                                 </ComboBox>
                             </StackPanel>
 
-                            <StackPanel Grid.Column="2" Spacing="8">
-                                <TextBlock Text="Max Skill Level"
-                                           FontWeight="SemiBold"/>
-                                <TextBox x:Name="MaxSkillLevelTextBox"
-                                         Width="180"
-                                         HorizontalAlignment="Left"
-                                         LostFocus="OnMaxSkillLevelChanged"
-                                         KeyDown="OnMaxSkillLevelKeyDown"/>
-                            </StackPanel>
-                        </Grid>
-                    </StackPanel>
-                </Border>
+                        <StackPanel Grid.Column="2" Spacing="8">
+                            <TextBlock Text="Max Skill Level"
+                                       FontWeight="SemiBold"/>
+                            <ComboBox x:Name="MaxSkillLevelComboBox"
+                                      Width="180"
+                                      HorizontalAlignment="Left"
+                                      SelectionChanged="OnTweaksSelectionChanged">
+                                <ComboBoxItem Content="5"/>
+                                <ComboBoxItem Content="6"/>
+                                <ComboBoxItem Content="7"/>
+                                <ComboBoxItem Content="8"/>
+                                <ComboBoxItem Content="9"/>
+                                <ComboBoxItem Content="10"/>
+                                <ComboBoxItem Content="11"/>
+                                <ComboBoxItem Content="12"/>
+                                <ComboBoxItem Content="13"/>
+                                <ComboBoxItem Content="14"/>
+                                <ComboBoxItem Content="15"/>
+                                <ComboBoxItem Content="16"/>
+                                <ComboBoxItem Content="17"/>
+                                <ComboBoxItem Content="18"/>
+                                <ComboBoxItem Content="19"/>
+                                <ComboBoxItem Content="20"/>
+                                <ComboBoxItem Content="21"/>
+                                <ComboBoxItem Content="22"/>
+                                <ComboBoxItem Content="23"/>
+                                <ComboBoxItem Content="24"/>
+                                <ComboBoxItem Content="25 (Default)"/>
+                            </ComboBox>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
 
                 <Border Classes="panel"
                         Padding="20">
@@ -97,39 +118,45 @@
                                        Text="Override the ResistPenalty values in DifficultyLevels for each difficulty."/>
                         </StackPanel>
 
-                        <Grid ColumnDefinitions="220,220,220,*" ColumnSpacing="16" RowDefinitions="Auto">
-                            <StackPanel Grid.Column="0" Spacing="8">
-                                <TextBlock Text="Normal Resist Penalty"
-                                           FontWeight="SemiBold"/>
-                                <TextBox x:Name="NormalResistPenaltyTextBox"
-                                         Width="180"
-                                         HorizontalAlignment="Left"
-                                         LostFocus="OnResistPenaltyChanged"
-                                         KeyDown="OnResistPenaltyKeyDown"/>
-                            </StackPanel>
+                    <Grid ColumnDefinitions="220,220,220,*" ColumnSpacing="16" RowDefinitions="Auto">
+                        <StackPanel Grid.Column="0" Spacing="8">
+                            <TextBlock Text="Normal Resist Penalty"
+                                       FontWeight="SemiBold"/>
+                            <TextBox x:Name="NormalResistPenaltyTextBox"
+                                     Width="180"
+                                     HorizontalAlignment="Left"
+                                     LostFocus="OnResistPenaltyChanged"
+                                     KeyDown="OnResistPenaltyKeyDown"/>
+                            <TextBlock Classes="muted"
+                                       Text="Default: 0"/>
+                        </StackPanel>
 
-                            <StackPanel Grid.Column="1" Spacing="8">
-                                <TextBlock Text="Nightmare Resist Penalty"
-                                           FontWeight="SemiBold"/>
-                                <TextBox x:Name="NightmareResistPenaltyTextBox"
-                                         Width="180"
-                                         HorizontalAlignment="Left"
-                                         LostFocus="OnResistPenaltyChanged"
-                                         KeyDown="OnResistPenaltyKeyDown"/>
-                            </StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="8">
+                            <TextBlock Text="Nightmare Resist Penalty"
+                                       FontWeight="SemiBold"/>
+                            <TextBox x:Name="NightmareResistPenaltyTextBox"
+                                     Width="180"
+                                     HorizontalAlignment="Left"
+                                     LostFocus="OnResistPenaltyChanged"
+                                     KeyDown="OnResistPenaltyKeyDown"/>
+                            <TextBlock Classes="muted"
+                                       Text="Default: -60"/>
+                        </StackPanel>
 
-                            <StackPanel Grid.Column="2" Spacing="8">
-                                <TextBlock Text="Hell Resist Penalty"
-                                           FontWeight="SemiBold"/>
-                                <TextBox x:Name="HellResistPenaltyTextBox"
-                                         Width="180"
-                                         HorizontalAlignment="Left"
-                                         LostFocus="OnResistPenaltyChanged"
-                                         KeyDown="OnResistPenaltyKeyDown"/>
-                            </StackPanel>
-                        </Grid>
-                    </StackPanel>
-                </Border>
+                        <StackPanel Grid.Column="2" Spacing="8">
+                            <TextBlock Text="Hell Resist Penalty"
+                                       FontWeight="SemiBold"/>
+                            <TextBox x:Name="HellResistPenaltyTextBox"
+                                     Width="180"
+                                     HorizontalAlignment="Left"
+                                     LostFocus="OnResistPenaltyChanged"
+                                     KeyDown="OnResistPenaltyKeyDown"/>
+                            <TextBlock Classes="muted"
+                                       Text="Default: -120"/>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
 
                 <Border Classes="panel"
                         Padding="20">
@@ -141,17 +168,17 @@
                                        Text="Optional local audio changes applied to excel data before launch."/>
                         </StackPanel>
 
-                        <StackPanel Spacing="4">
-                            <CheckBox x:Name="RemovePaladinAuraSoundCheckBox"
-                                      Content="Remove Paladin Aura Sound"
-                                      Checked="OnSoundTweaksChanged"
-                                      Unchecked="OnSoundTweaksChanged"/>
-                            <TextBlock Classes="muted"
-                                       Margin="28,0,0,0"
-                                       Text="Blanks onsound for paladin_aura_* rows in states.txt for both excel variants."/>
-                        </StackPanel>
+                    <StackPanel Spacing="4">
+                        <CheckBox x:Name="RemovePaladinAuraSoundCheckBox"
+                                  Content="Remove Paladin Aura Sound"
+                                  Checked="OnSoundTweaksChanged"
+                                  Unchecked="OnSoundTweaksChanged"/>
+                        <TextBlock Classes="muted"
+                                   Margin="28,0,0,0"
+                                   Text="Stops Paladin aura sounds from constantly turning on and off. Useful if you teleport with a mercenary using aura-on-equip gear."/>
                     </StackPanel>
-                </Border>
+                </StackPanel>
+            </Border>
 
                 <Border Classes="panel"
                         Padding="20">
@@ -163,17 +190,27 @@
                                        Text="Optional local visual changes applied to hd JSON data before launch."/>
                         </StackPanel>
 
-                        <StackPanel Spacing="4">
-                            <CheckBox x:Name="RemoveSplashVfxCheckBox"
-                                      Content="Remove Splash VFX"
-                                      Checked="OnVisualTweaksChanged"
-                                      Unchecked="OnVisualTweaksChanged"/>
-                            <TextBlock Classes="muted"
-                                       Margin="28,0,0,0"
-                                       Text="Blanks proc_splash_explode in missiles.json to remove the splash visual effect."/>
-                        </StackPanel>
+                    <StackPanel Spacing="4">
+                        <CheckBox x:Name="RemoveSplashVfxCheckBox"
+                                  Content="Remove Splash VFX"
+                                  Checked="OnVisualTweaksChanged"
+                                  Unchecked="OnVisualTweaksChanged"/>
+                        <TextBlock Classes="muted"
+                                   Margin="28,0,0,0"
+                                   Text="Removes the red dust cloud effect from the Splash Charm. The charm still works the same way."/>
                     </StackPanel>
-                </Border>
+
+                    <StackPanel Spacing="4">
+                        <CheckBox x:Name="MakeTooltipBackgroundOpaqueCheckBox"
+                                  Content="Make Tooltip Background Opaque (HDR Tooltip Fix)"
+                                  Checked="OnVisualTweaksChanged"
+                                  Unchecked="OnVisualTweaksChanged"/>
+                        <TextBlock Classes="muted"
+                                   Margin="28,0,0,0"
+                                   Text="Makes item tooltip backgrounds solid black so they stay readable with HDR on."/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
             </StackPanel>
         </ScrollViewer>
 
@@ -185,7 +222,7 @@
             <TextBlock x:Name="WarningTextBlock"
                        Foreground="{StaticResource GoldTextBrush}"
                        TextWrapping="Wrap"
-                       Text="This is the unintended Reimagined experience. Defaults are 1 skill point, 5 attributes per level, max skill level 25, default difficulty resist penalties of 0, -60, and -120, with Remove Paladin Aura Sound and Remove Splash VFX turned off."/>
+                       Text="This is the unintended Reimagined experience. Defaults are 1 skill point, 5 attributes per level, max skill level 25, and default difficulty resist penalties of 0, -60, and -120."/>
         </Border>
     </Grid>
 </UserControl>

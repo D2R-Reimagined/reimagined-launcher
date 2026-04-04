@@ -73,6 +73,7 @@
                                  Classes="nav-list"
                                  SelectionChanged="OnNavigationSelectionChanged">
                             <ListBoxItem x:Name="LaunchNavItem" Content="Launch" />
+                            <ListBoxItem Content="Plugins" />
                             <ListBoxItem Content="Backups" />
                             <ListBoxItem Content="Settings" />
                             <ListBoxItem Content="Mod Tweaks" />

@@ -1,4 +1,6 @@
-﻿namespace ReimaginedLauncher.Utilities;
+﻿using System.Collections.Generic;
+
+namespace ReimaginedLauncher.Utilities;
 
 public class AppSettings
 {
@@ -23,4 +25,6 @@ public class AppSettings
     public int HellResistPenalty { get; set; } = -120;
     public bool RemovePaladinAuraSound { get; set; }
     public bool RemoveSplashVfx { get; set; }
+    public List<PluginRegistration> Plugins { get; set; } = [];
+    public bool MakeTooltipBackgroundOpaque { get; set; }
 }
