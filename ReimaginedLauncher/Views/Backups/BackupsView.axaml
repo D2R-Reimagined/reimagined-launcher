@@ -8,7 +8,26 @@
              x:Class="ReimaginedLauncher.Views.Backups.BackupsView">
     <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                   VerticalScrollBarVisibility="Auto">
-        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="12" ColumnSpacing="12">
+        <StackPanel Spacing="12">
+            <Border x:Name="LoadingBanner"
+                    Classes="panel"
+                    Padding="16"
+                    IsVisible="False">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="Loading backups..."
+                               FontWeight="SemiBold"/>
+                    <ProgressBar IsIndeterminate="True"
+                                 Height="8"/>
+                    <TextBlock Classes="muted"
+                               Text="Reading backup settings and saved snapshots."/>
+                </StackPanel>
+            </Border>
+
+            <Grid x:Name="ContentGrid"
+                  RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                  ColumnDefinitions="*,Auto"
+                  RowSpacing="12"
+                  ColumnSpacing="12">
             <StackPanel Grid.Row="0" Grid.ColumnSpan="2" Spacing="4">
                 <TextBlock Classes="view-title" Text="Backups"/>
                 <TextBlock Classes="muted" Text="Configure the backup system, choose how often backups run, and restore any saved snapshot."/>
@@ -79,6 +98,7 @@
                        x:Name="RestoreSelectionTextBlock"
                        Opacity="0.75"
                        Text="Select a backup to restore."/>
-        </Grid>
+            </Grid>
+        </StackPanel>
     </ScrollViewer>
 </UserControl>

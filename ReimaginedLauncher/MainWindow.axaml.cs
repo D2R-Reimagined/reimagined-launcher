@@ -23,6 +23,7 @@ using ReimaginedLauncher.Utilities.ViewModels;
 using ReimaginedLauncher.Views.Backups;
 using ReimaginedLauncher.Views.Launch;
 using ReimaginedLauncher.Views.ModTweaks;
+using ReimaginedLauncher.Views.Plugins;
 using ReimaginedLauncher.Views.Settings;
 using ReimaginedLauncher.Views.Update;
 
@@ -104,6 +105,7 @@ public partial class MainWindow : Window
         
         var installDir = Settings.InstallDirectory;
         RefreshLocalModState(installDir);
+        PluginsView? pluginsViewToRefresh = null;
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
@@ -123,7 +125,16 @@ public partial class MainWindow : Window
             {
                 modTweaksView.RefreshTweaksState();
             }
+            else if (ContentArea.Content is PluginsView pluginsView)
+            {
+                pluginsViewToRefresh = pluginsView;
+            }
         });
+
+        if (pluginsViewToRefresh != null)
+        {
+            await pluginsViewToRefresh.RefreshPluginsStateAsync();
+        }
 
         BackupService.UpdateSchedule();
         await SettingsManager.SaveAsync(Settings);
@@ -488,9 +499,10 @@ public partial class MainWindow : Window
                     ContentArea.Content = launchView;
                     break;
                 case "Backups":
-                    var backupsView = new BackupsView();
-                    backupsView.RefreshBackupState();
-                    ContentArea.Content = backupsView;
+                    _ = NavigateToBackupsViewAsync();
+                    break;
+                case "Plugins":
+                    _ = NavigateToPluginsViewAsync();
                     break;
                 case "Settings":
                     var settingsView = new SettingsView();
@@ -579,6 +591,119 @@ public partial class MainWindow : Window
         });
     }
 
+    public async Task NavigateToBackupsViewAsync()
+    {
+        BackupsView? backupsView = null;
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            backupsView = new BackupsView();
+            backupsView.SetLoadingState(true);
+            ContentArea.Content = backupsView;
+
+            if (NavigationList.SelectedItem is not ListBoxItem { Content: "Backups" })
+            {
+                NavigationList.SelectedIndex = 2;
+            }
+        });
+
+        try
+        {
+            if (backupsView != null)
+            {
+                await backupsView.RefreshBackupStateAsync();
+            }
+        }
+        finally
+        {
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (backupsView != null && ReferenceEquals(ContentArea.Content, backupsView))
+                {
+                    backupsView.SetLoadingState(false);
+                }
+            });
+        }
+    }
+
+    public async Task NavigateToPluginsViewAsync()
+    {
+        PluginsView? pluginsView = null;
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            pluginsView = new PluginsView();
+            pluginsView.SetLoadingState(true);
+            ContentArea.Content = pluginsView;
+
+            if (NavigationList.SelectedItem is not ListBoxItem { Content: "Plugins" })
+            {
+                NavigationList.SelectedIndex = 1;
+            }
+        });
+
+        try
+        {
+            if (pluginsView != null)
+            {
+                await pluginsView.RefreshPluginsStateAsync();
+            }
+        }
+        finally
+        {
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (pluginsView != null && ReferenceEquals(ContentArea.Content, pluginsView))
+                {
+                    pluginsView.SetLoadingState(false);
+                }
+            });
+        }
+    }
+
+    public void NavigateToPluginsView()
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(NavigateToPluginsView);
+            return;
+        }
+
+        _ = NavigateToPluginsViewAsync();
+    }
+
+    public void NavigateToPluginAuthoringGuideView()
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(NavigateToPluginAuthoringGuideView);
+            return;
+        }
+
+        ContentArea.Content = new PluginAuthoringGuideView();
+
+        if (NavigationList.SelectedItem is not ListBoxItem { Content: "Plugins" })
+        {
+            NavigationList.SelectedIndex = 1;
+        }
+    }
+
+    public void NavigateToOfficialPluginsView()
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(NavigateToOfficialPluginsView);
+            return;
+        }
+
+        ContentArea.Content = new OfficialPluginsView();
+
+        if (NavigationList.SelectedItem is not ListBoxItem { Content: "Plugins" })
+        {
+            NavigationList.SelectedIndex = 1;
+        }
+    }
+
     private void RefreshCurrentContent()
     {
         if (!Dispatcher.UIThread.CheckAccess())
@@ -593,7 +718,7 @@ public partial class MainWindow : Window
         }
         else if (ContentArea.Content is BackupsView backupsView)
         {
-            backupsView.RefreshBackupState();
+            _ = backupsView.RefreshBackupStateAsync();
         }
         else if (ContentArea.Content is SettingsView settingsView)
         {
@@ -602,6 +727,14 @@ public partial class MainWindow : Window
         else if (ContentArea.Content is ModTweaksView modTweaksView)
         {
             modTweaksView.RefreshTweaksState();
+        }
+        else if (ContentArea.Content is PluginsView pluginsView)
+        {
+            _ = pluginsView.RefreshPluginsStateAsync();
+        }
+        else if (ContentArea.Content is OfficialPluginsView officialPluginsView)
+        {
+            _ = officialPluginsView.RefreshOfficialPluginsStateAsync();
         }
         else if (ContentArea.Content is UpdateView updateView)
         {
