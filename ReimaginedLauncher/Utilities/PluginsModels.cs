@@ -21,6 +21,31 @@ public sealed class PluginCatalogItem
             : "Disabled";
 }
 
+public sealed class OfficialPluginCatalogItem
+{
+    public string FolderName { get; init; } = string.Empty;
+    public string PluginId { get; init; } = string.Empty;
+    public string Name { get; init; } = string.Empty;
+    public string Version { get; init; } = string.Empty;
+    public bool IsInstalled { get; init; }
+    public bool IsEnabled { get; init; }
+    public IReadOnlyList<string> Errors { get; init; } = [];
+    public bool HasErrors => Errors.Count > 0;
+    public bool CanInstallOrEnable => !HasErrors && (!IsInstalled || !IsEnabled);
+    public string ActionText => !IsInstalled
+        ? "Install"
+        : IsEnabled
+            ? "Installed"
+            : "Enable";
+    public string StatusText => HasErrors
+        ? $"{Errors.Count} error(s)"
+        : !IsInstalled
+            ? "Not installed"
+            : IsEnabled
+                ? "Enabled"
+                : "Disabled";
+}
+
 public sealed class PluginParameterItem
 {
     public string PluginId { get; init; } = string.Empty;

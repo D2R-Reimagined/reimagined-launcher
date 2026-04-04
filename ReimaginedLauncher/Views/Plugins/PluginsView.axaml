@@ -12,6 +12,22 @@
                   Focusable="True"
                   PointerPressed="OnBackgroundPointerPressed">
         <StackPanel Spacing="18">
+            <Border x:Name="LoadingBanner"
+                    Classes="panel"
+                    Padding="16"
+                    IsVisible="False">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="Loading plugins..."
+                               FontWeight="SemiBold" />
+                    <ProgressBar IsIndeterminate="True"
+                                 Height="8" />
+                    <TextBlock Classes="muted"
+                               Text="Loading installed plugins and editor state." />
+                </StackPanel>
+            </Border>
+
+            <StackPanel x:Name="ContentPanel"
+                        Spacing="18">
             <StackPanel Spacing="4">
                 <TextBlock Classes="view-title"
                            Text="Plugins" />
@@ -21,7 +37,7 @@
 
             <Border Classes="panel"
                     Padding="20">
-                <Grid ColumnDefinitions="*,Auto,Auto,Auto"
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto"
                       ColumnSpacing="12"
                       RowDefinitions="Auto,Auto"
                       RowSpacing="12">
@@ -32,44 +48,48 @@
                                    Text="Installed Plugins" />
                         <TextBlock x:Name="PluginsSummaryTextBlock"
                                    Classes="muted"
-                                   Text="Imported plugin zips appear here. Enable them to apply their JSON changes before launch." />
+                                   Text="Plugins you install appear here. Enable them to apply their JSON changes before launch." />
                     </StackPanel>
 
                     <Button Grid.Row="0"
                             Grid.Column="1"
+                            Content="Install Official Plugins"
+                            Click="OnOpenOfficialPluginsClicked" />
+                    <Button Grid.Row="0"
+                            Grid.Column="2"
                             Content="How To Write a Plugin"
                             Click="OnOpenAuthoringGuideClicked" />
                     <Button Grid.Row="0"
-                            Grid.Column="2"
+                            Grid.Column="3"
                             Content="Refresh"
                             Click="OnRefreshClicked" />
                     <Button Grid.Row="0"
-                            Grid.Column="3"
+                            Grid.Column="4"
                             Classes="accent"
                             Content="Import Plugin Zip"
                             Click="OnImportPluginClicked" />
 
                     <StackPanel x:Name="EmptyStatePanel"
                                 Grid.Row="1"
-                                Grid.ColumnSpan="4"
+                                Grid.ColumnSpan="5"
                                 Spacing="4"
                                 IsVisible="False">
-                        <TextBlock Text="No plugins have been imported yet."
+                        <TextBlock Text="No plugins have been installed yet."
                                    FontWeight="SemiBold" />
                         <TextBlock Classes="muted"
-                                   Text="Import a zip that contains plugininfo.json plus one or more plugin JSON files." />
+                                   Text="Install an official plugin or import a zip that contains plugininfo.json plus one or more plugin JSON files." />
                     </StackPanel>
 
                     <ItemsControl x:Name="PluginsItemsControl"
                                   Grid.Row="1"
-                                  Grid.ColumnSpan="4">
+                                  Grid.ColumnSpan="5">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="plugins:PluginCatalogItem">
                                 <Border Classes="panel"
                                         Margin="0,0,0,12"
                                         Padding="16">
                                     <StackPanel Spacing="12">
-                                        <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto"
+                                        <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto"
                                               ColumnSpacing="12">
                                             <CheckBox Grid.Column="0"
                                                       VerticalAlignment="Center"
@@ -92,7 +112,10 @@
                                             <Button Grid.Column="3"
                                                     Content="Down"
                                                     Click="OnMovePluginDownClicked" />
-                                            <TextBlock Grid.Column="4"
+                                            <Button Grid.Column="4"
+                                                    Content="Delete"
+                                                    Click="OnDeletePluginClicked" />
+                                            <TextBlock Grid.Column="5"
                                                        VerticalAlignment="Center"
                                                        Foreground="{StaticResource GoldTextBrush}"
                                                        FontWeight="SemiBold"
@@ -211,6 +234,7 @@
                     <avaloniaEdit:TextEditor x:Name="EditorTextBox"
                                              Classes="code-editor"
                                              MinHeight="420"
+                                             MaxHeight="520"
                                              ShowLineNumbers="True"
                                              WordWrap="False"
                                              TextChanged="OnEditorTextChanged"
@@ -220,6 +244,7 @@
                                VerticalAlignment="Center" />
                 </StackPanel>
             </Border>
+            </StackPanel>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

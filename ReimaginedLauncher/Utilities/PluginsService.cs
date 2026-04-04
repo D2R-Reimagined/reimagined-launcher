@@ -75,6 +75,63 @@ public static class PluginsService
         await SettingsManager.SaveAsync(MainWindow.Settings);
     }
 
+    public static async Task<IReadOnlyList<OfficialPluginCatalogItem>> GetOfficialCatalogAsync()
+    {
+        var bundledPluginsRoot = Path.Combine(AppContext.BaseDirectory, BundledPluginsDirectoryName);
+        if (!Directory.Exists(bundledPluginsRoot))
+        {
+            return [];
+        }
+
+        MainWindow.Settings.Plugins ??= [];
+        var catalog = new List<OfficialPluginCatalogItem>();
+
+        foreach (var sourceDirectory in Directory.GetDirectories(bundledPluginsRoot).OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        {
+            var folderName = Path.GetFileName(sourceDirectory);
+            if (string.IsNullOrWhiteSpace(folderName))
+            {
+                continue;
+            }
+
+            var sourcePluginInfoPath = Path.Combine(sourceDirectory, PluginInfoFileName);
+            if (!File.Exists(sourcePluginInfoPath))
+            {
+                continue;
+            }
+
+            var registration = FindRegistrationByFolderName(folderName);
+            var errors = new List<string>();
+            var name = folderName;
+            var version = "Unknown";
+
+            try
+            {
+                var pluginInfo = await LoadPluginInfoAsync(sourcePluginInfoPath);
+                ValidatePluginInfo(pluginInfo, sourceDirectory);
+                name = pluginInfo.Name;
+                version = pluginInfo.Version;
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"plugininfo.json is invalid: {ex.Message}");
+            }
+
+            catalog.Add(new OfficialPluginCatalogItem
+            {
+                FolderName = folderName,
+                PluginId = registration?.Id ?? string.Empty,
+                Name = name,
+                Version = version,
+                IsInstalled = registration != null,
+                IsEnabled = registration?.IsEnabled == true,
+                Errors = errors
+            });
+        }
+
+        return catalog;
+    }
+
     public static async Task<IReadOnlyList<PluginCatalogItem>> GetCatalogAsync()
     {
         MainWindow.Settings.Plugins ??= [];
@@ -98,6 +155,50 @@ public static class PluginsService
         }
 
         return catalog;
+    }
+
+    public static async Task InstallOfficialPluginAsync(string folderName)
+    {
+        var sourceDirectory = GetBundledPluginDirectory(folderName);
+        if (!Directory.Exists(sourceDirectory))
+        {
+            throw new DirectoryNotFoundException("The selected official plugin could not be found.");
+        }
+
+        var sourcePluginInfoPath = Path.Combine(sourceDirectory, PluginInfoFileName);
+        if (!File.Exists(sourcePluginInfoPath))
+        {
+            throw new FileNotFoundException("The selected official plugin is missing plugininfo.json.", sourcePluginInfoPath);
+        }
+
+        var pluginInfo = await LoadPluginInfoAsync(sourcePluginInfoPath);
+        ValidatePluginInfo(pluginInfo, sourceDirectory);
+
+        Directory.CreateDirectory(PluginsDirectoryPath);
+        MainWindow.Settings.Plugins ??= [];
+
+        var registration = FindRegistrationByFolderName(folderName);
+        var destinationDirectory = Path.Combine(PluginsDirectoryPath, folderName);
+        if (!Directory.Exists(destinationDirectory))
+        {
+            await CopyDirectoryAsync(sourceDirectory, destinationDirectory);
+        }
+
+        if (registration == null)
+        {
+            MainWindow.Settings.Plugins.Add(new PluginRegistration
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                FolderName = folderName,
+                IsEnabled = true
+            });
+        }
+        else
+        {
+            registration.IsEnabled = true;
+        }
+
+        await SettingsManager.SaveAsync(MainWindow.Settings);
     }
 
     public static async Task ImportPluginAsync(string zipPath)
@@ -196,6 +297,20 @@ public static class PluginsService
             (MainWindow.Settings.Plugins[nextIndex], MainWindow.Settings.Plugins[currentIndex]);
 
         await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    public static async Task DeletePluginAsync(string pluginId)
+    {
+        MainWindow.Settings.Plugins ??= [];
+        var registration = GetRegistration(pluginId);
+        MainWindow.Settings.Plugins.Remove(registration);
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+
+        var pluginDirectory = GetPluginDirectory(registration);
+        if (Directory.Exists(pluginDirectory))
+        {
+            Directory.Delete(pluginDirectory, recursive: true);
+        }
     }
 
     public static async Task<PluginEditorDocument> LoadEditorDocumentAsync(string pluginId, string relativePath)
@@ -782,6 +897,18 @@ public static class PluginsService
         }
 
         return registration;
+    }
+
+    private static PluginRegistration? FindRegistrationByFolderName(string folderName)
+    {
+        MainWindow.Settings.Plugins ??= [];
+        return MainWindow.Settings.Plugins.FirstOrDefault(plugin =>
+            plugin.FolderName.Equals(folderName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string GetBundledPluginDirectory(string folderName)
+    {
+        return Path.Combine(AppContext.BaseDirectory, BundledPluginsDirectoryName, folderName);
     }
 
     private static string GetPluginDirectory(PluginRegistration registration)

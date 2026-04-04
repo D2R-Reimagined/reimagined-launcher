@@ -12,11 +12,12 @@ namespace ReimaginedLauncher.Views.Backups;
 public partial class BackupsView : UserControl
 {
     private bool _isRefreshing;
+    private bool _isLoading;
 
     public BackupsView()
     {
         InitializeComponent();
-        RefreshBackupState();
+        SetLoadingState(false);
     }
 
     public void RefreshBackupState()
@@ -30,6 +31,28 @@ public partial class BackupsView : UserControl
         BackupsListBox.ItemsSource = BackupService.GetBackups();
         RestoreSelectionTextBlock.Text = "Select a backup to restore.";
         _isRefreshing = false;
+    }
+
+    public async Task RefreshBackupStateAsync()
+    {
+        SetLoadingState(true);
+
+        try
+        {
+            await Task.Yield();
+            RefreshBackupState();
+        }
+        finally
+        {
+            SetLoadingState(false);
+        }
+    }
+
+    public void SetLoadingState(bool isLoading)
+    {
+        _isLoading = isLoading;
+        LoadingBanner.IsVisible = isLoading;
+        ContentGrid.IsVisible = !isLoading;
     }
 
     private async void OnBackupDirectoryClick(object? sender, RoutedEventArgs e)

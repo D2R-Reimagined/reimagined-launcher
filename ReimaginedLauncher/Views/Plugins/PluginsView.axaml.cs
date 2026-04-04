@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using AvaloniaEdit.TextMate;
 using AvaloniaEdit;
@@ -20,6 +21,7 @@ public partial class PluginsView : UserControl
     private string? _selectedRelativePath;
     private string _originalEditorContent = string.Empty;
     private bool _isUpdatingEditorState;
+    private bool _isLoading;
 
     public PluginsView()
     {
@@ -27,17 +29,40 @@ public partial class PluginsView : UserControl
         ConfigureEditor();
         SupportedTargetsTextBlock.Text = PluginsService.GetSupportedTargetsSummary();
         SetEditorState(fileSelected: false, isDirty: false);
-        _ = RefreshPluginsStateAsync();
+        SetLoadingState(false);
     }
 
     public async Task RefreshPluginsStateAsync()
     {
-        var catalog = await PluginsService.GetCatalogAsync();
-        PluginsItemsControl.ItemsSource = catalog;
-        EmptyStatePanel.IsVisible = catalog.Count == 0;
-        PluginsSummaryTextBlock.Text = catalog.Count == 0
-            ? "Imported plugin zips appear here. Enable them to apply their JSON changes before launch."
-            : $"{catalog.Count} plugin(s) imported. Enabled plugins run in the order shown here.";
+        SetLoadingState(true);
+
+        try
+        {
+            await Task.Yield();
+            var catalog = await PluginsService.GetCatalogAsync();
+            PluginsItemsControl.ItemsSource = catalog;
+            EmptyStatePanel.IsVisible = catalog.Count == 0;
+            if (!string.IsNullOrWhiteSpace(_selectedPluginId) &&
+                !catalog.Any(plugin => plugin.Id.Equals(_selectedPluginId, StringComparison.Ordinal)))
+            {
+                ClearEditorSelection();
+            }
+
+            PluginsSummaryTextBlock.Text = catalog.Count == 0
+                ? "Plugins you install appear here. Enable them to apply their JSON changes before launch."
+                : $"{catalog.Count} installed plugin(s). Enabled plugins run in the order shown here.";
+        }
+        finally
+        {
+            SetLoadingState(false);
+        }
+    }
+
+    public void SetLoadingState(bool isLoading)
+    {
+        _isLoading = isLoading;
+        LoadingBanner.IsVisible = isLoading;
+        ContentPanel.IsVisible = !isLoading;
     }
 
     private async void OnRefreshClicked(object? sender, RoutedEventArgs e)
@@ -97,6 +122,14 @@ public partial class PluginsView : UserControl
         }
     }
 
+    private void OnOpenOfficialPluginsClicked(object? sender, RoutedEventArgs e)
+    {
+        if (TopLevel.GetTopLevel(this) is MainWindow window)
+        {
+            window.NavigateToOfficialPluginsView();
+        }
+    }
+
     private async void OnPluginEnabledClicked(object? sender, RoutedEventArgs e)
     {
         if (sender is not CheckBox { DataContext: PluginCatalogItem plugin } checkBox)
@@ -145,6 +178,31 @@ public partial class PluginsView : UserControl
 
         await PluginsService.MovePluginAsync(plugin.Id, 1);
         await RefreshPluginsStateAsync();
+    }
+
+    private async void OnDeletePluginClicked(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: PluginCatalogItem plugin })
+        {
+            return;
+        }
+
+        try
+        {
+            await PluginsService.DeletePluginAsync(plugin.Id);
+
+            if (string.Equals(_selectedPluginId, plugin.Id, StringComparison.Ordinal))
+            {
+                ClearEditorSelection();
+            }
+
+            await RefreshPluginsStateAsync();
+            Notifications.SendNotification($"Plugin '{plugin.Name}' deleted.", "Success");
+        }
+        catch (Exception ex)
+        {
+            Notifications.SendNotification($"Plugin delete failed: {ex.Message}", "Warning");
+        }
     }
 
     private async void OnEditPluginFileClicked(object? sender, RoutedEventArgs e)
@@ -256,9 +314,21 @@ public partial class PluginsView : UserControl
         return !string.Equals(_originalEditorContent, EditorTextBox.Text ?? string.Empty, StringComparison.Ordinal);
     }
 
+    private void ClearEditorSelection()
+    {
+        _selectedPluginId = null;
+        _selectedRelativePath = null;
+        _originalEditorContent = string.Empty;
+        _isUpdatingEditorState = true;
+        EditorTextBox.Text = string.Empty;
+        _isUpdatingEditorState = false;
+        EditorTitleTextBlock.Text = "Select a plugin JSON file to edit it here.";
+        SetEditorState(fileSelected: false, isDirty: false);
+    }
+
     private void SetEditorState(bool fileSelected, bool isDirty)
     {
-        SaveJsonButton.IsEnabled = fileSelected && isDirty;
+        SaveJsonButton.IsEnabled = !_isLoading && fileSelected && isDirty;
         EditorStatusTextBlock.Text = !fileSelected
             ? "No file selected."
             : isDirty
