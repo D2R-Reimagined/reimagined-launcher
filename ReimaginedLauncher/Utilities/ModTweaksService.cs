@@ -62,6 +62,9 @@ public static class ModTweaksService
                 await ValidateExcelFilesAsync(sourceExcelDirectory);
                 await CopyDirectoryAsync(sourceExcelDirectory, targetExcelDirectory, overwrite: true);
                 await ApplyTweaksAsync(targetExcelDirectory, progress);
+                ReportProgress(progress, $"Applying plugins in {targetLabel}...");
+                LaunchDiagnostics.Log($"Applying plugins in {targetExcelDirectory}.");
+                await PluginsService.ApplyEnabledPluginsAsync(targetExcelDirectory, progress);
             }
 
             ReportProgress(progress, "Restoring missiles.json...");

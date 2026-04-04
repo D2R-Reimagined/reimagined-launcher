@@ -1,0 +1,106 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:plugins="clr-namespace:ReimaginedLauncher.Utilities"
+             mc:Ignorable="d" d:DesignWidth="980" d:DesignHeight="560"
+             x:Class="ReimaginedLauncher.Views.Plugins.OfficialPluginsView">
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                  VerticalScrollBarVisibility="Auto">
+        <StackPanel Spacing="18">
+            <StackPanel Spacing="4">
+                <TextBlock Classes="view-title"
+                           Text="Official Plugins" />
+                <TextBlock Classes="muted"
+                           Text="Install bundled plugins here. Installed official plugins are also listed on the main plugins page." />
+            </StackPanel>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <Grid ColumnDefinitions="*,Auto,Auto"
+                      ColumnSpacing="12"
+                      RowDefinitions="Auto,Auto"
+                      RowSpacing="12">
+                    <StackPanel Grid.Row="0"
+                                Grid.Column="0"
+                                Spacing="4">
+                        <TextBlock Classes="section-title"
+                                   Text="Available Official Plugins" />
+                        <TextBlock x:Name="OfficialPluginsSummaryTextBlock"
+                                   Classes="muted"
+                                   Text="Bundled plugins appear here." />
+                    </StackPanel>
+
+                    <Button Grid.Row="0"
+                            Grid.Column="1"
+                            Content="Back to Installed Plugins"
+                            Click="OnBackClicked" />
+                    <Button Grid.Row="0"
+                            Grid.Column="2"
+                            Content="Refresh"
+                            Click="OnRefreshClicked" />
+
+                    <StackPanel x:Name="EmptyStatePanel"
+                                Grid.Row="1"
+                                Grid.ColumnSpan="3"
+                                Spacing="4"
+                                IsVisible="False">
+                        <TextBlock Text="No official plugins are currently bundled."
+                                   FontWeight="SemiBold" />
+                    </StackPanel>
+
+                    <ItemsControl x:Name="OfficialPluginsItemsControl"
+                                  Grid.Row="1"
+                                  Grid.ColumnSpan="3">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="plugins:OfficialPluginCatalogItem">
+                                <Border Classes="panel"
+                                        Margin="0,0,0,12"
+                                        Padding="16">
+                                    <StackPanel Spacing="12">
+                                        <Grid ColumnDefinitions="*,Auto,Auto"
+                                              ColumnSpacing="12">
+                                            <StackPanel Grid.Column="0"
+                                                        Spacing="3">
+                                                <TextBlock FontWeight="SemiBold"
+                                                           Text="{Binding Name}" />
+                                                <TextBlock Classes="muted"
+                                                           Text="{Binding Version, StringFormat=Version {0}}" />
+                                            </StackPanel>
+
+                                            <TextBlock Grid.Column="1"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="{StaticResource GoldTextBrush}"
+                                                       FontWeight="SemiBold"
+                                                       Text="{Binding StatusText}" />
+
+                                            <Button Grid.Column="2"
+                                                    Classes="accent"
+                                                    Content="{Binding ActionText}"
+                                                    IsEnabled="{Binding CanInstallOrEnable}"
+                                                    Click="OnInstallOrEnableClicked" />
+                                        </Grid>
+
+                                        <ItemsControl ItemsSource="{Binding Errors}"
+                                                      IsVisible="{Binding HasErrors}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="x:String">
+                                                    <Border Classes="warning-banner"
+                                                            Margin="0,0,0,8"
+                                                            Padding="10">
+                                                        <TextBlock Text="{Binding .}"
+                                                                   TextWrapping="Wrap" />
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Grid>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

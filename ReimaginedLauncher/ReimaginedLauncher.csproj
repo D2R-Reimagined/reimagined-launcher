@@ -24,9 +24,11 @@
 
     <ItemGroup>
         <PackageReference Include="Avalonia" Version="11.3.13" />
+        <PackageReference Include="Avalonia.AvaloniaEdit" Version="11.3.0" />
         <PackageReference Include="Avalonia.Desktop" Version="11.3.13" />
         <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.13" />
         <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.13" />
+        <PackageReference Include="AvaloniaEdit.TextMate" Version="11.3.0" />
         <!--Condition below is needed to remove Avalonia.Diagnostics package from build output in Release configuration.-->
         <PackageReference Include="Avalonia.Diagnostics" Version="11.3.13">
             <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
@@ -44,11 +46,12 @@
        <None Include="Assets\ReimaginedLauncher.ico">
          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
        </None>
+       <None Include="Assets\Plugins\**\*">
+         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+       </None>
      </ItemGroup>
 
 </Project>
-
-
 
 
 

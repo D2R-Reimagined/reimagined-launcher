@@ -1,0 +1,127 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="ReimaginedLauncher.Views.Plugins.PluginAuthoringGuideView">
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                  VerticalScrollBarVisibility="Auto">
+        <StackPanel Spacing="18">
+            <Grid ColumnDefinitions="*,Auto"
+                  ColumnSpacing="12">
+                <StackPanel Spacing="4">
+                    <TextBlock Classes="view-title"
+                               Text="How To Write a Plugin" />
+                    <TextBlock Classes="muted"
+                               Text="Use this guide to package a launcher plugin, declare parameters, and write supported JSON operations." />
+                </StackPanel>
+
+                <Button Grid.Column="1"
+                        Content="Back to Plugins"
+                        Click="OnBackToPluginsClicked" />
+            </Grid>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="8">
+                    <TextBlock Classes="section-title"
+                               Text="What a Plugin Is" />
+                    <TextBlock Text="A plugin is a zip archive that contains a plugininfo.json file plus one or more plugin JSON files." TextWrapping="Wrap" />
+                    <TextBlock Classes="muted"
+                               Text="When a plugin is enabled, the launcher reads each listed JSON file and applies its operations before launch." TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="10">
+                    <TextBlock Classes="section-title"
+                               Text="Required Folder Layout" />
+                    <TextBlock Text="The archive can contain folders, but it must include exactly one plugininfo.json." TextWrapping="Wrap" />
+                    <TextBox x:Name="FolderLayoutTextBox"
+                             IsReadOnly="True"
+                             AcceptsReturn="True"
+                             Classes="code-editor"
+                             MinHeight="92" />
+                </StackPanel>
+            </Border>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="10">
+                    <TextBlock Classes="section-title"
+                               Text="plugininfo.json" />
+                    <TextBlock Text="plugininfo.json must include a name, version, and at least one plugin JSON file path." TextWrapping="Wrap" />
+                    <TextBlock Classes="muted"
+                               Text="Parameters are optional, but each one needs key, name, and defaultValue." TextWrapping="Wrap" />
+                    <TextBox x:Name="PluginInfoExampleTextBox"
+                             IsReadOnly="True"
+                             AcceptsReturn="True"
+                             Classes="code-editor"
+                             MinHeight="260" />
+                </StackPanel>
+            </Border>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="10">
+                    <TextBlock Classes="section-title"
+                               Text="Plugin JSON Operations" />
+                    <TextBlock Text="Each plugin JSON file can be either a single object or an array of objects." TextWrapping="Wrap" />
+                    <TextBlock Classes="muted"
+                               Text="Supported target today: skills.txt only. rowIdentifier is matched against the Skill column." TextWrapping="Wrap" />
+                    <TextBox x:Name="OperationsExampleTextBox"
+                             IsReadOnly="True"
+                             AcceptsReturn="True"
+                             Classes="code-editor"
+                             MinHeight="310" />
+                </StackPanel>
+            </Border>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="8">
+                    <TextBlock Classes="section-title"
+                               Text="Available Fields" />
+                    <TextBlock Text="file: Required. Must be skills.txt right now." TextWrapping="Wrap" />
+                    <TextBlock Text="rowIdentifier: Required for skills.txt. Must match a row's Skill value." TextWrapping="Wrap" />
+                    <TextBlock Text="column: Required. Must match a real skills.txt column name understood by the parser." TextWrapping="Wrap" />
+                    <TextBlock Text="updatedValue: The replacement value, or the multiplier when operation is multiplyExisting and parameterKey is not used." TextWrapping="Wrap" />
+                    <TextBlock Text="operation: Optional. Leave empty or use replace for direct replacement. Use multiplyExisting to multiply the current numeric value." TextWrapping="Wrap" />
+                    <TextBlock Text="parameterKey: Optional. References a parameter declared in plugininfo.json." TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="8">
+                    <TextBlock Classes="section-title"
+                               Text="Parameter Tokens" />
+                    <TextBlock Text="updatedValue also supports inline parameter tokens in the form {{parameter:key}}." TextWrapping="Wrap" />
+                    <TextBlock Classes="muted"
+                               Text="Example: set updatedValue to {{parameter:damageMultiplier}} if you want the value resolved from plugininfo.json at runtime." TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="8">
+                    <TextBlock Classes="section-title"
+                               Text="Validation Rules" />
+                    <TextBlock Text="The launcher rejects plugin file paths that are absolute or that traverse outside the plugin folder." TextWrapping="Wrap" />
+                    <TextBlock Text="plugininfo.json must list files that actually exist in the archive." TextWrapping="Wrap" />
+                    <TextBlock Text="multiplyExisting only works on numeric columns and requires either parameterKey or updatedValue." TextWrapping="Wrap" />
+                    <TextBlock Text="Unknown parameters and unknown skills.txt columns are reported as plugin errors." TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="8">
+                    <TextBlock Classes="section-title"
+                               Text="Current Limits" />
+                    <TextBlock Text="Only skills.txt is supported today." TextWrapping="Wrap" />
+                    <TextBlock Text="replace and multiplyExisting are the only supported operations." TextWrapping="Wrap" />
+                    <TextBlock Text="Values are written through the generated parser types, so the column name and value type still need to be valid." TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
