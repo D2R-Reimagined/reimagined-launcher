@@ -122,40 +122,56 @@
                                                        Text="{Binding StatusText}" />
                                         </Grid>
 
-                                        <StackPanel Spacing="6">
-                                            <TextBlock Text="Parameters"
-                                                       FontWeight="SemiBold"
-                                                       IsVisible="{Binding HasParameters}" />
+                                        <StackPanel Spacing="0"
+                                                    IsVisible="{Binding HasParameters}">
+                                            <ToggleButton HorizontalAlignment="Stretch"
+                                                          HorizontalContentAlignment="Stretch"
+                                                          IsChecked="{Binding IsParametersExpanded, Mode=TwoWay}">
+                                                <Grid ColumnDefinitions="*,Auto"
+                                                      ColumnSpacing="12">
+                                                    <TextBlock Grid.Column="0"
+                                                               Text="{Binding ParametersToggleText}"
+                                                               FontWeight="SemiBold" />
+                                                    <TextBlock Grid.Column="1"
+                                                               Classes="muted"
+                                                               Text="{Binding ParametersActionText}" />
+                                                </Grid>
+                                            </ToggleButton>
 
-                                            <ItemsControl ItemsSource="{Binding Parameters}"
-                                                          IsVisible="{Binding HasParameters}">
-                                                <ItemsControl.ItemTemplate>
-                                                    <DataTemplate x:DataType="plugins:PluginParameterItem">
-                                                        <Grid ColumnDefinitions="220,*,Auto"
-                                                              ColumnSpacing="12"
-                                                              Margin="0,0,0,6">
-                                                            <StackPanel Grid.Column="0"
-                                                                        Spacing="2">
-                                                                <TextBlock Text="{Binding DisplayName}"
-                                                                           FontWeight="SemiBold" />
-                                                                <TextBlock Classes="muted"
-                                                                           Text="{Binding Description}"
-                                                                           TextWrapping="Wrap" />
-                                                            </StackPanel>
+                                            <Border Margin="0,10,0,0"
+                                                    Padding="12"
+                                                    Classes="panel"
+                                                    IsVisible="{Binding IsParametersExpanded}">
+                                                <ItemsControl ItemsSource="{Binding Parameters}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate x:DataType="plugins:PluginParameterItem">
+                                                            <Grid ColumnDefinitions="220,*,Auto"
+                                                                  ColumnSpacing="12"
+                                                                  Margin="0,0,0,6">
+                                                                <StackPanel Grid.Column="0"
+                                                                            Spacing="2">
+                                                                    <TextBlock Text="{Binding DisplayName}"
+                                                                               FontWeight="SemiBold" />
+                                                                    <TextBlock Classes="muted"
+                                                                               Text="{Binding Description}"
+                                                                               TextWrapping="Wrap" />
+                                                                </StackPanel>
 
-                                                            <TextBox Grid.Column="1"
-                                                                     Text="{Binding Value, Mode=OneWay}"
-                                                                     VerticalAlignment="Center"
-                                                                     LostFocus="OnParameterValueChanged" />
+                                                                <TextBox Grid.Column="1"
+                                                                         Text="{Binding Value, Mode=OneWay}"
+                                                                         HorizontalAlignment="Stretch"
+                                                                         VerticalAlignment="Center"
+                                                                         LostFocus="OnParameterValueChanged" />
 
-                                                            <TextBlock Grid.Column="2"
-                                                                       Classes="muted"
-                                                                       VerticalAlignment="Center"
-                                                                       Text="{Binding DefaultValue, StringFormat=Default {0}}" />
-                                                        </Grid>
-                                                    </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                            </ItemsControl>
+                                                                <TextBlock Grid.Column="2"
+                                                                           Classes="muted"
+                                                                           VerticalAlignment="Center"
+                                                                           Text="{Binding DefaultValue, StringFormat=Default {0}}" />
+                                                            </Grid>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </Border>
                                         </StackPanel>
 
                                         <StackPanel Spacing="6">
