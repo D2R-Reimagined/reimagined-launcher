@@ -26,4 +26,5 @@ public class AppSettings
     public bool RemovePaladinAuraSound { get; set; }
     public bool RemoveSplashVfx { get; set; }
     public List<PluginRegistration> Plugins { get; set; } = [];
+    public bool MakeTooltipBackgroundOpaque { get; set; }
 }
