@@ -19,10 +19,11 @@ public static class ModTweaksService
     private const string HdDirectoryName = "hd";
     private const string GlobalDirectoryName = "global";
     private const string UiDirectoryName = "ui";
+    private const string LayoutsDirectoryName = "layouts";
     private const string MissilesDirectoryName = "missiles";
     private const string MissilesFileName = "missiles.json";
     private const string CleanMissilesFileName = "missiles_launcher_clean.json";
-    private const string LayoutsProfileHdFileName = "layouts_profilehd.json";
+    private const string LayoutsProfileHdFileName = "_profilehd.json";
     private const string CleanLayoutsProfileHdFileName = "layouts_profilehd_launcher_clean.json";
     private const string CharStatsFileName = "charstats.txt";
     private const string DifficultyLevelsFileName = "DifficultyLevels.txt";
@@ -151,6 +152,7 @@ public static class ModTweaksService
             DataDirectoryName,
             GlobalDirectoryName,
             UiDirectoryName,
+            LayoutsDirectoryName,
             LayoutsProfileHdFileName);
     }
 
