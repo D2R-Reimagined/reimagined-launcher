@@ -201,7 +201,90 @@ public static class PluginsService
         await SettingsManager.SaveAsync(MainWindow.Settings);
     }
 
-    public static async Task ImportPluginAsync(string zipPath)
+    public static async Task<PluginImportPreview> LoadPluginImportPreviewAsync(string zipPath)
+    {
+        if (!File.Exists(zipPath))
+        {
+            throw new FileNotFoundException("The selected plugin archive was not found.", zipPath);
+        }
+
+        if (!IsZipArchive(zipPath))
+        {
+            throw new InvalidDataException("The selected file is not a valid zip archive.");
+        }
+
+        var tempDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "d2r-reimagined-launcher",
+            "plugin-import",
+            Guid.NewGuid().ToString("N"));
+
+        Directory.CreateDirectory(tempDirectory);
+
+        try
+        {
+            ZipFile.ExtractToDirectory(zipPath, tempDirectory, overwriteFiles: true);
+
+            var pluginInfoPaths = Directory.GetFiles(tempDirectory, PluginInfoFileName, SearchOption.AllDirectories);
+            if (pluginInfoPaths.Length == 0)
+            {
+                throw new InvalidDataException("plugininfo.json was not found in the selected archive.");
+            }
+
+            if (pluginInfoPaths.Length > 1)
+            {
+                throw new InvalidDataException("The selected archive contains multiple plugininfo.json files.");
+            }
+
+            var pluginInfoPath = pluginInfoPaths[0];
+            var pluginRootDirectory = Path.GetDirectoryName(pluginInfoPath);
+            if (string.IsNullOrWhiteSpace(pluginRootDirectory))
+            {
+                throw new InvalidDataException("The plugin root directory could not be resolved.");
+            }
+
+            var pluginInfo = await LoadPluginInfoAsync(pluginInfoPath);
+            ValidatePluginInfo(pluginInfo, pluginRootDirectory);
+
+            return new PluginImportPreview
+            {
+                Name = pluginInfo.Name,
+                Version = pluginInfo.Version
+            };
+        }
+        finally
+        {
+            if (Directory.Exists(tempDirectory))
+            {
+                Directory.Delete(tempDirectory, recursive: true);
+            }
+        }
+    }
+
+    public static async Task<InstalledPluginLookupResult?> FindInstalledPluginByNameAsync(string pluginName)
+    {
+        MainWindow.Settings.Plugins ??= [];
+
+        foreach (var registration in MainWindow.Settings.Plugins)
+        {
+            var pluginState = await LoadPluginStateAsync(registration);
+            if (!pluginState.Name.Equals(pluginName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            return new InstalledPluginLookupResult
+            {
+                PluginId = registration.Id,
+                Name = pluginState.Name,
+                Version = pluginState.Version
+            };
+        }
+
+        return null;
+    }
+
+    public static async Task ImportPluginAsync(string zipPath, string? replacePluginId = null)
     {
         if (!File.Exists(zipPath))
         {
@@ -247,6 +330,20 @@ public static class PluginsService
 
             var pluginInfo = await LoadPluginInfoAsync(pluginInfoPath);
             ValidatePluginInfo(pluginInfo, pluginRootDirectory);
+
+            if (!string.IsNullOrWhiteSpace(replacePluginId))
+            {
+                var registration = GetRegistration(replacePluginId);
+                var destDirectory = GetPluginDirectory(registration);
+                if (Directory.Exists(destDirectory))
+                {
+                    Directory.Delete(destDirectory, recursive: true);
+                }
+
+                await CopyDirectoryAsync(pluginRootDirectory, destDirectory);
+                await SettingsManager.SaveAsync(MainWindow.Settings);
+                return;
+            }
 
             var destinationFolderName = GetUniquePluginFolderName(pluginInfo.Name, pluginInfo.Version);
             var destinationDirectory = Path.Combine(PluginsDirectoryPath, destinationFolderName);

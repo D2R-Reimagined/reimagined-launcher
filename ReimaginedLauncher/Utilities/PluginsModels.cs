@@ -70,3 +70,16 @@ public sealed class PluginEditorDocument
     public string RelativePath { get; init; } = string.Empty;
     public string Content { get; init; } = string.Empty;
 }
+
+public sealed class PluginImportPreview
+{
+    public string Name { get; init; } = string.Empty;
+    public string Version { get; init; } = string.Empty;
+}
+
+public sealed class InstalledPluginLookupResult
+{
+    public string PluginId { get; init; } = string.Empty;
+    public string Name { get; init; } = string.Empty;
+    public string Version { get; init; } = string.Empty;
+}

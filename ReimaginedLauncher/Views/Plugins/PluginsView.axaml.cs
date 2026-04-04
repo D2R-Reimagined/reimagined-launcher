@@ -1,11 +1,14 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using Avalonia;
 using AvaloniaEdit.TextMate;
 using AvaloniaEdit;
 using Avalonia.Controls;
+using Avalonia.Layout;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.VisualTree;
 using ReimaginedLauncher.Utilities;
@@ -104,9 +107,36 @@ public partial class PluginsView : UserControl
 
         try
         {
-            await PluginsService.ImportPluginAsync(zipPath);
+            var importPreview = await PluginsService.LoadPluginImportPreviewAsync(zipPath);
+            var existingPlugin = await PluginsService.FindInstalledPluginByNameAsync(importPreview.Name);
+            string? replacePluginId = null;
+
+            if (existingPlugin != null)
+            {
+                var shouldReplace = await ShowReplacePluginConfirmationAsync(
+                    window,
+                    importPreview.Name,
+                    existingPlugin.Version,
+                    importPreview.Version);
+                if (!shouldReplace)
+                {
+                    return;
+                }
+
+                replacePluginId = existingPlugin.PluginId;
+            }
+
+            await PluginsService.ImportPluginAsync(zipPath, replacePluginId);
+            if (!string.IsNullOrWhiteSpace(replacePluginId) &&
+                string.Equals(_selectedPluginId, replacePluginId, StringComparison.Ordinal))
+            {
+                ClearEditorSelection();
+            }
+
             await RefreshPluginsStateAsync();
-            Notifications.SendNotification("Plugin imported successfully.", "Success");
+            Notifications.SendNotification(
+                existingPlugin == null ? "Plugin imported successfully." : "Plugin replaced successfully.",
+                "Success");
         }
         catch (Exception ex)
         {
@@ -334,6 +364,73 @@ public partial class PluginsView : UserControl
             : isDirty
                 ? "Unsaved changes"
                 : "Saved";
+    }
+
+    private static async Task<bool> ShowReplacePluginConfirmationAsync(
+        Window owner,
+        string pluginName,
+        string existingVersion,
+        string incomingVersion)
+    {
+        var dialog = new Window
+        {
+            Width = 420,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Title = "Replace Plugin?"
+        };
+
+        var replaceButton = new Button
+        {
+            Content = "Replace",
+            Classes = { "accent" },
+            MinWidth = 96
+        };
+        var cancelButton = new Button
+        {
+            Content = "Cancel",
+            MinWidth = 96
+        };
+
+        replaceButton.Click += (_, _) => dialog.Close(true);
+        cancelButton.Click += (_, _) => dialog.Close(false);
+
+        dialog.Content = new Border
+        {
+            Padding = new Thickness(20),
+            Child = new StackPanel
+            {
+                Spacing = 14,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = $"A plugin named '{pluginName}' is already installed.",
+                        FontWeight = FontWeight.SemiBold,
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    new TextBlock
+                    {
+                        Text = $"Installed version: {existingVersion}{Environment.NewLine}Incoming version: {incomingVersion}{Environment.NewLine}{Environment.NewLine}Do you want to replace the existing install?",
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Spacing = 10,
+                        Children =
+                        {
+                            cancelButton,
+                            replaceButton
+                        }
+                    }
+                }
+            }
+        };
+
+        return await dialog.ShowDialog<bool>(owner);
     }
 
     private void ConfigureEditor()
