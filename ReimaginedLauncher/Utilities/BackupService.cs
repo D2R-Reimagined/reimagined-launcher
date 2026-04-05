@@ -203,6 +203,7 @@ public static class BackupService
             var backupFilePath = Path.Combine(backupRoot, $"{backupName}.zip");
             
             var excludedDirectories = new List<string>();
+            var excludedFiles = new List<string>();
             
             var normalizedSource = NormalizeDirectoryPath(sourceDirectory);
             var normalizedBackupRoot = NormalizeDirectoryPath(backupRoot);
@@ -214,17 +215,25 @@ public static class BackupService
             }
             else if (string.Equals(normalizedSource, normalizedBackupRoot, StringComparison.OrdinalIgnoreCase))
             {
-                // Exclude folder backups. Archive backups (*.zip) are handled globally in CreateZipBackupAsync.
-                foreach (var backup in GetBackups().Where(b => !b.IsArchive))
+                // Exclude existing backups when they are in the same folder.
+                foreach (var backup in GetBackups())
                 {
-                    excludedDirectories.Add(backup.BackupPath);
+                    if (backup.IsArchive)
+                    {
+                        excludedFiles.Add(backup.BackupPath);
+                    }
+                    else
+                    {
+                        excludedDirectories.Add(backup.BackupPath);
+                    }
                 }
             }
 
             await CreateZipBackupAsync(
                 sourceDirectory,
                 backupFilePath,
-                excludedDirectories: excludedDirectories);
+                excludedDirectories: excludedDirectories,
+                excludedFiles: excludedFiles);
             TrimBackups();
 
             Notifications.SendNotification($"Backup created: {backupName}", "Success");
@@ -406,7 +415,8 @@ public static class BackupService
     private static Task CreateZipBackupAsync(
         string sourceDirectory,
         string destinationArchivePath,
-        IEnumerable<string>? excludedDirectories = null)
+        IEnumerable<string>? excludedDirectories = null,
+        IEnumerable<string>? excludedFiles = null)
     {
         return Task.Run(async () =>
         {
@@ -415,17 +425,36 @@ public static class BackupService
                 .Select(NormalizeDirectoryPath)
                 .ToArray() ?? [];
 
+            var excludedFilePaths = excludedFiles?
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Select(Path.GetFullPath)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
+
+            var fullDestinationPath = Path.GetFullPath(destinationArchivePath);
+
             await using var destinationStream = File.Open(destinationArchivePath, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
             using var archive = new ZipArchive(destinationStream, ZipArchiveMode.Create);
 
             foreach (var filePath in Directory.GetFiles(sourceDirectory, "*", SearchOption.AllDirectories))
             {
-                if (filePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                var fullPath = Path.GetFullPath(filePath);
+
+                if (string.Equals(fullPath, fullDestinationPath, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
 
-                var fullPath = Path.GetFullPath(filePath);
+                if (excludedFilePaths.Contains(fullPath))
+                {
+                    continue;
+                }
+
+                // Exclude files that match the backup naming pattern to avoid recursive backups or including other backups.
+                if (filePath.EndsWith("-backup.zip", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 if (excludedDirectoryPaths.Any(excludedDirectory => IsPathWithinDirectory(fullPath, excludedDirectory)))
                 {
                     continue;
