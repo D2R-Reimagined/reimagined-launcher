@@ -22,9 +22,32 @@ public partial class LaunchView : UserControl
         RefreshInstallDirectoryState();
     }
 
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+
+        if (MainWindow.Settings is not null && !MainWindow.Settings.IsInstallDirectoryValidated && !LauncherService.IsDetecting)
+        {
+            _ = LauncherService.CheckForD2RExecutableAsync(async () =>
+            {
+                await Dispatcher.UIThread.InvokeAsync(async () =>
+                {
+                    RefreshInstallDirectoryState();
+                    if (this.GetVisualRoot() is MainWindow mw)
+                    {
+                        mw.RefreshLocalModState();
+                        await mw.RefreshUpdateStateAsync();
+                    }
+                });
+            });
+            RefreshInstallDirectoryState();
+        }
+    }
+
     public void RefreshInstallDirectoryState()
     {
         DirectoryTextBox.Text = MainWindow.Settings.InstallDirectory ?? string.Empty;
+        DetectionLoadingIndicator.IsVisible = LauncherService.IsDetecting;
 
         var isValidated = InstallDirectoryValidator.IsValidInstallDirectory(MainWindow.Settings.InstallDirectory);
         var isModDetected = MainWindow.IsLocalModDetected;
@@ -145,6 +168,7 @@ public partial class LaunchView : UserControl
 
     private async void OnInstallDirectoryClick(object? sender, RoutedEventArgs e)
     {
+        LauncherService.CancelDetection();
         if (this.GetVisualRoot() is Window window)
         {
             var folders = await window.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions

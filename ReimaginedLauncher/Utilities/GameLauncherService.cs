@@ -3,12 +3,16 @@ using System.ComponentModel;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace ReimaginedLauncher.Utilities;
 
 public class GameLauncherService
 {
     private const string? DefaultInstallPath = @"C:\Program Files (x86)\Diablo II Resurrected\D2R.exe";
+    private CancellationTokenSource? _detectionCts;
+    public bool IsDetecting { get; private set; }
     public string? GamePathOverride { get; set; } = string.Empty;
     public string LaunchParameters => BuildLaunchParameters();
     
@@ -20,23 +24,29 @@ public class GameLauncherService
 
     public GameLauncherService()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            CheckForD2RExecutable();
-        }
     }
 
-    private void CheckForD2RExecutable()
+    public async Task CheckForD2RExecutableAsync(Action? onComplete = null)
     {
+        _detectionCts?.Cancel();
+        _detectionCts = new CancellationTokenSource();
+        var token = _detectionCts.Token;
+
         if (InstallDirectoryValidator.IsValidInstallDirectory(MainWindow.Settings.InstallDirectory))
         {
             MainWindow.Settings.InstallDirectory =
                 InstallDirectoryValidator.NormalizeInstallDirectory(MainWindow.Settings.InstallDirectory);
             MainWindow.Settings.IsInstallDirectoryValidated = true;
+            onComplete?.Invoke();
+            return;
         }
-        else
+
+        IsDetecting = true;
+        try
         {
-            var detectedExecutablePath = FindD2RExecutable();
+            var detectedExecutablePath = await Task.Run(() => FindD2RExecutable(token), token);
+
+            if (token.IsCancellationRequested) return;
 
             if (!string.IsNullOrEmpty(detectedExecutablePath))
             {
@@ -48,13 +58,27 @@ public class GameLauncherService
             else
             {
                 MainWindow.Settings.IsInstallDirectoryValidated = false;
-                // Handle the case where the executable wasn't found
                 Notifications.SendNotification("D2R.exe not found");
             }
         }
+        catch (OperationCanceledException)
+        {
+            // Search was cancelled, do nothing
+        }
+        finally
+        {
+            IsDetecting = false;
+            onComplete?.Invoke();
+        }
     }
 
-    private string? FindD2RExecutable()
+    public void CancelDetection()
+    {
+        _detectionCts?.Cancel();
+        IsDetecting = false;
+    }
+
+    private string? FindD2RExecutable(CancellationToken token)
     {
         // Check the default installation path first
         if (File.Exists(DefaultInstallPath))
@@ -65,12 +89,13 @@ public class GameLauncherService
         // Iterate through all fixed drives
         foreach (var drive in DriveInfo.GetDrives())
         {
+            if (token.IsCancellationRequested) return null;
             if (drive.DriveType != DriveType.Fixed) continue;
 
             try
             {
                 // Start a recursive search in the root directory of each fixed drive
-                var executablePath = FindFileRecursively(drive.RootDirectory.FullName, "D2R.exe");
+                var executablePath = FindFileRecursively(drive.RootDirectory.FullName, "D2R.exe", token);
                 if (!string.IsNullOrEmpty(executablePath))
                 {
                     return executablePath;
@@ -88,8 +113,10 @@ public class GameLauncherService
     }
 
     // Helper method to search for a file recursively
-    private string? FindFileRecursively(string rootDirectory, string fileName)
+    private string? FindFileRecursively(string rootDirectory, string fileName, CancellationToken token)
     {
+        if (token.IsCancellationRequested) return null;
+
         try
         {
             // Search in the current directory for the file
@@ -102,7 +129,9 @@ public class GameLauncherService
             // Recurse into subdirectories
             foreach (var directory in Directory.GetDirectories(rootDirectory))
             {
-                var result = FindFileRecursively(directory, fileName);
+                if (token.IsCancellationRequested) return null;
+
+                var result = FindFileRecursively(directory, fileName, token);
                 if (result != null)
                 {
                     return result;
