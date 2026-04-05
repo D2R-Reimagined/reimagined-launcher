@@ -279,6 +279,17 @@ public partial class UpdateView : UserControl
             return;
         }
 
+        var modDir = Path.Combine(installDirectory, "mods", "Reimagined");
+        if (Directory.Exists(modDir))
+        {
+            var backupDir = Path.Combine(installDirectory, "mods", "Reimagined.backup");
+            if (Directory.Exists(backupDir))
+            {
+                Directory.Delete(backupDir, recursive: true);
+            }
+            Directory.Move(modDir, backupDir);
+        }
+
         ZipFile.ExtractToDirectory(zipPath, installDirectory, overwriteFiles: true);
         Notifications.SendNotification("Mod installed successfully.", "Success");
 
