@@ -175,6 +175,12 @@ public static class BackupService
             return false;
         }
 
+        if (!Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories).Any())
+        {
+            Notifications.SendNotification("No save files found to back up.", "Warning");
+            return false;
+        }
+
         var backupRoot = MainWindow.Settings.BackupSaveDirectory;
         if (string.IsNullOrWhiteSpace(backupRoot))
         {
