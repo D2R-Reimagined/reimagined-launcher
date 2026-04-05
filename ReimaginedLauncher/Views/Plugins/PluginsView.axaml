@@ -101,6 +101,10 @@
                                                 <TextBlock FontWeight="SemiBold"
                                                            Text="{Binding Name}" />
                                                 <TextBlock Classes="muted"
+                                                           Text="{Binding Description}"
+                                                           TextWrapping="Wrap"
+                                                           IsVisible="{Binding HasDescription}" />
+                                                <TextBlock Classes="muted"
                                                            Text="{Binding Version, StringFormat=Version {0}}" />
                                                 <TextBlock Classes="muted"
                                                            Text="{Binding Order, StringFormat=Execution order {0}}" />

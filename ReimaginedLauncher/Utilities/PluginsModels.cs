@@ -11,6 +11,7 @@ public sealed class PluginCatalogItem : INotifyPropertyChanged
     public string Id { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;
     public string Version { get; init; } = string.Empty;
+    public string Description { get; init; } = string.Empty;
     public bool IsEnabled { get; init; }
     public int Order { get; init; }
     public IReadOnlyList<PluginParameterItem> Parameters { get; init; } = [];
@@ -18,6 +19,7 @@ public sealed class PluginCatalogItem : INotifyPropertyChanged
     public IReadOnlyList<string> Errors { get; init; } = [];
     public bool HasErrors => Errors.Count > 0;
     public bool HasParameters => Parameters.Count > 0;
+    public bool HasDescription => !string.IsNullOrWhiteSpace(Description);
     public bool IsParametersExpanded
     {
         get => _isParametersExpanded;
@@ -60,10 +62,12 @@ public sealed class OfficialPluginCatalogItem
     public string PluginId { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;
     public string Version { get; init; } = string.Empty;
+    public string Description { get; init; } = string.Empty;
     public bool IsInstalled { get; init; }
     public bool IsEnabled { get; init; }
     public IReadOnlyList<string> Errors { get; init; } = [];
     public bool HasErrors => Errors.Count > 0;
+    public bool HasDescription => !string.IsNullOrWhiteSpace(Description);
     public bool CanInstallOrEnable => !HasErrors && (!IsInstalled || !IsEnabled);
     public string ActionText => !IsInstalled
         ? "Install"

@@ -104,6 +104,7 @@ public static class PluginsService
             var errors = new List<string>();
             var name = folderName;
             var version = "Unknown";
+            var description = string.Empty;
 
             try
             {
@@ -111,6 +112,7 @@ public static class PluginsService
                 ValidatePluginInfo(pluginInfo, sourceDirectory);
                 name = pluginInfo.Name;
                 version = pluginInfo.Version;
+                description = pluginInfo.Description ?? string.Empty;
             }
             catch (Exception ex)
             {
@@ -123,6 +125,7 @@ public static class PluginsService
                 PluginId = registration?.Id ?? string.Empty,
                 Name = name,
                 Version = version,
+                Description = description,
                 IsInstalled = registration != null,
                 IsEnabled = registration?.IsEnabled == true,
                 Errors = errors
@@ -146,6 +149,7 @@ public static class PluginsService
                 Id = registration.Id,
                 Name = pluginState.Name,
                 Version = pluginState.Version,
+                Description = pluginState.Description,
                 IsEnabled = registration.IsEnabled,
                 Order = index + 1,
                 Parameters = pluginState.Parameters,
@@ -724,18 +728,19 @@ public static class PluginsService
         var parameters = new List<PluginParameterItem>();
         var name = registration.FolderName;
         var version = "Unknown";
+        var description = string.Empty;
 
         if (!Directory.Exists(pluginDirectory))
         {
             errors.Add("Imported plugin files are missing from disk.");
-            return new PluginState(name, version, parameters, files, errors);
+            return new PluginState(name, version, description, parameters, files, errors);
         }
 
         var pluginInfoPath = Path.Combine(pluginDirectory, PluginInfoFileName);
         if (!File.Exists(pluginInfoPath))
         {
             errors.Add("plugininfo.json is missing.");
-            return new PluginState(name, version, parameters, files, errors);
+            return new PluginState(name, version, description, parameters, files, errors);
         }
 
         try
@@ -743,6 +748,7 @@ public static class PluginsService
             var pluginInfo = await LoadPluginInfoAsync(pluginInfoPath);
             name = pluginInfo.Name;
             version = pluginInfo.Version;
+            description = pluginInfo.Description ?? string.Empty;
             parameters = pluginInfo.Parameters.Select(parameter => new PluginParameterItem
             {
                 PluginId = registration.Id,
@@ -756,7 +762,7 @@ public static class PluginsService
             if (pluginInfo.Files.Count == 0)
             {
                 errors.Add("plugininfo.json does not list any plugin JSON files.");
-                return new PluginState(name, version, parameters, files, errors);
+                return new PluginState(name, version, description, parameters, files, errors);
             }
 
             foreach (var relativePath in pluginInfo.Files)
@@ -792,7 +798,7 @@ public static class PluginsService
             errors.Add($"plugininfo.json is invalid: {ex.Message}");
         }
 
-        return new PluginState(name, version, parameters, files, errors);
+        return new PluginState(name, version, description, parameters, files, errors);
     }
 
     private static void ValidateOperations(
@@ -870,6 +876,7 @@ public static class PluginsService
         {
             Name = pluginInfo.Name ?? string.Empty,
             Version = pluginInfo.Version ?? string.Empty,
+            Description = pluginInfo.Description,
             Files = pluginInfo.Files ?? [],
             Parameters = pluginInfo.Parameters ?? []
         };
@@ -1145,6 +1152,7 @@ public static class PluginsService
     private sealed record PluginState(
         string Name,
         string Version,
+        string Description,
         IReadOnlyList<PluginParameterItem> Parameters,
         IReadOnlyList<PluginCatalogFileItem> Files,
         IReadOnlyList<string> Errors);
@@ -1153,6 +1161,7 @@ public static class PluginsService
     {
         public string Name { get; set; } = string.Empty;
         public string Version { get; set; } = string.Empty;
+        public string? Description { get; set; }
         public List<string> Files { get; set; } = [];
         public List<PluginParameterDefinition> Parameters { get; set; } = [];
     }
