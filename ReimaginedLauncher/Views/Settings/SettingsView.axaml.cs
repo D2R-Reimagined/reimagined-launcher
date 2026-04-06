@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.VisualTree;
 using ReimaginedLauncher.Utilities;
 
 namespace ReimaginedLauncher.Views.Settings;
@@ -17,6 +18,12 @@ public partial class SettingsView : UserControl
     public void RefreshSettingsState()
     {
         _isRefreshingSettings = true;
+        UiScaleComboBox.SelectedIndex = MainWindow.Settings.UiScale switch
+        {
+            <= 0.85 => 0,
+            <= 0.95 => 1,
+            _ => 2
+        };
         NoSoundCheckBox.IsChecked = MainWindow.Settings.NoSound;
         NoRumbleCheckBox.IsChecked = MainWindow.Settings.NoRumble;
         ResetOfflineMapsCheckBox.IsChecked = MainWindow.Settings.ResetOfflineMaps;
@@ -53,6 +60,28 @@ public partial class SettingsView : UserControl
             >= 1 and <= 7 => PlayersComboBox.SelectedIndex + 1,
             _ => null
         };
+
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private async void OnUiScaleSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_isRefreshingSettings)
+        {
+            return;
+        }
+
+        MainWindow.Settings.UiScale = UiScaleComboBox.SelectedIndex switch
+        {
+            0 => 0.8,
+            1 => 0.9,
+            _ => 1.0
+        };
+
+        if (this.GetVisualRoot() is MainWindow mainWindow)
+        {
+            mainWindow.ApplyUiScale();
+        }
 
         await SettingsManager.SaveAsync(MainWindow.Settings);
     }
