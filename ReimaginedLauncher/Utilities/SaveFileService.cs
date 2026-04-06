@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
@@ -6,35 +7,68 @@ namespace ReimaginedLauncher.Utilities;
 
 public class SaveFileService
 {
-    public static bool SaveFilesSafe()
+    public static string GetSavedGamesPath()
     {
-        //Find default drive
-        var drive = DriveInfo.GetDrives().FirstOrDefault(d => d.IsReady && d.DriveType == DriveType.Fixed);
-        if (drive == null)
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var myDocuments = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+
+        var candidates = new List<string>();
+
+        // 1. Try the one derived from MyDocuments (handles OneDrive better as MyDocuments is often redirected to OneDrive)
+        if (!string.IsNullOrWhiteSpace(myDocuments))
         {
-            // Handle the case where no fixed drive is found
-            Notifications.SendNotification("Failed to find drive info");
-            return false;
-        }
-        
-        //Check My Saved Games Folder
-        var foundFile = false;
-        var mySavedGamesPath = Path.Combine(drive.RootDirectory.FullName, "Users", Environment.UserName, "Saved Games");
-        if (Directory.Exists(mySavedGamesPath))
-        {
-            //Check all ds2 files and see if they are above 7kb in size
-            foreach (var saveFile in GetSaveFiles())
+            var parent = Path.GetDirectoryName(myDocuments);
+            if (!string.IsNullOrWhiteSpace(parent))
             {
-                var fileInfo = new FileInfo(saveFile);
-                if (fileInfo.Length <= 7000) continue;
-                foundFile = true;
-                // Handle the case where a save file is found
-                Notifications.SendNotification($"Found save file above 7kb - {fileInfo.Name}", "Warning");
+                candidates.Add(Path.Combine(parent, "Saved Games"));
             }
         }
-        else
+
+        // 2. Try the standard one under UserProfile
+        if (!string.IsNullOrWhiteSpace(userProfile))
+        {
+            candidates.Add(Path.Combine(userProfile, "Saved Games"));
+        }
+
+        // 3. Try inside MyDocuments (some systems might have it there)
+        if (!string.IsNullOrWhiteSpace(myDocuments))
+        {
+            candidates.Add(Path.Combine(myDocuments, "Saved Games"));
+        }
+
+        // Return the first candidate that exists and contains the "Diablo II Resurrected" folder
+        foreach (var candidate in candidates)
+        {
+            var d2rPath = Path.Combine(candidate, "Diablo II Resurrected");
+            if (Directory.Exists(d2rPath))
+            {
+                return candidate;
+            }
+        }
+
+        // Fallback to the first existing candidate, or the default if none exist
+        return candidates.FirstOrDefault(Directory.Exists)
+               ?? candidates.FirstOrDefault(c => !string.IsNullOrWhiteSpace(c))
+               ?? Path.Combine(userProfile, "Saved Games");
+    }
+
+    public static bool SaveFilesSafe()
+    {
+        var mySavedGamesPath = GetSavedGamesPath();
+        if (string.IsNullOrEmpty(mySavedGamesPath) || !Directory.Exists(mySavedGamesPath))
         {
             Notifications.SendNotification("Failed to find save files", "Warning");
+            return true; // Assume safe if not found? Or false? Current code returned true if no file found.
+        }
+
+        //Check all ds2 files and see if they are above 7kb in size
+        var foundFile = false;
+        foreach (var saveFile in GetSaveFiles())
+        {
+            var fileInfo = new FileInfo(saveFile);
+            if (fileInfo.Length <= 7000) continue;
+            foundFile = true;
+            Notifications.SendNotification($"Found save file above 7kb - {fileInfo.Name}", "Warning");
         }
 
         return !foundFile;
@@ -42,25 +76,13 @@ public class SaveFileService
     
     private static string[] GetSaveFiles()
     {
-        //Find default drive
-        var drive = DriveInfo.GetDrives().FirstOrDefault(d => d.IsReady && d.DriveType == DriveType.Fixed);
-        if (drive == null)
-        {
-            // Handle the case where no fixed drive is found
-            Notifications.SendNotification("Failed to find drive info");
-            return [];
-        }
-        
-        //Check My Saved Games Folder
-        var mySavedGamesPath = Path.Combine(drive.RootDirectory.FullName, "Users", Environment.UserName, "Saved Games");
+        var mySavedGamesPath = GetSavedGamesPath();
         if (Directory.Exists(mySavedGamesPath))
         {
-            //Check all ds2 files and see if they are above 7kb in size
             var saveFiles = Directory.GetFiles(mySavedGamesPath, "*.d2s", SearchOption.AllDirectories);
             return saveFiles;
         }
         
-        Notifications.SendNotification("Failed to find save files", "Warning");
         return [];
     }
 

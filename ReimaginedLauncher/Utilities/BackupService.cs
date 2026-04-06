@@ -147,13 +147,13 @@ public static class BackupService
         }
 
         var trimmedSavePath = savePath.Trim().Trim('/', '\\');
-        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        if (string.IsNullOrWhiteSpace(userProfile))
+        var savedGamesPath = SaveFileService.GetSavedGamesPath();
+        if (string.IsNullOrWhiteSpace(savedGamesPath))
         {
             return string.Empty;
         }
 
-        return Path.Combine(userProfile, "Saved Games", "Diablo II Resurrected", "mods", trimmedSavePath);
+        return Path.Combine(savedGamesPath, "Diablo II Resurrected", "mods", trimmedSavePath);
     }
 
     public static Task<bool> CreateLaunchBackupAsync()
@@ -172,6 +172,12 @@ public static class BackupService
         if (string.IsNullOrWhiteSpace(sourceDirectory) || !Directory.Exists(sourceDirectory))
         {
             Notifications.SendNotification("Save directory not found. Check your install and modinfo.json.", "Warning");
+            return false;
+        }
+
+        if (!Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories).Any())
+        {
+            Notifications.SendNotification("No save files found to back up.", "Warning");
             return false;
         }
 
@@ -195,13 +201,39 @@ public static class BackupService
         {
             var backupName = BuildBackupName(backupReason);
             var backupFilePath = Path.Combine(backupRoot, $"{backupName}.zip");
+            
+            var excludedDirectories = new List<string>();
+            var excludedFiles = new List<string>();
+            
+            var normalizedSource = NormalizeDirectoryPath(sourceDirectory);
+            var normalizedBackupRoot = NormalizeDirectoryPath(backupRoot);
+
+            // If the backup root is a subdirectory of the source, we must exclude the entire root to avoid recursion.
+            if (normalizedBackupRoot.StartsWith(normalizedSource + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                excludedDirectories.Add(backupRoot);
+            }
+            else if (string.Equals(normalizedSource, normalizedBackupRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                // Exclude existing backups when they are in the same folder.
+                foreach (var backup in GetBackups())
+                {
+                    if (backup.IsArchive)
+                    {
+                        excludedFiles.Add(backup.BackupPath);
+                    }
+                    else
+                    {
+                        excludedDirectories.Add(backup.BackupPath);
+                    }
+                }
+            }
+
             await CreateZipBackupAsync(
                 sourceDirectory,
                 backupFilePath,
-                excludedDirectories:
-                [
-                    backupRoot
-                ]);
+                excludedDirectories: excludedDirectories,
+                excludedFiles: excludedFiles);
             TrimBackups();
 
             Notifications.SendNotification($"Backup created: {backupName}", "Success");
@@ -236,13 +268,26 @@ public static class BackupService
         try
         {
             Directory.CreateDirectory(destinationDirectory);
+            List<string> errors;
             if (backupEntry.IsArchive)
             {
-                await ExtractArchiveAsync(backupEntry.BackupPath, destinationDirectory);
+                errors = await ExtractArchiveAsync(backupEntry.BackupPath, destinationDirectory);
             }
             else
             {
-                await CopyDirectoryAsync(backupEntry.BackupPath, destinationDirectory, overwrite: true);
+                errors = await CopyDirectoryAsync(backupEntry.BackupPath, destinationDirectory, overwrite: true);
+            }
+
+            if (errors.Count > 0)
+            {
+                var errorSummary = string.Join(Environment.NewLine, errors.Take(3));
+                if (errors.Count > 3)
+                {
+                    errorSummary += $"{Environment.NewLine}...and {errors.Count - 3} more files failed.";
+                }
+
+                Notifications.SendNotification($"Restored backup with errors:{Environment.NewLine}{errorSummary}", "Warning");
+                return true;
             }
 
             Notifications.SendNotification($"Restored backup: {backupEntry.Name}", "Success");
@@ -283,15 +328,14 @@ public static class BackupService
 
     private static string GetDefaultBackupDirectory()
     {
-        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        if (string.IsNullOrWhiteSpace(userProfile))
+        var savedGamesPath = SaveFileService.GetSavedGamesPath();
+        if (string.IsNullOrWhiteSpace(savedGamesPath))
         {
             return string.Empty;
         }
 
         return Path.Combine(
-            userProfile,
-            "Saved Games",
+            savedGamesPath,
             "Diablo II Resurrected",
             DefaultBackupDirectoryName);
     }
@@ -335,21 +379,34 @@ public static class BackupService
         }
     }
 
-    private static async Task CopyDirectoryAsync(
+    private static async Task<List<string>> CopyDirectoryAsync(
         string sourceDirectory,
         string destinationDirectory,
         bool overwrite,
-        IEnumerable<string>? excludedDirectories = null)
+        IEnumerable<string>? excludedDirectories = null,
+        IEnumerable<string>? excludedFiles = null)
     {
+        var errors = new List<string>();
         Directory.CreateDirectory(destinationDirectory);
         var excludedDirectoryPaths = excludedDirectories?
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Select(NormalizeDirectoryPath)
             .ToArray() ?? [];
 
+        var excludedFilePaths = excludedFiles?
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(Path.GetFullPath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
+
         foreach (var filePath in Directory.GetFiles(sourceDirectory, "*", SearchOption.AllDirectories))
         {
-            if (excludedDirectoryPaths.Any(excludedDirectory => IsPathWithinDirectory(filePath, excludedDirectory)))
+            var fullPath = Path.GetFullPath(filePath);
+            if (excludedFilePaths.Contains(fullPath))
+            {
+                continue;
+            }
+
+            if (excludedDirectoryPaths.Any(excludedDirectory => IsPathWithinDirectory(fullPath, excludedDirectory)))
             {
                 continue;
             }
@@ -363,16 +420,28 @@ public static class BackupService
                 Directory.CreateDirectory(destinationFolder);
             }
 
-            await using var sourceStream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            await using var destinationStream = File.Open(destinationFilePath, overwrite ? FileMode.Create : FileMode.CreateNew, FileAccess.Write, FileShare.None);
-            await sourceStream.CopyToAsync(destinationStream);
+            try
+            {
+                await using var sourceStream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                await using var destinationStream = File.Open(destinationFilePath, overwrite ? FileMode.Create : FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                await sourceStream.CopyToAsync(destinationStream);
+            }
+            catch (Exception ex)
+            {
+                var fileName = Path.GetFileName(destinationFilePath);
+                var message = ex.Message.Replace(destinationFilePath, fileName, StringComparison.OrdinalIgnoreCase);
+                errors.Add($"{destinationFilePath}:{Environment.NewLine}{message}");
+            }
         }
+
+        return errors;
     }
 
     private static Task CreateZipBackupAsync(
         string sourceDirectory,
         string destinationArchivePath,
-        IEnumerable<string>? excludedDirectories = null)
+        IEnumerable<string>? excludedDirectories = null,
+        IEnumerable<string>? excludedFiles = null)
     {
         return Task.Run(async () =>
         {
@@ -381,12 +450,37 @@ public static class BackupService
                 .Select(NormalizeDirectoryPath)
                 .ToArray() ?? [];
 
+            var excludedFilePaths = excludedFiles?
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Select(Path.GetFullPath)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
+
+            var fullDestinationPath = Path.GetFullPath(destinationArchivePath);
+
             await using var destinationStream = File.Open(destinationArchivePath, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
             using var archive = new ZipArchive(destinationStream, ZipArchiveMode.Create);
 
             foreach (var filePath in Directory.GetFiles(sourceDirectory, "*", SearchOption.AllDirectories))
             {
-                if (excludedDirectoryPaths.Any(excludedDirectory => IsPathWithinDirectory(filePath, excludedDirectory)))
+                var fullPath = Path.GetFullPath(filePath);
+
+                if (string.Equals(fullPath, fullDestinationPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (excludedFilePaths.Contains(fullPath))
+                {
+                    continue;
+                }
+
+                // Exclude files that match the backup naming pattern to avoid recursive backups or including other backups.
+                if (filePath.EndsWith("-backup.zip", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (excludedDirectoryPaths.Any(excludedDirectory => IsPathWithinDirectory(fullPath, excludedDirectory)))
                 {
                     continue;
                 }
@@ -402,10 +496,11 @@ public static class BackupService
         });
     }
 
-    private static Task ExtractArchiveAsync(string archivePath, string destinationDirectory)
+    private static Task<List<string>> ExtractArchiveAsync(string archivePath, string destinationDirectory)
     {
         return Task.Run(() =>
         {
+            var errors = new List<string>();
             using var archive = ZipFile.OpenRead(archivePath);
             foreach (var entry in archive.Entries.Where(entry => !string.IsNullOrEmpty(entry.Name)))
             {
@@ -417,8 +512,19 @@ public static class BackupService
                     Directory.CreateDirectory(destinationFolder);
                 }
 
-                entry.ExtractToFile(destinationPath, overwrite: true);
+                try
+                {
+                    entry.ExtractToFile(destinationPath, overwrite: true);
+                }
+                catch (Exception ex)
+                {
+                    var fileName = Path.GetFileName(destinationPath);
+                    var message = ex.Message.Replace(destinationPath, fileName, StringComparison.OrdinalIgnoreCase);
+                    errors.Add($"{destinationPath}:{Environment.NewLine}{message}");
+                }
             }
+
+            return errors;
         });
     }
 
