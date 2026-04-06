@@ -14,9 +14,12 @@ public static class LauncherUpdateService
     private static UpdateManager? _updateManager;
     private static UpdateInfo? _updateInfo;
     
+    public static bool IsUpdateAvailable { get; private set; }
+    public static bool IsDownloading { get; private set; }
     public static bool IsUpdateDownloaded { get; private set; }
     public static string? LatestVersion { get; private set; }
     public static event EventHandler? UpdateDownloaded;
+    public static event EventHandler? UpdateStateChanged;
 
     public static async Task CheckForUpdatesAsync()
     {
@@ -43,22 +46,25 @@ public static class LauncherUpdateService
                 return;
             }
 
+            IsUpdateAvailable = true;
             LatestVersion = _updateInfo.TargetFullRelease.Version.ToString();
+            UpdateStateChanged?.Invoke(null, EventArgs.Empty);
 
-            await Dispatcher.UIThread.InvokeAsync(() =>
-                Notifications.SendNotification(
-                    $"Launcher update {LatestVersion} available. Downloading...",
-                    "Info"));
+            IsDownloading = true;
+            UpdateStateChanged?.Invoke(null, EventArgs.Empty);
 
-            await _updateManager.DownloadUpdatesAsync(_updateInfo);
+            try
+            {
+                await _updateManager.DownloadUpdatesAsync(_updateInfo);
+                IsUpdateDownloaded = true;
+            }
+            finally
+            {
+                IsDownloading = false;
+            }
 
-            IsUpdateDownloaded = true;
             UpdateDownloaded?.Invoke(null, EventArgs.Empty);
-
-            await Dispatcher.UIThread.InvokeAsync(() =>
-                Notifications.SendNotification(
-                    $"Launcher update {LatestVersion} downloaded. Restart the launcher to apply it.",
-                    "Success"));
+            UpdateStateChanged?.Invoke(null, EventArgs.Empty);
         }
         catch (Exception ex)
         {

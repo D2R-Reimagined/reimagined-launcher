@@ -66,6 +66,7 @@ public partial class MainWindow : Window
         LogoImage.Source = new Bitmap("Assets/ReimaginedLauncher.ico");
         LauncherVersionTextBlock.Text = $"Launcher v{LauncherVersion}";
         LauncherUpdateService.UpdateDownloaded += (s, e) => RefreshLauncherUpdateUI();
+        LauncherUpdateService.UpdateStateChanged += (s, e) => RefreshLauncherUpdateUI();
         RefreshLauncherUpdateUI();
 
         
@@ -813,13 +814,25 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (LauncherUpdateService.IsUpdateDownloaded)
+        bool showBanner = LauncherUpdateService.IsUpdateAvailable || LauncherUpdateService.IsUpdateDownloaded;
+        UpdateBanner.IsVisible = showBanner;
+
+        if (showBanner)
         {
-            UpdateBanner.IsVisible = true;
-            
-            if (!string.IsNullOrEmpty(LauncherUpdateService.LatestVersion))
+            if (LauncherUpdateService.IsUpdateDownloaded)
             {
                 UpdateBannerText.Text = $"Launcher update {LauncherUpdateService.LatestVersion} is ready to install.";
+                LauncherRestartButton.IsVisible = true;
+            }
+            else if (LauncherUpdateService.IsDownloading)
+            {
+                UpdateBannerText.Text = $"Launcher update {LauncherUpdateService.LatestVersion} is downloading...";
+                LauncherRestartButton.IsVisible = false;
+            }
+            else
+            {
+                UpdateBannerText.Text = $"Launcher update {LauncherUpdateService.LatestVersion} is available.";
+                LauncherRestartButton.IsVisible = false;
             }
         }
     }
