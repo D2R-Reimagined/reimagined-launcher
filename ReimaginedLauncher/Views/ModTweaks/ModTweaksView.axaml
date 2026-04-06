@@ -14,8 +14,6 @@
                       Focusable="True"
                       PointerPressed="OnBackgroundPointerPressed">
             <StackPanel Spacing="16"
-                        Width="{Binding Bounds.Width, ElementName=RootScrollViewer}"
-                        MinHeight="{Binding Bounds.Height, ElementName=RootScrollViewer}"
                         HorizontalAlignment="Stretch">
                 <StackPanel Spacing="4">
                     <TextBlock Classes="view-title" Text="Mod Tweaks"/>

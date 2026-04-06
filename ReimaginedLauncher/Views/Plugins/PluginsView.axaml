@@ -13,8 +13,6 @@
                   Focusable="True"
                   PointerPressed="OnBackgroundPointerPressed">
         <StackPanel Spacing="18"
-                    Width="{Binding Bounds.Width, ElementName=RootScrollViewer}"
-                    MinHeight="{Binding Bounds.Height, ElementName=RootScrollViewer}"
                     HorizontalAlignment="Stretch">
             <Border x:Name="LoadingBanner"
                     Classes="panel"
@@ -33,8 +31,6 @@
 
             <StackPanel x:Name="ContentPanel"
                         Spacing="18"
-                        Width="{Binding Bounds.Width, ElementName=RootScrollViewer}"
-                        MinHeight="{Binding Bounds.Height, ElementName=RootScrollViewer}"
                         HorizontalAlignment="Stretch">
             <StackPanel Spacing="4">
                 <TextBlock Classes="view-title"

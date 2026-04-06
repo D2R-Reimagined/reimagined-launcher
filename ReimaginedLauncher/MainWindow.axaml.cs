@@ -64,6 +64,7 @@ public partial class MainWindow : Window
     public static int? UpdateFileId { get; private set; }
     private NexusModsSSO? _nexusSSO;
     private string? _localModVersion;
+    private double _currentScale = 1.0;
 
     public MainWindow()
     {
@@ -78,6 +79,7 @@ public partial class MainWindow : Window
 
         
         DataContext = UserViewModel;
+        RootScaleControl.SizeChanged += (_, _) => UpdateRootGridSize();
         ApplyUiScale();
         _ = LoadSettingsAsync();
         _ = NavigateToLaunchViewAsync();
@@ -176,8 +178,19 @@ public partial class MainWindow : Window
 
     public void ApplyUiScale()
     {
-        var scale = ClampUiScale(Settings.UiScale);
-        RootScaleControl.LayoutTransform = new ScaleTransform(scale, scale);
+        _currentScale = ClampUiScale(Settings.UiScale);
+        RootScaleControl.LayoutTransform = new ScaleTransform(_currentScale, _currentScale);
+        UpdateRootGridSize();
+    }
+
+    private void UpdateRootGridSize()
+    {
+        var bounds = RootScaleControl.Bounds;
+        if (bounds.Width > 0 && bounds.Height > 0 && _currentScale > 0)
+        {
+            RootGrid.Width = bounds.Width / _currentScale;
+            RootGrid.Height = bounds.Height / _currentScale;
+        }
     }
 
     private static double ClampUiScale(double uiScale)
