@@ -65,6 +65,9 @@ public partial class MainWindow : Window
         InitializeComponent();
         LogoImage.Source = new Bitmap("Assets/ReimaginedLauncher.ico");
         LauncherVersionTextBlock.Text = $"Launcher v{LauncherVersion}";
+        LauncherUpdateService.UpdateDownloaded += (s, e) => RefreshLauncherUpdateUI();
+        RefreshLauncherUpdateUI();
+
         
         DataContext = UserViewModel;
         _ = LoadSettingsAsync();
@@ -801,6 +804,31 @@ public partial class MainWindow : Window
             button.ContextMenu.Open(button);
         }
     }
+
+    private void RefreshLauncherUpdateUI()
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(RefreshLauncherUpdateUI);
+            return;
+        }
+
+        if (LauncherUpdateService.IsUpdateDownloaded)
+        {
+            UpdateBanner.IsVisible = true;
+            
+            if (!string.IsNullOrEmpty(LauncherUpdateService.LatestVersion))
+            {
+                UpdateBannerText.Text = $"Launcher update {LauncherUpdateService.LatestVersion} is ready to install.";
+            }
+        }
+    }
+
+    private void OnLauncherRestartClicked(object? sender, RoutedEventArgs e)
+    {
+        LauncherUpdateService.ApplyUpdateAndRestart();
+    }
+
 
     private async void OnLogoutClicked(object? sender, RoutedEventArgs e)
     {
