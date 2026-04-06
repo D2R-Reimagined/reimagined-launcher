@@ -25,4 +25,5 @@ public class NexusUserViewModel : INotifyPropertyChanged
     public bool IsLoggedIn => User != null;
     public string Name => User?.Name ?? "";
     public string ProfileUrl => User?.ProfileUrl ?? "";
+    public SessionLogViewModel SessionLog { get; } = new();
 }
