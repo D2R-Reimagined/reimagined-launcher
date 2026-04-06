@@ -65,6 +65,10 @@ public partial class MainWindow : Window
         InitializeComponent();
         LogoImage.Source = new Bitmap("Assets/ReimaginedLauncher.ico");
         LauncherVersionTextBlock.Text = $"Launcher v{LauncherVersion}";
+        LauncherUpdateService.UpdateDownloaded += (s, e) => RefreshLauncherUpdateUI();
+        LauncherUpdateService.UpdateStateChanged += (s, e) => RefreshLauncherUpdateUI();
+        RefreshLauncherUpdateUI();
+
         
         DataContext = UserViewModel;
         _ = LoadSettingsAsync();
@@ -801,6 +805,43 @@ public partial class MainWindow : Window
             button.ContextMenu.Open(button);
         }
     }
+
+    private void RefreshLauncherUpdateUI()
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(RefreshLauncherUpdateUI);
+            return;
+        }
+
+        bool showBanner = LauncherUpdateService.IsUpdateAvailable || LauncherUpdateService.IsUpdateDownloaded;
+        UpdateBanner.IsVisible = showBanner;
+
+        if (showBanner)
+        {
+            if (LauncherUpdateService.IsUpdateDownloaded)
+            {
+                UpdateBannerText.Text = $"Launcher update {LauncherUpdateService.LatestVersion} is ready to install.";
+                LauncherRestartButton.IsVisible = true;
+            }
+            else if (LauncherUpdateService.IsDownloading)
+            {
+                UpdateBannerText.Text = $"Launcher update {LauncherUpdateService.LatestVersion} is downloading...";
+                LauncherRestartButton.IsVisible = false;
+            }
+            else
+            {
+                UpdateBannerText.Text = $"Launcher update {LauncherUpdateService.LatestVersion} is available.";
+                LauncherRestartButton.IsVisible = false;
+            }
+        }
+    }
+
+    private void OnLauncherRestartClicked(object? sender, RoutedEventArgs e)
+    {
+        LauncherUpdateService.ApplyUpdateAndRestart();
+    }
+
 
     private async void OnLogoutClicked(object? sender, RoutedEventArgs e)
     {
