@@ -280,10 +280,10 @@ public static class BackupService
 
             if (errors.Count > 0)
             {
-                var errorSummary = string.Join(Environment.NewLine + Environment.NewLine, errors.Take(3));
+                var errorSummary = string.Join(Environment.NewLine, errors.Take(3));
                 if (errors.Count > 3)
                 {
-                    errorSummary += $"{Environment.NewLine}{Environment.NewLine}...and {errors.Count - 3} more files failed.";
+                    errorSummary += $"{Environment.NewLine}...and {errors.Count - 3} more files failed.";
                 }
 
                 Notifications.SendNotification($"Restored backup with errors:{Environment.NewLine}{errorSummary}", "Warning");
