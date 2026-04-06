@@ -8,6 +8,7 @@ public static class Notifications
 {
     public static void SendNotification(string message, string badgeType = "Info")
     {
+        SessionLogService.AddEntry(message, badgeType);
         Dispatcher.UIThread.Post(() =>
         {
             MainWindow.ManagerInstance

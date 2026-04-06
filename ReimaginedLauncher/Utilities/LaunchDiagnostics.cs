@@ -31,6 +31,7 @@ public static class LaunchDiagnostics
 
     public static void LogException(string context, Exception exception)
     {
+        SessionLogService.AddEntry($"{context}: {exception.Message}", "Error");
         Log($"{context}: {exception}");
     }
 }

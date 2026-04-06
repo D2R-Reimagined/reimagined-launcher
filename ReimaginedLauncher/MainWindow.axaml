@@ -146,27 +146,64 @@
                                    Text="Use the launcher to keep your install current, backed up, and ready to descend." />
                     </StackPanel>
 
-                    <Grid Grid.Column="1"
-                          VerticalAlignment="Center">
-                        <Button Classes="accent"
-                                Content="Login with Nexus Mods"
-                                Click="OnNexusLoginClicked"
-                                IsVisible="{Binding IsLoggedIn, Converter={StaticResource InverseBooleanConverter}}"
-                                VerticalAlignment="Center" />
-                        <Button x:Name="UserMenuButton"
-                                Classes="accent"
-                                Content="{Binding Name}"
-                                Click="OnUserMenuClick"
-                                VerticalAlignment="Center"
-                                FontWeight="Bold"
-                                IsVisible="{Binding IsLoggedIn}">
-                            <Button.ContextMenu>
-                                <ContextMenu>
-                                    <MenuItem Header="Logout" Click="OnLogoutClicked"/>
-                                </ContextMenu>
-                            </Button.ContextMenu>
+                    <StackPanel Grid.Column="1" 
+                                Orientation="Horizontal" 
+                                Spacing="8" 
+                                VerticalAlignment="Center">
+                        <Button Classes="link-button" 
+                                Content="{materialIcons:MaterialIconExt Kind=History}" 
+                                ToolTip.Tip="Session Log"
+                                VerticalAlignment="Center">
+                            <Button.Flyout>
+                                <Flyout Placement="BottomEdgeAlignedRight">
+                                    <Border Width="400" MaxHeight="500" Padding="12">
+                                        <Grid RowDefinitions="Auto,*">
+                                            <TextBlock Grid.Row="0" Text="Session Log" FontWeight="Bold" FontSize="16" Margin="0,0,0,10" Foreground="{StaticResource GoldBrush}"/>
+                                            <ScrollViewer Grid.Row="1">
+                                                <ItemsControl ItemsSource="{Binding SessionLog.Entries}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Border BorderBrush="#333" BorderThickness="0,0,0,1" Padding="0,8">
+                                                                <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto">
+                                                                    <materialIcons:MaterialIcon Grid.Row="0" Grid.Column="0" 
+                                                                                                Kind="{Binding Type, Converter={StaticResource LogTypeToIconConverter}}" 
+                                                                                                Foreground="{Binding Type, Converter={StaticResource LogTypeToBrushConverter}}"
+                                                                                                Width="16" Height="16" Margin="0,2,8,0" VerticalAlignment="Top"/>
+                                                                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap" FontSize="13"/>
+                                                                    <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Timestamp, StringFormat=\{0:HH:mm:ss\}}" Classes="muted" FontSize="11" Margin="0,4,0,0"/>
+                                                                </Grid>
+                                                            </Border>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </ScrollViewer>
+                                        </Grid>
+                                    </Border>
+                                </Flyout>
+                            </Button.Flyout>
                         </Button>
-                    </Grid>
+
+                        <Grid VerticalAlignment="Center">
+                            <Button Classes="accent"
+                                    Content="Login with Nexus Mods"
+                                    Click="OnNexusLoginClicked"
+                                    IsVisible="{Binding IsLoggedIn, Converter={StaticResource InverseBooleanConverter}}"
+                                    VerticalAlignment="Center" />
+                            <Button x:Name="UserMenuButton"
+                                    Classes="accent"
+                                    Content="{Binding Name}"
+                                    Click="OnUserMenuClick"
+                                    VerticalAlignment="Center"
+                                    FontWeight="Bold"
+                                    IsVisible="{Binding IsLoggedIn}">
+                                <Button.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Logout" Click="OnLogoutClicked"/>
+                                    </ContextMenu>
+                                </Button.ContextMenu>
+                            </Button>
+                        </Grid>
+                    </StackPanel>
                 </Grid>
             </Border>
 
