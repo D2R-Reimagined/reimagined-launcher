@@ -34,6 +34,8 @@
             <GradientStop Color="#090707" Offset="1" />
         </LinearGradientBrush>
         <valueConverters:InverseBooleanConverter x:Key="InverseBooleanConverter" />
+        <valueConverters:LogTypeToIconConverter x:Key="LogTypeToIconConverter" />
+        <valueConverters:LogTypeToBrushConverter x:Key="LogTypeToBrushConverter" />
     </Application.Resources>
     <Application.Styles>
         <FluentTheme />
