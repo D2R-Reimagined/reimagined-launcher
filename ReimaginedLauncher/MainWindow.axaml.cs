@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
@@ -23,6 +24,7 @@ using ReimaginedLauncher.Utilities.ViewModels;
 using ReimaginedLauncher.Views.Backups;
 using ReimaginedLauncher.Views.Launch;
 using ReimaginedLauncher.Views.ModTweaks;
+using ReimaginedLauncher.Views.NewsAnnouncements;
 using ReimaginedLauncher.Views.Plugins;
 using ReimaginedLauncher.Views.Settings;
 using ReimaginedLauncher.Views.Update;
@@ -40,12 +42,15 @@ public partial class MainWindow : Window
     private const string NexusUrl = "https://www.nexusmods.com/diablo2resurrected/mods/503";
     private const string DiscordUrl = "https://discord.gg/5bbjneJCrr";
     private static readonly string LauncherVersion = ResolveLauncherVersion();
+    private readonly GitHubAnnouncementsHttpClient _gitHubAnnouncementsHttpClient;
     private readonly INexusModsHttpClient _nexusModsHttpClient;
     public NexusModsValidateResponse? User { get; set; }
     public static NexusUserViewModel UserViewModel { get; } = new();
     
     public static INotificationMessageManager ManagerInstance { get; } = new NotificationMessageManager();
     public static AppSettings Settings = new();
+    public static IReadOnlyList<GitHubAnnouncement> Announcements { get; private set; } = [];
+    public static bool HasUnreadAnnouncements { get; private set; }
     public static bool IsLocalModDetected { get; private set; }
     public static bool IsUpdateAvailable { get; private set; }
     public static bool CanInstallOrUpdate { get; private set; }
@@ -61,6 +66,7 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
+        _gitHubAnnouncementsHttpClient = Program.ServiceProvider.GetRequiredService<GitHubAnnouncementsHttpClient>();
         _nexusModsHttpClient = Program.ServiceProvider.GetRequiredService<NexusModsHttpClient>();;
         InitializeComponent();
         LogoImage.Source = new Bitmap("Assets/ReimaginedLauncher.ico");
@@ -72,7 +78,7 @@ public partial class MainWindow : Window
         
         DataContext = UserViewModel;
         _ = LoadSettingsAsync();
-        ContentArea.Content = new LaunchView();
+        _ = NavigateToLaunchViewAsync();
         
         // Set the window icon
         Icon = new WindowIcon("Assets/ReimaginedLauncher.ico");
@@ -100,6 +106,7 @@ public partial class MainWindow : Window
         Settings.InstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(Settings.InstallDirectory);
         Settings.IsInstallDirectoryValidated = InstallDirectoryValidator.IsValidInstallDirectory(Settings.InstallDirectory);
         BackupService.ApplyDefaultSettings();
+        var openedUnreadAnnouncements = await RefreshAnnouncementsStateAsync(openUnreadAnnouncements: true);
         
         if (!string.IsNullOrWhiteSpace(Settings.NexusModsSSOApiKey))
         {
@@ -124,6 +131,10 @@ public partial class MainWindow : Window
             else if (ContentArea.Content is SettingsView settingsView)
             {
                 settingsView.RefreshSettingsState();
+            }
+            else if (ContentArea.Content is NewsAnnouncementsView newsAnnouncementsView)
+            {
+                newsAnnouncementsView.RefreshAnnouncementsState();
             }
             else if (ContentArea.Content is ModTweaksView modTweaksView)
             {
@@ -152,7 +163,10 @@ public partial class MainWindow : Window
 
         if (!IsLocalModDetected)
         {
-            await PromptInstallForMissingModAsync();
+            if (!openedUnreadAnnouncements)
+            {
+                await PromptInstallForMissingModAsync();
+            }
         }
     }
 
@@ -163,6 +177,59 @@ public partial class MainWindow : Window
             await RefreshUpdateStateAsync();
             RefreshCurrentContent();
         }
+    }
+
+    public async Task<bool> RefreshAnnouncementsStateAsync(bool openUnreadAnnouncements = false)
+    {
+        var announcements = await _gitHubAnnouncementsHttpClient.GetAnnouncementsAsync();
+        foreach (var announcement in announcements)
+        {
+            announcement.IsUnread = IsAnnouncementUnread(announcement.Number);
+        }
+
+        Announcements = announcements;
+        HasUnreadAnnouncements = announcements.Any(announcement => announcement.IsUnread);
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            RefreshNewsNavigationLabel();
+
+            if (ContentArea.Content is NewsAnnouncementsView newsAnnouncementsView)
+            {
+                newsAnnouncementsView.RefreshAnnouncementsState();
+            }
+        });
+
+        if (openUnreadAnnouncements && HasUnreadAnnouncements)
+        {
+            await NavigateToNewsAnnouncementsViewAsync();
+            return true;
+        }
+
+        return false;
+    }
+
+    public async Task MarkAnnouncementsReadUpToAsync(int discussionNumber)
+    {
+        if (discussionNumber <= Settings.LastReadAnnouncementNumber)
+        {
+            return;
+        }
+
+        Settings.LastReadAnnouncementNumber = discussionNumber;
+        foreach (var announcement in Announcements)
+        {
+            announcement.IsUnread = IsAnnouncementUnread(announcement.Number);
+        }
+
+        HasUnreadAnnouncements = Announcements.Any(announcement => announcement.IsUnread);
+        await SettingsManager.SaveAsync(Settings);
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            RefreshNewsNavigationLabel();
+            RefreshCurrentContent();
+        });
     }
 
     public async Task RefreshUpdateStateAsync()
@@ -495,8 +562,11 @@ public partial class MainWindow : Window
     {
         if (NavigationList.SelectedItem is ListBoxItem item)
         {
-            switch (item.Content?.ToString())
+            switch (item.Tag?.ToString())
             {
+                case "NewsAnnouncements":
+                    _ = NavigateToNewsAnnouncementsViewAsync();
+                    break;
                 case "Launch":
                     var launchView = new LaunchView();
                     launchView.RefreshInstallDirectoryState();
@@ -513,7 +583,7 @@ public partial class MainWindow : Window
                     settingsView.RefreshSettingsState();
                     ContentArea.Content = settingsView;
                     break;
-                case "Mod Tweaks":
+                case "ModTweaks":
                     var modTweaksView = new ModTweaksView();
                     modTweaksView.RefreshTweaksState();
                     ContentArea.Content = modTweaksView;
@@ -595,6 +665,38 @@ public partial class MainWindow : Window
         });
     }
 
+    public async Task NavigateToNewsAnnouncementsViewAsync()
+    {
+        NewsAnnouncementsView? newsAnnouncementsView = null;
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            newsAnnouncementsView = new NewsAnnouncementsView();
+            newsAnnouncementsView.SetLoadingState(true);
+            ContentArea.Content = newsAnnouncementsView;
+
+            if (NewsAnnouncementsNavItem != null && NavigationList.SelectedItem != NewsAnnouncementsNavItem)
+            {
+                NavigationList.SelectedItem = NewsAnnouncementsNavItem;
+            }
+        });
+
+        try
+        {
+            await RefreshAnnouncementsStateAsync();
+        }
+        finally
+        {
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (newsAnnouncementsView != null && ReferenceEquals(ContentArea.Content, newsAnnouncementsView))
+                {
+                    newsAnnouncementsView.SetLoadingState(false);
+                }
+            });
+        }
+    }
+
     public async Task NavigateToBackupsViewAsync()
     {
         BackupsView? backupsView = null;
@@ -605,9 +707,9 @@ public partial class MainWindow : Window
             backupsView.SetLoadingState(true);
             ContentArea.Content = backupsView;
 
-            if (NavigationList.SelectedItem is not ListBoxItem { Content: "Backups" })
+            if (BackupsNavItem != null && NavigationList.SelectedItem != BackupsNavItem)
             {
-                NavigationList.SelectedIndex = 2;
+                NavigationList.SelectedItem = BackupsNavItem;
             }
         });
 
@@ -640,9 +742,9 @@ public partial class MainWindow : Window
             pluginsView.SetLoadingState(true);
             ContentArea.Content = pluginsView;
 
-            if (NavigationList.SelectedItem is not ListBoxItem { Content: "Plugins" })
+            if (PluginsNavItem != null && NavigationList.SelectedItem != PluginsNavItem)
             {
-                NavigationList.SelectedIndex = 1;
+                NavigationList.SelectedItem = PluginsNavItem;
             }
         });
 
@@ -686,9 +788,9 @@ public partial class MainWindow : Window
 
         ContentArea.Content = new PluginAuthoringGuideView();
 
-        if (NavigationList.SelectedItem is not ListBoxItem { Content: "Plugins" })
+        if (PluginsNavItem != null && NavigationList.SelectedItem != PluginsNavItem)
         {
-            NavigationList.SelectedIndex = 1;
+            NavigationList.SelectedItem = PluginsNavItem;
         }
     }
 
@@ -702,9 +804,9 @@ public partial class MainWindow : Window
 
         ContentArea.Content = new OfficialPluginsView();
 
-        if (NavigationList.SelectedItem is not ListBoxItem { Content: "Plugins" })
+        if (PluginsNavItem != null && NavigationList.SelectedItem != PluginsNavItem)
         {
-            NavigationList.SelectedIndex = 1;
+            NavigationList.SelectedItem = PluginsNavItem;
         }
     }
 
@@ -727,6 +829,10 @@ public partial class MainWindow : Window
         else if (ContentArea.Content is SettingsView settingsView)
         {
             settingsView.RefreshSettingsState();
+        }
+        else if (ContentArea.Content is NewsAnnouncementsView newsAnnouncementsView)
+        {
+            newsAnnouncementsView.RefreshAnnouncementsState();
         }
         else if (ContentArea.Content is ModTweaksView modTweaksView)
         {
@@ -835,6 +941,23 @@ public partial class MainWindow : Window
                 LauncherRestartButton.IsVisible = false;
             }
         }
+    }
+
+    private static bool IsAnnouncementUnread(int discussionNumber)
+    {
+        return discussionNumber > Settings.LastReadAnnouncementNumber;
+    }
+
+    private void RefreshNewsNavigationLabel()
+    {
+        if (NewsAnnouncementsNavItem == null)
+        {
+            return;
+        }
+
+        NewsAnnouncementsNavItem.Content = HasUnreadAnnouncements
+            ? "News & Announcements (New)"
+            : "News & Announcements";
     }
 
     private void OnLauncherRestartClicked(object? sender, RoutedEventArgs e)

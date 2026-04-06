@@ -20,6 +20,7 @@ class Program
         VelopackApp.Build().Run();
 
         var services = new ServiceCollection();
+        services.AddHttpClient<GitHubAnnouncementsHttpClient>();
         services.AddHttpClient<NexusModsHttpClient>();
         
         ServiceProvider = services.BuildServiceProvider();

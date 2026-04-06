@@ -4,6 +4,7 @@ namespace ReimaginedLauncher.Utilities;
 
 public class AppSettings
 {
+    public int LastReadAnnouncementNumber { get; set; }
     public string? InstallDirectory { get; set; }
     public bool IsInstallDirectoryValidated { get; set; }
     public string? BackupSaveDirectory { get; set; }
