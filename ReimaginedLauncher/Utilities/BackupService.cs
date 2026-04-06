@@ -268,13 +268,26 @@ public static class BackupService
         try
         {
             Directory.CreateDirectory(destinationDirectory);
+            List<string> errors;
             if (backupEntry.IsArchive)
             {
-                await ExtractArchiveAsync(backupEntry.BackupPath, destinationDirectory);
+                errors = await ExtractArchiveAsync(backupEntry.BackupPath, destinationDirectory);
             }
             else
             {
-                await CopyDirectoryAsync(backupEntry.BackupPath, destinationDirectory, overwrite: true);
+                errors = await CopyDirectoryAsync(backupEntry.BackupPath, destinationDirectory, overwrite: true);
+            }
+
+            if (errors.Count > 0)
+            {
+                var errorSummary = string.Join(Environment.NewLine + Environment.NewLine, errors.Take(3));
+                if (errors.Count > 3)
+                {
+                    errorSummary += $"{Environment.NewLine}{Environment.NewLine}...and {errors.Count - 3} more files failed.";
+                }
+
+                Notifications.SendNotification($"Restored backup with errors:{Environment.NewLine}{errorSummary}", "Warning");
+                return true;
             }
 
             Notifications.SendNotification($"Restored backup: {backupEntry.Name}", "Success");
@@ -366,13 +379,14 @@ public static class BackupService
         }
     }
 
-    private static async Task CopyDirectoryAsync(
+    private static async Task<List<string>> CopyDirectoryAsync(
         string sourceDirectory,
         string destinationDirectory,
         bool overwrite,
         IEnumerable<string>? excludedDirectories = null,
         IEnumerable<string>? excludedFiles = null)
     {
+        var errors = new List<string>();
         Directory.CreateDirectory(destinationDirectory);
         var excludedDirectoryPaths = excludedDirectories?
             .Where(path => !string.IsNullOrWhiteSpace(path))
@@ -406,10 +420,21 @@ public static class BackupService
                 Directory.CreateDirectory(destinationFolder);
             }
 
-            await using var sourceStream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            await using var destinationStream = File.Open(destinationFilePath, overwrite ? FileMode.Create : FileMode.CreateNew, FileAccess.Write, FileShare.None);
-            await sourceStream.CopyToAsync(destinationStream);
+            try
+            {
+                await using var sourceStream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                await using var destinationStream = File.Open(destinationFilePath, overwrite ? FileMode.Create : FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                await sourceStream.CopyToAsync(destinationStream);
+            }
+            catch (Exception ex)
+            {
+                var fileName = Path.GetFileName(destinationFilePath);
+                var message = ex.Message.Replace(destinationFilePath, fileName, StringComparison.OrdinalIgnoreCase);
+                errors.Add($"{destinationFilePath}:{Environment.NewLine}{message}");
+            }
         }
+
+        return errors;
     }
 
     private static Task CreateZipBackupAsync(
@@ -471,10 +496,11 @@ public static class BackupService
         });
     }
 
-    private static Task ExtractArchiveAsync(string archivePath, string destinationDirectory)
+    private static Task<List<string>> ExtractArchiveAsync(string archivePath, string destinationDirectory)
     {
         return Task.Run(() =>
         {
+            var errors = new List<string>();
             using var archive = ZipFile.OpenRead(archivePath);
             foreach (var entry in archive.Entries.Where(entry => !string.IsNullOrEmpty(entry.Name)))
             {
@@ -486,8 +512,19 @@ public static class BackupService
                     Directory.CreateDirectory(destinationFolder);
                 }
 
-                entry.ExtractToFile(destinationPath, overwrite: true);
+                try
+                {
+                    entry.ExtractToFile(destinationPath, overwrite: true);
+                }
+                catch (Exception ex)
+                {
+                    var fileName = Path.GetFileName(destinationPath);
+                    var message = ex.Message.Replace(destinationPath, fileName, StringComparison.OrdinalIgnoreCase);
+                    errors.Add($"{destinationPath}:{Environment.NewLine}{message}");
+                }
             }
+
+            return errors;
         });
     }
 
