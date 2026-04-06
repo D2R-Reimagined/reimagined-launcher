@@ -1,0 +1,260 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:models="clr-namespace:ReimaginedLauncher.HttpClients.Models"
+             xmlns:primitives="clr-namespace:Avalonia.Controls.Primitives;assembly=Avalonia.Controls"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+             x:Class="ReimaginedLauncher.Views.NewsAnnouncements.NewsAnnouncementsView">
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                  VerticalScrollBarVisibility="Auto">
+        <StackPanel Spacing="16">
+            <StackPanel Spacing="4">
+                <TextBlock Classes="view-title"
+                           Text="News &amp; Announcements" />
+                <TextBlock Classes="muted"
+                           Text="Latest updates pulled from the GitHub Discussions announcement channel." />
+            </StackPanel>
+
+            <Border x:Name="LoadingBanner"
+                    Classes="panel"
+                    Padding="16"
+                    IsVisible="False">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="Loading announcements..."
+                               FontWeight="SemiBold" />
+                    <ProgressBar IsIndeterminate="True"
+                                 Height="8" />
+                    <TextBlock Classes="muted"
+                               Text="Checking the latest news from GitHub Discussions." />
+                </StackPanel>
+            </Border>
+
+            <StackPanel Orientation="Horizontal"
+                        Spacing="8">
+                <Button x:Name="RefreshButton"
+                        Classes="accent"
+                        Content="Refresh"
+                        Click="OnRefreshClicked" />
+                <Button x:Name="MarkAllReadButton"
+                        Content="Mark All Read"
+                        Click="OnMarkAllReadClicked" />
+            </StackPanel>
+
+            <Border x:Name="EmptyStateBorder"
+                    Classes="panel"
+                    Padding="20"
+                    IsVisible="False">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="No announcements found."
+                               FontWeight="Bold" />
+                    <TextBlock Classes="muted"
+                               Text="When new updates are posted in the GitHub announcement category, they will appear here." />
+                </StackPanel>
+            </Border>
+
+            <ItemsControl x:Name="AnnouncementsItemsControl">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="models:GitHubAnnouncement">
+                        <Border Classes="panel"
+                                Padding="18"
+                                Margin="0,0,0,12">
+                            <StackPanel Spacing="10">
+                                <StackPanel Spacing="4">
+                                    <StackPanel Orientation="Horizontal"
+                                                Spacing="8">
+                                        <TextBlock Text="{Binding Title}"
+                                                   FontWeight="Bold"
+                                                   FontSize="18"
+                                                   TextWrapping="Wrap" />
+                                        <Border Classes="warning-banner"
+                                                Padding="8,2"
+                                                CornerRadius="999"
+                                                IsVisible="{Binding IsUnread}">
+                                            <TextBlock Text="Unread"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{StaticResource GoldTextBrush}" />
+                                        </Border>
+                                    </StackPanel>
+                                    <TextBlock Classes="muted"
+                                               Text="{Binding MetaText}" />
+                                </StackPanel>
+
+                                <ItemsControl ItemsSource="{Binding PreviewBlocks}"
+                                              IsVisible="{Binding ShowPreview}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="models:GitHubAnnouncementBlock">
+                                            <Grid Margin="0,0,0,4">
+                                                <TextBlock Text="{Binding Text}"
+                                                           TextWrapping="Wrap"
+                                                           FontWeight="Bold"
+                                                           FontSize="24"
+                                                           IsVisible="{Binding IsHeading1}" />
+                                                <TextBlock Text="{Binding Text}"
+                                                           TextWrapping="Wrap"
+                                                           FontWeight="Bold"
+                                                           FontSize="21"
+                                                           IsVisible="{Binding IsHeading2}" />
+                                                <TextBlock Text="{Binding Text}"
+                                                           TextWrapping="Wrap"
+                                                           FontWeight="Bold"
+                                                           FontSize="18"
+                                                           IsVisible="{Binding IsHeading3}" />
+                                                <TextBlock Text="{Binding Text}"
+                                                           TextWrapping="Wrap"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="16"
+                                                           IsVisible="{Binding IsHeading4}" />
+                                                <TextBlock Text="{Binding Text}"
+                                                           TextWrapping="Wrap"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="15"
+                                                           IsVisible="{Binding IsHeading5}" />
+                                                <TextBlock Text="{Binding Text}"
+                                                           TextWrapping="Wrap"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="14"
+                                                           IsVisible="{Binding IsHeading6}" />
+                                                <Grid ColumnDefinitions="Auto,*"
+                                                      IsVisible="{Binding IsListItem}">
+                                                    <TextBlock Text="*"
+                                                               Margin="0,0,8,0"
+                                                               VerticalAlignment="Top" />
+                                                    <TextBlock Grid.Column="1"
+                                                               Text="{Binding Text}"
+                                                               TextWrapping="Wrap" />
+                                                </Grid>
+                                                <TextBlock Text="{Binding Text}"
+                                                           TextWrapping="Wrap"
+                                                           IsVisible="{Binding IsParagraph}" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <ItemsControl ItemsSource="{Binding Blocks}"
+                                              IsVisible="{Binding ShowExpandedBody}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="models:GitHubAnnouncementBlock">
+                                            <Grid Margin="0,0,0,6">
+                                                <TextBlock Text="{Binding Text}"
+                                                           TextWrapping="Wrap"
+                                                           FontWeight="Bold"
+                                                           FontSize="24"
+                                                           IsVisible="{Binding IsHeading1}" />
+                                                <TextBlock Text="{Binding Text}"
+                                                           TextWrapping="Wrap"
+                                                           FontWeight="Bold"
+                                                           FontSize="21"
+                                                           IsVisible="{Binding IsHeading2}" />
+                                                <TextBlock Text="{Binding Text}"
+                                                           TextWrapping="Wrap"
+                                                           FontWeight="Bold"
+                                                           FontSize="18"
+                                                           IsVisible="{Binding IsHeading3}" />
+                                                <TextBlock Text="{Binding Text}"
+                                                           TextWrapping="Wrap"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="16"
+                                                           IsVisible="{Binding IsHeading4}" />
+                                                <TextBlock Text="{Binding Text}"
+                                                           TextWrapping="Wrap"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="15"
+                                                           IsVisible="{Binding IsHeading5}" />
+                                                <TextBlock Text="{Binding Text}"
+                                                           TextWrapping="Wrap"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="14"
+                                                           IsVisible="{Binding IsHeading6}" />
+                                                <Grid ColumnDefinitions="Auto,*"
+                                                      IsVisible="{Binding IsListItem}">
+                                                    <TextBlock Text="*"
+                                                               Margin="0,0,8,0"
+                                                               VerticalAlignment="Top" />
+                                                    <TextBlock Grid.Column="1"
+                                                               Text="{Binding Text}"
+                                                               TextWrapping="Wrap" />
+                                                </Grid>
+                                                <TextBlock Text="{Binding Text}"
+                                                           TextWrapping="Wrap"
+                                                           IsVisible="{Binding IsParagraph}" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <ItemsControl ItemsSource="{Binding Blocks}"
+                                              IsVisible="{Binding ShowFullBody}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="models:GitHubAnnouncementBlock">
+                                            <Grid Margin="0,0,0,6">
+                                                <TextBlock Text="{Binding Text}"
+                                                           TextWrapping="Wrap"
+                                                           FontWeight="Bold"
+                                                           FontSize="24"
+                                                           IsVisible="{Binding IsHeading1}" />
+                                                <TextBlock Text="{Binding Text}"
+                                                           TextWrapping="Wrap"
+                                                           FontWeight="Bold"
+                                                           FontSize="21"
+                                                           IsVisible="{Binding IsHeading2}" />
+                                                <TextBlock Text="{Binding Text}"
+                                                           TextWrapping="Wrap"
+                                                           FontWeight="Bold"
+                                                           FontSize="18"
+                                                           IsVisible="{Binding IsHeading3}" />
+                                                <TextBlock Text="{Binding Text}"
+                                                           TextWrapping="Wrap"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="16"
+                                                           IsVisible="{Binding IsHeading4}" />
+                                                <TextBlock Text="{Binding Text}"
+                                                           TextWrapping="Wrap"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="15"
+                                                           IsVisible="{Binding IsHeading5}" />
+                                                <TextBlock Text="{Binding Text}"
+                                                           TextWrapping="Wrap"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="14"
+                                                           IsVisible="{Binding IsHeading6}" />
+                                                <Grid ColumnDefinitions="Auto,*"
+                                                      IsVisible="{Binding IsListItem}">
+                                                    <TextBlock Text="*"
+                                                               Margin="0,0,8,0"
+                                                               VerticalAlignment="Top" />
+                                                    <TextBlock Grid.Column="1"
+                                                               Text="{Binding Text}"
+                                                               TextWrapping="Wrap" />
+                                                </Grid>
+                                                <TextBlock Text="{Binding Text}"
+                                                           TextWrapping="Wrap"
+                                                           IsVisible="{Binding IsParagraph}" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <StackPanel Orientation="Horizontal"
+                                            Spacing="8">
+                                    <primitives:ToggleButton Content="{Binding ExpandActionText}"
+                                                             Tag="{Binding Number}"
+                                                             Click="OnToggleExpandedClicked"
+                                                             IsVisible="{Binding HasExpandableContent}" />
+                                    <Button Content="Open Discussion"
+                                            Tag="{Binding Url}"
+                                            Click="OnOpenAnnouncementClicked" />
+                                    <Button Content="Mark As Read"
+                                            Tag="{Binding Number}"
+                                            Click="OnMarkAsReadClicked"
+                                            IsVisible="{Binding IsUnread}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

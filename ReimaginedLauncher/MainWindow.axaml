@@ -78,12 +78,13 @@
                     <ListBox x:Name="NavigationList"
                              Classes="nav-list"
                              SelectionChanged="OnNavigationSelectionChanged">
-                        <ListBoxItem x:Name="LaunchNavItem" Content="Launch" />
-                        <ListBoxItem Content="Plugins" />
-                        <ListBoxItem Content="Backups" />
-                        <ListBoxItem Content="Settings" />
-                        <ListBoxItem Content="Mod Tweaks" />
-                        <ListBoxItem x:Name="UpdateNavItem" Content="Update" />
+                        <ListBoxItem x:Name="NewsAnnouncementsNavItem" Tag="NewsAnnouncements" Content="News &amp; Announcements" />
+                        <ListBoxItem x:Name="LaunchNavItem" Tag="Launch" Content="Launch" />
+                        <ListBoxItem x:Name="PluginsNavItem" Tag="Plugins" Content="Plugins" />
+                        <ListBoxItem x:Name="BackupsNavItem" Tag="Backups" Content="Backups" />
+                        <ListBoxItem x:Name="SettingsNavItem" Tag="Settings" Content="Settings" />
+                        <ListBoxItem x:Name="ModTweaksNavItem" Tag="ModTweaks" Content="Mod Tweaks" />
+                        <ListBoxItem x:Name="UpdateNavItem" Tag="Update" Content="Update" />
                     </ListBox>
                 </DockPanel>
 
