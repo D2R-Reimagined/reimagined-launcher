@@ -80,6 +80,28 @@
                     </StackPanel>
                 </StackPanel>
             </Border>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="14">
+                    <TextBlock Classes="section-title"
+                               Text="Launcher UI" />
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="Scale"
+                                   FontWeight="SemiBold" />
+                        <TextBlock Classes="muted"
+                                   TextWrapping="Wrap"
+                                   Text="Adjust the launcher interface size if it feels too large on smaller displays." />
+                        <ComboBox x:Name="UiScaleComboBox"
+                                  Width="180"
+                                  SelectionChanged="OnUiScaleSelectionChanged">
+                            <ComboBoxItem Content="80%"/>
+                            <ComboBoxItem Content="90%"/>
+                            <ComboBoxItem Content="100%"/>
+                        </ComboBox>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

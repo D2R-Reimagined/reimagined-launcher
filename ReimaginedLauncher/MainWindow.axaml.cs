@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Controls.Notifications;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Notification;
 using Avalonia.Platform.Storage;
@@ -71,6 +72,7 @@ public partial class MainWindow : Window
 
         
         DataContext = UserViewModel;
+        ApplyUiScale();
         _ = LoadSettingsAsync();
         ContentArea.Content = new LaunchView();
         
@@ -97,9 +99,11 @@ public partial class MainWindow : Window
     private async Task LoadSettingsAsync()
     {
         Settings = await SettingsManager.LoadAsync();
+        Settings.UiScale = ClampUiScale(Settings.UiScale);
         Settings.InstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(Settings.InstallDirectory);
         Settings.IsInstallDirectoryValidated = InstallDirectoryValidator.IsValidInstallDirectory(Settings.InstallDirectory);
         BackupService.ApplyDefaultSettings();
+        ApplyUiScale();
         
         if (!string.IsNullOrWhiteSpace(Settings.NexusModsSSOApiKey))
         {
@@ -154,6 +158,22 @@ public partial class MainWindow : Window
         {
             await PromptInstallForMissingModAsync();
         }
+    }
+
+    public void ApplyUiScale()
+    {
+        var scale = ClampUiScale(Settings.UiScale);
+        RootScaleControl.LayoutTransform = new ScaleTransform(scale, scale);
+    }
+
+    private static double ClampUiScale(double uiScale)
+    {
+        if (uiScale <= 0)
+        {
+            return 1.0;
+        }
+
+        return Math.Clamp(uiScale, 0.8, 1.0);
     }
 
     private async void UserViewModelOnPropertyChanged(object? sender, PropertyChangedEventArgs e)

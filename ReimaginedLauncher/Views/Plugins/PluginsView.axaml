@@ -9,12 +9,17 @@
     <ScrollViewer x:Name="RootScrollViewer"
                   HorizontalScrollBarVisibility="Disabled"
                   VerticalScrollBarVisibility="Auto"
+                  HorizontalAlignment="Stretch"
                   Focusable="True"
                   PointerPressed="OnBackgroundPointerPressed">
-        <StackPanel Spacing="18">
+        <StackPanel Spacing="18"
+                    Width="{Binding Bounds.Width, ElementName=RootScrollViewer}"
+                    MinHeight="{Binding Bounds.Height, ElementName=RootScrollViewer}"
+                    HorizontalAlignment="Stretch">
             <Border x:Name="LoadingBanner"
                     Classes="panel"
                     Padding="16"
+                    HorizontalAlignment="Stretch"
                     IsVisible="False">
                 <StackPanel Spacing="10">
                     <TextBlock Text="Loading plugins..."
@@ -27,7 +32,10 @@
             </Border>
 
             <StackPanel x:Name="ContentPanel"
-                        Spacing="18">
+                        Spacing="18"
+                        Width="{Binding Bounds.Width, ElementName=RootScrollViewer}"
+                        MinHeight="{Binding Bounds.Height, ElementName=RootScrollViewer}"
+                        HorizontalAlignment="Stretch">
             <StackPanel Spacing="4">
                 <TextBlock Classes="view-title"
                            Text="Plugins" />
@@ -36,13 +44,11 @@
             </StackPanel>
 
             <Border Classes="panel"
-                    Padding="20">
-                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto"
-                      ColumnSpacing="12"
-                      RowDefinitions="Auto,Auto"
+                    Padding="20"
+                    HorizontalAlignment="Stretch">
+                <Grid RowDefinitions="Auto,Auto,Auto"
                       RowSpacing="12">
                     <StackPanel Grid.Row="0"
-                                Grid.Column="0"
                                 Spacing="4">
                         <TextBlock Classes="section-title"
                                    Text="Installed Plugins" />
@@ -51,27 +57,24 @@
                                    Text="Plugins you install appear here. Enable them to apply their JSON changes before launch." />
                     </StackPanel>
 
-                    <Button Grid.Row="0"
-                            Grid.Column="1"
-                            Content="Install Official Plugins"
-                            Click="OnOpenOfficialPluginsClicked" />
-                    <Button Grid.Row="0"
-                            Grid.Column="2"
-                            Content="How To Write a Plugin"
-                            Click="OnOpenAuthoringGuideClicked" />
-                    <Button Grid.Row="0"
-                            Grid.Column="3"
-                            Content="Refresh"
-                            Click="OnRefreshClicked" />
-                    <Button Grid.Row="0"
-                            Grid.Column="4"
-                            Classes="accent"
-                            Content="Import Plugin Zip"
-                            Click="OnImportPluginClicked" />
+                    <WrapPanel Grid.Row="1"
+                               Orientation="Horizontal"
+                               HorizontalAlignment="Left"
+                               ItemSpacing="12"
+                               LineSpacing="12">
+                        <Button Content="Install Official Plugins"
+                                Click="OnOpenOfficialPluginsClicked" />
+                        <Button Content="How To Write a Plugin"
+                                Click="OnOpenAuthoringGuideClicked" />
+                        <Button Content="Refresh"
+                                Click="OnRefreshClicked" />
+                        <Button Classes="accent"
+                                Content="Import Plugin Zip"
+                                Click="OnImportPluginClicked" />
+                    </WrapPanel>
 
                     <StackPanel x:Name="EmptyStatePanel"
-                                Grid.Row="1"
-                                Grid.ColumnSpan="5"
+                                Grid.Row="2"
                                 Spacing="4"
                                 IsVisible="False">
                         <TextBlock Text="No plugins have been installed yet."
@@ -81,22 +84,27 @@
                     </StackPanel>
 
                     <ItemsControl x:Name="PluginsItemsControl"
-                                  Grid.Row="1"
-                                  Grid.ColumnSpan="5">
+                                  HorizontalAlignment="Stretch"
+                                  Grid.Row="2">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="plugins:PluginCatalogItem">
                                 <Border Classes="panel"
                                         Margin="0,0,0,12"
-                                        Padding="16">
+                                        Padding="16"
+                                        HorizontalAlignment="Stretch">
                                     <StackPanel Spacing="12">
-                                        <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto"
-                                              ColumnSpacing="12">
+                                        <Grid ColumnDefinitions="Auto,*,Auto"
+                                              ColumnSpacing="12"
+                                              RowDefinitions="Auto,Auto"
+                                              RowSpacing="12">
                                             <CheckBox Grid.Column="0"
+                                                      Grid.Row="0"
                                                       VerticalAlignment="Center"
                                                       IsChecked="{Binding IsEnabled, Mode=OneWay}"
                                                       Click="OnPluginEnabledClicked" />
 
                                             <StackPanel Grid.Column="1"
+                                                        Grid.Row="0"
                                                         Spacing="3">
                                                 <TextBlock FontWeight="SemiBold"
                                                            Text="{Binding Name}" />
@@ -110,20 +118,26 @@
                                                            Text="{Binding Order, StringFormat=Execution order {0}}" />
                                             </StackPanel>
 
-                                            <Button Grid.Column="2"
-                                                    Content="Up"
-                                                    Click="OnMovePluginUpClicked" />
-                                            <Button Grid.Column="3"
-                                                    Content="Down"
-                                                    Click="OnMovePluginDownClicked" />
-                                            <Button Grid.Column="4"
-                                                    Content="Delete"
-                                                    Click="OnDeletePluginClicked" />
-                                            <TextBlock Grid.Column="5"
+                                            <TextBlock Grid.Column="2"
+                                                       Grid.Row="0"
                                                        VerticalAlignment="Center"
                                                        Foreground="{StaticResource GoldTextBrush}"
                                                        FontWeight="SemiBold"
                                                        Text="{Binding StatusText}" />
+
+                                            <WrapPanel Grid.Column="1"
+                                                       Grid.Row="1"
+                                                       Grid.ColumnSpan="2"
+                                                       Orientation="Horizontal"
+                                                       ItemSpacing="8"
+                                                       LineSpacing="8">
+                                                <Button Content="Up"
+                                                        Click="OnMovePluginUpClicked" />
+                                                <Button Content="Down"
+                                                        Click="OnMovePluginDownClicked" />
+                                                <Button Content="Delete"
+                                                        Click="OnDeletePluginClicked" />
+                                            </WrapPanel>
                                         </Grid>
 
                                         <StackPanel Spacing="0"
@@ -149,11 +163,9 @@
                                                 <ItemsControl ItemsSource="{Binding Parameters}">
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate x:DataType="plugins:PluginParameterItem">
-                                                            <Grid ColumnDefinitions="220,*,Auto"
-                                                                  ColumnSpacing="12"
-                                                                  Margin="0,0,0,6">
-                                                                <StackPanel Grid.Column="0"
-                                                                            Spacing="2">
+                                                            <StackPanel Spacing="8"
+                                                                        Margin="0,0,0,10">
+                                                                <StackPanel Spacing="2">
                                                                     <TextBlock Text="{Binding DisplayName}"
                                                                                FontWeight="SemiBold" />
                                                                     <TextBlock Classes="muted"
@@ -161,17 +173,20 @@
                                                                                TextWrapping="Wrap" />
                                                                 </StackPanel>
 
-                                                                <TextBox Grid.Column="1"
+                                                                <Grid ColumnDefinitions="*,Auto"
+                                                                      ColumnSpacing="12">
+                                                                    <TextBox Grid.Column="0"
                                                                          Text="{Binding Value, Mode=OneWay}"
                                                                          HorizontalAlignment="Stretch"
                                                                          VerticalAlignment="Center"
                                                                          LostFocus="OnParameterValueChanged" />
 
-                                                                <TextBlock Grid.Column="2"
-                                                                           Classes="muted"
-                                                                           VerticalAlignment="Center"
-                                                                           Text="{Binding DefaultValue, StringFormat=Default {0}}" />
-                                                            </Grid>
+                                                                    <TextBlock Grid.Column="1"
+                                                                               Classes="muted"
+                                                                               VerticalAlignment="Center"
+                                                                               Text="{Binding DefaultValue, StringFormat=Default {0}}" />
+                                                                </Grid>
+                                                            </StackPanel>
                                                         </DataTemplate>
                                                     </ItemsControl.ItemTemplate>
                                                 </ItemsControl>
@@ -220,7 +235,8 @@
             </Border>
 
             <Border Classes="panel"
-                    Padding="20">
+                    Padding="20"
+                    HorizontalAlignment="Stretch">
                 <StackPanel Spacing="10">
                     <Grid ColumnDefinitions="*,Auto"
                           ColumnSpacing="12">
