@@ -188,8 +188,10 @@ public partial class MainWindow : Window
         var bounds = RootScaleControl.Bounds;
         if (bounds.Width > 0 && bounds.Height > 0 && _currentScale > 0)
         {
-            RootGrid.Width = bounds.Width / _currentScale;
-            RootGrid.Height = bounds.Height / _currentScale;
+            var horizontalMargin = RootGrid.Margin.Left + RootGrid.Margin.Right;
+            var verticalMargin = RootGrid.Margin.Top + RootGrid.Margin.Bottom;
+            RootGrid.Width = (bounds.Width / _currentScale) - horizontalMargin;
+            RootGrid.Height = (bounds.Height / _currentScale) - verticalMargin;
         }
     }
 
