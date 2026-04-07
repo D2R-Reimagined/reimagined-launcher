@@ -247,7 +247,9 @@
                 <Border Grid.Row="1"
                         Classes="panel"
                         Padding="24">
-                    <ContentControl x:Name="ContentArea" />
+                    <ContentControl x:Name="ContentArea"
+                                    HorizontalContentAlignment="Stretch"
+                                    VerticalContentAlignment="Stretch" />
                 </Border>
             </Grid>
 
