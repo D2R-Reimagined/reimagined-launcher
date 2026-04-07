@@ -534,19 +534,23 @@ public static class PluginsService
 
         foreach (var operation in skillsOperations)
         {
-            var entryIndex = entries.FindIndex(entry =>
-                string.Equals(entry.Skill, operation.RowIdentifier, StringComparison.OrdinalIgnoreCase));
+            var matchingIndices = Enumerable.Range(0, entries.Count)
+                .Where(i => string.Equals(entries[i].Skill, operation.RowIdentifier, StringComparison.OrdinalIgnoreCase))
+                .ToList();
 
-            if (entryIndex < 0)
+            if (matchingIndices.Count == 0)
             {
                 throw new InvalidDataException(
                     $"Could not find row '{operation.RowIdentifier}' in skills.txt using the {SkillsRowIdentifierPropertyName} column.");
             }
 
-            entries[entryIndex] = UpdateRecord(
-                entries[entryIndex],
-                operation.Column ?? string.Empty,
-                ResolveOperationValue(entries[entryIndex], operation, parameters));
+            foreach (var entryIndex in matchingIndices)
+            {
+                entries[entryIndex] = UpdateRecord(
+                    entries[entryIndex],
+                    operation.Column ?? string.Empty,
+                    ResolveOperationValue(entries[entryIndex], operation, parameters));
+            }
         }
 
         await SaveGeneratedEntriesAsync(
@@ -586,24 +590,31 @@ public static class PluginsService
         if (string.IsNullOrWhiteSpace(operationType) ||
             operationType.Equals("replace", StringComparison.OrdinalIgnoreCase))
         {
+            if (!string.IsNullOrWhiteSpace(operation.ParameterKey) &&
+                parameters.TryGetValue(operation.ParameterKey, out var parameterValue))
+            {
+                return parameterValue;
+            }
+
             return resolvedUpdatedValue;
         }
 
         if (operationType.Equals("multiplyExisting", StringComparison.OrdinalIgnoreCase))
         {
+            var column = operation.Column ?? string.Empty;
             var property = typeof(Skills).GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                .FirstOrDefault(candidate => candidate.Name.Equals(operation.Column, StringComparison.OrdinalIgnoreCase));
+                .FirstOrDefault(candidate => candidate.Name.Equals(column, StringComparison.OrdinalIgnoreCase));
 
             if (property == null)
             {
-                throw new InvalidDataException($"The column '{operation.Column}' is not supported for skills.txt.");
+                throw new InvalidDataException($"The column '{column}' is not supported for skills.txt.");
             }
 
             var currentValue = property.GetValue(entry)?.ToString();
             if (!decimal.TryParse(currentValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var currentNumber))
             {
                 throw new InvalidDataException(
-                    $"The existing value '{currentValue}' in column '{operation.Column}' is not numeric and cannot be multiplied.");
+                    $"The existing value '{currentValue}' in column '{column}' is not numeric and cannot be multiplied.");
             }
 
             var multiplierText = ResolveMultiplierValue(operation, parameters, resolvedUpdatedValue);
