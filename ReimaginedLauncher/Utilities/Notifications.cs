@@ -1,5 +1,5 @@
 using System;
-using Avalonia.Notification;
+using Avalonia.Controls.Notifications;
 using Avalonia.Threading;
 
 namespace ReimaginedLauncher.Utilities;
@@ -11,15 +11,22 @@ public static class Notifications
         SessionLogService.AddEntry(message, badgeType);
         Dispatcher.UIThread.Post(() =>
         {
-            MainWindow.ManagerInstance
-                .CreateMessage()
-                .Accent("#1751C3")
-                .Animates(true)
-                .Background("#333")
-                .HasBadge(badgeType)
-                .HasMessage(message)
-                .Dismiss().WithDelay(TimeSpan.FromSeconds(5))
-                .Queue();
+            MainWindow.NotificationManager?.Show(new Notification(
+                badgeType,
+                message,
+                ParseNotificationType(badgeType),
+                TimeSpan.FromSeconds(5)));
         });
+    }
+
+    private static NotificationType ParseNotificationType(string badgeType)
+    {
+        return badgeType switch
+        {
+            "Success" => NotificationType.Success,
+            "Warning" => NotificationType.Warning,
+            "Error" => NotificationType.Error,
+            _ => NotificationType.Information
+        };
     }
 }

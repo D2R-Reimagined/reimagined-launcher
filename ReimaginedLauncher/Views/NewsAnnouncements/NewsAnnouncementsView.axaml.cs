@@ -4,7 +4,6 @@ using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Interactivity;
-using Avalonia.VisualTree;
 using ReimaginedLauncher.HttpClients.Models;
 
 namespace ReimaginedLauncher.Views.NewsAnnouncements;
@@ -37,7 +36,7 @@ public partial class NewsAnnouncementsView : UserControl
 
     private async void OnRefreshClicked(object? sender, RoutedEventArgs e)
     {
-        if (this.GetVisualRoot() is not MainWindow mainWindow)
+        if (TopLevel.GetTopLevel(this) is not MainWindow mainWindow)
         {
             return;
         }
@@ -55,7 +54,7 @@ public partial class NewsAnnouncementsView : UserControl
 
     private async void OnMarkAllReadClicked(object? sender, RoutedEventArgs e)
     {
-        if (this.GetVisualRoot() is not MainWindow mainWindow || MainWindow.Announcements.Count == 0)
+        if (TopLevel.GetTopLevel(this) is not MainWindow mainWindow || MainWindow.Announcements.Count == 0)
         {
             return;
         }
@@ -65,7 +64,7 @@ public partial class NewsAnnouncementsView : UserControl
 
     private async void OnMarkAsReadClicked(object? sender, RoutedEventArgs e)
     {
-        if (this.GetVisualRoot() is not MainWindow mainWindow ||
+        if (TopLevel.GetTopLevel(this) is not MainWindow mainWindow ||
             sender is not Button { Tag: not null } button ||
             !int.TryParse(button.Tag.ToString(), out var discussionNumber))
         {

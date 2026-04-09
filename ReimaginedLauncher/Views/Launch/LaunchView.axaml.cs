@@ -5,7 +5,6 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
-using Avalonia.VisualTree;
 using ReimaginedLauncher.Utilities;
 
 namespace ReimaginedLauncher.Views.Launch;
@@ -33,7 +32,7 @@ public partial class LaunchView : UserControl
                 await Dispatcher.UIThread.InvokeAsync(async () =>
                 {
                     RefreshInstallDirectoryState();
-                    if (this.GetVisualRoot() is MainWindow mw)
+                    if (TopLevel.GetTopLevel(this) is MainWindow mw)
                     {
                         mw.RefreshLocalModState();
                         await mw.RefreshUpdateStateAsync();
@@ -95,7 +94,7 @@ public partial class LaunchView : UserControl
                 "D2R Reimagined mod not detected",
                 "Install the mod in the selected directory before launching.");
 
-            if (this.GetVisualRoot() is MainWindow mainWindow)
+            if (TopLevel.GetTopLevel(this) is MainWindow mainWindow)
             {
                 await mainWindow.PromptInstallForMissingModAsync();
             }
@@ -169,7 +168,7 @@ public partial class LaunchView : UserControl
     private async void OnInstallDirectoryClick(object? sender, RoutedEventArgs e)
     {
         LauncherService.CancelDetection();
-        if (this.GetVisualRoot() is Window window)
+        if (TopLevel.GetTopLevel(this) is Window window)
         {
             var folders = await window.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
             {
@@ -185,7 +184,7 @@ public partial class LaunchView : UserControl
                 InstallDirectoryValidator.IsValidInstallDirectory(MainWindow.Settings.InstallDirectory);
             await SettingsManager.SaveAsync(MainWindow.Settings);
             BackupService.UpdateSchedule();
-            if (this.GetVisualRoot() is MainWindow mw)
+            if (TopLevel.GetTopLevel(this) is MainWindow mw)
             {
                 mw.RefreshLocalModState();
                 await mw.RefreshUpdateStateAsync();
@@ -206,7 +205,7 @@ public partial class LaunchView : UserControl
                     "D2R Reimagined mod not detected",
                     "Install the mod in this directory before launching.");
 
-                if (this.GetVisualRoot() is MainWindow mainWindow)
+                if (TopLevel.GetTopLevel(this) is MainWindow mainWindow)
                 {
                     await mainWindow.PromptInstallForMissingModAsync();
                 }

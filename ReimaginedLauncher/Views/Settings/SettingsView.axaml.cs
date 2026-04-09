@@ -1,6 +1,5 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
-using Avalonia.VisualTree;
 using ReimaginedLauncher.Utilities;
 
 namespace ReimaginedLauncher.Views.Settings;
@@ -78,7 +77,7 @@ public partial class SettingsView : UserControl
             _ => 1.0
         };
 
-        if (this.GetVisualRoot() is MainWindow mainWindow)
+        if (TopLevel.GetTopLevel(this) is MainWindow mainWindow)
         {
             mainWindow.ApplyUiScale();
         }

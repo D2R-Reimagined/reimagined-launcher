@@ -4,7 +4,6 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:materialIcons="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
-    xmlns:controls="clr-namespace:Avalonia.Notification.Controls;assembly=Notification.Avalonia"
     xmlns:reimaginedLauncher1="clr-namespace:ReimaginedLauncher.Utilities.ViewModels"
     xmlns:local="clr-namespace:ReimaginedLauncher"
     mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
@@ -252,11 +251,6 @@
                                     VerticalContentAlignment="Stretch" />
                 </Border>
             </Grid>
-
-            <controls:NotificationMessageContainer Grid.Column="1"
-                                                   HorizontalAlignment="Stretch"
-                                                   VerticalAlignment="Stretch"
-                                                   Manager="{x:Static local:MainWindow.ManagerInstance}" />
         </Grid>
     </LayoutTransformControl>
     

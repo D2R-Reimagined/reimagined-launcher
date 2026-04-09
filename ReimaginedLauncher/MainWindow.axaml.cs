@@ -12,7 +12,6 @@ using Avalonia.Controls.Notifications;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
-using Avalonia.Notification;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Microsoft.Extensions.DependencyInjection;
@@ -48,7 +47,7 @@ public partial class MainWindow : Window
     public NexusModsValidateResponse? User { get; set; }
     public static NexusUserViewModel UserViewModel { get; } = new();
     
-    public static INotificationMessageManager ManagerInstance { get; } = new NotificationMessageManager();
+    public static INotificationManager? NotificationManager { get; private set; }
     public static AppSettings Settings = new();
     public static IReadOnlyList<GitHubAnnouncement> Announcements { get; private set; } = [];
     public static bool HasUnreadAnnouncements { get; private set; }
@@ -71,6 +70,11 @@ public partial class MainWindow : Window
         _gitHubAnnouncementsHttpClient = Program.ServiceProvider.GetRequiredService<GitHubAnnouncementsHttpClient>();
         _nexusModsHttpClient = Program.ServiceProvider.GetRequiredService<NexusModsHttpClient>();;
         InitializeComponent();
+        NotificationManager = new WindowNotificationManager(this)
+        {
+            Position = NotificationPosition.BottomRight,
+            MaxItems = 3
+        };
         LogoImage.Source = new Bitmap("Assets/ReimaginedLauncher.ico");
         LauncherVersionTextBlock.Text = $"Launcher v{LauncherVersion}";
         LauncherUpdateService.UpdateDownloaded += (s, e) => RefreshLauncherUpdateUI();
