@@ -16,6 +16,7 @@ public class AppSettings
     public bool? NexusPremiumDownloadAccess { get; set; }
     public bool NoSound { get; set; }
     public bool NoRumble { get; set; }
+    public bool ForceDesktop { get; set; }
     public bool ResetOfflineMaps { get; set; }
     public bool EnableRespec { get; set; }
     public int? PlayersCount { get; set; }

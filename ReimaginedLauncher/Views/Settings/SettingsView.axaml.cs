@@ -25,6 +25,7 @@ public partial class SettingsView : UserControl
         };
         NoSoundCheckBox.IsChecked = MainWindow.Settings.NoSound;
         NoRumbleCheckBox.IsChecked = MainWindow.Settings.NoRumble;
+        ForceDesktopCheckBox.IsChecked = MainWindow.Settings.ForceDesktop;
         ResetOfflineMapsCheckBox.IsChecked = MainWindow.Settings.ResetOfflineMaps;
         EnableRespecCheckBox.IsChecked = MainWindow.Settings.EnableRespec;
         PlayersComboBox.SelectedIndex = MainWindow.Settings.PlayersCount is >= 2 and <= 8
@@ -42,6 +43,7 @@ public partial class SettingsView : UserControl
 
         MainWindow.Settings.NoSound = NoSoundCheckBox.IsChecked ?? false;
         MainWindow.Settings.NoRumble = NoRumbleCheckBox.IsChecked ?? false;
+        MainWindow.Settings.ForceDesktop = ForceDesktopCheckBox.IsChecked ?? false;
         MainWindow.Settings.ResetOfflineMaps = ResetOfflineMapsCheckBox.IsChecked ?? false;
         MainWindow.Settings.EnableRespec = EnableRespecCheckBox.IsChecked ?? false;
         await SettingsManager.SaveAsync(MainWindow.Settings);
