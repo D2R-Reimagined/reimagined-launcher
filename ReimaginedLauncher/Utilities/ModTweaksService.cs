@@ -17,6 +17,10 @@ public static class ModTweaksService
     private const string BaseExcelDirectoryName = "base";
     private const string CleanExcelDirectoryName = "excel_launcher_clean";
     private const string HdDirectoryName = "hd";
+    private const string ItemsDirectoryName = "items";
+    private const string ArmorDirectoryName = "armor";
+    private const string HelmetDirectoryName = "helmet";
+    private const string CircletDirectoryName = "circlet";
     private const string GlobalDirectoryName = "global";
     private const string UiDirectoryName = "ui";
     private const string LayoutsDirectoryName = "layouts";
@@ -25,11 +29,43 @@ public static class ModTweaksService
     private const string CleanMissilesFileName = "missiles_launcher_clean.json";
     private const string LayoutsProfileHdFileName = "_profilehd.json";
     private const string CleanLayoutsProfileHdFileName = "layouts_profilehd_launcher_clean.json";
+    private const string CleanArmorTweaksDirectoryName = "armor_launcher_clean";
     private const string CharStatsFileName = "charstats.txt";
     private const string DifficultyLevelsFileName = "DifficultyLevels.txt";
     private const string SkillsFileName = "skills.txt";
     private const string StatesFileName = "states.txt";
     private const string GeneratedTweaksFolderName = "mod-tweaks";
+    private static readonly string[] HelmetVisualRelativePaths =
+    [
+        Path.Combine(HelmetDirectoryName, "assault_helmet.json"),
+        Path.Combine(HelmetDirectoryName, "avenger_guard.json"),
+        Path.Combine(HelmetDirectoryName, "bone_helm.json"),
+        Path.Combine(HelmetDirectoryName, "cap_hat.json"),
+        Path.Combine(HelmetDirectoryName, "coif_of_glory.json"),
+        Path.Combine(HelmetDirectoryName, "colbarbfrenzy_helm.json"),
+        Path.Combine(HelmetDirectoryName, "colossal_summons_great_helm.json"),
+        Path.Combine(HelmetDirectoryName, "crown.json"),
+        Path.Combine(HelmetDirectoryName, "crown_of_thieves.json"),
+        Path.Combine(HelmetDirectoryName, "duskdeep.json"),
+        Path.Combine(HelmetDirectoryName, "fanged_helm.json"),
+        Path.Combine(HelmetDirectoryName, "full_helm.json"),
+        Path.Combine(HelmetDirectoryName, "great_helm.json"),
+        Path.Combine(HelmetDirectoryName, "helm.json"),
+        Path.Combine(HelmetDirectoryName, "horazons_countenance.json"),
+        Path.Combine(HelmetDirectoryName, "horned_helm.json"),
+        Path.Combine(HelmetDirectoryName, "jawbone_cap.json"),
+        Path.Combine(HelmetDirectoryName, "mask.json"),
+        Path.Combine(HelmetDirectoryName, "ondals_almighty.json"),
+        Path.Combine(HelmetDirectoryName, "rockstopper.json"),
+        Path.Combine(HelmetDirectoryName, "skull_cap.json"),
+        Path.Combine(HelmetDirectoryName, "unique_warlock_helm.json"),
+        Path.Combine(HelmetDirectoryName, "war_bonnet.json"),
+        Path.Combine(HelmetDirectoryName, "wormskull.json"),
+        Path.Combine(CircletDirectoryName, "circlet.json"),
+        Path.Combine(CircletDirectoryName, "coronet.json"),
+        Path.Combine(CircletDirectoryName, "diadem.json"),
+        Path.Combine(CircletDirectoryName, "tiara.json")
+    ];
 
     public static async Task<bool> PrepareForLaunchAsync(IProgress<string>? progress = null)
     {
@@ -44,12 +80,15 @@ public static class ModTweaksService
 
         var missilesFilePath = GetMissilesFilePath();
         var layoutsProfileHdFilePath = GetLayoutsProfileHdFilePath();
+        var armorDirectory = GetArmorDirectory();
         var cleanExcelDirectory = GetCleanExcelDirectory(excelDirectory);
         var cleanMissilesFilePath = GetCleanMissilesFilePath(missilesFilePath);
         var cleanLayoutsProfileHdFilePath = GetCleanLayoutsProfileHdFilePath(layoutsProfileHdFilePath);
+        var cleanArmorTweaksDirectory = GetCleanArmorTweaksDirectory(armorDirectory);
         var excelDirectories = GetExcelDirectories(excelDirectory).ToList();
         LaunchDiagnostics.Log($"Resolved missiles file path: {missilesFilePath ?? "<null>"}");
         LaunchDiagnostics.Log($"Resolved layouts_profilehd.json path: {layoutsProfileHdFilePath ?? "<null>"}");
+        LaunchDiagnostics.Log($"Resolved armor directory path: {armorDirectory ?? "<null>"}");
         LaunchDiagnostics.Log($"Excel directories to process: {string.Join(", ", excelDirectories)}");
 
         try
@@ -63,6 +102,9 @@ public static class ModTweaksService
             ReportProgress(progress, "Preparing clean tooltip layout copy...");
             LaunchDiagnostics.Log("Ensuring clean layouts_profilehd.json copy.");
             await EnsureCleanLayoutsProfileHdCopyAsync(layoutsProfileHdFilePath, cleanLayoutsProfileHdFilePath);
+            ReportProgress(progress, "Preparing clean helmet visual copy...");
+            LaunchDiagnostics.Log("Ensuring clean helmet and circlet JSON copy.");
+            await EnsureCleanArmorTweaksCopyAsync(armorDirectory, cleanArmorTweaksDirectory);
 
             foreach (var targetExcelDirectory in excelDirectories)
             {
@@ -90,6 +132,12 @@ public static class ModTweaksService
             ReportProgress(progress, "Applying tooltip layout tweaks...");
             LaunchDiagnostics.Log("Applying tooltip layout tweaks.");
             await ApplyTooltipLayoutTweaksAsync(layoutsProfileHdFilePath, MainWindow.Settings.MakeTooltipBackgroundOpaque);
+            ReportProgress(progress, "Restoring helmet visual files...");
+            LaunchDiagnostics.Log("Restoring helmet and circlet visual files from clean copy.");
+            await RestoreArmorTweaksAsync(armorDirectory, cleanArmorTweaksDirectory);
+            ReportProgress(progress, "Applying helmet visual tweaks...");
+            LaunchDiagnostics.Log("Applying helmet visual tweaks.");
+            await ApplyHelmetVisualTweaksAsync(armorDirectory, MainWindow.Settings.RemoveHelmetVisual);
             LaunchDiagnostics.Log("Mod tweak preparation succeeded.");
 
             return true;
@@ -157,6 +205,25 @@ public static class ModTweaksService
             UiDirectoryName,
             LayoutsDirectoryName,
             LayoutsProfileHdFileName);
+    }
+
+    private static string? GetArmorDirectory()
+    {
+        var installDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(MainWindow.Settings.InstallDirectory);
+        if (string.IsNullOrWhiteSpace(installDirectory))
+        {
+            return null;
+        }
+
+        return Path.Combine(
+            installDirectory,
+            "mods",
+            ModDirectoryName,
+            $"{ModDirectoryName}.mpq",
+            DataDirectoryName,
+            HdDirectoryName,
+            ItemsDirectoryName,
+            ArmorDirectoryName);
     }
 
     private static string GetCleanExcelDirectory(string excelDirectory)
@@ -240,6 +307,48 @@ public static class ModTweaksService
         }
 
         await CopyFileAsync(layoutsProfileHdFilePath, cleanLayoutsProfileHdFilePath, overwrite: true);
+    }
+
+    private static string GetCleanArmorTweaksDirectory(string? armorDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(armorDirectory))
+        {
+            throw new DirectoryNotFoundException("Armor folder could not be resolved.");
+        }
+
+        return Path.Combine(armorDirectory, CleanArmorTweaksDirectoryName);
+    }
+
+    private static async Task EnsureCleanArmorTweaksCopyAsync(string? armorDirectory, string cleanArmorTweaksDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(armorDirectory) || !Directory.Exists(armorDirectory))
+        {
+            throw new DirectoryNotFoundException("Armor folder was not found in the Reimagined hd items folder.");
+        }
+
+        if (Directory.Exists(cleanArmorTweaksDirectory))
+        {
+            return;
+        }
+
+        foreach (var relativePath in HelmetVisualRelativePaths)
+        {
+            var sourceFilePath = Path.Combine(armorDirectory, relativePath);
+            var cleanFilePath = Path.Combine(cleanArmorTweaksDirectory, relativePath);
+            var cleanDirectory = Path.GetDirectoryName(cleanFilePath);
+            if (!string.IsNullOrWhiteSpace(cleanDirectory))
+            {
+                Directory.CreateDirectory(cleanDirectory);
+            }
+
+            if (File.Exists(sourceFilePath))
+            {
+                await CopyFileAsync(sourceFilePath, cleanFilePath, overwrite: true);
+                continue;
+            }
+
+            await File.WriteAllTextAsync($"{cleanFilePath}.missing", string.Empty);
+        }
     }
 
     private static IEnumerable<string> GetExcelDirectories(string excelDirectory)
@@ -388,6 +497,69 @@ public static class ModTweaksService
         if (updatedValues == 0)
         {
             throw new InvalidDataException("layouts_profilehd.json did not contain TooltipStyle background colors to update.");
+        }
+    }
+
+    private static async Task RestoreArmorTweaksAsync(string? armorDirectory, string cleanArmorTweaksDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(armorDirectory) || !Directory.Exists(armorDirectory))
+        {
+            throw new DirectoryNotFoundException("Armor folder was not found in the Reimagined hd items folder.");
+        }
+
+        if (!Directory.Exists(cleanArmorTweaksDirectory))
+        {
+            throw new DirectoryNotFoundException("Clean helmet and circlet JSON copy was not found.");
+        }
+
+        foreach (var relativePath in HelmetVisualRelativePaths)
+        {
+            var targetFilePath = Path.Combine(armorDirectory, relativePath);
+            var cleanFilePath = Path.Combine(cleanArmorTweaksDirectory, relativePath);
+            var missingMarkerPath = $"{cleanFilePath}.missing";
+
+            if (File.Exists(cleanFilePath))
+            {
+                await CopyFileAsync(cleanFilePath, targetFilePath, overwrite: true);
+                continue;
+            }
+
+            if (File.Exists(missingMarkerPath))
+            {
+                if (File.Exists(targetFilePath))
+                {
+                    File.Delete(targetFilePath);
+                }
+
+                continue;
+            }
+
+            throw new FileNotFoundException($"Clean helmet visual state was missing for {relativePath}.");
+        }
+    }
+
+    private static async Task ApplyHelmetVisualTweaksAsync(string? armorDirectory, bool removeHelmetVisual)
+    {
+        if (string.IsNullOrWhiteSpace(armorDirectory) || !Directory.Exists(armorDirectory))
+        {
+            throw new DirectoryNotFoundException("Armor folder was not found in the Reimagined hd items folder.");
+        }
+
+        if (!removeHelmetVisual)
+        {
+            return;
+        }
+
+        foreach (var relativePath in HelmetVisualRelativePaths)
+        {
+            var filePath = Path.Combine(armorDirectory, relativePath);
+            var directory = Path.GetDirectoryName(filePath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            await File.WriteAllTextAsync(filePath, string.Empty);
         }
     }
 

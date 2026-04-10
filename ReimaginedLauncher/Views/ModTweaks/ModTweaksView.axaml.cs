@@ -35,6 +35,7 @@ public partial class ModTweaksView : UserControl
         var removePaladinAuraSound = MainWindow.Settings.RemovePaladinAuraSound;
         var removeSplashVfx = MainWindow.Settings.RemoveSplashVfx;
         var makeTooltipBackgroundOpaque = MainWindow.Settings.MakeTooltipBackgroundOpaque;
+        var removeHelmetVisual = MainWindow.Settings.RemoveHelmetVisual;
 
         MainWindow.Settings.SkillPointsPerLevel = skillPointsPerLevel;
         MainWindow.Settings.AttributesPerLevel = attributesPerLevel;
@@ -45,6 +46,7 @@ public partial class ModTweaksView : UserControl
         MainWindow.Settings.RemovePaladinAuraSound = removePaladinAuraSound;
         MainWindow.Settings.RemoveSplashVfx = removeSplashVfx;
         MainWindow.Settings.MakeTooltipBackgroundOpaque = makeTooltipBackgroundOpaque;
+        MainWindow.Settings.RemoveHelmetVisual = removeHelmetVisual;
 
         SkillPointsComboBox.SelectedIndex = skillPointsPerLevel - 1;
         AttributesComboBox.SelectedIndex = attributesPerLevel - 1;
@@ -55,6 +57,7 @@ public partial class ModTweaksView : UserControl
         RemovePaladinAuraSoundCheckBox.IsChecked = removePaladinAuraSound;
         RemoveSplashVfxCheckBox.IsChecked = removeSplashVfx;
         MakeTooltipBackgroundOpaqueCheckBox.IsChecked = makeTooltipBackgroundOpaque;
+        RemoveHelmetVisualCheckBox.IsChecked = removeHelmetVisual;
         WarningBorder.IsVisible = HasNonDefaultTweaks(
             skillPointsPerLevel,
             attributesPerLevel,
@@ -114,6 +117,7 @@ public partial class ModTweaksView : UserControl
 
         MainWindow.Settings.RemoveSplashVfx = RemoveSplashVfxCheckBox.IsChecked ?? false;
         MainWindow.Settings.MakeTooltipBackgroundOpaque = MakeTooltipBackgroundOpaqueCheckBox.IsChecked ?? false;
+        MainWindow.Settings.RemoveHelmetVisual = RemoveHelmetVisualCheckBox.IsChecked ?? false;
         WarningBorder.IsVisible = HasNonDefaultTweaks(
             MainWindow.Settings.SkillPointsPerLevel,
             MainWindow.Settings.AttributesPerLevel,
