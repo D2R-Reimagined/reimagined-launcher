@@ -4,7 +4,6 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
-using Avalonia.VisualTree;
 using ReimaginedLauncher.Utilities;
 
 namespace ReimaginedLauncher.Views.Backups;
@@ -57,7 +56,7 @@ public partial class BackupsView : UserControl
 
     private async void OnBackupDirectoryClick(object? sender, RoutedEventArgs e)
     {
-        if (this.GetVisualRoot() is not Window window)
+        if (TopLevel.GetTopLevel(this) is not Window window)
         {
             return;
         }

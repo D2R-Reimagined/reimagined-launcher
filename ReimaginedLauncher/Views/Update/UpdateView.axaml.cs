@@ -8,7 +8,6 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
-using Avalonia.VisualTree;
 using ReimaginedLauncher.Utilities;
 
 namespace ReimaginedLauncher.Views.Update;
@@ -119,7 +118,7 @@ public partial class UpdateView : UserControl
         }
     }
 
-    private void OnOpenDownloadPageClick(object? sender, RoutedEventArgs e)
+    private void OnOpenDownloadPageClick(object? sender, RoutedEventArgs? e)
     {
         if (string.IsNullOrWhiteSpace(MainWindow.UpdateDownloadUrl))
             return;
@@ -154,7 +153,7 @@ public partial class UpdateView : UserControl
             return;
         }
 
-        if (this.GetVisualRoot() is not Window window)
+        if (TopLevel.GetTopLevel(this) is not Window window)
         {
             return;
         }
@@ -203,7 +202,7 @@ public partial class UpdateView : UserControl
 
     private async void OnRecheckClick(object? sender, RoutedEventArgs e)
     {
-        if (this.GetVisualRoot() is MainWindow mainWindow)
+        if (TopLevel.GetTopLevel(this) is MainWindow mainWindow)
         {
             SetLoadingState(true);
             try
@@ -293,7 +292,7 @@ public partial class UpdateView : UserControl
         ZipFile.ExtractToDirectory(zipPath, installDirectory, overwriteFiles: true);
         Notifications.SendNotification("Mod installed successfully.", "Success");
 
-        if (this.GetVisualRoot() is MainWindow mainWindow)
+        if (TopLevel.GetTopLevel(this) is MainWindow mainWindow)
         {
             mainWindow.RefreshLocalModState();
             await mainWindow.RefreshUpdateStateAsync();

@@ -186,8 +186,7 @@
                     <StackPanel Spacing="4">
                         <CheckBox x:Name="RemovePaladinAuraSoundCheckBox"
                                   Content="Remove Paladin Aura Sound"
-                                  Checked="OnSoundTweaksChanged"
-                                  Unchecked="OnSoundTweaksChanged"/>
+                                  IsCheckedChanged="OnSoundTweaksChanged"/>
                         <TextBlock Classes="muted"
                                    Margin="28,0,0,0"
                                    Text="Stops Paladin aura sounds from constantly turning on and off. Useful if you teleport with a mercenary using aura-on-equip gear."/>
@@ -209,8 +208,7 @@
                     <StackPanel Spacing="4">
                         <CheckBox x:Name="RemoveSplashVfxCheckBox"
                                   Content="Remove Splash VFX"
-                                  Checked="OnVisualTweaksChanged"
-                                  Unchecked="OnVisualTweaksChanged"/>
+                                  IsCheckedChanged="OnVisualTweaksChanged"/>
                         <TextBlock Classes="muted"
                                    Margin="28,0,0,0"
                                    Text="Removes the red dust cloud effect from the Splash Charm. The charm still works the same way."/>
@@ -219,8 +217,7 @@
                     <StackPanel Spacing="4">
                         <CheckBox x:Name="MakeTooltipBackgroundOpaqueCheckBox"
                                   Content="Make Tooltip Background Opaque (HDR Tooltip Fix)"
-                                  Checked="OnVisualTweaksChanged"
-                                  Unchecked="OnVisualTweaksChanged"/>
+                                  IsCheckedChanged="OnVisualTweaksChanged"/>
                         <TextBlock Classes="muted"
                                    Margin="28,0,0,0"
                                    Text="Makes item tooltip backgrounds solid black so they stay readable with HDR on."/>

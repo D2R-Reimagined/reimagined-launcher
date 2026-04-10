@@ -40,8 +40,6 @@
     <Application.Styles>
         <FluentTheme />
         <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
-        <StyleInclude Source="avares://Notification.Avalonia/Themes/Generic.xaml" />
-
         <Style Selector="Window">
             <Setter Property="Background" Value="{StaticResource WindowBackgroundBrush}" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />

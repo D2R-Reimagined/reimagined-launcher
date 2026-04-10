@@ -184,6 +184,11 @@ public class GameLauncherService
             launchParameters.Add("-norumble");
         }
 
+        if (MainWindow.Settings.ForceDesktop)
+        {
+            launchParameters.Add("-forcedesktop");
+        }
+
         if (MainWindow.Settings.NoSound)
         {
             launchParameters.Add("-nosound");

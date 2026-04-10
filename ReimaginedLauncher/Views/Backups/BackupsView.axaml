@@ -46,19 +46,18 @@
                     <StackPanel Grid.Column="1" Spacing="6">
                         <TextBlock Text="Interval (minutes)"
                                    FontWeight="SemiBold"/>
-                        <TextBox x:Name="BackupIntervalTextBox" Watermark="60" LostFocus="OnBackupConfigurationChanged"/>
+                        <TextBox x:Name="BackupIntervalTextBox" PlaceholderText="60" LostFocus="OnBackupConfigurationChanged"/>
                     </StackPanel>
                     <StackPanel Grid.Column="2" Spacing="6">
                         <TextBlock Text="Backup Amount"
                                    FontWeight="SemiBold"/>
-                        <TextBox x:Name="BackupAmountTextBox" Watermark="10" LostFocus="OnBackupConfigurationChanged"/>
+                        <TextBox x:Name="BackupAmountTextBox" PlaceholderText="10" LostFocus="OnBackupConfigurationChanged"/>
                     </StackPanel>
 
                     <StackPanel Grid.Row="1" Grid.ColumnSpan="3" Spacing="4">
                         <CheckBox x:Name="AutomaticBackupsCheckBox"
                                   Content="Enable automatic backup system"
-                                  Checked="OnAutomaticBackupsChanged"
-                                  Unchecked="OnAutomaticBackupsChanged"/>
+                                  IsCheckedChanged="OnAutomaticBackupsChanged"/>
                         <TextBlock Classes="muted"
                                    Text="When enabled, the launcher runs backups using the interval and retention settings below, including a backup before launch. Uncheck this to disable all automatic backups."
                                    TextWrapping="Wrap"/>
