@@ -1,0 +1,76 @@
+[
+  { "file": "skills.txt", "rowIdentifier": "Chilling Armor", "column": "Param3", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Chilling Armor", "column": "Param3", "operation": "multiplyExisting", "parameterKey": "chillingArmorMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Shiver Armor", "column": "Param3", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Shiver Armor", "column": "Param3", "operation": "multiplyExisting", "parameterKey": "shiverArmorMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Quickness", "column": "Param5", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Quickness", "column": "Param5", "operation": "multiplyExisting", "parameterKey": "burstOfSpeedMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Holy Shield", "column": "Param1", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Holy Shield", "column": "Param1", "operation": "multiplyExisting", "parameterKey": "holyShieldMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Battle Command", "column": "Param1", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Battle Command", "column": "Param1", "operation": "multiplyExisting", "parameterKey": "battleCommandMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Battle Orders", "column": "Param1", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Battle Orders", "column": "Param1", "operation": "multiplyExisting", "parameterKey": "battleOrdersMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Venom", "column": "Param1", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Venom", "column": "Param1", "operation": "multiplyExisting", "parameterKey": "venomMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Blade Shield", "column": "Param1", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Blade Shield", "column": "Param1", "operation": "multiplyExisting", "parameterKey": "bladeShieldMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Fade", "column": "Param5", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Fade", "column": "Param5", "operation": "multiplyExisting", "parameterKey": "fadeMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Frozen Armor", "column": "Param3", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Frozen Armor", "column": "Param3", "operation": "multiplyExisting", "parameterKey": "frozenArmorMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Energy Shield", "column": "Param1", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Energy Shield", "column": "Param1", "operation": "multiplyExisting", "parameterKey": "energyShieldMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Enchant", "column": "Param1", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Enchant", "column": "Param1", "operation": "multiplyExisting", "parameterKey": "enchantMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Feral Rage", "column": "Param1", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Feral Rage", "column": "Param1", "operation": "multiplyExisting", "parameterKey": "feralRageMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Maul", "column": "Param4", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Maul", "column": "Param4", "operation": "multiplyExisting", "parameterKey": "maulMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Tiger Strike", "column": "Param3", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Tiger Strike", "column": "Param3", "operation": "multiplyExisting", "parameterKey": "tigerStrikeChargesMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Cobra Strike", "column": "Param3", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Cobra Strike", "column": "Param3", "operation": "multiplyExisting", "parameterKey": "cobraStrikeChargesMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Claws of Thunder", "column": "Param3", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Claws of Thunder", "column": "Param3", "operation": "multiplyExisting", "parameterKey": "clawsOfThunderChargesMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Blades of Ice", "column": "Param3", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Blades of Ice", "column": "Param3", "operation": "multiplyExisting", "parameterKey": "bladesOfIceChargesMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Fists of Fire", "column": "Param3", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Fists of Fire", "column": "Param3", "operation": "multiplyExisting", "parameterKey": "fistsOfFireChargesMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Consume", "column": "Param1", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Consume", "column": "Param1", "operation": "multiplyExisting", "parameterKey": "consumeMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Engorge", "column": "Param5", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Engorge", "column": "Param5", "operation": "multiplyExisting", "parameterKey": "engorgeMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Hex Siphon", "column": "Param3", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Hex Siphon", "column": "Param3", "operation": "multiplyExisting", "parameterKey": "hexSiphonMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Hex Purge", "column": "Param3", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Hex Purge", "column": "Param3", "operation": "multiplyExisting", "parameterKey": "hexPurgeMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Hex Bane", "column": "Param3", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Hex Bane", "column": "Param3", "operation": "multiplyExisting", "parameterKey": "hexBaneMultiplier" },
+
+  { "file": "skills.txt", "rowIdentifier": "Royal Strike", "column": "Param9", "operation": "multiplyExisting", "parameterKey": "globalDurationMultiplier" },
+  { "file": "skills.txt", "rowIdentifier": "Royal Strike", "column": "Param9", "operation": "multiplyExisting", "parameterKey": "royalStrikeMultiplier" }
+]
