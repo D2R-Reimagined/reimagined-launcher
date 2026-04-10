@@ -1,9 +1,0 @@
-[
-  {
-    "file": "skills.txt",
-    "rowIdentifier": "Chilling Armor",
-    "column": "Param4",
-    "operation": "multiplyExisting",
-    "parameterKey": "durationMultiplier"
-  }
-]
