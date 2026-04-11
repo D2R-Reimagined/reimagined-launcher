@@ -1,0 +1,166 @@
+{
+  "name": "Duration Editor",
+  "version": "1.2",
+  "description": "Modifies skill duration based on configurable multipliers.",
+  "files": [
+    "duration-modifier.json"
+  ],
+  "parameters": [
+    {
+      "key": "globalDurationMultiplier",
+      "name": "Global Duration Multiplier",
+      "description": "Scales duration for all configured skills.",
+      "defaultValue": "2.0"
+    },
+    {
+      "key": "chillingArmorMultiplier",
+      "name": "Chilling Armor Multiplier",
+      "description": "Additional scaling for Chilling Armor (Param3).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "shiverArmorMultiplier",
+      "name": "Shiver Armor Multiplier",
+      "description": "Additional scaling for Shiver Armor (Param3).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "burstOfSpeedMultiplier",
+      "name": "Burst of Speed Multiplier",
+      "description": "Additional scaling for Burst of Speed (Param5).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "holyShieldMultiplier",
+      "name": "Holy Shield Multiplier",
+      "description": "Additional scaling for Holy Shield (Param1).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "battleCommandMultiplier",
+      "name": "Battle Command Multiplier",
+      "description": "Additional scaling for Battle Command (Param1).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "battleOrdersMultiplier",
+      "name": "Battle Orders Multiplier",
+      "description": "Additional scaling for Battle Orders (Param1).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "venomMultiplier",
+      "name": "Venom Multiplier",
+      "description": "Additional scaling for Venom (Param1).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "bladeShieldMultiplier",
+      "name": "Blade Shield Multiplier",
+      "description": "Additional scaling for Blade Shield (Param1).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "fadeMultiplier",
+      "name": "Fade Multiplier",
+      "description": "Additional scaling for Fade (Param5).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "frozenArmorMultiplier",
+      "name": "Frozen Armor Multiplier",
+      "description": "Additional scaling for Frozen Armor (Param3).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "energyShieldMultiplier",
+      "name": "Energy Shield Multiplier",
+      "description": "Additional scaling for Energy Shield (Param1).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "enchantMultiplier",
+      "name": "Enchant Multiplier",
+      "description": "Additional scaling for Enchant (Param1).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "feralRageMultiplier",
+      "name": "Feral Rage Multiplier",
+      "description": "Additional scaling for Feral Rage (Param1).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "maulMultiplier",
+      "name": "Maul Multiplier",
+      "description": "Additional scaling for Maul (Param4).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "tigerStrikeChargesMultiplier",
+      "name": "Tiger Strike Charges Multiplier",
+      "description": "Additional scaling for Tiger Strike charges (Param3).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "cobraStrikeChargesMultiplier",
+      "name": "Cobra Strike Charges Multiplier",
+      "description": "Additional scaling for Cobra Strike charges (Param3).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "clawsOfThunderChargesMultiplier",
+      "name": "Claws of Thunder Charges Multiplier",
+      "description": "Additional scaling for Claws of Thunder charges (Param3).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "bladesOfIceChargesMultiplier",
+      "name": "Blades of Ice Charges Multiplier",
+      "description": "Additional scaling for Blades of Ice charges (Param3).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "fistsOfFireChargesMultiplier",
+      "name": "Fists of Fire Charges Multiplier",
+      "description": "Additional scaling for Fists of Fire charges (Param3).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "consumeMultiplier",
+      "name": "Consume Multiplier",
+      "description": "Additional scaling for Consume (Param1).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "engorgeMultiplier",
+      "name": "Engorge Multiplier",
+      "description": "Additional scaling for Engorge (Param5).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "hexSiphonMultiplier",
+      "name": "Hex Siphon Multiplier",
+      "description": "Additional scaling for Hex Siphon (Param3).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "hexPurgeMultiplier",
+      "name": "Hex Purge Multiplier",
+      "description": "Additional scaling for Hex Purge (Param3).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "hexBaneMultiplier",
+      "name": "Hex Bane Multiplier",
+      "description": "Additional scaling for Hex Bane (Param3).",
+      "defaultValue": "1.0"
+    },
+    {
+      "key": "royalStrikeMultiplier",
+      "name": "Phoenix Strike Multiplier",
+      "description": "Additional scaling for Phoenix Strike (Param9).",
+      "defaultValue": "1.0"
+    }
+  ]
+}
