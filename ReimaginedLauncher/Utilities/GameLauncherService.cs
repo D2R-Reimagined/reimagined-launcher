@@ -10,7 +10,11 @@ namespace ReimaginedLauncher.Utilities;
 
 public class GameLauncherService
 {
-    private const string? DefaultInstallPath = @"C:\Program Files (x86)\Diablo II Resurrected\D2R.exe";
+    private static readonly string[] DefaultInstallPaths =
+    [
+        @"C:\Program Files (x86)\Diablo II Resurrected\D2R.exe",
+        @"C:\Program Files (x86)\Steam\steamapps\common\Diablo II Resurrected\D2R.exe"
+    ];
     private CancellationTokenSource? _detectionCts;
     public bool IsDetecting { get; private set; }
     public string? GamePathOverride { get; set; } = string.Empty;
@@ -80,10 +84,13 @@ public class GameLauncherService
 
     private string? FindD2RExecutable(CancellationToken token)
     {
-        // Check the default installation path first
-        if (File.Exists(DefaultInstallPath))
+        // Check the default installation paths first
+        foreach (var path in DefaultInstallPaths)
         {
-            return DefaultInstallPath;
+            if (File.Exists(path))
+            {
+                return path;
+            }
         }
 
         // Iterate through all fixed drives
