@@ -21,6 +21,7 @@ public static class ModTweaksService
     private const string ArmorDirectoryName = "armor";
     private const string HelmetDirectoryName = "helmet";
     private const string CircletDirectoryName = "circlet";
+    private const string PeltDirectoryName = "pelt";
     private const string GlobalDirectoryName = "global";
     private const string UiDirectoryName = "ui";
     private const string LayoutsDirectoryName = "layouts";
@@ -64,7 +65,12 @@ public static class ModTweaksService
         Path.Combine(CircletDirectoryName, "circlet.json"),
         Path.Combine(CircletDirectoryName, "coronet.json"),
         Path.Combine(CircletDirectoryName, "diadem.json"),
-        Path.Combine(CircletDirectoryName, "tiara.json")
+        Path.Combine(CircletDirectoryName, "tiara.json"),
+        Path.Combine(PeltDirectoryName, "antlers.json"),
+        Path.Combine(PeltDirectoryName, "falcon_mask.json"),
+        Path.Combine(PeltDirectoryName, "hawk_helm.json"),
+        Path.Combine(PeltDirectoryName, "spirit_mask.json"),
+        Path.Combine(PeltDirectoryName, "wolf_head.json")
     ];
 
     public static async Task<bool> PrepareForLaunchAsync(IProgress<string>? progress = null)
