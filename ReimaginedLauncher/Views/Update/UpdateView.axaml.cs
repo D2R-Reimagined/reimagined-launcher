@@ -31,10 +31,11 @@ public partial class UpdateView : UserControl
         var canDownload = isInstallMissing || MainWindow.IsUpdateAvailable;
 
         LoadingBanner.IsVisible = _isLoading;
-        StatusBorder.IsVisible = !_isLoading;
-        VersionsBorder.IsVisible = !_isLoading;
-        AuthWarningBanner.IsVisible = !_isLoading && !isAuthenticated;
-        NonPremiumWarningBanner.IsVisible = !_isLoading && usesDownloadsWatcher && canDownload;
+        InstallProgressBanner.IsVisible = _isInstalling;
+        StatusBorder.IsVisible = !_isLoading && !_isInstalling;
+        VersionsBorder.IsVisible = !_isLoading && !_isInstalling;
+        AuthWarningBanner.IsVisible = !_isLoading && !_isInstalling && !isAuthenticated;
+        NonPremiumWarningBanner.IsVisible = !_isLoading && !_isInstalling && usesDownloadsWatcher && canDownload;
 
         StatusTitleText.Text = MainWindow.UpdateStatusTitle;
         StatusMessageText.Text = MainWindow.UpdateStatusMessage;
@@ -47,7 +48,7 @@ public partial class UpdateView : UserControl
                                           canDownload;
         SelectZipManuallyButton.IsEnabled = !_isLoading &&
                                             !_isInstalling &&
-                                            MainWindow.Settings.IsInstallDirectoryValidated &&
+                                            MainWindow.Settings.CurrentProfile.IsInstallDirectoryValidated &&
                                             !string.IsNullOrWhiteSpace(MainWindow.Settings.InstallDirectory);
         OpenDownloadPageButton.IsEnabled = !_isLoading && !string.IsNullOrWhiteSpace(MainWindow.UpdateDownloadUrl);
         RecheckButton.IsEnabled = !_isLoading;
@@ -75,12 +76,15 @@ public partial class UpdateView : UserControl
             return;
         }
         
-        var installDirectory = MainWindow.Settings.InstallDirectory;
-        if (!MainWindow.Settings.IsInstallDirectoryValidated || string.IsNullOrWhiteSpace(installDirectory))
+        var profile = MainWindow.Settings.CurrentProfile;
+        var installDirectory = profile.InstallDirectory;
+        if (!profile.IsInstallDirectoryValidated || string.IsNullOrWhiteSpace(installDirectory))
         {
             Notifications.SendNotification(
                 "Install directory not validated",
-                "Select the Diablo II: Resurrected folder before installing the mod.");
+                profile.Type == InstallationType.D2RMM
+                    ? "Select the D2RMM mods folder before installing the mod."
+                    : "Select the Diablo II: Resurrected folder before installing the mod.");
             return;
         }
 
@@ -92,6 +96,7 @@ public partial class UpdateView : UserControl
             if (MainWindow.Settings.NexusPremiumDownloadAccess == false)
             {
                 Notifications.SendNotification("Open Manual Download in browser. Waiting for zip in Downloads...", "Info");
+                SetInstallProgress("Waiting for download...", "Complete the manual download in your browser. The launcher is watching your Downloads folder.");
                 OnOpenDownloadPageClick(null, null);
                 var downloadedZip = await WaitForNewZipFromDownloadsAsync(TimeSpan.FromMinutes(8));
                 if (string.IsNullOrWhiteSpace(downloadedZip))
@@ -100,11 +105,12 @@ public partial class UpdateView : UserControl
                     return;
                 }
 
+                SetInstallProgress("Installing...", "Download detected. Extracting and installing mod files.");
                 await ExtractAndFinalizeInstallAsync(downloadedZip, installDirectory);
                 return;
             }
 
-            Notifications.SendNotification("Downloading mod archive. This may take a moment.");
+            SetInstallProgress("Downloading...", "Downloading mod archive from Nexus Mods. This may take a moment.");
             await DownloadExtractAndFinalizeInstallAsync(MainWindow.UpdateDownloadUrl, installDirectory);
         }
         catch (Exception ex)
@@ -144,12 +150,15 @@ public partial class UpdateView : UserControl
         if (_isInstalling)
             return;
 
-        var installDirectory = MainWindow.Settings.InstallDirectory;
-        if (!MainWindow.Settings.IsInstallDirectoryValidated || string.IsNullOrWhiteSpace(installDirectory))
+        var profile = MainWindow.Settings.CurrentProfile;
+        var installDirectory = profile.InstallDirectory;
+        if (!profile.IsInstallDirectoryValidated || string.IsNullOrWhiteSpace(installDirectory))
         {
             Notifications.SendNotification(
                 "Install directory not validated",
-                "Select the Diablo II: Resurrected folder before installing the mod.");
+                profile.Type == InstallationType.D2RMM
+                    ? "Select the D2RMM mods folder before installing the mod."
+                    : "Select the Diablo II: Resurrected folder before installing the mod.");
             return;
         }
 
@@ -187,6 +196,7 @@ public partial class UpdateView : UserControl
         {
             _isInstalling = true;
             RefreshUpdateState();
+            SetInstallProgress("Installing...", "Extracting and installing mod files from selected zip.");
             await ExtractAndFinalizeInstallAsync(zipPath, installDirectory);
         }
         catch (Exception ex)
@@ -240,6 +250,7 @@ public partial class UpdateView : UserControl
 
         try
         {
+            SetInstallProgress("Downloading...", "Downloading mod archive. Please wait.");
             using var httpClient = new HttpClient();
             using var response = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
             response.EnsureSuccessStatusCode();
@@ -259,6 +270,7 @@ public partial class UpdateView : UserControl
                 return;
             }
 
+            SetInstallProgress("Installing...", "Extracting and installing mod files.");
             await ExtractAndFinalizeInstallAsync(tempZipPath, installDirectory);
         }
         finally
@@ -270,6 +282,13 @@ public partial class UpdateView : UserControl
         }
     }
 
+    private void SetInstallProgress(string title, string message)
+    {
+        InstallProgressTitle.Text = title;
+        InstallProgressMessage.Text = message;
+        InstallProgressBanner.IsVisible = true;
+    }
+
     private async Task ExtractAndFinalizeInstallAsync(string zipPath, string installDirectory)
     {
         if (!IsZipArchive(zipPath))
@@ -278,19 +297,82 @@ public partial class UpdateView : UserControl
             return;
         }
 
-        var modDir = Path.Combine(installDirectory, "mods", "Reimagined");
-        if (Directory.Exists(modDir))
-        {
-            var backupDir = Path.Combine(installDirectory, "mods", "Reimagined.backup");
-            if (Directory.Exists(backupDir))
-            {
-                Directory.Delete(backupDir, recursive: true);
-            }
-            Directory.Move(modDir, backupDir);
-        }
+        SetInstallProgress("Installing...", "Extracting and installing mod files. Please wait.");
 
-        ZipFile.ExtractToDirectory(zipPath, installDirectory, overwriteFiles: true);
-        Notifications.SendNotification("Mod installed successfully.", "Success");
+        var profile = MainWindow.Settings.CurrentProfile;
+        if (profile.Type == InstallationType.D2RMM)
+        {
+            var result = await Task.Run(() =>
+            {
+                string? tempDir = null;
+                try
+                {
+                    tempDir = Path.Combine(Path.GetTempPath(), $"d2rmm_extract_{Guid.NewGuid():N}");
+                    Directory.CreateDirectory(tempDir);
+                    ZipFile.ExtractToDirectory(zipPath, tempDir);
+
+                    var sourceMpqDir = Path.Combine(tempDir, "mods", "Reimagined", "Reimagined.mpq");
+                    if (!Directory.Exists(sourceMpqDir))
+                        sourceMpqDir = Path.Combine(tempDir, "Reimagined", "Reimagined.mpq");
+                    if (!Directory.Exists(sourceMpqDir))
+                    {
+                        var found = Directory.GetDirectories(tempDir, "Reimagined.mpq", SearchOption.AllDirectories);
+                        if (found.Length > 0)
+                            sourceMpqDir = found[0];
+                    }
+
+                    if (!Directory.Exists(sourceMpqDir))
+                        return false;
+
+                    var targetMpqDir = Path.Combine(installDirectory, "Reimagined.mpq");
+                    if (Directory.Exists(targetMpqDir))
+                    {
+                        var backupDir = Path.Combine(installDirectory, "Reimagined.mpq.backup");
+                        if (Directory.Exists(backupDir))
+                            Directory.Delete(backupDir, recursive: true);
+                        Directory.Move(targetMpqDir, backupDir);
+                    }
+
+                    CopyDirectory(sourceMpqDir, targetMpqDir);
+                    return true;
+                }
+                finally
+                {
+                    if (tempDir != null && Directory.Exists(tempDir))
+                    {
+                        try { Directory.Delete(tempDir, true); } catch { /* ignore cleanup */ }
+                    }
+                }
+            });
+
+            if (!result)
+            {
+                Notifications.SendNotification("Reimagined.mpq not found in the mod archive.", "Warning");
+                return;
+            }
+
+            Notifications.SendNotification("Mod installed to D2RMM mods folder successfully.", "Success");
+        }
+        else
+        {
+            await Task.Run(() =>
+            {
+                var modDir = Path.Combine(installDirectory, "mods", "Reimagined");
+                if (Directory.Exists(modDir))
+                {
+                    var backupDir = Path.Combine(installDirectory, "mods", "Reimagined.backup");
+                    if (Directory.Exists(backupDir))
+                    {
+                        Directory.Delete(backupDir, recursive: true);
+                    }
+                    Directory.Move(modDir, backupDir);
+                }
+
+                ZipFile.ExtractToDirectory(zipPath, installDirectory, overwriteFiles: true);
+            });
+
+            Notifications.SendNotification("Mod installed successfully.", "Success");
+        }
 
         if (TopLevel.GetTopLevel(this) is MainWindow mainWindow)
         {
@@ -298,6 +380,15 @@ public partial class UpdateView : UserControl
             await mainWindow.RefreshUpdateStateAsync();
             await mainWindow.NavigateToLaunchViewAsync();
         }
+    }
+
+    private static void CopyDirectory(string sourceDir, string targetDir)
+    {
+        Directory.CreateDirectory(targetDir);
+        foreach (var file in Directory.GetFiles(sourceDir))
+            File.Copy(file, Path.Combine(targetDir, Path.GetFileName(file)), true);
+        foreach (var directory in Directory.GetDirectories(sourceDir))
+            CopyDirectory(directory, Path.Combine(targetDir, Path.GetFileName(directory)));
     }
 
     private static async Task<string?> WaitForNewZipFromDownloadsAsync(TimeSpan timeout)

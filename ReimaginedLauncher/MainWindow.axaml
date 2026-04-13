@@ -83,7 +83,7 @@
                         <ListBoxItem x:Name="BackupsNavItem" Tag="Backups" Content="Backups" />
                         <ListBoxItem x:Name="SettingsNavItem" Tag="Settings" Content="Settings" />
                         <ListBoxItem x:Name="ModTweaksNavItem" Tag="ModTweaks" Content="Mod Tweaks" />
-                        <ListBoxItem x:Name="UpdateNavItem" Tag="Update" Content="Update" />
+                        <ListBoxItem x:Name="UpdateNavItem" Tag="Update" Content="Install/Update" />
                     </ListBox>
                 </DockPanel>
 

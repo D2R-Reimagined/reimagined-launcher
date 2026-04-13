@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -36,11 +37,31 @@ public class GameLauncherService
         _detectionCts = new CancellationTokenSource();
         var token = _detectionCts.Token;
 
-        if (InstallDirectoryValidator.IsValidInstallDirectory(MainWindow.Settings.InstallDirectory))
+        var settings = MainWindow.Settings;
+        var currentProfile = settings.CurrentProfile;
+
+        // If current profile already has a valid directory, just normalise and return
+        if (InstallDirectoryValidator.IsValidInstallDirectory(currentProfile.InstallDirectory))
         {
-            MainWindow.Settings.InstallDirectory =
-                InstallDirectoryValidator.NormalizeInstallDirectory(MainWindow.Settings.InstallDirectory);
-            MainWindow.Settings.IsInstallDirectoryValidated = true;
+            currentProfile.InstallDirectory =
+                InstallDirectoryValidator.NormalizeInstallDirectory(currentProfile.InstallDirectory);
+            currentProfile.IsInstallDirectoryValidated = true;
+
+            if (currentProfile.Type == InstallationType.BattleNet)
+            {
+                var detectedType = DetectInstallationType(currentProfile.InstallDirectory!);
+                if (detectedType != InstallationType.BattleNet)
+                {
+                    currentProfile.Type = detectedType;
+                    if (detectedType == InstallationType.Steam)
+                        currentProfile.SteamDirectory = FindSteamExecutable(currentProfile.InstallDirectory);
+                }
+            }
+
+            // Still check the other default path to populate the sibling profile
+            PopulateDefaultPaths(settings);
+            _ = SettingsManager.SaveAsync(settings);
+
             onComplete?.Invoke();
             return;
         }
@@ -48,21 +69,91 @@ public class GameLauncherService
         IsDetecting = true;
         try
         {
-            var detectedExecutablePath = await Task.Run(() => FindD2RExecutable(token), token);
-
+            // ── Phase 1: check both well-known default locations ──
+            var foundPaths = await Task.Run(() => CheckDefaultPaths(token), token);
             if (token.IsCancellationRequested) return;
 
-            if (!string.IsNullOrEmpty(detectedExecutablePath))
+            bool anyFound = false;
+
+            if (foundPaths.BattleNetPath is not null)
             {
-                MainWindow.Settings.InstallDirectory =
-                    InstallDirectoryValidator.NormalizeInstallDirectory(detectedExecutablePath);
-                MainWindow.Settings.IsInstallDirectoryValidated = true;
-                _ = SettingsManager.SaveAsync(MainWindow.Settings);
+                var bnetProfile = GetProfileByType(settings, InstallationType.BattleNet);
+                if (!bnetProfile.IsInstallDirectoryValidated)
+                {
+                    bnetProfile.InstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(foundPaths.BattleNetPath);
+                    bnetProfile.IsInstallDirectoryValidated = true;
+                    anyFound = true;
+                }
+            }
+
+            if (foundPaths.SteamPath is not null)
+            {
+                var steamProfile = GetProfileByType(settings, InstallationType.Steam);
+                if (!steamProfile.IsInstallDirectoryValidated)
+                {
+                    steamProfile.InstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(foundPaths.SteamPath);
+                    steamProfile.IsInstallDirectoryValidated = true;
+                    steamProfile.SteamDirectory = FindSteamExecutable(steamProfile.InstallDirectory);
+                    anyFound = true;
+                }
+            }
+
+            // If the current profile was populated by the default-path check, we're done
+            if (currentProfile.IsInstallDirectoryValidated)
+            {
+                if (anyFound)
+                {
+                    NotifyDetectionResults(foundPaths);
+                    _ = SettingsManager.SaveAsync(settings);
+                }
+                onComplete?.Invoke();
+                return;
+            }
+
+            // ── Phase 2: fall back to full-disk search ──
+            if (!anyFound)
+            {
+                var detectedExecutablePath = await Task.Run(() => FindD2RExecutable(token), token);
+                if (token.IsCancellationRequested) return;
+
+                if (!string.IsNullOrEmpty(detectedExecutablePath))
+                {
+                    var normalised = InstallDirectoryValidator.NormalizeInstallDirectory(detectedExecutablePath);
+                    var detectedType = DetectInstallationType(normalised!);
+                    var targetProfile = GetProfileByType(settings, detectedType);
+
+                    targetProfile.InstallDirectory = normalised;
+                    targetProfile.IsInstallDirectoryValidated = true;
+                    if (detectedType == InstallationType.Steam)
+                        targetProfile.SteamDirectory = FindSteamExecutable(targetProfile.InstallDirectory);
+
+                    // Make sure the current profile points to the one we just found
+                    settings.SelectedProfileIndex = settings.Profiles.IndexOf(targetProfile);
+
+                    _ = SettingsManager.SaveAsync(settings);
+                }
+                else
+                {
+                    currentProfile.IsInstallDirectoryValidated = false;
+                    Notifications.SendNotification("D2R.exe not found");
+                }
             }
             else
             {
-                MainWindow.Settings.IsInstallDirectoryValidated = false;
-                Notifications.SendNotification("D2R.exe not found");
+                // Default paths found something — select the first validated non-D2RMM profile
+                if (!currentProfile.IsInstallDirectoryValidated)
+                {
+                    for (int i = 0; i < settings.Profiles.Count; i++)
+                    {
+                        if (settings.Profiles[i].IsInstallDirectoryValidated && settings.Profiles[i].Type != InstallationType.D2RMM)
+                        {
+                            settings.SelectedProfileIndex = i;
+                            break;
+                        }
+                    }
+                }
+                NotifyDetectionResults(foundPaths);
+                _ = SettingsManager.SaveAsync(settings);
             }
         }
         catch (OperationCanceledException)
@@ -73,6 +164,124 @@ public class GameLauncherService
         {
             IsDetecting = false;
             onComplete?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// Checks the two well-known default D2R install locations.
+    /// </summary>
+    private static (string? BattleNetPath, string? SteamPath) CheckDefaultPaths(CancellationToken token)
+    {
+        string? bnet = null;
+        string? steam = null;
+
+        foreach (var path in DefaultInstallPaths)
+        {
+            if (token.IsCancellationRequested) break;
+            if (!File.Exists(path)) continue;
+
+            var dir = Path.GetDirectoryName(path);
+            if (path.Contains("steamapps\\common", StringComparison.OrdinalIgnoreCase))
+                steam = dir;
+            else
+                bnet = dir;
+        }
+
+        return (bnet, steam);
+    }
+
+    /// <summary>
+    /// Ensures both B.Net and Steam profiles are populated from default paths when possible.
+    /// Called when the current profile is already valid, to discover the other installation.
+    /// </summary>
+    private void PopulateDefaultPaths(AppSettings settings)
+    {
+        foreach (var path in DefaultInstallPaths)
+        {
+            if (!File.Exists(path)) continue;
+            var dir = InstallDirectoryValidator.NormalizeInstallDirectory(Path.GetDirectoryName(path));
+            var type = DetectInstallationType(dir!);
+            var profile = GetProfileByType(settings, type);
+            if (profile.IsInstallDirectoryValidated) continue;
+
+            profile.InstallDirectory = dir;
+            profile.IsInstallDirectoryValidated = true;
+            if (type == InstallationType.Steam)
+                profile.SteamDirectory = FindSteamExecutable(profile.InstallDirectory);
+        }
+    }
+
+    private static InstallationProfile GetProfileByType(AppSettings settings, InstallationType type)
+    {
+        // Ensure profiles exist
+        _ = settings.CurrentProfile;
+        foreach (var p in settings.Profiles)
+        {
+            if (p.Type == type) return p;
+        }
+        // Should not happen with default 3 profiles, but just in case
+        var newProfile = new InstallationProfile { Type = type };
+        settings.Profiles.Add(newProfile);
+        return newProfile;
+    }
+
+    private static void NotifyDetectionResults((string? BattleNetPath, string? SteamPath) found)
+    {
+        if (found.BattleNetPath is not null && found.SteamPath is not null)
+        {
+            Notifications.SendNotification(
+                "Dual installation detected",
+                "Both Battle.Net and Steam installations of D2R were found. Use the dropdown to switch between them.");
+        }
+        else if (found.BattleNetPath is not null)
+        {
+            Notifications.SendNotification("Battle.Net installation detected", "D2R found in the default Battle.Net location.");
+        }
+        else if (found.SteamPath is not null)
+        {
+            Notifications.SendNotification("Steam installation detected", "D2R found in the default Steam location.");
+        }
+    }
+
+    public InstallationType DetectInstallationType(string path)
+    {
+        if (path.Contains("steamapps\\common", StringComparison.OrdinalIgnoreCase))
+        {
+            return InstallationType.Steam;
+        }
+        return InstallationType.BattleNet;
+    }
+
+    public string? FindSteamExecutable(string? d2rDir = null)
+    {
+        var targetD2rDir = d2rDir ?? MainWindow.Settings.InstallDirectory;
+        if (!string.IsNullOrEmpty(targetD2rDir) && targetD2rDir.Contains("steamapps\\common", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var steamDir = Path.GetFullPath(Path.Combine(targetD2rDir, "..", "..", ".."));
+                var steamExe = Path.Combine(steamDir, "Steam.exe");
+                if (File.Exists(steamExe)) return steamExe;
+            }
+            catch { /* ignore path errors */ }
+        }
+
+        var defaultPath = @"C:\Program Files (x86)\Steam\steam.exe";
+        if (File.Exists(defaultPath)) return defaultPath;
+
+        return null;
+    }
+
+    private void CopyDirectory(string sourceDir, string targetDir)
+    {
+        Directory.CreateDirectory(targetDir);
+        foreach (var file in Directory.GetFiles(sourceDir))
+        {
+            File.Copy(file, Path.Combine(targetDir, Path.GetFileName(file)), true);
+        }
+        foreach (var directory in Directory.GetDirectories(sourceDir))
+        {
+            CopyDirectory(directory, Path.Combine(targetDir, Path.GetFileName(directory)));
         }
     }
 
@@ -206,33 +415,70 @@ public class GameLauncherService
 
     public string BuildLaunchCommand(string? launchParamOverride = null, string? gamePathOverride = null)
     {
+        var profile = MainWindow.Settings.CurrentProfile;
+        if (profile.Type == InstallationType.D2RMM)
+        {
+            return "D2RMM Install: No launch command. Clicking install mod will install reimagined.mpq into D2RMM/mods.";
+        }
+
         var launchParameters = string.IsNullOrWhiteSpace(launchParamOverride)
             ? LaunchParameters
             : launchParamOverride;
-        var executablePath = ResolveExecutablePath(gamePathOverride) ?? "D2R.exe";
 
+        if (profile.Type == InstallationType.Steam)
+        {
+            var steamPath = profile.SteamDirectory ?? @"C:\Program Files (x86)\Steam\steam.exe";
+            return $"\"{steamPath}\" -silent -applaunch 2536520 {launchParameters}";
+        }
+
+        var executablePath = ResolveExecutablePath(gamePathOverride) ?? "D2R.exe";
         return $"\"{executablePath}\" {launchParameters}";
     }
 
     public void LaunchGame(string? launchParamOverride = null, string? gamePathOverride = null)
     {
+        var profile = MainWindow.Settings.CurrentProfile;
+        
+        // D2RMM handled separately in LaunchView
+        if (profile.Type == InstallationType.D2RMM) return;
+
         if (!string.IsNullOrWhiteSpace(gamePathOverride))
         {
             GamePathOverride = gamePathOverride;
         }
 
-        var executablePath = ResolveExecutablePath(GamePathOverride);
-        LaunchDiagnostics.Log($"Resolved executable path: {executablePath ?? "<null>"}");
-        if (string.IsNullOrWhiteSpace(executablePath))
-        {
-            Notifications.SendNotification("No valid game path found. Please set the game path in settings.");
-            return;
-        }
-
         var launchParameters = string.IsNullOrWhiteSpace(launchParamOverride)
             ? LaunchParameters
             : launchParamOverride;
-        LaunchDiagnostics.Log($"Launch parameters: {launchParameters}");
+
+        string executablePath;
+        string finalArgs;
+
+        if (profile.Type == InstallationType.Steam)
+        {
+            executablePath = profile.SteamDirectory ?? @"C:\Program Files (x86)\Steam\steam.exe";
+            finalArgs = $"-silent -applaunch 2536520 {launchParameters}";
+            
+            if (!File.Exists(executablePath))
+            {
+                Notifications.SendNotification($"Steam.exe not found at {executablePath}. Please locate it in the Install Directory section.");
+                return;
+            }
+        }
+        else
+        {
+            executablePath = ResolveExecutablePath(GamePathOverride) ?? string.Empty;
+            finalArgs = launchParameters;
+            
+            if (string.IsNullOrWhiteSpace(executablePath))
+            {
+                Notifications.SendNotification("No valid game path found. Please set the game path in settings.");
+                return;
+            }
+        }
+
+        LaunchDiagnostics.Log($"Resolved executable path: {executablePath}");
+        LaunchDiagnostics.Log($"Launch parameters: {finalArgs}");
             
         if (!OperatingSystem.IsWindows())
         {
@@ -243,7 +489,7 @@ public class GameLauncherService
         var processStartInfo = new ProcessStartInfo(executablePath)
         {
             UseShellExecute = true,
-            Arguments = launchParameters
+            Arguments = finalArgs
         };
 
         try
@@ -252,7 +498,7 @@ public class GameLauncherService
             if (process == null)
             {
                 LaunchDiagnostics.Log("Process.Start returned null.");
-                Notifications.SendNotification("Failed to start D2R.exe.", "Warning");
+                Notifications.SendNotification($"Failed to start {Path.GetFileName(executablePath)}.", "Warning");
                 return;
             }
 
@@ -261,7 +507,7 @@ public class GameLauncherService
         catch (Win32Exception ex)
         {
             LaunchDiagnostics.LogException("Process.Start failed", ex);
-            Notifications.SendNotification($"Failed to start D2R.exe: {ex.Message}", "Warning");
+            Notifications.SendNotification($"Failed to start {Path.GetFileName(executablePath)}: {ex.Message}", "Warning");
         }
     }
 

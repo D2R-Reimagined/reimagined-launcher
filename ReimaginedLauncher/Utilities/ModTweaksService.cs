@@ -102,19 +102,32 @@ public static class ModTweaksService
         }
     }
 
-    private static string? GetExcelDirectory()
+    private static string? GetMpqBaseDirectory()
     {
-        var installDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(MainWindow.Settings.InstallDirectory);
+        var profile = MainWindow.Settings.CurrentProfile;
+        var installDirectory = profile.Type == InstallationType.D2RMM
+            ? profile.InstallDirectory
+            : InstallDirectoryValidator.NormalizeInstallDirectory(profile.InstallDirectory);
         if (string.IsNullOrWhiteSpace(installDirectory))
         {
             return null;
         }
 
+        return profile.Type == InstallationType.D2RMM
+            ? Path.Combine(installDirectory, $"{ModDirectoryName}.mpq")
+            : Path.Combine(installDirectory, "mods", ModDirectoryName, $"{ModDirectoryName}.mpq");
+    }
+
+    private static string? GetExcelDirectory()
+    {
+        var mpqBase = GetMpqBaseDirectory();
+        if (string.IsNullOrWhiteSpace(mpqBase))
+        {
+            return null;
+        }
+
         return Path.Combine(
-            installDirectory,
-            "mods",
-            ModDirectoryName,
-            $"{ModDirectoryName}.mpq",
+            mpqBase,
             DataDirectoryName,
             "global",
             ExcelDirectoryName);
@@ -122,17 +135,14 @@ public static class ModTweaksService
 
     private static string? GetMissilesFilePath()
     {
-        var installDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(MainWindow.Settings.InstallDirectory);
-        if (string.IsNullOrWhiteSpace(installDirectory))
+        var mpqBase = GetMpqBaseDirectory();
+        if (string.IsNullOrWhiteSpace(mpqBase))
         {
             return null;
         }
 
         return Path.Combine(
-            installDirectory,
-            "mods",
-            ModDirectoryName,
-            $"{ModDirectoryName}.mpq",
+            mpqBase,
             DataDirectoryName,
             HdDirectoryName,
             MissilesDirectoryName,
@@ -141,17 +151,14 @@ public static class ModTweaksService
 
     private static string? GetLayoutsProfileHdFilePath()
     {
-        var installDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(MainWindow.Settings.InstallDirectory);
-        if (string.IsNullOrWhiteSpace(installDirectory))
+        var mpqBase = GetMpqBaseDirectory();
+        if (string.IsNullOrWhiteSpace(mpqBase))
         {
             return null;
         }
 
         return Path.Combine(
-            installDirectory,
-            "mods",
-            ModDirectoryName,
-            $"{ModDirectoryName}.mpq",
+            mpqBase,
             DataDirectoryName,
             GlobalDirectoryName,
             UiDirectoryName,

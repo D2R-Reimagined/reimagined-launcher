@@ -12,9 +12,17 @@ public static class InstallDirectoryValidator
         if (string.IsNullOrWhiteSpace(installDirectory))
             return null;
 
-        return installDirectory.EndsWith(ExecutableName, StringComparison.OrdinalIgnoreCase)
+        var directory = installDirectory.EndsWith(ExecutableName, StringComparison.OrdinalIgnoreCase)
             ? Path.GetDirectoryName(installDirectory)
             : installDirectory;
+
+        if (string.IsNullOrEmpty(directory))
+            return directory;
+
+        if (!directory.EndsWith(Path.DirectorySeparatorChar) && !directory.EndsWith(Path.AltDirectorySeparatorChar))
+            directory += Path.DirectorySeparatorChar;
+
+        return directory;
     }
 
     public static bool IsValidInstallDirectory(string? installDirectory)
