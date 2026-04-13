@@ -222,6 +222,15 @@
                                    Margin="28,0,0,0"
                                    Text="Makes item tooltip backgrounds solid black so they stay readable with HDR on."/>
                     </StackPanel>
+
+                    <StackPanel Spacing="4">
+                        <CheckBox x:Name="RemoveHelmetVisualCheckBox"
+                                  Content="Remove Helmet Visual"
+                                  IsCheckedChanged="OnVisualTweaksChanged"/>
+                        <TextBlock Classes="muted"
+                                   Margin="28,0,0,0"
+                                   Text="Creates blank helmet and circlet hd JSON overrides so equipped headgear stays hidden visually."/>
+                    </StackPanel>
                 </StackPanel>
             </Border>
             </StackPanel>
