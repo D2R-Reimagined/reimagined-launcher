@@ -309,33 +309,37 @@ public partial class UpdateView : UserControl
         if (!Directory.Exists(downloadsFolder))
             return null;
 
-        var start = DateTime.UtcNow;
         var baseline = SnapshotZipFiles(downloadsFolder);
+        var tcs = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        while (DateTime.UtcNow - start < timeout)
-        {
-            var candidates = Directory.GetFiles(downloadsFolder, "*.zip", SearchOption.TopDirectoryOnly)
-                .OrderByDescending(path => Path.GetFileName(path).Contains("reimagined", StringComparison.OrdinalIgnoreCase))
-                .ThenByDescending(path => File.GetLastWriteTimeUtc(path))
-                .ToArray();
+        using var watcher = new FileSystemWatcher(downloadsFolder, "*.zip");
+        watcher.NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size;
+        watcher.IncludeSubdirectories = false;
+        watcher.EnableRaisingEvents = true;
 
-            foreach (var path in candidates)
-            {
-                var signature = GetFileSignature(path);
-                if (signature == null || baseline.Contains(signature))
-                    continue;
+        void OnChanged(object _, FileSystemEventArgs e) => TryResolve(e.FullPath, baseline, tcs);
+        watcher.Created += OnChanged;
+        watcher.Changed += OnChanged;
 
-                if (!IsFileReady(path))
-                    continue;
+        using var cts = new System.Threading.CancellationTokenSource(timeout);
+        cts.Token.Register(() => tcs.TrySetResult(null));
 
-                if (IsZipArchive(path))
-                    return path;
-            }
+        return await tcs.Task;
+    }
 
-            await Task.Delay(TimeSpan.FromSeconds(2));
-        }
+    private static void TryResolve(string path, HashSet<string> baseline, TaskCompletionSource<string?> tcs)
+    {
+        if (tcs.Task.IsCompleted)
+            return;
 
-        return null;
+        var signature = GetFileSignature(path);
+        if (signature == null || baseline.Contains(signature))
+            return;
+
+        if (!IsFileReady(path) || !IsZipArchive(path))
+            return;
+
+        tcs.TrySetResult(path);
     }
 
     private static HashSet<string> SnapshotZipFiles(string folder)
