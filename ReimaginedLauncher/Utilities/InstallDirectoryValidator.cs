@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 
 namespace ReimaginedLauncher.Utilities;
 
@@ -32,6 +33,15 @@ public static class InstallDirectoryValidator
             return false;
 
         return File.Exists(Path.Combine(normalizedDirectory, ExecutableName));
+    }
+
+    public static bool IsValidSteamInstallDirectory(string? installDirectory)
+    {
+        if (!IsValidInstallDirectory(installDirectory))
+            return false;
+
+        var normalizedDirectory = NormalizeInstallDirectory(installDirectory)!;
+        return Directory.EnumerateFiles(normalizedDirectory, "steam_*.dll").Any();
     }
 
     public static string? GetExecutablePath(string? installDirectory)

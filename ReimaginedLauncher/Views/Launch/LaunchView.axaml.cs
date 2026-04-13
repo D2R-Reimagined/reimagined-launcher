@@ -1,6 +1,7 @@
 using System.Threading.Tasks;
 using System;
 using System.IO;
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
@@ -120,7 +121,9 @@ public partial class LaunchView : UserControl
         {
             InstallDirectoryTitle.Text = "Install Directory";
             InstallDirectoryDescription.Text = "Select the Diablo II: Resurrected folder that contains your local mod installation (Folder with .exe in it)";
-            isValidated = InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory);
+            isValidated = profile.Type == InstallationType.Steam
+                ? InstallDirectoryValidator.IsValidSteamInstallDirectory(profile.InstallDirectory)
+                : InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory);
             isModDetected = MainWindow.IsLocalModDetected;
         }
 
@@ -159,7 +162,10 @@ public partial class LaunchView : UserControl
             ValidationBannerText.Text = !isValidated
                 ? string.IsNullOrWhiteSpace(profile.InstallDirectory)
                     ? "Enter your Diablo II: Resurrected install directory before using the launcher."
-                    : "The selected install directory has not been validated. Choose the folder that contains D2R.exe."
+                    : profile.Type == InstallationType.Steam
+                        && InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory)
+                        ? "The selected directory does not contain steam_*.dll. Please select a valid Steam installation or switch to Battle.Net."
+                        : "The selected install directory has not been validated. Choose the folder that contains D2R.exe."
                 : "D2R Reimagined mod not detected in this directory. Install the mod before launching.";
         }
         
@@ -203,7 +209,19 @@ public partial class LaunchView : UserControl
 
             if (files.Count > 0)
             {
-                MainWindow.Settings.CurrentProfile.SteamDirectory = files[0].Path.LocalPath;
+                var selectedPath = files[0].Path.LocalPath;
+                var steamDir = Path.GetDirectoryName(selectedPath);
+
+                if (string.IsNullOrEmpty(steamDir) ||
+                    !Directory.EnumerateFiles(steamDir, "steam_*.dll").Any())
+                {
+                    Notifications.SendNotification(
+                        "Invalid Steam path",
+                        "The selected path does not contain steam_*.dll. Please select a valid Steam installation or switch to Battle.Net.");
+                    return;
+                }
+
+                MainWindow.Settings.CurrentProfile.SteamDirectory = selectedPath;
                 await SettingsManager.SaveAsync(MainWindow.Settings);
                 RefreshInstallDirectoryState();
             }
@@ -363,7 +381,9 @@ public partial class LaunchView : UserControl
 
             profile.IsInstallDirectoryValidated = profile.Type == InstallationType.D2RMM
                 ? !string.IsNullOrWhiteSpace(profile.InstallDirectory)
-                : InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory);
+                : profile.Type == InstallationType.Steam
+                    ? InstallDirectoryValidator.IsValidSteamInstallDirectory(profile.InstallDirectory)
+                    : InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory);
 
             // Auto-detect type if it's currently BattleNet (default)
             if (profile.Type == InstallationType.BattleNet && profile.IsInstallDirectoryValidated)
@@ -422,6 +442,15 @@ public partial class LaunchView : UserControl
                     await mainWindow.PromptInstallForMissingModAsync();
                 }
 
+                return;
+            }
+
+            if (profile.Type == InstallationType.Steam
+                && !InstallDirectoryValidator.IsValidSteamInstallDirectory(profile.InstallDirectory))
+            {
+                Notifications.SendNotification(
+                    "Invalid Steam path",
+                    "The selected directory does not contain steam_*.dll. Please select a valid Steam installation or switch to Battle.Net.");
                 return;
             }
 
