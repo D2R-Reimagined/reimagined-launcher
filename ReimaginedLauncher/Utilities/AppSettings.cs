@@ -36,6 +36,7 @@ public class InstallationProfile
     public bool RemoveSplashVfx { get; set; }
     public List<PluginRegistration> Plugins { get; set; } = [];
     public bool MakeTooltipBackgroundOpaque { get; set; }
+    public bool RemoveHelmetVisual { get; set; }
 }
 
 public class AppSettings

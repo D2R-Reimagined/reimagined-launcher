@@ -570,13 +570,10 @@ public static class PluginsService
             throw new InvalidDataException($"The column '{column}' is not supported for skills.txt.");
         }
 
-        var clonedEntry = typeof(object)
-            .GetMethod("MemberwiseClone", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .Invoke(entry, null);
-
+        var clonedEntry = entry with { };
         var convertedValue = ConvertValue(updatedValue, property.PropertyType, column);
         property.SetValue(clonedEntry, convertedValue);
-        return (Skills)clonedEntry!;
+        return clonedEntry;
     }
 
     private static string? ResolveOperationValue(
