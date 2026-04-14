@@ -1,7 +1,6 @@
 using System.Threading.Tasks;
 using System;
 using System.IO;
-using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
@@ -131,8 +130,8 @@ public partial class LaunchView : UserControl
 
         if (profile.Type == InstallationType.D2RMM)
         {
-            StartGameButton.Content = "Install Mod";
-            StartGameDescription.Text = "Clicking install mod will apply tweaks and adjustments to the files in your D2RMM/mods/Reimagined.mpq/data directory.";
+            StartGameButton.Content = "Install Tweaks";
+            StartGameDescription.Text = "Clicking 'Install Tweaks' will apply tweaks and adjustments to the files in your D2RMM/mods/Reimagined.mpq/data directory.";
             StartGameButton.IsEnabled = !_isLaunching && isValidated && isModDetected;
         }
         else
@@ -210,16 +209,6 @@ public partial class LaunchView : UserControl
             if (files.Count > 0)
             {
                 var selectedPath = files[0].Path.LocalPath;
-                var steamDir = Path.GetDirectoryName(selectedPath);
-
-                if (string.IsNullOrEmpty(steamDir) ||
-                    !Directory.EnumerateFiles(steamDir, "steam_*.dll").Any())
-                {
-                    Notifications.SendNotification(
-                        "Invalid Steam path",
-                        "The selected path does not contain steam_*.dll. Please select a valid Steam installation or switch to Battle.Net.");
-                    return;
-                }
 
                 MainWindow.Settings.CurrentProfile.SteamDirectory = selectedPath;
                 await SettingsManager.SaveAsync(MainWindow.Settings);
