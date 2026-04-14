@@ -111,7 +111,7 @@ public partial class LaunchView : UserControl
             InstallDirectoryTitle.Text = "D2RMM Mods Folder";
             InstallDirectoryDescription.Text = "Select your D2RMM mods folder where Reimagined.mpq will be installed.";
             
-            isValidated = !string.IsNullOrWhiteSpace(profile.InstallDirectory) && Directory.Exists(profile.InstallDirectory);
+            isValidated = InstallDirectoryValidator.IsValidD2RmmModsDirectory(profile.InstallDirectory) && Directory.Exists(profile.InstallDirectory);
             
             // For D2RMM, check if Reimagined.mpq exists in the mods folder
             isModDetected = isValidated && Directory.Exists(Path.Combine(profile.InstallDirectory!, "Reimagined.mpq"));
@@ -152,9 +152,11 @@ public partial class LaunchView : UserControl
         {
             ValidationBannerText.Text = string.IsNullOrWhiteSpace(profile.InstallDirectory)
                 ? "Select your D2RMM mods folder."
-                : !isModDetected && isValidated
-                    ? "Reimagined.mpq not yet installed in this mods folder."
-                    : "The selected folder could not be found.";
+                : !InstallDirectoryValidator.IsValidD2RmmModsDirectory(profile.InstallDirectory)
+                    ? "Invalid location. Please select the D2RMM/mods folder."
+                    : !isModDetected && isValidated
+                        ? "Reimagined.mpq not yet installed in this mods folder."
+                        : "The selected folder could not be found.";
         }
         else
         {
@@ -369,7 +371,7 @@ public partial class LaunchView : UserControl
             }
 
             profile.IsInstallDirectoryValidated = profile.Type == InstallationType.D2RMM
-                ? !string.IsNullOrWhiteSpace(profile.InstallDirectory)
+                ? InstallDirectoryValidator.IsValidD2RmmModsDirectory(profile.InstallDirectory)
                 : profile.Type == InstallationType.Steam
                     ? InstallDirectoryValidator.IsValidSteamInstallDirectory(profile.InstallDirectory)
                     : InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory);
@@ -408,8 +410,15 @@ public partial class LaunchView : UserControl
                 if (profile.Type == InstallationType.D2RMM)
                 {
                     Notifications.SendNotification(
-                        "D2RMM mods folder not found",
-                        "Select your D2RMM mods folder.");
+                        "Invalid D2RMM location",
+                        "Please select the D2RMM/mods folder.");
+                }
+                else if (profile.Type == InstallationType.Steam
+                         && InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory))
+                {
+                    Notifications.SendNotification(
+                        "Invalid Steam path",
+                        "The selected directory does not contain steam_*.dll. Please select a valid Steam installation or switch to Battle.Net.");
                 }
                 else
                 {
@@ -431,15 +440,6 @@ public partial class LaunchView : UserControl
                     await mainWindow.PromptInstallForMissingModAsync();
                 }
 
-                return;
-            }
-
-            if (profile.Type == InstallationType.Steam
-                && !InstallDirectoryValidator.IsValidSteamInstallDirectory(profile.InstallDirectory))
-            {
-                Notifications.SendNotification(
-                    "Invalid Steam path",
-                    "The selected directory does not contain steam_*.dll. Please select a valid Steam installation or switch to Battle.Net.");
                 return;
             }
 
