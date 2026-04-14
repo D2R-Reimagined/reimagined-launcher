@@ -92,4 +92,5 @@ public class AppSettings
     [JsonIgnore] public bool RemoveSplashVfx { get => CurrentProfile.RemoveSplashVfx; set => CurrentProfile.RemoveSplashVfx = value; }
     [JsonIgnore] public List<PluginRegistration> Plugins { get => CurrentProfile.Plugins; set => CurrentProfile.Plugins = value; }
     [JsonIgnore] public bool MakeTooltipBackgroundOpaque { get => CurrentProfile.MakeTooltipBackgroundOpaque; set => CurrentProfile.MakeTooltipBackgroundOpaque = value; }
+    [JsonIgnore] public bool RemoveHelmetVisual { get => CurrentProfile.RemoveHelmetVisual; set => CurrentProfile.RemoveHelmetVisual = value; }
 }
