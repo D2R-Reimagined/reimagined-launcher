@@ -326,14 +326,14 @@ public partial class UpdateView : UserControl
 
                     var targetMpqDir = Path.Combine(installDirectory, "Reimagined.mpq");
                     if (Directory.Exists(targetMpqDir))
-                    {
-                        var backupDir = Path.Combine(installDirectory, "Reimagined.mpq.backup");
-                        if (Directory.Exists(backupDir))
-                            Directory.Delete(backupDir, recursive: true);
-                        Directory.Move(targetMpqDir, backupDir);
-                    }
+                        Directory.Delete(targetMpqDir, recursive: true);
 
                     CopyDirectory(sourceMpqDir, targetMpqDir);
+
+                    var backupDir = Path.Combine(installDirectory, "Reimagined.mpq.backup");
+                    if (Directory.Exists(backupDir))
+                        Directory.Delete(backupDir, recursive: true);
+
                     return true;
                 }
                 finally

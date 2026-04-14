@@ -153,7 +153,7 @@ public partial class LaunchView : UserControl
             ValidationBannerText.Text = string.IsNullOrWhiteSpace(profile.InstallDirectory)
                 ? "Select your D2RMM mods folder."
                 : !InstallDirectoryValidator.IsValidD2RmmModsDirectory(profile.InstallDirectory)
-                    ? "Invalid location. Please select the D2RMM/mods folder."
+                    ? InstallDirectoryValidator.GetD2RmmValidationMessage(profile.InstallDirectory)
                     : !isModDetected && isValidated
                         ? "Reimagined.mpq not yet installed in this mods folder."
                         : "The selected folder could not be found.";
@@ -411,7 +411,7 @@ public partial class LaunchView : UserControl
                 {
                     Notifications.SendNotification(
                         "Invalid D2RMM location",
-                        "Please select the D2RMM/mods folder.");
+                        InstallDirectoryValidator.GetD2RmmValidationMessage(profile.InstallDirectory));
                 }
                 else if (profile.Type == InstallationType.Steam
                          && InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory))

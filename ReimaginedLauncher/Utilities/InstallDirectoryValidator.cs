@@ -57,8 +57,25 @@ public static class InstallDirectoryValidator
         if (string.IsNullOrEmpty(parentDir))
             return false;
 
-        var parentName = Path.GetFileName(parentDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        return string.Equals(parentName, "D2RMM", StringComparison.OrdinalIgnoreCase);
+        return File.Exists(Path.Combine(parentDir, "D2RMM.exe"));
+    }
+
+    public static string GetD2RmmValidationMessage(string? modsDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(modsDirectory))
+            return "Invalid location. Please select the mods folder inside the D2RMM directory.";
+
+        var trimmed = modsDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var dirName = Path.GetFileName(trimmed);
+
+        if (!string.Equals(dirName, "mods", StringComparison.OrdinalIgnoreCase))
+            return "Invalid location. Please select the mods folder inside the D2RMM directory.";
+
+        var parentDir = Path.GetDirectoryName(trimmed);
+        if (string.IsNullOrEmpty(parentDir))
+            return "Invalid location. Please select the mods folder inside the D2RMM directory.";
+
+        return $"Invalid location. D2RMM.exe not found in the {parentDir} directory.";
     }
 
     public static string? GetExecutablePath(string? installDirectory)
