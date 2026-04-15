@@ -22,8 +22,10 @@
                 <StackPanel Spacing="12">
                     <TextBlock Classes="section-title"
                                Text="Launch" />
-                    <TextBlock Classes="muted"
-                               Text="The button stays available here and will enable once the install directory is valid and the mod is detected." />
+                    <TextBlock x:Name="StartGameDescription"
+                               Classes="muted"
+                               Text="The button stays available here and will enable once the install directory is valid and the mod is detected."
+                               TextWrapping="Wrap" />
                     <Button x:Name="StartGameButton"
                             Classes="accent"
                             Content="Start Game"
@@ -40,12 +42,12 @@
             <Border Grid.Row="2"
                     Classes="panel"
                     Padding="20">
-                <Grid RowDefinitions="Auto,Auto,Auto"
+                <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto"
                       RowSpacing="14">
                     <StackPanel Spacing="4">
-                        <TextBlock Classes="section-title"
+                        <TextBlock x:Name="InstallDirectoryTitle" Classes="section-title"
                                    Text="Install Directory" />
-                        <TextBlock Classes="muted"
+                        <TextBlock x:Name="InstallDirectoryDescription" Classes="muted"
                                    Text="Select the Diablo II: Resurrected folder that contains your local mod installation (Folder with .exe in it)" />
                     </StackPanel>
 
@@ -59,14 +61,24 @@
                                    TextWrapping="Wrap" />
                     </Border>
 
-                    <Grid Grid.Row="2"
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="10">
+                        <TextBlock Text="Installation Type:" VerticalAlignment="Center" Classes="muted"/>
+                        <ComboBox x:Name="InstallationTypeComboBox" Width="200" SelectionChanged="OnInstallationTypeChanged">
+                            <ComboBoxItem Content="Battle.Net" />
+                            <ComboBoxItem Content="Steam" />
+                            <ComboBoxItem Content="D2RMM Launcher" />
+                        </ComboBox>
+                    </StackPanel>
+
+                    <Grid Grid.Row="3"
                           ColumnDefinitions="*,Auto"
                           ColumnSpacing="10">
                         <StackPanel Orientation="Horizontal"
                                     Spacing="10">
                             <TextBox x:Name="DirectoryTextBox"
                                      IsReadOnly="True"
-                                     Width="450" />
+                                     Width="563"
+                                     HorizontalAlignment="Left" />
                             <StackPanel x:Name="DetectionLoadingIndicator"
                                         Orientation="Horizontal"
                                         Spacing="8"
@@ -83,6 +95,19 @@
                         <Button Grid.Column="1"
                                 Content="Browse"
                                 Click="OnInstallDirectoryClick"
+                                VerticalContentAlignment="Center" />
+                    </Grid>
+
+                    <Grid x:Name="SteamExtraPanel" Grid.Row="4" ColumnDefinitions="*,Auto" ColumnSpacing="10" IsVisible="False">
+                        <TextBox x:Name="SteamPathTextBox"
+                                 IsReadOnly="True"
+                                 Width="563"
+                                 HorizontalAlignment="Left"
+                                 PlaceholderText="Steam.exe Path" />
+                        <Button x:Name="LocateSteamButton"
+                                Grid.Column="1"
+                                Content="Locate Steam.exe"
+                                Click="OnLocateSteamClick"
                                 VerticalContentAlignment="Center" />
                     </Grid>
                 </Grid>

@@ -19,69 +19,76 @@
                 <StackPanel Spacing="14">
                     <TextBlock Classes="section-title"
                                Text="Launch Parameters" />
-                    <StackPanel Spacing="4">
-                        <CheckBox x:Name="EnableRespecCheckBox"
-                                  Content="-enablerespec"
-                                  IsCheckedChanged="OnLaunchSettingChanged"/>
-                        <TextBlock Classes="muted"
-                                   Margin="28,0,0,0"
-                                   TextWrapping="Wrap"
-                                   Text="Enables unlimited stat and skill respecs in-game. Hold ALT and left-click any STR/DEX/VIT/ENERGY plus button to trigger a stat reset." />
-                    </StackPanel>
-                    <StackPanel Spacing="4">
-                        <CheckBox x:Name="ResetOfflineMapsCheckBox"
-                                  Content="-resetofflinemaps"
-                                  IsCheckedChanged="OnLaunchSettingChanged"/>
-                        <TextBlock Classes="muted"
-                                   Margin="28,0,0,0"
-                                   TextWrapping="Wrap"
-                                   Text="Generates fresh offline map layouts every time the game starts. If you only want to reset all maps once, you can also switch difficulties (Normal/Nightmare/Hell) on a single character." />
-                    </StackPanel>
-                    <StackPanel Spacing="8">
-                        <TextBlock Text="-players"
-                                   FontWeight="SemiBold" />
-                        <TextBlock Classes="muted"
-                                   TextWrapping="Wrap"
-                                   Text="Simulates higher player counts offline to increase difficulty and drops. The game sets /players to this value whenever you enter a game. You can change it in-game, but it resets to this value after returning to the character select screen." />
-                        <ComboBox x:Name="PlayersComboBox"
-                                  Width="180"
-                                  SelectionChanged="OnPlayersSelectionChanged">
-                            <ComboBoxItem Content="Disabled"/>
-                            <ComboBoxItem Content="2"/>
-                            <ComboBoxItem Content="3"/>
-                            <ComboBoxItem Content="4"/>
-                            <ComboBoxItem Content="5"/>
-                            <ComboBoxItem Content="6"/>
-                            <ComboBoxItem Content="7"/>
-                            <ComboBoxItem Content="8"/>
-                        </ComboBox>
-                    </StackPanel>
-                    <StackPanel Spacing="4">
-                        <CheckBox x:Name="NoRumbleCheckBox"
-                                  Content="-norumble"
-                                  IsCheckedChanged="OnLaunchSettingChanged"/>
-                        <TextBlock Classes="muted"
-                                   Margin="28,0,0,0"
-                                   TextWrapping="Wrap"
-                                   Text="Disables controller vibration." />
-                    </StackPanel>
-                    <StackPanel Spacing="4">
-                        <CheckBox x:Name="ForceDesktopCheckBox"
-                                  Content="-forcedesktop"
-                                  IsCheckedChanged="OnLaunchSettingChanged"/>
-                        <TextBlock Classes="muted"
-                                   Margin="28,0,0,0"
-                                   TextWrapping="Wrap"
-                                   Text="Forces the desktop mouse-and-keyboard UI on devices the game otherwise treats as handheld." />
-                    </StackPanel>
-                    <StackPanel Spacing="4">
-                        <CheckBox x:Name="NoSoundCheckBox"
-                                  Content="-nosound"
-                                  IsCheckedChanged="OnLaunchSettingChanged"/>
-                        <TextBlock Classes="muted"
-                                   Margin="28,0,0,0"
-                                   TextWrapping="Wrap"
-                                   Text="Starts the game without audio output." />
+                    <TextBlock x:Name="D2RmmLaunchParamsNotice"
+                               Classes="muted"
+                               IsVisible="False"
+                               TextWrapping="Wrap"
+                               Text="Launch parameters are not available when using the D2RMM launcher. Configure launch options directly in D2RMM." />
+                    <StackPanel x:Name="LaunchParametersPanel" Spacing="10">
+                        <StackPanel Spacing="4">
+                            <CheckBox x:Name="EnableRespecCheckBox"
+                                      Content="-enablerespec"
+                                      IsCheckedChanged="OnLaunchSettingChanged"/>
+                            <TextBlock Classes="muted"
+                                       Margin="28,0,0,0"
+                                       TextWrapping="Wrap"
+                                       Text="Enables unlimited stat and skill respecs in-game. Hold ALT and left-click any STR/DEX/VIT/ENERGY plus button to trigger a stat reset." />
+                        </StackPanel>
+                        <StackPanel Spacing="4">
+                            <CheckBox x:Name="ResetOfflineMapsCheckBox"
+                                      Content="-resetofflinemaps"
+                                      IsCheckedChanged="OnLaunchSettingChanged"/>
+                            <TextBlock Classes="muted"
+                                       Margin="28,0,0,0"
+                                       TextWrapping="Wrap"
+                                       Text="Generates fresh offline map layouts every time the game starts. If you only want to reset all maps once, you can also switch difficulties (Normal/Nightmare/Hell) on a single character." />
+                        </StackPanel>
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="-players"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Classes="muted"
+                                       TextWrapping="Wrap"
+                                       Text="Simulates higher player counts offline to increase difficulty and drops. The game sets /players to this value whenever you enter a game. You can change it in-game, but it resets to this value after returning to the character select screen." />
+                            <ComboBox x:Name="PlayersComboBox"
+                                      Width="180"
+                                      SelectionChanged="OnPlayersSelectionChanged">
+                                <ComboBoxItem Content="Disabled"/>
+                                <ComboBoxItem Content="2"/>
+                                <ComboBoxItem Content="3"/>
+                                <ComboBoxItem Content="4"/>
+                                <ComboBoxItem Content="5"/>
+                                <ComboBoxItem Content="6"/>
+                                <ComboBoxItem Content="7"/>
+                                <ComboBoxItem Content="8"/>
+                            </ComboBox>
+                        </StackPanel>
+                        <StackPanel Spacing="4">
+                            <CheckBox x:Name="NoRumbleCheckBox"
+                                      Content="-norumble"
+                                      IsCheckedChanged="OnLaunchSettingChanged"/>
+                            <TextBlock Classes="muted"
+                                       Margin="28,0,0,0"
+                                       TextWrapping="Wrap"
+                                       Text="Disables controller vibration." />
+                        </StackPanel>
+                        <StackPanel Spacing="4">
+                            <CheckBox x:Name="ForceDesktopCheckBox"
+                                      Content="-forcedesktop"
+                                      IsCheckedChanged="OnLaunchSettingChanged"/>
+                            <TextBlock Classes="muted"
+                                       Margin="28,0,0,0"
+                                       TextWrapping="Wrap"
+                                       Text="Forces the desktop mouse-and-keyboard UI on devices the game otherwise treats as handheld." />
+                        </StackPanel>
+                        <StackPanel Spacing="4">
+                            <CheckBox x:Name="NoSoundCheckBox"
+                                      Content="-nosound"
+                                      IsCheckedChanged="OnLaunchSettingChanged"/>
+                            <TextBlock Classes="muted"
+                                       Margin="28,0,0,0"
+                                       TextWrapping="Wrap"
+                                       Text="Starts the game without audio output." />
+                        </StackPanel>
                     </StackPanel>
                 </StackPanel>
             </Border>

@@ -441,27 +441,51 @@ public partial class MainWindow : Window
         _localModVersion = "Unknown";
         IsLocalModDetected = false;
 
-        var installDir = installDirectory ?? Settings.InstallDirectory;
-        if (!string.IsNullOrWhiteSpace(installDir))
+        var profile = Settings.CurrentProfile;
+        if (profile.Type == InstallationType.D2RMM)
         {
-            var modRootDirectory = Path.Combine(installDir, "mods", "Reimagined");
-            var modInfoPath = Path.Combine(modRootDirectory, "modinfo.json");
-            var modInfoPathInMpq = Path.Combine(modRootDirectory, "Reimagined.mpq", "modinfo.json");
-            var layoutsDir = Path.Combine(
-                modRootDirectory,
-                "Reimagined.mpq", "data", "global", "ui", "layouts"
-            );
+            if (!string.IsNullOrWhiteSpace(profile.InstallDirectory))
+            {
+                var modPath = Path.Combine(profile.InstallDirectory, "Reimagined.mpq");
+                var modInfoPath = Path.Combine(modPath, "modinfo.json");
+                var layoutsDir = Path.Combine(modPath, "data", "global", "ui", "layouts");
 
-            var panel = CharacterSelectPanelService.FromJson(layoutsDir);
-            var panelVersion = panel?.GetModVersion();
-            var modInfoVersion = TryGetVersionFromModInfo(modInfoPath) ?? TryGetVersionFromModInfo(modInfoPathInMpq);
-            _localModVersion = !string.IsNullOrWhiteSpace(panelVersion) && !panelVersion.Equals("Unknown", StringComparison.OrdinalIgnoreCase)
-                ? panelVersion
-                : !string.IsNullOrWhiteSpace(modInfoVersion)
-                    ? modInfoVersion
-                    : "Unknown";
+                IsLocalModDetected = Directory.Exists(modPath);
 
-            IsLocalModDetected = Directory.Exists(modRootDirectory) || File.Exists(modInfoPath) || File.Exists(modInfoPathInMpq);
+                var panel = CharacterSelectPanelService.FromJson(layoutsDir);
+                var panelVersion = panel?.GetModVersion();
+                var modInfoVersion = TryGetVersionFromModInfo(modInfoPath);
+                _localModVersion = !string.IsNullOrWhiteSpace(panelVersion) && !panelVersion.Equals("Unknown", StringComparison.OrdinalIgnoreCase)
+                    ? panelVersion
+                    : !string.IsNullOrWhiteSpace(modInfoVersion)
+                        ? modInfoVersion
+                        : "Unknown";
+            }
+        }
+        else
+        {
+            var installDir = installDirectory ?? Settings.InstallDirectory;
+            if (!string.IsNullOrWhiteSpace(installDir))
+            {
+                var modRootDirectory = Path.Combine(installDir, "mods", "Reimagined");
+                var modInfoPath = Path.Combine(modRootDirectory, "modinfo.json");
+                var modInfoPathInMpq = Path.Combine(modRootDirectory, "Reimagined.mpq", "modinfo.json");
+                var layoutsDir = Path.Combine(
+                    modRootDirectory,
+                    "Reimagined.mpq", "data", "global", "ui", "layouts"
+                );
+
+                var panel = CharacterSelectPanelService.FromJson(layoutsDir);
+                var panelVersion = panel?.GetModVersion();
+                var modInfoVersion = TryGetVersionFromModInfo(modInfoPath) ?? TryGetVersionFromModInfo(modInfoPathInMpq);
+                _localModVersion = !string.IsNullOrWhiteSpace(panelVersion) && !panelVersion.Equals("Unknown", StringComparison.OrdinalIgnoreCase)
+                    ? panelVersion
+                    : !string.IsNullOrWhiteSpace(modInfoVersion)
+                        ? modInfoVersion
+                        : "Unknown";
+
+                IsLocalModDetected = Directory.Exists(modRootDirectory) || File.Exists(modInfoPath) || File.Exists(modInfoPathInMpq);
+            }
         }
 
         if (Dispatcher.UIThread.CheckAccess())

@@ -23,14 +23,32 @@ public partial class SettingsView : UserControl
             <= 0.95 => 1,
             _ => 2
         };
-        NoSoundCheckBox.IsChecked = MainWindow.Settings.NoSound;
-        NoRumbleCheckBox.IsChecked = MainWindow.Settings.NoRumble;
-        ForceDesktopCheckBox.IsChecked = MainWindow.Settings.ForceDesktop;
-        ResetOfflineMapsCheckBox.IsChecked = MainWindow.Settings.ResetOfflineMaps;
-        EnableRespecCheckBox.IsChecked = MainWindow.Settings.EnableRespec;
-        PlayersComboBox.SelectedIndex = MainWindow.Settings.PlayersCount is >= 2 and <= 8
-            ? MainWindow.Settings.PlayersCount.Value - 1
-            : 0;
+
+        var isD2Rmm = MainWindow.Settings.CurrentProfile.Type == InstallationType.D2RMM;
+        LaunchParametersPanel.IsEnabled = !isD2Rmm;
+        D2RmmLaunchParamsNotice.IsVisible = isD2Rmm;
+
+        if (isD2Rmm)
+        {
+            NoSoundCheckBox.IsChecked = false;
+            NoRumbleCheckBox.IsChecked = false;
+            ForceDesktopCheckBox.IsChecked = false;
+            ResetOfflineMapsCheckBox.IsChecked = false;
+            EnableRespecCheckBox.IsChecked = false;
+            PlayersComboBox.SelectedIndex = 0;
+        }
+        else
+        {
+            NoSoundCheckBox.IsChecked = MainWindow.Settings.NoSound;
+            NoRumbleCheckBox.IsChecked = MainWindow.Settings.NoRumble;
+            ForceDesktopCheckBox.IsChecked = MainWindow.Settings.ForceDesktop;
+            ResetOfflineMapsCheckBox.IsChecked = MainWindow.Settings.ResetOfflineMaps;
+            EnableRespecCheckBox.IsChecked = MainWindow.Settings.EnableRespec;
+            PlayersComboBox.SelectedIndex = MainWindow.Settings.PlayersCount is >= 2 and <= 8
+                ? MainWindow.Settings.PlayersCount.Value - 1
+                : 0;
+        }
+
         _isRefreshingSettings = false;
     }
 

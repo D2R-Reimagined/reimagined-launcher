@@ -6,7 +6,7 @@
              x:Class="ReimaginedLauncher.Views.Update.UpdateView">
     <StackPanel Spacing="16">
         <StackPanel Spacing="4">
-            <TextBlock Classes="view-title" Text="Update"/>
+            <TextBlock Classes="view-title" Text="Install/Update"/>
             <TextBlock Classes="muted" Text="Check the local install state and pull the newest Reimagined release."/>
         </StackPanel>
         <Border x:Name="LoadingBanner"
@@ -39,6 +39,21 @@
                 <TextBlock Grid.Row="1" Grid.Column="0" Text="Latest Version:" Margin="0,0,10,0"/>
                 <TextBlock x:Name="LatestVersionText" Grid.Row="1" Grid.Column="1" FontWeight="Bold"/>
             </Grid>
+        </Border>
+        <Border x:Name="InstallProgressBanner"
+                Classes="panel"
+                Padding="16"
+                IsVisible="False">
+            <StackPanel Spacing="10">
+                <TextBlock x:Name="InstallProgressTitle"
+                           Text="Installing..."
+                           FontWeight="SemiBold"/>
+                <ProgressBar IsIndeterminate="True"
+                             Height="8"/>
+                <TextBlock x:Name="InstallProgressMessage"
+                           Classes="muted"
+                           Text="Please wait while the mod is being installed."/>
+            </StackPanel>
         </Border>
         <Border x:Name="AuthWarningBanner"
                 Classes="warning-banner"

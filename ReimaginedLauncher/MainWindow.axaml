@@ -15,6 +15,10 @@
 >
     <Window.Styles>
         <materialIcons:MaterialIconStyles />
+        <Style Selector="NotificationCard TextBlock">
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="TextTrimming" Value="None" />
+        </Style>
     </Window.Styles>
     <LayoutTransformControl x:Name="RootScaleControl">
         <Grid x:Name="RootGrid"
@@ -83,7 +87,7 @@
                         <ListBoxItem x:Name="BackupsNavItem" Tag="Backups" Content="Backups" />
                         <ListBoxItem x:Name="SettingsNavItem" Tag="Settings" Content="Settings" />
                         <ListBoxItem x:Name="ModTweaksNavItem" Tag="ModTweaks" Content="Mod Tweaks" />
-                        <ListBoxItem x:Name="UpdateNavItem" Tag="Update" Content="Update" />
+                        <ListBoxItem x:Name="UpdateNavItem" Tag="Update" Content="Install/Update" />
                     </ListBox>
                 </DockPanel>
 
