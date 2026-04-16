@@ -400,16 +400,40 @@ public partial class MainWindow : Window
             !string.IsNullOrEmpty(latestVersion) &&
             !_localModVersion.Equals(latestVersion, StringComparison.OrdinalIgnoreCase))
         {
-            SetUpdateState(
-                isUpdateAvailable: true,
-                canInstallOrUpdate: true,
-                title: "Update available",
-                message: "A newer version of D2R Reimagined is available.",
-                currentVersion: _localModVersion,
-                latestVersion: latestVersion,
-                downloadUrl: downloadUrl,
-                isDirectDownload: updateLink.IsDirect,
-                fileId: latestFile.FileId);
+            var isNewerAvailable = true;
+
+            if (Version.TryParse(_localModVersion, out var localVer) &&
+                Version.TryParse(latestVersion, out var latestVer))
+            {
+                isNewerAvailable = latestVer > localVer;
+            }
+
+            if (isNewerAvailable)
+            {
+                SetUpdateState(
+                    isUpdateAvailable: true,
+                    canInstallOrUpdate: true,
+                    title: "Update available",
+                    message: "A newer version of D2R Reimagined is available.",
+                    currentVersion: _localModVersion,
+                    latestVersion: latestVersion,
+                    downloadUrl: downloadUrl,
+                    isDirectDownload: updateLink.IsDirect,
+                    fileId: latestFile.FileId);
+            }
+            else
+            {
+                SetUpdateState(
+                    isUpdateAvailable: false,
+                    canInstallOrUpdate: true,
+                    title: "No updates detected",
+                    message: "Custom or developer build detected — your version is ahead of the latest release.",
+                    currentVersion: _localModVersion,
+                    latestVersion: latestVersion,
+                    downloadUrl: downloadUrl,
+                    isDirectDownload: updateLink.IsDirect,
+                    fileId: latestFile.FileId);
+            }
         }
         else
         {
