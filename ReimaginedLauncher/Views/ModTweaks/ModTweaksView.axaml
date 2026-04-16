@@ -17,7 +17,9 @@
                         HorizontalAlignment="Stretch">
                 <StackPanel Spacing="4">
                     <TextBlock Classes="view-title" Text="Mod Tweaks"/>
-                    <TextBlock Classes="muted" Text="Customize gameplay and visual tweaks for your local launcher configuration."/>
+                    <TextBlock Classes="muted"
+                               TextWrapping="Wrap"
+                               Text="Customize visuals, sounds, and gameplay for your selected installation. These are installed on game launch and will remain even if another launch method is used. Disable and launch game to remove."/>
                 </StackPanel>
 
                 <Border Classes="panel"
