@@ -15,12 +15,19 @@
                       PointerPressed="OnBackgroundPointerPressed">
             <StackPanel Spacing="16"
                         HorizontalAlignment="Stretch">
-                <StackPanel Spacing="4">
-                    <TextBlock Classes="view-title" Text="Mod Tweaks"/>
-                    <TextBlock Classes="muted"
-                               TextWrapping="Wrap"
-                               Text="Customize visuals, sounds, and gameplay for your selected installation. These are installed on game launch and will remain even if another launch method is used. Disable and launch game to remove."/>
-                </StackPanel>
+                <DockPanel>
+                    <Button Content="Reset Tweaks"
+                            DockPanel.Dock="Right"
+                            VerticalAlignment="Center"
+                            Margin="0,0,20,0"
+                            Click="OnResetTweaksClick"/>
+                    <StackPanel Spacing="4">
+                        <TextBlock Classes="view-title" Text="Mod Tweaks"/>
+                        <TextBlock Classes="muted"
+                                   TextWrapping="Wrap"
+                                   Text="Customize visuals, sounds, and gameplay for your selected installation. These are installed on game launch and will remain even if another launch method is used. Disable and launch game to remove."/>
+                    </StackPanel>
+                </DockPanel>
 
                 <Border Classes="panel"
                         Padding="20"

@@ -172,6 +172,24 @@ public partial class ModTweaksView : UserControl
         await SaveResistPenaltyValuesAsync();
     }
 
+    private async void OnResetTweaksClick(object? sender, RoutedEventArgs e)
+    {
+        MainWindow.Settings.SkillPointsPerLevel = DefaultSkillPointsPerLevel;
+        MainWindow.Settings.AttributesPerLevel = DefaultAttributesPerLevel;
+        MainWindow.Settings.MaxSkillLevel = DefaultMaxSkillLevel;
+        MainWindow.Settings.NormalResistPenalty = DefaultNormalResistPenalty;
+        MainWindow.Settings.NightmareResistPenalty = DefaultNightmareResistPenalty;
+        MainWindow.Settings.HellResistPenalty = DefaultHellResistPenalty;
+        MainWindow.Settings.RemovePaladinAuraSound = false;
+        MainWindow.Settings.RemoveSplashVfx = false;
+        MainWindow.Settings.MakeTooltipBackgroundOpaque = false;
+        MainWindow.Settings.RemoveHelmetVisual = false;
+        MainWindow.Settings.TerrorizeAllZones = false;
+
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+        RefreshTweaksState();
+    }
+
     private void OnBackgroundPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (e.Source is TextBox)
