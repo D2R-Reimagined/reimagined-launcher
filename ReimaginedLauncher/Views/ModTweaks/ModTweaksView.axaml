@@ -15,10 +15,19 @@
                       PointerPressed="OnBackgroundPointerPressed">
             <StackPanel Spacing="16"
                         HorizontalAlignment="Stretch">
-                <StackPanel Spacing="4">
-                    <TextBlock Classes="view-title" Text="Mod Tweaks"/>
-                    <TextBlock Classes="muted" Text="Customize gameplay and visual tweaks for your local launcher configuration."/>
-                </StackPanel>
+                <DockPanel>
+                    <Button Content="Reset Tweaks"
+                            DockPanel.Dock="Right"
+                            VerticalAlignment="Center"
+                            Margin="0,0,20,0"
+                            Click="OnResetTweaksClick"/>
+                    <StackPanel Spacing="4">
+                        <TextBlock Classes="view-title" Text="Mod Tweaks"/>
+                        <TextBlock Classes="muted"
+                                   TextWrapping="Wrap"
+                                   Text="Customize visuals, sounds, and gameplay for your selected installation. These are installed on game launch and will remain even if another launch method is used. Disable and launch game to remove."/>
+                    </StackPanel>
+                </DockPanel>
 
                 <Border Classes="panel"
                         Padding="20"
@@ -191,6 +200,15 @@
                                    Margin="28,0,0,0"
                                    Text="Stops Paladin aura sounds from constantly turning on and off. Useful if you teleport with a mercenary using aura-on-equip gear."/>
                     </StackPanel>
+
+                    <StackPanel Spacing="4">
+                        <CheckBox x:Name="RestoreTerrorZoneFanfareCheckBox"
+                                  Content="Restore Terror Zone Fanfare"
+                                  IsCheckedChanged="OnSoundTweaksChanged"/>
+                        <TextBlock Classes="muted"
+                                   Margin="28,0,0,0"
+                                   Text="Restores the sound that plays the first time you enter a terrorized zone from a non-terrorized zone."/>
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
@@ -230,6 +248,37 @@
                         <TextBlock Classes="muted"
                                    Margin="28,0,0,0"
                                    Text="Creates blank helmet and circlet hd JSON overrides so equipped headgear stays hidden visually."/>
+                    </StackPanel>
+
+                    <StackPanel Spacing="4">
+                        <CheckBox x:Name="TerrorZonePurpleOverlayCheckBox"
+                                  Content="Restore Terror Zone Overlay"
+                                  IsCheckedChanged="OnVisualTweaksChanged"/>
+                        <TextBlock Classes="muted"
+                                   Margin="28,0,0,0"
+                                   Text="Restores the purple screen overlay in terrorized areas."/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+                <Border Classes="panel"
+                        Padding="20"
+                        HorizontalAlignment="Stretch">
+                    <StackPanel Spacing="14">
+                        <StackPanel Spacing="4">
+                            <TextBlock Classes="section-title"
+                                       Text="Gameplay Tweaks"/>
+                            <TextBlock Classes="muted"
+                                       Text="Optional local tweaks that directly affect gameplay"/>
+                        </StackPanel>
+
+                    <StackPanel Spacing="4">
+                        <CheckBox x:Name="TerrorizeAllZonesCheckBox"
+                                  Content="Terrorize All Zones"
+                                  IsCheckedChanged="OnZoneTweaksChanged"/>
+                        <TextBlock Classes="muted"
+                                   Margin="28,0,0,0"
+                                   Text="Terrorize the entire game at one time, hourly warnings still apear but do nothing. You can save and exit to change the unique monster modifier."/>
                     </StackPanel>
                 </StackPanel>
             </Border>

@@ -37,6 +37,9 @@ public class InstallationProfile
     public List<PluginRegistration> Plugins { get; set; } = [];
     public bool MakeTooltipBackgroundOpaque { get; set; }
     public bool RemoveHelmetVisual { get; set; }
+    public bool TerrorizeAllZones { get; set; }
+    public bool TerrorZonePurpleOverlay { get; set; }
+    public bool RestoreTerrorZoneFanfare { get; set; }
 }
 
 public class AppSettings
@@ -68,29 +71,4 @@ public class AppSettings
             return Profiles[SelectedProfileIndex];
         }
     }
-
-    // Proxy properties for backward compatibility
-    [JsonIgnore] public string? InstallDirectory { get => CurrentProfile.InstallDirectory; set => CurrentProfile.InstallDirectory = value; }
-    [JsonIgnore] public bool IsInstallDirectoryValidated { get => CurrentProfile.IsInstallDirectoryValidated; set => CurrentProfile.IsInstallDirectoryValidated = value; }
-    [JsonIgnore] public string? BackupSaveDirectory { get => CurrentProfile.BackupSaveDirectory; set => CurrentProfile.BackupSaveDirectory = value; }
-    [JsonIgnore] public bool AutomaticBackupsEnabled { get => CurrentProfile.AutomaticBackupsEnabled; set => CurrentProfile.AutomaticBackupsEnabled = value; }
-    [JsonIgnore] public int BackupIntervalMinutes { get => CurrentProfile.BackupIntervalMinutes; set => CurrentProfile.BackupIntervalMinutes = value; }
-    [JsonIgnore] public int BackupAmount { get => CurrentProfile.BackupAmount; set => CurrentProfile.BackupAmount = value; }
-    [JsonIgnore] public bool NoSound { get => CurrentProfile.NoSound; set => CurrentProfile.NoSound = value; }
-    [JsonIgnore] public bool NoRumble { get => CurrentProfile.NoRumble; set => CurrentProfile.NoRumble = value; }
-    [JsonIgnore] public bool ForceDesktop { get => CurrentProfile.ForceDesktop; set => CurrentProfile.ForceDesktop = value; }
-    [JsonIgnore] public bool ResetOfflineMaps { get => CurrentProfile.ResetOfflineMaps; set => CurrentProfile.ResetOfflineMaps = value; }
-    [JsonIgnore] public bool EnableRespec { get => CurrentProfile.EnableRespec; set => CurrentProfile.EnableRespec = value; }
-    [JsonIgnore] public int? PlayersCount { get => CurrentProfile.PlayersCount; set => CurrentProfile.PlayersCount = value; }
-    [JsonIgnore] public int SkillPointsPerLevel { get => CurrentProfile.SkillPointsPerLevel; set => CurrentProfile.SkillPointsPerLevel = value; }
-    [JsonIgnore] public int AttributesPerLevel { get => CurrentProfile.AttributesPerLevel; set => CurrentProfile.AttributesPerLevel = value; }
-    [JsonIgnore] public int MaxSkillLevel { get => CurrentProfile.MaxSkillLevel; set => CurrentProfile.MaxSkillLevel = value; }
-    [JsonIgnore] public int NormalResistPenalty { get => CurrentProfile.NormalResistPenalty; set => CurrentProfile.NormalResistPenalty = value; }
-    [JsonIgnore] public int NightmareResistPenalty { get => CurrentProfile.NightmareResistPenalty; set => CurrentProfile.NightmareResistPenalty = value; }
-    [JsonIgnore] public int HellResistPenalty { get => CurrentProfile.HellResistPenalty; set => CurrentProfile.HellResistPenalty = value; }
-    [JsonIgnore] public bool RemovePaladinAuraSound { get => CurrentProfile.RemovePaladinAuraSound; set => CurrentProfile.RemovePaladinAuraSound = value; }
-    [JsonIgnore] public bool RemoveSplashVfx { get => CurrentProfile.RemoveSplashVfx; set => CurrentProfile.RemoveSplashVfx = value; }
-    [JsonIgnore] public List<PluginRegistration> Plugins { get => CurrentProfile.Plugins; set => CurrentProfile.Plugins = value; }
-    [JsonIgnore] public bool MakeTooltipBackgroundOpaque { get => CurrentProfile.MakeTooltipBackgroundOpaque; set => CurrentProfile.MakeTooltipBackgroundOpaque = value; }
-    [JsonIgnore] public bool RemoveHelmetVisual { get => CurrentProfile.RemoveHelmetVisual; set => CurrentProfile.RemoveHelmetVisual = value; }
 }

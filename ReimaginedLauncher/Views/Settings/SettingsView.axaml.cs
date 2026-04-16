@@ -24,7 +24,8 @@ public partial class SettingsView : UserControl
             _ => 2
         };
 
-        var isD2Rmm = MainWindow.Settings.CurrentProfile.Type == InstallationType.D2RMM;
+        var profile = MainWindow.Settings.CurrentProfile;
+        var isD2Rmm = profile.Type == InstallationType.D2RMM;
         LaunchParametersPanel.IsEnabled = !isD2Rmm;
         D2RmmLaunchParamsNotice.IsVisible = isD2Rmm;
 
@@ -39,13 +40,13 @@ public partial class SettingsView : UserControl
         }
         else
         {
-            NoSoundCheckBox.IsChecked = MainWindow.Settings.NoSound;
-            NoRumbleCheckBox.IsChecked = MainWindow.Settings.NoRumble;
-            ForceDesktopCheckBox.IsChecked = MainWindow.Settings.ForceDesktop;
-            ResetOfflineMapsCheckBox.IsChecked = MainWindow.Settings.ResetOfflineMaps;
-            EnableRespecCheckBox.IsChecked = MainWindow.Settings.EnableRespec;
-            PlayersComboBox.SelectedIndex = MainWindow.Settings.PlayersCount is >= 2 and <= 8
-                ? MainWindow.Settings.PlayersCount.Value - 1
+            NoSoundCheckBox.IsChecked = profile.NoSound;
+            NoRumbleCheckBox.IsChecked = profile.NoRumble;
+            ForceDesktopCheckBox.IsChecked = profile.ForceDesktop;
+            ResetOfflineMapsCheckBox.IsChecked = profile.ResetOfflineMaps;
+            EnableRespecCheckBox.IsChecked = profile.EnableRespec;
+            PlayersComboBox.SelectedIndex = profile.PlayersCount is >= 2 and <= 8
+                ? profile.PlayersCount.Value - 1
                 : 0;
         }
 
@@ -59,11 +60,12 @@ public partial class SettingsView : UserControl
             return;
         }
 
-        MainWindow.Settings.NoSound = NoSoundCheckBox.IsChecked ?? false;
-        MainWindow.Settings.NoRumble = NoRumbleCheckBox.IsChecked ?? false;
-        MainWindow.Settings.ForceDesktop = ForceDesktopCheckBox.IsChecked ?? false;
-        MainWindow.Settings.ResetOfflineMaps = ResetOfflineMapsCheckBox.IsChecked ?? false;
-        MainWindow.Settings.EnableRespec = EnableRespecCheckBox.IsChecked ?? false;
+        var profile = MainWindow.Settings.CurrentProfile;
+        profile.NoSound = NoSoundCheckBox.IsChecked ?? false;
+        profile.NoRumble = NoRumbleCheckBox.IsChecked ?? false;
+        profile.ForceDesktop = ForceDesktopCheckBox.IsChecked ?? false;
+        profile.ResetOfflineMaps = ResetOfflineMapsCheckBox.IsChecked ?? false;
+        profile.EnableRespec = EnableRespecCheckBox.IsChecked ?? false;
         await SettingsManager.SaveAsync(MainWindow.Settings);
     }
 
@@ -74,7 +76,7 @@ public partial class SettingsView : UserControl
             return;
         }
 
-        MainWindow.Settings.PlayersCount = PlayersComboBox.SelectedIndex switch
+        MainWindow.Settings.CurrentProfile.PlayersCount = PlayersComboBox.SelectedIndex switch
         {
             >= 1 and <= 7 => PlayersComboBox.SelectedIndex + 1,
             _ => null

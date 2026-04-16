@@ -95,7 +95,7 @@ public class SaveFileService
             return;
         }
         
-        var backupDirectory = MainWindow.Settings.BackupSaveDirectory;
+        var backupDirectory = MainWindow.Settings.CurrentProfile.BackupSaveDirectory;
         if (string.IsNullOrEmpty(backupDirectory))
         {
             Notifications.SendNotification("Backup directory not set.");

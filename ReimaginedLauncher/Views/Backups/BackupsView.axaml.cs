@@ -22,10 +22,11 @@ public partial class BackupsView : UserControl
     public void RefreshBackupState()
     {
         _isRefreshing = true;
-        BackupDirectoryTextBox.Text = MainWindow.Settings.BackupSaveDirectory ?? string.Empty;
-        AutomaticBackupsCheckBox.IsChecked = MainWindow.Settings.AutomaticBackupsEnabled;
-        BackupIntervalTextBox.Text = MainWindow.Settings.BackupIntervalMinutes.ToString(CultureInfo.InvariantCulture);
-        BackupAmountTextBox.Text = MainWindow.Settings.BackupAmount.ToString(CultureInfo.InvariantCulture);
+        var profile = MainWindow.Settings.CurrentProfile;
+        BackupDirectoryTextBox.Text = profile.BackupSaveDirectory ?? string.Empty;
+        AutomaticBackupsCheckBox.IsChecked = profile.AutomaticBackupsEnabled;
+        BackupIntervalTextBox.Text = profile.BackupIntervalMinutes.ToString(CultureInfo.InvariantCulture);
+        BackupAmountTextBox.Text = profile.BackupAmount.ToString(CultureInfo.InvariantCulture);
         SaveDirectoryTextBlock.Text = BuildSaveDirectoryText();
         BackupsListBox.ItemsSource = BackupService.GetBackups();
         RestoreSelectionTextBlock.Text = "Select a backup to restore.";
@@ -72,7 +73,7 @@ public partial class BackupsView : UserControl
             return;
         }
 
-        MainWindow.Settings.BackupSaveDirectory = folders[0].Path.LocalPath;
+        MainWindow.Settings.CurrentProfile.BackupSaveDirectory = folders[0].Path.LocalPath;
         await PersistBackupSettingsAsync();
         RefreshBackupState();
     }
@@ -128,7 +129,7 @@ public partial class BackupsView : UserControl
             return;
         }
 
-        MainWindow.Settings.AutomaticBackupsEnabled = AutomaticBackupsCheckBox.IsChecked == true;
+        MainWindow.Settings.CurrentProfile.AutomaticBackupsEnabled = AutomaticBackupsCheckBox.IsChecked == true;
         await PersistBackupSettingsAsync();
     }
 
@@ -157,8 +158,9 @@ public partial class BackupsView : UserControl
             return false;
         }
 
-        MainWindow.Settings.BackupIntervalMinutes = intervalMinutes;
-        MainWindow.Settings.BackupAmount = backupAmount;
+        var profile = MainWindow.Settings.CurrentProfile;
+        profile.BackupIntervalMinutes = intervalMinutes;
+        profile.BackupAmount = backupAmount;
         return true;
     }
 

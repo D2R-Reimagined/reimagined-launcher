@@ -55,7 +55,10 @@ public static class SettingsManager
             if (root.TryGetProperty("RemovePaladinAuraSound", out prop)) profile.RemovePaladinAuraSound = prop.GetBoolean();
             if (root.TryGetProperty("RemoveSplashVfx", out prop)) profile.RemoveSplashVfx = prop.GetBoolean();
             if (root.TryGetProperty("MakeTooltipBackgroundOpaque", out prop)) profile.MakeTooltipBackgroundOpaque = prop.GetBoolean();
-            
+            if (root.TryGetProperty("TerrorizeAllZones", out prop)) profile.TerrorizeAllZones = prop.GetBoolean();
+            if (root.TryGetProperty("TerrorZonePurpleOverlay", out prop)) profile.TerrorZonePurpleOverlay = prop.GetBoolean();
+            if (root.TryGetProperty("RestoreTerrorZoneFanfare", out prop)) profile.RestoreTerrorZoneFanfare = prop.GetBoolean();
+
             if (root.TryGetProperty("Plugins", out prop) && prop.ValueKind == JsonValueKind.Array)
             {
                 profile.Plugins = JsonSerializer.Deserialize<List<PluginRegistration>>(prop.GetRawText()) ?? [];

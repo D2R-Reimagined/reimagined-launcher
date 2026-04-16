@@ -35,6 +35,16 @@ public static class ModTweaksService
     private const string DifficultyLevelsFileName = "DifficultyLevels.txt";
     private const string SkillsFileName = "skills.txt";
     private const string StatesFileName = "states.txt";
+    private const string DesecratedZonesFileName = "desecratedzones.json";
+    private const string CleanDesecratedZonesFileName = "desecratedzones_launcher_clean.json";
+    private const string EnvDirectoryName = "env";
+    private const string VisDirectoryName = "vis";
+    private const string DesecratedFilePattern = "desecrated";
+    private const string CleanVisDirectoryName = "vis_launcher_clean";
+    private const string SfxDirectoryName = "sfx";
+    private const string QuestDirectoryName = "quest";
+    private const string DesecratedEnterHdFileName = "desecrated_enter_hd.flac";
+    private const string CleanDesecratedEnterHdFileName = "desecrated_enter_hd_launcher_clean.flac";
     private const string GeneratedTweaksFolderName = "mod-tweaks";
     private static readonly string[] HelmetVisualRelativePaths =
     [
@@ -87,14 +97,17 @@ public static class ModTweaksService
         var missilesFilePath = GetMissilesFilePath();
         var layoutsProfileHdFilePath = GetLayoutsProfileHdFilePath();
         var armorDirectory = GetArmorDirectory();
+        var desecratedZonesFilePath = GetDesecratedZonesFilePath();
         var cleanExcelDirectory = GetCleanExcelDirectory(excelDirectory);
         var cleanMissilesFilePath = GetCleanMissilesFilePath(missilesFilePath);
         var cleanLayoutsProfileHdFilePath = GetCleanLayoutsProfileHdFilePath(layoutsProfileHdFilePath);
         var cleanArmorTweaksDirectory = GetCleanArmorTweaksDirectory(armorDirectory);
+        var cleanDesecratedZonesFilePath = GetCleanDesecratedZonesFilePath(desecratedZonesFilePath);
         var excelDirectories = GetExcelDirectories(excelDirectory).ToList();
         LaunchDiagnostics.Log($"Resolved missiles file path: {missilesFilePath ?? "<null>"}");
         LaunchDiagnostics.Log($"Resolved layouts_profilehd.json path: {layoutsProfileHdFilePath ?? "<null>"}");
         LaunchDiagnostics.Log($"Resolved armor directory path: {armorDirectory ?? "<null>"}");
+        LaunchDiagnostics.Log($"Resolved desecratedzones.json path: {desecratedZonesFilePath ?? "<null>"}");
         LaunchDiagnostics.Log($"Excel directories to process: {string.Join(", ", excelDirectories)}");
 
         try
@@ -111,6 +124,15 @@ public static class ModTweaksService
             ReportProgress(progress, "Preparing clean helmet visual copy...");
             LaunchDiagnostics.Log("Ensuring clean helmet and circlet JSON copy.");
             await EnsureCleanArmorTweaksCopyAsync(armorDirectory, cleanArmorTweaksDirectory);
+            ReportProgress(progress, "Preparing clean desecrated zones copy...");
+            LaunchDiagnostics.Log("Ensuring clean desecratedzones.json copy.");
+            await EnsureCleanDesecratedZonesCopyAsync(desecratedZonesFilePath, cleanDesecratedZonesFilePath);
+            ReportProgress(progress, "Preparing clean vis copy...");
+            LaunchDiagnostics.Log("Ensuring clean vis directory copy.");
+            await EnsureCleanVisCopyAsync();
+            ReportProgress(progress, "Preparing clean terror zone fanfare copy...");
+            LaunchDiagnostics.Log("Ensuring clean desecrated_enter_hd.flac copy.");
+            EnsureCleanTerrorZoneFanfareCopy();
 
             foreach (var targetExcelDirectory in excelDirectories)
             {
@@ -131,19 +153,38 @@ public static class ModTweaksService
             await RestoreMissilesFileAsync(cleanMissilesFilePath, missilesFilePath);
             ReportProgress(progress, "Applying missiles tweaks...");
             LaunchDiagnostics.Log("Applying missiles tweaks.");
-            await ApplyMissilesTweaksAsync(missilesFilePath, MainWindow.Settings.RemoveSplashVfx);
+            var profile = MainWindow.Settings.CurrentProfile;
+            await ApplyMissilesTweaksAsync(missilesFilePath, profile.RemoveSplashVfx);
             ReportProgress(progress, "Restoring layouts_profilehd.json...");
             LaunchDiagnostics.Log("Restoring tooltip layout file from clean copy.");
             await RestoreLayoutsProfileHdFileAsync(cleanLayoutsProfileHdFilePath, layoutsProfileHdFilePath);
             ReportProgress(progress, "Applying tooltip layout tweaks...");
             LaunchDiagnostics.Log("Applying tooltip layout tweaks.");
-            await ApplyTooltipLayoutTweaksAsync(layoutsProfileHdFilePath, MainWindow.Settings.MakeTooltipBackgroundOpaque);
+            await ApplyTooltipLayoutTweaksAsync(layoutsProfileHdFilePath, profile.MakeTooltipBackgroundOpaque);
             ReportProgress(progress, "Restoring helmet visual files...");
             LaunchDiagnostics.Log("Restoring helmet and circlet visual files from clean copy.");
             await RestoreArmorTweaksAsync(armorDirectory, cleanArmorTweaksDirectory);
             ReportProgress(progress, "Applying helmet visual tweaks...");
             LaunchDiagnostics.Log("Applying helmet visual tweaks.");
-            await ApplyHelmetVisualTweaksAsync(armorDirectory, MainWindow.Settings.RemoveHelmetVisual);
+            await ApplyHelmetVisualTweaksAsync(armorDirectory, profile.RemoveHelmetVisual);
+            ReportProgress(progress, "Restoring desecratedzones.json...");
+            LaunchDiagnostics.Log("Restoring desecrated zones file from clean copy.");
+            await RestoreDesecratedZonesFileAsync(cleanDesecratedZonesFilePath, desecratedZonesFilePath);
+            ReportProgress(progress, "Applying desecrated zones tweaks...");
+            LaunchDiagnostics.Log("Applying desecrated zones tweaks.");
+            await ApplyDesecratedZonesTweaksAsync(desecratedZonesFilePath, profile.TerrorizeAllZones);
+            ReportProgress(progress, "Restoring desecrated vis files...");
+            LaunchDiagnostics.Log("Restoring desecrated vis files from clean copy.");
+            await RestoreVisFilesAsync();
+            ReportProgress(progress, "Applying terror zone purple overlay tweaks...");
+            LaunchDiagnostics.Log("Applying terror zone purple overlay tweaks.");
+            ApplyTerrorZonePurpleOverlayTweak(profile.TerrorZonePurpleOverlay);
+            ReportProgress(progress, "Restoring terror zone fanfare...");
+            LaunchDiagnostics.Log("Restoring desecrated_enter_hd.flac from clean copy.");
+            RestoreTerrorZoneFanfareFile();
+            ReportProgress(progress, "Applying terror zone fanfare tweaks...");
+            LaunchDiagnostics.Log("Applying terror zone fanfare tweaks.");
+            ApplyTerrorZoneFanfareTweak(profile.RestoreTerrorZoneFanfare);
             LaunchDiagnostics.Log("Mod tweak preparation succeeded.");
 
             return true;
@@ -220,9 +261,26 @@ public static class ModTweaksService
             LayoutsProfileHdFileName);
     }
 
+    private static string? GetDesecratedZonesFilePath()
+    {
+        var mpqBase = GetMpqBaseDirectory();
+        if (string.IsNullOrWhiteSpace(mpqBase))
+        {
+            return null;
+        }
+
+        return Path.Combine(
+            mpqBase,
+            DataDirectoryName,
+            HdDirectoryName,
+            GlobalDirectoryName,
+            ExcelDirectoryName,
+            DesecratedZonesFileName);
+    }
+
     private static string? GetArmorDirectory()
     {
-        var installDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(MainWindow.Settings.InstallDirectory);
+        var installDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(MainWindow.Settings.CurrentProfile.InstallDirectory);
         if (string.IsNullOrWhiteSpace(installDirectory))
         {
             return null;
@@ -364,6 +422,71 @@ public static class ModTweaksService
         }
     }
 
+    private static string GetCleanDesecratedZonesFilePath(string? desecratedZonesFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(desecratedZonesFilePath))
+        {
+            throw new FileNotFoundException("desecratedzones.json path could not be resolved.");
+        }
+
+        var desecratedZonesDirectory = Path.GetDirectoryName(desecratedZonesFilePath);
+        if (string.IsNullOrWhiteSpace(desecratedZonesDirectory))
+        {
+            throw new DirectoryNotFoundException("Desecrated zones folder could not be resolved.");
+        }
+
+        return Path.Combine(desecratedZonesDirectory, CleanDesecratedZonesFileName);
+    }
+
+    private static async Task EnsureCleanDesecratedZonesCopyAsync(string? desecratedZonesFilePath, string cleanDesecratedZonesFilePath)
+    {
+        if (File.Exists(cleanDesecratedZonesFilePath))
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(desecratedZonesFilePath) || !File.Exists(desecratedZonesFilePath))
+        {
+            throw new FileNotFoundException("desecratedzones.json was not found in the Reimagined hd global excel folder.");
+        }
+
+        await CopyFileAsync(desecratedZonesFilePath, cleanDesecratedZonesFilePath, overwrite: true);
+    }
+
+    private static async Task RestoreDesecratedZonesFileAsync(string cleanDesecratedZonesFilePath, string? desecratedZonesFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(desecratedZonesFilePath))
+        {
+            throw new FileNotFoundException("desecratedzones.json path could not be resolved.");
+        }
+
+        if (!File.Exists(cleanDesecratedZonesFilePath))
+        {
+            throw new FileNotFoundException("Clean desecratedzones.json copy was not found.");
+        }
+
+        await CopyFileAsync(cleanDesecratedZonesFilePath, desecratedZonesFilePath, overwrite: true);
+    }
+
+    private static async Task ApplyDesecratedZonesTweaksAsync(string? desecratedZonesFilePath, bool terrorizeAllZones)
+    {
+        if (string.IsNullOrWhiteSpace(desecratedZonesFilePath) || !File.Exists(desecratedZonesFilePath))
+        {
+            throw new FileNotFoundException("desecratedzones.json was not found in the Reimagined hd global excel folder.");
+        }
+
+        if (!terrorizeAllZones)
+        {
+            return;
+        }
+
+        var updatedEntries = await DesecratedZonesJsonService.MergeActAutoZonesAsync(desecratedZonesFilePath);
+        if (updatedEntries == 0)
+        {
+            throw new InvalidDataException("desecratedzones.json did not contain Act Auto zone boundaries to update.");
+        }
+    }
+
     private static IEnumerable<string> GetExcelDirectories(string excelDirectory)
     {
         yield return excelDirectory;
@@ -414,29 +537,30 @@ public static class ModTweaksService
 
     private static async Task ApplyTweaksAsync(string excelDirectory, IProgress<string>? progress)
     {
+        var profile = MainWindow.Settings.CurrentProfile;
         ReportProgress(progress, "Updating charstats.txt...");
         LaunchDiagnostics.Log($"Applying charstats tweaks in {excelDirectory}.");
         await ApplyCharStatsTweaksAsync(
             Path.Combine(excelDirectory, CharStatsFileName),
-            MainWindow.Settings.SkillPointsPerLevel,
-            MainWindow.Settings.AttributesPerLevel);
+            profile.SkillPointsPerLevel,
+            profile.AttributesPerLevel);
         ReportProgress(progress, "Updating skills.txt...");
         LaunchDiagnostics.Log($"Applying skills tweaks in {excelDirectory}.");
         await ApplySkillsTweaksAsync(
             Path.Combine(excelDirectory, SkillsFileName),
-            MainWindow.Settings.MaxSkillLevel);
+            profile.MaxSkillLevel);
         ReportProgress(progress, "Updating DifficultyLevels.txt...");
         LaunchDiagnostics.Log($"Applying difficulty tweaks in {excelDirectory}.");
         await ApplyDifficultyLevelsTweaksAsync(
             Path.Combine(excelDirectory, DifficultyLevelsFileName),
-            MainWindow.Settings.NormalResistPenalty,
-            MainWindow.Settings.NightmareResistPenalty,
-            MainWindow.Settings.HellResistPenalty);
+            profile.NormalResistPenalty,
+            profile.NightmareResistPenalty,
+            profile.HellResistPenalty);
         ReportProgress(progress, "Updating states.txt...");
         LaunchDiagnostics.Log($"Applying states tweaks in {excelDirectory}.");
         await ApplyStatesTweaksAsync(
             Path.Combine(excelDirectory, StatesFileName),
-            MainWindow.Settings.RemovePaladinAuraSound);
+            profile.RemovePaladinAuraSound);
     }
 
     private static void ReportProgress(IProgress<string>? progress, string message)
@@ -766,6 +890,218 @@ public static class ModTweaksService
                 FileShare.None);
             await sourceStream.CopyToAsync(destinationStream);
         }
+    }
+
+    private static string? GetVisDirectory()
+    {
+        var mpqBase = GetMpqBaseDirectory();
+        if (string.IsNullOrWhiteSpace(mpqBase))
+        {
+            return null;
+        }
+
+        return Path.Combine(
+            mpqBase,
+            DataDirectoryName,
+            HdDirectoryName,
+            EnvDirectoryName,
+            VisDirectoryName);
+    }
+
+    private static string GetCleanVisDirectory(string visDirectory)
+    {
+        var parentDirectory = Directory.GetParent(visDirectory)?.FullName;
+        if (string.IsNullOrWhiteSpace(parentDirectory))
+        {
+            throw new DirectoryNotFoundException("Vis folder parent directory could not be resolved.");
+        }
+
+        return Path.Combine(parentDirectory, CleanVisDirectoryName);
+    }
+
+    private static async Task EnsureCleanVisCopyAsync()
+    {
+        var visDirectory = GetVisDirectory();
+        if (string.IsNullOrWhiteSpace(visDirectory) || !Directory.Exists(visDirectory))
+        {
+            LaunchDiagnostics.Log($"Vis directory not found, skipping clean copy: {visDirectory ?? "<null>"}");
+            return;
+        }
+
+        var cleanVisDirectory = GetCleanVisDirectory(visDirectory);
+        if (Directory.Exists(cleanVisDirectory))
+        {
+            return;
+        }
+
+        var desecratedFiles = Directory.GetFiles(visDirectory, "*.json")
+            .Where(f => Path.GetFileName(f).Contains(DesecratedFilePattern, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (desecratedFiles.Count == 0)
+        {
+            LaunchDiagnostics.Log("No desecrated vis files found to back up.");
+            return;
+        }
+
+        Directory.CreateDirectory(cleanVisDirectory);
+
+        foreach (var file in desecratedFiles)
+        {
+            var fileName = Path.GetFileName(file);
+            var cleanFilePath = Path.Combine(cleanVisDirectory, fileName);
+            await CopyFileAsync(file, cleanFilePath, overwrite: true);
+            LaunchDiagnostics.Log($"Backed up desecrated vis file: {fileName}");
+        }
+    }
+
+    private static async Task RestoreVisFilesAsync()
+    {
+        var visDirectory = GetVisDirectory();
+        if (string.IsNullOrWhiteSpace(visDirectory) || !Directory.Exists(visDirectory))
+        {
+            LaunchDiagnostics.Log($"Vis directory not found, skipping restore: {visDirectory ?? "<null>"}");
+            return;
+        }
+
+        var cleanVisDirectory = GetCleanVisDirectory(visDirectory);
+        if (!Directory.Exists(cleanVisDirectory))
+        {
+            LaunchDiagnostics.Log("Clean vis directory not found, skipping restore.");
+            return;
+        }
+
+        foreach (var cleanFile in Directory.GetFiles(cleanVisDirectory, "*.json"))
+        {
+            var fileName = Path.GetFileName(cleanFile);
+            var targetFilePath = Path.Combine(visDirectory, fileName);
+            await CopyFileAsync(cleanFile, targetFilePath, overwrite: true);
+            LaunchDiagnostics.Log($"Restored desecrated vis file: {fileName}");
+        }
+    }
+
+    private static void ApplyTerrorZonePurpleOverlayTweak(bool terrorZonePurpleOverlay)
+    {
+        if (!terrorZonePurpleOverlay)
+        {
+            return;
+        }
+
+        var visDirectory = GetVisDirectory();
+        if (string.IsNullOrWhiteSpace(visDirectory) || !Directory.Exists(visDirectory))
+        {
+            LaunchDiagnostics.Log($"Vis directory not found: {visDirectory ?? "<null>"}");
+            return;
+        }
+
+        var files = Directory.GetFiles(visDirectory, "*.json")
+            .Where(f => Path.GetFileName(f).Contains(DesecratedFilePattern, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        LaunchDiagnostics.Log($"Found {files.Count} desecrated vis file(s) to delete.");
+
+        foreach (var file in files)
+        {
+            File.Delete(file);
+            LaunchDiagnostics.Log($"Deleted desecrated vis file: {file}");
+        }
+    }
+
+    private static string? GetTerrorZoneFanfareFilePath()
+    {
+        var mpqBase = GetMpqBaseDirectory();
+        if (string.IsNullOrWhiteSpace(mpqBase))
+        {
+            return null;
+        }
+
+        return Path.Combine(
+            mpqBase,
+            DataDirectoryName,
+            HdDirectoryName,
+            GlobalDirectoryName,
+            SfxDirectoryName,
+            QuestDirectoryName,
+            DesecratedEnterHdFileName);
+    }
+
+    private static string? GetCleanTerrorZoneFanfareFilePath()
+    {
+        var fanfareFilePath = GetTerrorZoneFanfareFilePath();
+        if (string.IsNullOrWhiteSpace(fanfareFilePath))
+        {
+            return null;
+        }
+
+        var parentDirectory = Path.GetDirectoryName(fanfareFilePath);
+        if (string.IsNullOrWhiteSpace(parentDirectory))
+        {
+            return null;
+        }
+
+        return Path.Combine(parentDirectory, CleanDesecratedEnterHdFileName);
+    }
+
+    private static void EnsureCleanTerrorZoneFanfareCopy()
+    {
+        var fanfareFilePath = GetTerrorZoneFanfareFilePath();
+        if (string.IsNullOrWhiteSpace(fanfareFilePath) || !File.Exists(fanfareFilePath))
+        {
+            LaunchDiagnostics.Log($"Terror zone fanfare file not found, skipping clean copy: {fanfareFilePath ?? "<null>"}");
+            return;
+        }
+
+        var cleanFilePath = GetCleanTerrorZoneFanfareFilePath();
+        if (string.IsNullOrWhiteSpace(cleanFilePath))
+        {
+            return;
+        }
+
+        if (File.Exists(cleanFilePath))
+        {
+            return;
+        }
+
+        File.Copy(fanfareFilePath, cleanFilePath);
+        LaunchDiagnostics.Log($"Backed up terror zone fanfare file: {DesecratedEnterHdFileName}");
+    }
+
+    private static void RestoreTerrorZoneFanfareFile()
+    {
+        var fanfareFilePath = GetTerrorZoneFanfareFilePath();
+        var cleanFilePath = GetCleanTerrorZoneFanfareFilePath();
+        if (string.IsNullOrWhiteSpace(fanfareFilePath) || string.IsNullOrWhiteSpace(cleanFilePath))
+        {
+            LaunchDiagnostics.Log("Terror zone fanfare paths could not be resolved, skipping restore.");
+            return;
+        }
+
+        if (!File.Exists(cleanFilePath))
+        {
+            LaunchDiagnostics.Log("Clean terror zone fanfare file not found, skipping restore.");
+            return;
+        }
+
+        File.Copy(cleanFilePath, fanfareFilePath, overwrite: true);
+        LaunchDiagnostics.Log($"Restored terror zone fanfare file: {DesecratedEnterHdFileName}");
+    }
+
+    private static void ApplyTerrorZoneFanfareTweak(bool restoreTerrorZoneFanfare)
+    {
+        if (restoreTerrorZoneFanfare)
+        {
+            return;
+        }
+
+        var fanfareFilePath = GetTerrorZoneFanfareFilePath();
+        if (string.IsNullOrWhiteSpace(fanfareFilePath) || !File.Exists(fanfareFilePath))
+        {
+            LaunchDiagnostics.Log($"Terror zone fanfare file not found: {fanfareFilePath ?? "<null>"}");
+            return;
+        }
+
+        File.Delete(fanfareFilePath);
+        LaunchDiagnostics.Log($"Deleted terror zone fanfare file: {fanfareFilePath}");
     }
 
     private static async Task CopyFileAsync(string sourceFilePath, string destinationFilePath, bool overwrite)
