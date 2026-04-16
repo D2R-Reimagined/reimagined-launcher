@@ -1,6 +1,12 @@
 # Reimagined Launcher
 This is a launcher built by the Reimagined team for D2R.
 
+## Purpose
+The reimagined launcher is intended to be used with the [Diablo 2 Resurrected - Reimagined Mod](https://www.nexusmods.com/diablo2resurrected/mods/503).
+
+Source code for the mod can be found here: [https://github.com/D2R-Reimagined/d2r-reimagined-mod](https://github.com/D2R-Reimagined/d2r-reimagined-mod)
+
+
 ## Features
 * Login with Nexus Mods
 * 1-click Install for Premium NM Users (2 click install for non-premium NM users)
