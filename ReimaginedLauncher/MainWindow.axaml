@@ -177,10 +177,20 @@
                                 <TextBlock Text="Sanctum Status"
                                            Foreground="{StaticResource GoldBrush}"
                                            FontWeight="SemiBold" />
-                                <TextBlock x:Name="VersionTextBlock"
-                                           FontFamily="Georgia"
-                                           FontSize="24"
-                                           FontWeight="Bold" />
+                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                    <TextBlock x:Name="VersionTextBlock"
+                                               FontFamily="Georgia"
+                                               FontSize="24"
+                                               FontWeight="Bold" />
+                                    <TextBlock x:Name="UpdateAvailableTextBlock"
+                                               FontFamily="Georgia"
+                                               FontSize="16"
+                                               FontWeight="SemiBold"
+                                               Foreground="{StaticResource GoldBrush}"
+                                               VerticalAlignment="Bottom"
+                                               Margin="0,0,0,2"
+                                               IsVisible="False" />
+                                </StackPanel>
                                 <TextBlock Classes="muted"
                                            Text="Use the launcher to keep your install current, backed up, and ready to descend." />
                             </StackPanel>
