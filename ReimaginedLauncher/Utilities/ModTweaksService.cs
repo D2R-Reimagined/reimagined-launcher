@@ -37,6 +37,14 @@ public static class ModTweaksService
     private const string StatesFileName = "states.txt";
     private const string DesecratedZonesFileName = "desecratedzones.json";
     private const string CleanDesecratedZonesFileName = "desecratedzones_launcher_clean.json";
+    private const string EnvDirectoryName = "env";
+    private const string VisDirectoryName = "vis";
+    private const string DesecratedFilePattern = "desecrated";
+    private const string CleanVisDirectoryName = "vis_launcher_clean";
+    private const string SfxDirectoryName = "sfx";
+    private const string QuestDirectoryName = "quest";
+    private const string DesecratedEnterHdFileName = "desecrated_enter_hd.flac";
+    private const string CleanDesecratedEnterHdFileName = "desecrated_enter_hd_launcher_clean.flac";
     private const string GeneratedTweaksFolderName = "mod-tweaks";
     private static readonly string[] HelmetVisualRelativePaths =
     [
@@ -119,6 +127,12 @@ public static class ModTweaksService
             ReportProgress(progress, "Preparing clean desecrated zones copy...");
             LaunchDiagnostics.Log("Ensuring clean desecratedzones.json copy.");
             await EnsureCleanDesecratedZonesCopyAsync(desecratedZonesFilePath, cleanDesecratedZonesFilePath);
+            ReportProgress(progress, "Preparing clean vis copy...");
+            LaunchDiagnostics.Log("Ensuring clean vis directory copy.");
+            await EnsureCleanVisCopyAsync();
+            ReportProgress(progress, "Preparing clean terror zone fanfare copy...");
+            LaunchDiagnostics.Log("Ensuring clean desecrated_enter_hd.flac copy.");
+            EnsureCleanTerrorZoneFanfareCopy();
 
             foreach (var targetExcelDirectory in excelDirectories)
             {
@@ -158,6 +172,18 @@ public static class ModTweaksService
             ReportProgress(progress, "Applying desecrated zones tweaks...");
             LaunchDiagnostics.Log("Applying desecrated zones tweaks.");
             await ApplyDesecratedZonesTweaksAsync(desecratedZonesFilePath, MainWindow.Settings.TerrorizeAllZones);
+            ReportProgress(progress, "Restoring desecrated vis files...");
+            LaunchDiagnostics.Log("Restoring desecrated vis files from clean copy.");
+            await RestoreVisFilesAsync();
+            ReportProgress(progress, "Applying terror zone purple overlay tweaks...");
+            LaunchDiagnostics.Log("Applying terror zone purple overlay tweaks.");
+            ApplyTerrorZonePurpleOverlayTweak(MainWindow.Settings.TerrorZonePurpleOverlay);
+            ReportProgress(progress, "Restoring terror zone fanfare...");
+            LaunchDiagnostics.Log("Restoring desecrated_enter_hd.flac from clean copy.");
+            RestoreTerrorZoneFanfareFile();
+            ReportProgress(progress, "Applying terror zone fanfare tweaks...");
+            LaunchDiagnostics.Log("Applying terror zone fanfare tweaks.");
+            ApplyTerrorZoneFanfareTweak(MainWindow.Settings.RestoreTerrorZoneFanfare);
             LaunchDiagnostics.Log("Mod tweak preparation succeeded.");
 
             return true;
@@ -862,6 +888,218 @@ public static class ModTweaksService
                 FileShare.None);
             await sourceStream.CopyToAsync(destinationStream);
         }
+    }
+
+    private static string? GetVisDirectory()
+    {
+        var mpqBase = GetMpqBaseDirectory();
+        if (string.IsNullOrWhiteSpace(mpqBase))
+        {
+            return null;
+        }
+
+        return Path.Combine(
+            mpqBase,
+            DataDirectoryName,
+            HdDirectoryName,
+            EnvDirectoryName,
+            VisDirectoryName);
+    }
+
+    private static string GetCleanVisDirectory(string visDirectory)
+    {
+        var parentDirectory = Directory.GetParent(visDirectory)?.FullName;
+        if (string.IsNullOrWhiteSpace(parentDirectory))
+        {
+            throw new DirectoryNotFoundException("Vis folder parent directory could not be resolved.");
+        }
+
+        return Path.Combine(parentDirectory, CleanVisDirectoryName);
+    }
+
+    private static async Task EnsureCleanVisCopyAsync()
+    {
+        var visDirectory = GetVisDirectory();
+        if (string.IsNullOrWhiteSpace(visDirectory) || !Directory.Exists(visDirectory))
+        {
+            LaunchDiagnostics.Log($"Vis directory not found, skipping clean copy: {visDirectory ?? "<null>"}");
+            return;
+        }
+
+        var cleanVisDirectory = GetCleanVisDirectory(visDirectory);
+        if (Directory.Exists(cleanVisDirectory))
+        {
+            return;
+        }
+
+        var desecratedFiles = Directory.GetFiles(visDirectory, "*.json")
+            .Where(f => Path.GetFileName(f).Contains(DesecratedFilePattern, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (desecratedFiles.Count == 0)
+        {
+            LaunchDiagnostics.Log("No desecrated vis files found to back up.");
+            return;
+        }
+
+        Directory.CreateDirectory(cleanVisDirectory);
+
+        foreach (var file in desecratedFiles)
+        {
+            var fileName = Path.GetFileName(file);
+            var cleanFilePath = Path.Combine(cleanVisDirectory, fileName);
+            await CopyFileAsync(file, cleanFilePath, overwrite: true);
+            LaunchDiagnostics.Log($"Backed up desecrated vis file: {fileName}");
+        }
+    }
+
+    private static async Task RestoreVisFilesAsync()
+    {
+        var visDirectory = GetVisDirectory();
+        if (string.IsNullOrWhiteSpace(visDirectory) || !Directory.Exists(visDirectory))
+        {
+            LaunchDiagnostics.Log($"Vis directory not found, skipping restore: {visDirectory ?? "<null>"}");
+            return;
+        }
+
+        var cleanVisDirectory = GetCleanVisDirectory(visDirectory);
+        if (!Directory.Exists(cleanVisDirectory))
+        {
+            LaunchDiagnostics.Log("Clean vis directory not found, skipping restore.");
+            return;
+        }
+
+        foreach (var cleanFile in Directory.GetFiles(cleanVisDirectory, "*.json"))
+        {
+            var fileName = Path.GetFileName(cleanFile);
+            var targetFilePath = Path.Combine(visDirectory, fileName);
+            await CopyFileAsync(cleanFile, targetFilePath, overwrite: true);
+            LaunchDiagnostics.Log($"Restored desecrated vis file: {fileName}");
+        }
+    }
+
+    private static void ApplyTerrorZonePurpleOverlayTweak(bool terrorZonePurpleOverlay)
+    {
+        if (!terrorZonePurpleOverlay)
+        {
+            return;
+        }
+
+        var visDirectory = GetVisDirectory();
+        if (string.IsNullOrWhiteSpace(visDirectory) || !Directory.Exists(visDirectory))
+        {
+            LaunchDiagnostics.Log($"Vis directory not found: {visDirectory ?? "<null>"}");
+            return;
+        }
+
+        var files = Directory.GetFiles(visDirectory, "*.json")
+            .Where(f => Path.GetFileName(f).Contains(DesecratedFilePattern, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        LaunchDiagnostics.Log($"Found {files.Count} desecrated vis file(s) to delete.");
+
+        foreach (var file in files)
+        {
+            File.Delete(file);
+            LaunchDiagnostics.Log($"Deleted desecrated vis file: {file}");
+        }
+    }
+
+    private static string? GetTerrorZoneFanfareFilePath()
+    {
+        var mpqBase = GetMpqBaseDirectory();
+        if (string.IsNullOrWhiteSpace(mpqBase))
+        {
+            return null;
+        }
+
+        return Path.Combine(
+            mpqBase,
+            DataDirectoryName,
+            HdDirectoryName,
+            GlobalDirectoryName,
+            SfxDirectoryName,
+            QuestDirectoryName,
+            DesecratedEnterHdFileName);
+    }
+
+    private static string? GetCleanTerrorZoneFanfareFilePath()
+    {
+        var fanfareFilePath = GetTerrorZoneFanfareFilePath();
+        if (string.IsNullOrWhiteSpace(fanfareFilePath))
+        {
+            return null;
+        }
+
+        var parentDirectory = Path.GetDirectoryName(fanfareFilePath);
+        if (string.IsNullOrWhiteSpace(parentDirectory))
+        {
+            return null;
+        }
+
+        return Path.Combine(parentDirectory, CleanDesecratedEnterHdFileName);
+    }
+
+    private static void EnsureCleanTerrorZoneFanfareCopy()
+    {
+        var fanfareFilePath = GetTerrorZoneFanfareFilePath();
+        if (string.IsNullOrWhiteSpace(fanfareFilePath) || !File.Exists(fanfareFilePath))
+        {
+            LaunchDiagnostics.Log($"Terror zone fanfare file not found, skipping clean copy: {fanfareFilePath ?? "<null>"}");
+            return;
+        }
+
+        var cleanFilePath = GetCleanTerrorZoneFanfareFilePath();
+        if (string.IsNullOrWhiteSpace(cleanFilePath))
+        {
+            return;
+        }
+
+        if (File.Exists(cleanFilePath))
+        {
+            return;
+        }
+
+        File.Copy(fanfareFilePath, cleanFilePath);
+        LaunchDiagnostics.Log($"Backed up terror zone fanfare file: {DesecratedEnterHdFileName}");
+    }
+
+    private static void RestoreTerrorZoneFanfareFile()
+    {
+        var fanfareFilePath = GetTerrorZoneFanfareFilePath();
+        var cleanFilePath = GetCleanTerrorZoneFanfareFilePath();
+        if (string.IsNullOrWhiteSpace(fanfareFilePath) || string.IsNullOrWhiteSpace(cleanFilePath))
+        {
+            LaunchDiagnostics.Log("Terror zone fanfare paths could not be resolved, skipping restore.");
+            return;
+        }
+
+        if (!File.Exists(cleanFilePath))
+        {
+            LaunchDiagnostics.Log("Clean terror zone fanfare file not found, skipping restore.");
+            return;
+        }
+
+        File.Copy(cleanFilePath, fanfareFilePath, overwrite: true);
+        LaunchDiagnostics.Log($"Restored terror zone fanfare file: {DesecratedEnterHdFileName}");
+    }
+
+    private static void ApplyTerrorZoneFanfareTweak(bool restoreTerrorZoneFanfare)
+    {
+        if (restoreTerrorZoneFanfare)
+        {
+            return;
+        }
+
+        var fanfareFilePath = GetTerrorZoneFanfareFilePath();
+        if (string.IsNullOrWhiteSpace(fanfareFilePath) || !File.Exists(fanfareFilePath))
+        {
+            LaunchDiagnostics.Log($"Terror zone fanfare file not found: {fanfareFilePath ?? "<null>"}");
+            return;
+        }
+
+        File.Delete(fanfareFilePath);
+        LaunchDiagnostics.Log($"Deleted terror zone fanfare file: {fanfareFilePath}");
     }
 
     private static async Task CopyFileAsync(string sourceFilePath, string destinationFilePath, bool overwrite)

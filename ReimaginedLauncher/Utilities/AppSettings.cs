@@ -38,6 +38,8 @@ public class InstallationProfile
     public bool MakeTooltipBackgroundOpaque { get; set; }
     public bool RemoveHelmetVisual { get; set; }
     public bool TerrorizeAllZones { get; set; }
+    public bool TerrorZonePurpleOverlay { get; set; }
+    public bool RestoreTerrorZoneFanfare { get; set; }
 }
 
 public class AppSettings
@@ -95,4 +97,6 @@ public class AppSettings
     [JsonIgnore] public bool MakeTooltipBackgroundOpaque { get => CurrentProfile.MakeTooltipBackgroundOpaque; set => CurrentProfile.MakeTooltipBackgroundOpaque = value; }
     [JsonIgnore] public bool RemoveHelmetVisual { get => CurrentProfile.RemoveHelmetVisual; set => CurrentProfile.RemoveHelmetVisual = value; }
     [JsonIgnore] public bool TerrorizeAllZones { get => CurrentProfile.TerrorizeAllZones; set => CurrentProfile.TerrorizeAllZones = value; }
+    [JsonIgnore] public bool TerrorZonePurpleOverlay { get => CurrentProfile.TerrorZonePurpleOverlay; set => CurrentProfile.TerrorZonePurpleOverlay = value; }
+    [JsonIgnore] public bool RestoreTerrorZoneFanfare { get => CurrentProfile.RestoreTerrorZoneFanfare; set => CurrentProfile.RestoreTerrorZoneFanfare = value; }
 }

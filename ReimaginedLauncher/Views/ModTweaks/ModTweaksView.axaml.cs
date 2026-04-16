@@ -37,6 +37,8 @@ public partial class ModTweaksView : UserControl
         var makeTooltipBackgroundOpaque = MainWindow.Settings.MakeTooltipBackgroundOpaque;
         var removeHelmetVisual = MainWindow.Settings.RemoveHelmetVisual;
         var terrorizeAllZones = MainWindow.Settings.TerrorizeAllZones;
+        var terrorZonePurpleOverlay = MainWindow.Settings.TerrorZonePurpleOverlay;
+        var restoreTerrorZoneFanfare = MainWindow.Settings.RestoreTerrorZoneFanfare;
 
         MainWindow.Settings.SkillPointsPerLevel = skillPointsPerLevel;
         MainWindow.Settings.AttributesPerLevel = attributesPerLevel;
@@ -49,6 +51,8 @@ public partial class ModTweaksView : UserControl
         MainWindow.Settings.MakeTooltipBackgroundOpaque = makeTooltipBackgroundOpaque;
         MainWindow.Settings.RemoveHelmetVisual = removeHelmetVisual;
         MainWindow.Settings.TerrorizeAllZones = terrorizeAllZones;
+        MainWindow.Settings.TerrorZonePurpleOverlay = terrorZonePurpleOverlay;
+        MainWindow.Settings.RestoreTerrorZoneFanfare = restoreTerrorZoneFanfare;
 
         SkillPointsComboBox.SelectedIndex = skillPointsPerLevel - 1;
         AttributesComboBox.SelectedIndex = attributesPerLevel - 1;
@@ -61,6 +65,8 @@ public partial class ModTweaksView : UserControl
         MakeTooltipBackgroundOpaqueCheckBox.IsChecked = makeTooltipBackgroundOpaque;
         RemoveHelmetVisualCheckBox.IsChecked = removeHelmetVisual;
         TerrorizeAllZonesCheckBox.IsChecked = terrorizeAllZones;
+        TerrorZonePurpleOverlayCheckBox.IsChecked = terrorZonePurpleOverlay;
+        RestoreTerrorZoneFanfareCheckBox.IsChecked = restoreTerrorZoneFanfare;
         WarningBorder.IsVisible = HasNonDefaultTweaks(
             skillPointsPerLevel,
             attributesPerLevel,
@@ -101,6 +107,7 @@ public partial class ModTweaksView : UserControl
         }
 
         MainWindow.Settings.RemovePaladinAuraSound = RemovePaladinAuraSoundCheckBox.IsChecked ?? false;
+        MainWindow.Settings.RestoreTerrorZoneFanfare = RestoreTerrorZoneFanfareCheckBox.IsChecked ?? false;
         WarningBorder.IsVisible = HasNonDefaultTweaks(
             MainWindow.Settings.SkillPointsPerLevel,
             MainWindow.Settings.AttributesPerLevel,
@@ -132,6 +139,7 @@ public partial class ModTweaksView : UserControl
         MainWindow.Settings.RemoveSplashVfx = RemoveSplashVfxCheckBox.IsChecked ?? false;
         MainWindow.Settings.MakeTooltipBackgroundOpaque = MakeTooltipBackgroundOpaqueCheckBox.IsChecked ?? false;
         MainWindow.Settings.RemoveHelmetVisual = RemoveHelmetVisualCheckBox.IsChecked ?? false;
+        MainWindow.Settings.TerrorZonePurpleOverlay = TerrorZonePurpleOverlayCheckBox.IsChecked ?? false;
         WarningBorder.IsVisible = HasNonDefaultTweaks(
             MainWindow.Settings.SkillPointsPerLevel,
             MainWindow.Settings.AttributesPerLevel,
@@ -185,6 +193,8 @@ public partial class ModTweaksView : UserControl
         MainWindow.Settings.MakeTooltipBackgroundOpaque = false;
         MainWindow.Settings.RemoveHelmetVisual = false;
         MainWindow.Settings.TerrorizeAllZones = false;
+        MainWindow.Settings.TerrorZonePurpleOverlay = false;
+        MainWindow.Settings.RestoreTerrorZoneFanfare = false;
 
         await SettingsManager.SaveAsync(MainWindow.Settings);
         RefreshTweaksState();
