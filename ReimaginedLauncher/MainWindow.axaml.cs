@@ -678,6 +678,29 @@ public partial class MainWindow : Window
         UpdateDownloadUrl = downloadUrl;
         IsUpdateDownloadDirect = isDirectDownload;
         UpdateFileId = fileId;
+        RefreshUpdateAvailableBadge();
+    }
+
+    private void RefreshUpdateAvailableBadge()
+    {
+        void UpdateBadge()
+        {
+            var show = IsUpdateAvailable &&
+                       !string.IsNullOrWhiteSpace(UpdateLatestVersion) &&
+                       !UpdateLatestVersion.Equals("Unknown", StringComparison.OrdinalIgnoreCase);
+
+            UpdateAvailableTextBlock.IsVisible = show;
+            UpdateAvailableTextBlock.Text = show ? $"(New v{UpdateLatestVersion} Available)" : string.Empty;
+        }
+
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            UpdateBadge();
+        }
+        else
+        {
+            Dispatcher.UIThread.Post(UpdateBadge);
+        }
     }
 
     public async Task NavigateToUpdateViewAsync()
