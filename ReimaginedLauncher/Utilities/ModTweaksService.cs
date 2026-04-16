@@ -153,37 +153,38 @@ public static class ModTweaksService
             await RestoreMissilesFileAsync(cleanMissilesFilePath, missilesFilePath);
             ReportProgress(progress, "Applying missiles tweaks...");
             LaunchDiagnostics.Log("Applying missiles tweaks.");
-            await ApplyMissilesTweaksAsync(missilesFilePath, MainWindow.Settings.RemoveSplashVfx);
+            var profile = MainWindow.Settings.CurrentProfile;
+            await ApplyMissilesTweaksAsync(missilesFilePath, profile.RemoveSplashVfx);
             ReportProgress(progress, "Restoring layouts_profilehd.json...");
             LaunchDiagnostics.Log("Restoring tooltip layout file from clean copy.");
             await RestoreLayoutsProfileHdFileAsync(cleanLayoutsProfileHdFilePath, layoutsProfileHdFilePath);
             ReportProgress(progress, "Applying tooltip layout tweaks...");
             LaunchDiagnostics.Log("Applying tooltip layout tweaks.");
-            await ApplyTooltipLayoutTweaksAsync(layoutsProfileHdFilePath, MainWindow.Settings.MakeTooltipBackgroundOpaque);
+            await ApplyTooltipLayoutTweaksAsync(layoutsProfileHdFilePath, profile.MakeTooltipBackgroundOpaque);
             ReportProgress(progress, "Restoring helmet visual files...");
             LaunchDiagnostics.Log("Restoring helmet and circlet visual files from clean copy.");
             await RestoreArmorTweaksAsync(armorDirectory, cleanArmorTweaksDirectory);
             ReportProgress(progress, "Applying helmet visual tweaks...");
             LaunchDiagnostics.Log("Applying helmet visual tweaks.");
-            await ApplyHelmetVisualTweaksAsync(armorDirectory, MainWindow.Settings.RemoveHelmetVisual);
+            await ApplyHelmetVisualTweaksAsync(armorDirectory, profile.RemoveHelmetVisual);
             ReportProgress(progress, "Restoring desecratedzones.json...");
             LaunchDiagnostics.Log("Restoring desecrated zones file from clean copy.");
             await RestoreDesecratedZonesFileAsync(cleanDesecratedZonesFilePath, desecratedZonesFilePath);
             ReportProgress(progress, "Applying desecrated zones tweaks...");
             LaunchDiagnostics.Log("Applying desecrated zones tweaks.");
-            await ApplyDesecratedZonesTweaksAsync(desecratedZonesFilePath, MainWindow.Settings.TerrorizeAllZones);
+            await ApplyDesecratedZonesTweaksAsync(desecratedZonesFilePath, profile.TerrorizeAllZones);
             ReportProgress(progress, "Restoring desecrated vis files...");
             LaunchDiagnostics.Log("Restoring desecrated vis files from clean copy.");
             await RestoreVisFilesAsync();
             ReportProgress(progress, "Applying terror zone purple overlay tweaks...");
             LaunchDiagnostics.Log("Applying terror zone purple overlay tweaks.");
-            ApplyTerrorZonePurpleOverlayTweak(MainWindow.Settings.TerrorZonePurpleOverlay);
+            ApplyTerrorZonePurpleOverlayTweak(profile.TerrorZonePurpleOverlay);
             ReportProgress(progress, "Restoring terror zone fanfare...");
             LaunchDiagnostics.Log("Restoring desecrated_enter_hd.flac from clean copy.");
             RestoreTerrorZoneFanfareFile();
             ReportProgress(progress, "Applying terror zone fanfare tweaks...");
             LaunchDiagnostics.Log("Applying terror zone fanfare tweaks.");
-            ApplyTerrorZoneFanfareTweak(MainWindow.Settings.RestoreTerrorZoneFanfare);
+            ApplyTerrorZoneFanfareTweak(profile.RestoreTerrorZoneFanfare);
             LaunchDiagnostics.Log("Mod tweak preparation succeeded.");
 
             return true;
@@ -279,7 +280,7 @@ public static class ModTweaksService
 
     private static string? GetArmorDirectory()
     {
-        var installDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(MainWindow.Settings.InstallDirectory);
+        var installDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(MainWindow.Settings.CurrentProfile.InstallDirectory);
         if (string.IsNullOrWhiteSpace(installDirectory))
         {
             return null;
@@ -536,29 +537,30 @@ public static class ModTweaksService
 
     private static async Task ApplyTweaksAsync(string excelDirectory, IProgress<string>? progress)
     {
+        var profile = MainWindow.Settings.CurrentProfile;
         ReportProgress(progress, "Updating charstats.txt...");
         LaunchDiagnostics.Log($"Applying charstats tweaks in {excelDirectory}.");
         await ApplyCharStatsTweaksAsync(
             Path.Combine(excelDirectory, CharStatsFileName),
-            MainWindow.Settings.SkillPointsPerLevel,
-            MainWindow.Settings.AttributesPerLevel);
+            profile.SkillPointsPerLevel,
+            profile.AttributesPerLevel);
         ReportProgress(progress, "Updating skills.txt...");
         LaunchDiagnostics.Log($"Applying skills tweaks in {excelDirectory}.");
         await ApplySkillsTweaksAsync(
             Path.Combine(excelDirectory, SkillsFileName),
-            MainWindow.Settings.MaxSkillLevel);
+            profile.MaxSkillLevel);
         ReportProgress(progress, "Updating DifficultyLevels.txt...");
         LaunchDiagnostics.Log($"Applying difficulty tweaks in {excelDirectory}.");
         await ApplyDifficultyLevelsTweaksAsync(
             Path.Combine(excelDirectory, DifficultyLevelsFileName),
-            MainWindow.Settings.NormalResistPenalty,
-            MainWindow.Settings.NightmareResistPenalty,
-            MainWindow.Settings.HellResistPenalty);
+            profile.NormalResistPenalty,
+            profile.NightmareResistPenalty,
+            profile.HellResistPenalty);
         ReportProgress(progress, "Updating states.txt...");
         LaunchDiagnostics.Log($"Applying states tweaks in {excelDirectory}.");
         await ApplyStatesTweaksAsync(
             Path.Combine(excelDirectory, StatesFileName),
-            MainWindow.Settings.RemovePaladinAuraSound);
+            profile.RemovePaladinAuraSound);
     }
 
     private static void ReportProgress(IProgress<string>? progress, string message)

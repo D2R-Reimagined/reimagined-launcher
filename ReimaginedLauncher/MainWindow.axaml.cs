@@ -112,8 +112,9 @@ public partial class MainWindow : Window
     {
         Settings = await SettingsManager.LoadAsync();
         Settings.UiScale = ClampUiScale(Settings.UiScale);
-        Settings.InstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(Settings.InstallDirectory);
-        Settings.IsInstallDirectoryValidated = InstallDirectoryValidator.IsValidInstallDirectory(Settings.InstallDirectory);
+        var profile = Settings.CurrentProfile;
+        profile.InstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(profile.InstallDirectory);
+        profile.IsInstallDirectoryValidated = InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory);
         BackupService.ApplyDefaultSettings();
         var openedUnreadAnnouncements = await RefreshAnnouncementsStateAsync(openUnreadAnnouncements: true);
         ApplyUiScale();
@@ -124,7 +125,7 @@ public partial class MainWindow : Window
             UserViewModel.User = User;
         }
         
-        var installDir = Settings.InstallDirectory;
+        var installDir = Settings.CurrentProfile.InstallDirectory;
         RefreshLocalModState(installDir);
         PluginsView? pluginsViewToRefresh = null;
 
@@ -273,7 +274,7 @@ public partial class MainWindow : Window
 
     public async Task RefreshUpdateStateAsync()
     {
-        if (!Settings.IsInstallDirectoryValidated || string.IsNullOrWhiteSpace(Settings.InstallDirectory))
+        if (!Settings.CurrentProfile.IsInstallDirectoryValidated || string.IsNullOrWhiteSpace(Settings.CurrentProfile.InstallDirectory))
         {
             SetUpdateState(
                 isUpdateAvailable: false,
@@ -430,7 +431,7 @@ public partial class MainWindow : Window
 
     public async Task PromptInstallForMissingModAsync()
     {
-        if (!Settings.IsInstallDirectoryValidated || string.IsNullOrWhiteSpace(Settings.InstallDirectory) || IsLocalModDetected)
+        if (!Settings.CurrentProfile.IsInstallDirectoryValidated || string.IsNullOrWhiteSpace(Settings.CurrentProfile.InstallDirectory) || IsLocalModDetected)
             return;
 
         await NavigateToUpdateViewAsync();
@@ -464,7 +465,7 @@ public partial class MainWindow : Window
         }
         else
         {
-            var installDir = installDirectory ?? Settings.InstallDirectory;
+            var installDir = installDirectory ?? Settings.CurrentProfile.InstallDirectory;
             if (!string.IsNullOrWhiteSpace(installDir))
             {
                 var modRootDirectory = Path.Combine(installDir, "mods", "Reimagined");

@@ -54,25 +54,26 @@ public static class BackupService
     public static bool ApplyDefaultSettings()
     {
         var settingsChanged = false;
+        var profile = MainWindow.Settings.CurrentProfile;
 
-        if (MainWindow.Settings.BackupIntervalMinutes <= 0)
+        if (profile.BackupIntervalMinutes <= 0)
         {
-            MainWindow.Settings.BackupIntervalMinutes = DefaultBackupIntervalMinutes;
+            profile.BackupIntervalMinutes = DefaultBackupIntervalMinutes;
             settingsChanged = true;
         }
 
-        if (MainWindow.Settings.BackupAmount <= 0)
+        if (profile.BackupAmount <= 0)
         {
-            MainWindow.Settings.BackupAmount = DefaultBackupAmount;
+            profile.BackupAmount = DefaultBackupAmount;
             settingsChanged = true;
         }
 
-        if (string.IsNullOrWhiteSpace(MainWindow.Settings.BackupSaveDirectory))
+        if (string.IsNullOrWhiteSpace(profile.BackupSaveDirectory))
         {
             var defaultBackupDirectory = GetDefaultBackupDirectory();
             if (!string.IsNullOrWhiteSpace(defaultBackupDirectory))
             {
-                MainWindow.Settings.BackupSaveDirectory = defaultBackupDirectory;
+                profile.BackupSaveDirectory = defaultBackupDirectory;
                 settingsChanged = true;
             }
         }
@@ -90,13 +91,13 @@ public static class BackupService
             return;
         }
 
-        BackupTimer.Interval = TimeSpan.FromMinutes(MainWindow.Settings.BackupIntervalMinutes);
+        BackupTimer.Interval = TimeSpan.FromMinutes(MainWindow.Settings.CurrentProfile.BackupIntervalMinutes);
         BackupTimer.Start();
     }
 
     public static IReadOnlyList<BackupEntry> GetBackups()
     {
-        var backupRoot = MainWindow.Settings.BackupSaveDirectory;
+        var backupRoot = MainWindow.Settings.CurrentProfile.BackupSaveDirectory;
         if (string.IsNullOrWhiteSpace(backupRoot) || !Directory.Exists(backupRoot))
         {
             return [];
@@ -181,14 +182,14 @@ public static class BackupService
             return false;
         }
 
-        var backupRoot = MainWindow.Settings.BackupSaveDirectory;
+        var backupRoot = MainWindow.Settings.CurrentProfile.BackupSaveDirectory;
         if (string.IsNullOrWhiteSpace(backupRoot))
         {
             Notifications.SendNotification("Backup directory not set.", "Warning");
             return false;
         }
 
-        if (MainWindow.Settings.BackupAmount <= 0)
+        if (MainWindow.Settings.CurrentProfile.BackupAmount <= 0)
         {
             Notifications.SendNotification("Backup amount must be greater than 0.", "Warning");
             return false;
@@ -307,10 +308,11 @@ public static class BackupService
 
     private static bool CanRunAutomaticBackups()
     {
-        return MainWindow.Settings.AutomaticBackupsEnabled
-               && MainWindow.Settings.BackupIntervalMinutes > 0
-               && MainWindow.Settings.BackupAmount > 0
-               && !string.IsNullOrWhiteSpace(MainWindow.Settings.BackupSaveDirectory)
+        var profile = MainWindow.Settings.CurrentProfile;
+        return profile.AutomaticBackupsEnabled
+               && profile.BackupIntervalMinutes > 0
+               && profile.BackupAmount > 0
+               && !string.IsNullOrWhiteSpace(profile.BackupSaveDirectory)
                && !string.IsNullOrWhiteSpace(GetResolvedSaveDirectory());
     }
 
@@ -342,7 +344,7 @@ public static class BackupService
 
     private static void TrimBackups()
     {
-        var maxBackups = MainWindow.Settings.BackupAmount;
+        var maxBackups = MainWindow.Settings.CurrentProfile.BackupAmount;
         if (maxBackups <= 0)
         {
             return;
@@ -591,7 +593,7 @@ public static class BackupService
 
     private static string? GetModInfoPath()
     {
-        var installDirectory = MainWindow.Settings.InstallDirectory;
+        var installDirectory = MainWindow.Settings.CurrentProfile.InstallDirectory;
         if (string.IsNullOrWhiteSpace(installDirectory))
         {
             return null;

@@ -49,7 +49,7 @@ public partial class UpdateView : UserControl
         SelectZipManuallyButton.IsEnabled = !_isLoading &&
                                             !_isInstalling &&
                                             MainWindow.Settings.CurrentProfile.IsInstallDirectoryValidated &&
-                                            !string.IsNullOrWhiteSpace(MainWindow.Settings.InstallDirectory);
+                                            !string.IsNullOrWhiteSpace(MainWindow.Settings.CurrentProfile.InstallDirectory);
         OpenDownloadPageButton.IsEnabled = !_isLoading && !string.IsNullOrWhiteSpace(MainWindow.UpdateDownloadUrl);
         RecheckButton.IsEnabled = !_isLoading;
         InstallOrUpdateButton.Content = MainWindow.UpdateCurrentVersion.Equals("Not detected", StringComparison.OrdinalIgnoreCase)

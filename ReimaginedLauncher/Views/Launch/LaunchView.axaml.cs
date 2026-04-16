@@ -37,7 +37,7 @@ public partial class LaunchView : UserControl
             {
                 // Run detection if the current profile isn't validated, or if any
                 // non-D2RMM profile is still missing its install directory (dual-install check).
-                needsDetection = !MainWindow.Settings.IsInstallDirectoryValidated;
+                needsDetection = !MainWindow.Settings.CurrentProfile.IsInstallDirectoryValidated;
                 if (!needsDetection)
                 {
                     foreach (var p in MainWindow.Settings.Profiles)

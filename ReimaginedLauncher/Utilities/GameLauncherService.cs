@@ -23,7 +23,7 @@ public class GameLauncherService
     
     public string? InstallDirectory
     {
-        get => InstallDirectoryValidator.NormalizeInstallDirectory(MainWindow.Settings.InstallDirectory) ?? string.Empty;
+        get => InstallDirectoryValidator.NormalizeInstallDirectory(MainWindow.Settings.CurrentProfile.InstallDirectory) ?? string.Empty;
         set => throw new NotImplementedException();
     }
 
@@ -254,7 +254,7 @@ public class GameLauncherService
 
     public string? FindSteamExecutable(string? d2rDir = null)
     {
-        var targetD2rDir = d2rDir ?? MainWindow.Settings.InstallDirectory;
+        var targetD2rDir = d2rDir ?? MainWindow.Settings.CurrentProfile.InstallDirectory;
         if (!string.IsNullOrEmpty(targetD2rDir) && targetD2rDir.Contains("steamapps\\common", StringComparison.OrdinalIgnoreCase))
         {
             try
@@ -379,33 +379,35 @@ public class GameLauncherService
             "-txt"
         };
 
-        if (MainWindow.Settings.EnableRespec)
+        var profile = MainWindow.Settings.CurrentProfile;
+
+        if (profile.EnableRespec)
         {
             launchParameters.Add("-enablerespec");
         }
 
-        if (MainWindow.Settings.ResetOfflineMaps)
+        if (profile.ResetOfflineMaps)
         {
             launchParameters.Add("-resetofflinemaps");
         }
 
-        if (MainWindow.Settings.PlayersCount is >= 2 and <= 8)
+        if (profile.PlayersCount is >= 2 and <= 8)
         {
             launchParameters.Add("-players");
-            launchParameters.Add(MainWindow.Settings.PlayersCount.Value.ToString());
+            launchParameters.Add(profile.PlayersCount.Value.ToString());
         }
 
-        if (MainWindow.Settings.NoRumble)
+        if (profile.NoRumble)
         {
             launchParameters.Add("-norumble");
         }
 
-        if (MainWindow.Settings.ForceDesktop)
+        if (profile.ForceDesktop)
         {
             launchParameters.Add("-forcedesktop");
         }
 
-        if (MainWindow.Settings.NoSound)
+        if (profile.NoSound)
         {
             launchParameters.Add("-nosound");
         }
@@ -518,6 +520,6 @@ public class GameLauncherService
             return Path.Combine(gamePathOverride, "D2R.exe");
         }
 
-        return InstallDirectoryValidator.GetExecutablePath(MainWindow.Settings.InstallDirectory);
+        return InstallDirectoryValidator.GetExecutablePath(MainWindow.Settings.CurrentProfile.InstallDirectory);
     }
 }

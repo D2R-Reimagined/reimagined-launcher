@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -37,7 +37,7 @@ public static class PluginsService
             return;
         }
 
-        MainWindow.Settings.Plugins ??= [];
+        MainWindow.Settings.CurrentProfile.Plugins ??= [];
         Directory.CreateDirectory(PluginsDirectoryPath);
 
         foreach (var sourceDirectory in Directory.GetDirectories(bundledPluginsRoot))
@@ -54,7 +54,7 @@ public static class PluginsService
                 continue;
             }
 
-            var existingRegistration = MainWindow.Settings.Plugins
+            var existingRegistration = MainWindow.Settings.CurrentProfile.Plugins
                 .FirstOrDefault(plugin => plugin.FolderName.Equals(folderName, StringComparison.OrdinalIgnoreCase));
 
             var destinationDirectory = Path.Combine(PluginsDirectoryPath, folderName);
@@ -64,7 +64,7 @@ public static class PluginsService
             }
 
             await CopyDirectoryAsync(sourceDirectory, destinationDirectory);
-            MainWindow.Settings.Plugins.Add(new PluginRegistration
+            MainWindow.Settings.CurrentProfile.Plugins.Add(new PluginRegistration
             {
                 Id = Guid.NewGuid().ToString("N"),
                 FolderName = folderName,
@@ -83,7 +83,7 @@ public static class PluginsService
             return [];
         }
 
-        MainWindow.Settings.Plugins ??= [];
+        MainWindow.Settings.CurrentProfile.Plugins ??= [];
         var catalog = new List<OfficialPluginCatalogItem>();
 
         foreach (var sourceDirectory in Directory.GetDirectories(bundledPluginsRoot).OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
@@ -137,12 +137,12 @@ public static class PluginsService
 
     public static async Task<IReadOnlyList<PluginCatalogItem>> GetCatalogAsync()
     {
-        MainWindow.Settings.Plugins ??= [];
-        var catalog = new List<PluginCatalogItem>(MainWindow.Settings.Plugins.Count);
+        MainWindow.Settings.CurrentProfile.Plugins ??= [];
+        var catalog = new List<PluginCatalogItem>(MainWindow.Settings.CurrentProfile.Plugins.Count);
 
-        for (var index = 0; index < MainWindow.Settings.Plugins.Count; index++)
+        for (var index = 0; index < MainWindow.Settings.CurrentProfile.Plugins.Count; index++)
         {
-            var registration = MainWindow.Settings.Plugins[index];
+            var registration = MainWindow.Settings.CurrentProfile.Plugins[index];
             var pluginState = await LoadPluginStateAsync(registration);
             catalog.Add(new PluginCatalogItem
             {
@@ -179,7 +179,7 @@ public static class PluginsService
         ValidatePluginInfo(pluginInfo, sourceDirectory);
 
         Directory.CreateDirectory(PluginsDirectoryPath);
-        MainWindow.Settings.Plugins ??= [];
+        MainWindow.Settings.CurrentProfile.Plugins ??= [];
 
         var registration = FindRegistrationByFolderName(folderName);
         var destinationDirectory = Path.Combine(PluginsDirectoryPath, folderName);
@@ -190,7 +190,7 @@ public static class PluginsService
 
         if (registration == null)
         {
-            MainWindow.Settings.Plugins.Add(new PluginRegistration
+            MainWindow.Settings.CurrentProfile.Plugins.Add(new PluginRegistration
             {
                 Id = Guid.NewGuid().ToString("N"),
                 FolderName = folderName,
@@ -267,9 +267,9 @@ public static class PluginsService
 
     public static async Task<InstalledPluginLookupResult?> FindInstalledPluginByNameAsync(string pluginName)
     {
-        MainWindow.Settings.Plugins ??= [];
+        MainWindow.Settings.CurrentProfile.Plugins ??= [];
 
-        foreach (var registration in MainWindow.Settings.Plugins)
+        foreach (var registration in MainWindow.Settings.CurrentProfile.Plugins)
         {
             var pluginState = await LoadPluginStateAsync(registration);
             if (!pluginState.Name.Equals(pluginName, StringComparison.OrdinalIgnoreCase))
@@ -353,8 +353,8 @@ public static class PluginsService
             var destinationDirectory = Path.Combine(PluginsDirectoryPath, destinationFolderName);
             await CopyDirectoryAsync(pluginRootDirectory, destinationDirectory);
 
-            MainWindow.Settings.Plugins ??= [];
-            MainWindow.Settings.Plugins.Add(new PluginRegistration
+            MainWindow.Settings.CurrentProfile.Plugins ??= [];
+            MainWindow.Settings.CurrentProfile.Plugins.Add(new PluginRegistration
             {
                 Id = Guid.NewGuid().ToString("N"),
                 FolderName = destinationFolderName,
@@ -381,30 +381,30 @@ public static class PluginsService
 
     public static async Task MovePluginAsync(string pluginId, int direction)
     {
-        MainWindow.Settings.Plugins ??= [];
-        var currentIndex = MainWindow.Settings.Plugins.FindIndex(plugin => plugin.Id == pluginId);
+        MainWindow.Settings.CurrentProfile.Plugins ??= [];
+        var currentIndex = MainWindow.Settings.CurrentProfile.Plugins.FindIndex(plugin => plugin.Id == pluginId);
         if (currentIndex < 0)
         {
             throw new InvalidOperationException("The selected plugin could not be found.");
         }
 
         var nextIndex = currentIndex + direction;
-        if (nextIndex < 0 || nextIndex >= MainWindow.Settings.Plugins.Count)
+        if (nextIndex < 0 || nextIndex >= MainWindow.Settings.CurrentProfile.Plugins.Count)
         {
             return;
         }
 
-        (MainWindow.Settings.Plugins[currentIndex], MainWindow.Settings.Plugins[nextIndex]) =
-            (MainWindow.Settings.Plugins[nextIndex], MainWindow.Settings.Plugins[currentIndex]);
+        (MainWindow.Settings.CurrentProfile.Plugins[currentIndex], MainWindow.Settings.CurrentProfile.Plugins[nextIndex]) =
+            (MainWindow.Settings.CurrentProfile.Plugins[nextIndex], MainWindow.Settings.CurrentProfile.Plugins[currentIndex]);
 
         await SettingsManager.SaveAsync(MainWindow.Settings);
     }
 
     public static async Task DeletePluginAsync(string pluginId)
     {
-        MainWindow.Settings.Plugins ??= [];
+        MainWindow.Settings.CurrentProfile.Plugins ??= [];
         var registration = GetRegistration(pluginId);
-        MainWindow.Settings.Plugins.Remove(registration);
+        MainWindow.Settings.CurrentProfile.Plugins.Remove(registration);
         await SettingsManager.SaveAsync(MainWindow.Settings);
 
         var pluginDirectory = GetPluginDirectory(registration);
@@ -466,9 +466,9 @@ public static class PluginsService
 
     public static async Task ApplyEnabledPluginsAsync(string excelDirectory, IProgress<string>? progress = null)
     {
-        MainWindow.Settings.Plugins ??= [];
+        MainWindow.Settings.CurrentProfile.Plugins ??= [];
 
-        foreach (var registration in MainWindow.Settings.Plugins.Where(plugin => plugin.IsEnabled))
+        foreach (var registration in MainWindow.Settings.CurrentProfile.Plugins.Where(plugin => plugin.IsEnabled))
         {
             var pluginState = await LoadPluginStateAsync(registration);
             if (pluginState.Errors.Count > 0)
@@ -1001,8 +1001,8 @@ public static class PluginsService
 
     private static PluginRegistration GetRegistration(string pluginId)
     {
-        MainWindow.Settings.Plugins ??= [];
-        var registration = MainWindow.Settings.Plugins.FirstOrDefault(plugin => plugin.Id == pluginId);
+        MainWindow.Settings.CurrentProfile.Plugins ??= [];
+        var registration = MainWindow.Settings.CurrentProfile.Plugins.FirstOrDefault(plugin => plugin.Id == pluginId);
         if (registration == null)
         {
             throw new InvalidOperationException("The selected plugin could not be found.");
@@ -1013,8 +1013,8 @@ public static class PluginsService
 
     private static PluginRegistration? FindRegistrationByFolderName(string folderName)
     {
-        MainWindow.Settings.Plugins ??= [];
-        return MainWindow.Settings.Plugins.FirstOrDefault(plugin =>
+        MainWindow.Settings.CurrentProfile.Plugins ??= [];
+        return MainWindow.Settings.CurrentProfile.Plugins.FirstOrDefault(plugin =>
             plugin.FolderName.Equals(folderName, StringComparison.OrdinalIgnoreCase));
     }
 
