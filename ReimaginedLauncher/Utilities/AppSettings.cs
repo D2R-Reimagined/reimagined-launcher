@@ -40,6 +40,7 @@ public class InstallationProfile
     public bool TerrorizeAllZones { get; set; }
     public bool TerrorZonePurpleOverlay { get; set; }
     public bool RestoreTerrorZoneFanfare { get; set; }
+    public bool RemoveVignette { get; set; }
 }
 
 public class AppSettings
