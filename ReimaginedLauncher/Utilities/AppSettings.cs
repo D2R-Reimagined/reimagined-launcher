@@ -37,6 +37,7 @@ public class InstallationProfile
     public List<PluginRegistration> Plugins { get; set; } = [];
     public bool MakeTooltipBackgroundOpaque { get; set; }
     public bool RemoveHelmetVisual { get; set; }
+    public bool TerrorizeAllZones { get; set; }
 }
 
 public class AppSettings
@@ -93,4 +94,5 @@ public class AppSettings
     [JsonIgnore] public List<PluginRegistration> Plugins { get => CurrentProfile.Plugins; set => CurrentProfile.Plugins = value; }
     [JsonIgnore] public bool MakeTooltipBackgroundOpaque { get => CurrentProfile.MakeTooltipBackgroundOpaque; set => CurrentProfile.MakeTooltipBackgroundOpaque = value; }
     [JsonIgnore] public bool RemoveHelmetVisual { get => CurrentProfile.RemoveHelmetVisual; set => CurrentProfile.RemoveHelmetVisual = value; }
+    [JsonIgnore] public bool TerrorizeAllZones { get => CurrentProfile.TerrorizeAllZones; set => CurrentProfile.TerrorizeAllZones = value; }
 }

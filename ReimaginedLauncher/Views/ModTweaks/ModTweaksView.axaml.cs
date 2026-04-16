@@ -36,6 +36,7 @@ public partial class ModTweaksView : UserControl
         var removeSplashVfx = MainWindow.Settings.RemoveSplashVfx;
         var makeTooltipBackgroundOpaque = MainWindow.Settings.MakeTooltipBackgroundOpaque;
         var removeHelmetVisual = MainWindow.Settings.RemoveHelmetVisual;
+        var terrorizeAllZones = MainWindow.Settings.TerrorizeAllZones;
 
         MainWindow.Settings.SkillPointsPerLevel = skillPointsPerLevel;
         MainWindow.Settings.AttributesPerLevel = attributesPerLevel;
@@ -47,6 +48,7 @@ public partial class ModTweaksView : UserControl
         MainWindow.Settings.RemoveSplashVfx = removeSplashVfx;
         MainWindow.Settings.MakeTooltipBackgroundOpaque = makeTooltipBackgroundOpaque;
         MainWindow.Settings.RemoveHelmetVisual = removeHelmetVisual;
+        MainWindow.Settings.TerrorizeAllZones = terrorizeAllZones;
 
         SkillPointsComboBox.SelectedIndex = skillPointsPerLevel - 1;
         AttributesComboBox.SelectedIndex = attributesPerLevel - 1;
@@ -58,6 +60,7 @@ public partial class ModTweaksView : UserControl
         RemoveSplashVfxCheckBox.IsChecked = removeSplashVfx;
         MakeTooltipBackgroundOpaqueCheckBox.IsChecked = makeTooltipBackgroundOpaque;
         RemoveHelmetVisualCheckBox.IsChecked = removeHelmetVisual;
+        TerrorizeAllZonesCheckBox.IsChecked = terrorizeAllZones;
         WarningBorder.IsVisible = HasNonDefaultTweaks(
             skillPointsPerLevel,
             attributesPerLevel,
@@ -105,6 +108,17 @@ public partial class ModTweaksView : UserControl
             MainWindow.Settings.NormalResistPenalty,
             MainWindow.Settings.NightmareResistPenalty,
             MainWindow.Settings.HellResistPenalty);
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private async void OnZoneTweaksChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_isRefreshing)
+        {
+            return;
+        }
+
+        MainWindow.Settings.TerrorizeAllZones = TerrorizeAllZonesCheckBox.IsChecked ?? false;
         await SettingsManager.SaveAsync(MainWindow.Settings);
     }
 

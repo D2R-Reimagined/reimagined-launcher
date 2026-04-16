@@ -35,6 +35,8 @@ public static class ModTweaksService
     private const string DifficultyLevelsFileName = "DifficultyLevels.txt";
     private const string SkillsFileName = "skills.txt";
     private const string StatesFileName = "states.txt";
+    private const string DesecratedZonesFileName = "desecratedzones.json";
+    private const string CleanDesecratedZonesFileName = "desecratedzones_launcher_clean.json";
     private const string GeneratedTweaksFolderName = "mod-tweaks";
     private static readonly string[] HelmetVisualRelativePaths =
     [
@@ -87,14 +89,17 @@ public static class ModTweaksService
         var missilesFilePath = GetMissilesFilePath();
         var layoutsProfileHdFilePath = GetLayoutsProfileHdFilePath();
         var armorDirectory = GetArmorDirectory();
+        var desecratedZonesFilePath = GetDesecratedZonesFilePath();
         var cleanExcelDirectory = GetCleanExcelDirectory(excelDirectory);
         var cleanMissilesFilePath = GetCleanMissilesFilePath(missilesFilePath);
         var cleanLayoutsProfileHdFilePath = GetCleanLayoutsProfileHdFilePath(layoutsProfileHdFilePath);
         var cleanArmorTweaksDirectory = GetCleanArmorTweaksDirectory(armorDirectory);
+        var cleanDesecratedZonesFilePath = GetCleanDesecratedZonesFilePath(desecratedZonesFilePath);
         var excelDirectories = GetExcelDirectories(excelDirectory).ToList();
         LaunchDiagnostics.Log($"Resolved missiles file path: {missilesFilePath ?? "<null>"}");
         LaunchDiagnostics.Log($"Resolved layouts_profilehd.json path: {layoutsProfileHdFilePath ?? "<null>"}");
         LaunchDiagnostics.Log($"Resolved armor directory path: {armorDirectory ?? "<null>"}");
+        LaunchDiagnostics.Log($"Resolved desecratedzones.json path: {desecratedZonesFilePath ?? "<null>"}");
         LaunchDiagnostics.Log($"Excel directories to process: {string.Join(", ", excelDirectories)}");
 
         try
@@ -111,6 +116,9 @@ public static class ModTweaksService
             ReportProgress(progress, "Preparing clean helmet visual copy...");
             LaunchDiagnostics.Log("Ensuring clean helmet and circlet JSON copy.");
             await EnsureCleanArmorTweaksCopyAsync(armorDirectory, cleanArmorTweaksDirectory);
+            ReportProgress(progress, "Preparing clean desecrated zones copy...");
+            LaunchDiagnostics.Log("Ensuring clean desecratedzones.json copy.");
+            await EnsureCleanDesecratedZonesCopyAsync(desecratedZonesFilePath, cleanDesecratedZonesFilePath);
 
             foreach (var targetExcelDirectory in excelDirectories)
             {
@@ -144,6 +152,12 @@ public static class ModTweaksService
             ReportProgress(progress, "Applying helmet visual tweaks...");
             LaunchDiagnostics.Log("Applying helmet visual tweaks.");
             await ApplyHelmetVisualTweaksAsync(armorDirectory, MainWindow.Settings.RemoveHelmetVisual);
+            ReportProgress(progress, "Restoring desecratedzones.json...");
+            LaunchDiagnostics.Log("Restoring desecrated zones file from clean copy.");
+            await RestoreDesecratedZonesFileAsync(cleanDesecratedZonesFilePath, desecratedZonesFilePath);
+            ReportProgress(progress, "Applying desecrated zones tweaks...");
+            LaunchDiagnostics.Log("Applying desecrated zones tweaks.");
+            await ApplyDesecratedZonesTweaksAsync(desecratedZonesFilePath, MainWindow.Settings.TerrorizeAllZones);
             LaunchDiagnostics.Log("Mod tweak preparation succeeded.");
 
             return true;
@@ -218,6 +232,23 @@ public static class ModTweaksService
             UiDirectoryName,
             LayoutsDirectoryName,
             LayoutsProfileHdFileName);
+    }
+
+    private static string? GetDesecratedZonesFilePath()
+    {
+        var mpqBase = GetMpqBaseDirectory();
+        if (string.IsNullOrWhiteSpace(mpqBase))
+        {
+            return null;
+        }
+
+        return Path.Combine(
+            mpqBase,
+            DataDirectoryName,
+            HdDirectoryName,
+            GlobalDirectoryName,
+            ExcelDirectoryName,
+            DesecratedZonesFileName);
     }
 
     private static string? GetArmorDirectory()
@@ -361,6 +392,71 @@ public static class ModTweaksService
             }
 
             await File.WriteAllTextAsync($"{cleanFilePath}.missing", string.Empty);
+        }
+    }
+
+    private static string GetCleanDesecratedZonesFilePath(string? desecratedZonesFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(desecratedZonesFilePath))
+        {
+            throw new FileNotFoundException("desecratedzones.json path could not be resolved.");
+        }
+
+        var desecratedZonesDirectory = Path.GetDirectoryName(desecratedZonesFilePath);
+        if (string.IsNullOrWhiteSpace(desecratedZonesDirectory))
+        {
+            throw new DirectoryNotFoundException("Desecrated zones folder could not be resolved.");
+        }
+
+        return Path.Combine(desecratedZonesDirectory, CleanDesecratedZonesFileName);
+    }
+
+    private static async Task EnsureCleanDesecratedZonesCopyAsync(string? desecratedZonesFilePath, string cleanDesecratedZonesFilePath)
+    {
+        if (File.Exists(cleanDesecratedZonesFilePath))
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(desecratedZonesFilePath) || !File.Exists(desecratedZonesFilePath))
+        {
+            throw new FileNotFoundException("desecratedzones.json was not found in the Reimagined hd global excel folder.");
+        }
+
+        await CopyFileAsync(desecratedZonesFilePath, cleanDesecratedZonesFilePath, overwrite: true);
+    }
+
+    private static async Task RestoreDesecratedZonesFileAsync(string cleanDesecratedZonesFilePath, string? desecratedZonesFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(desecratedZonesFilePath))
+        {
+            throw new FileNotFoundException("desecratedzones.json path could not be resolved.");
+        }
+
+        if (!File.Exists(cleanDesecratedZonesFilePath))
+        {
+            throw new FileNotFoundException("Clean desecratedzones.json copy was not found.");
+        }
+
+        await CopyFileAsync(cleanDesecratedZonesFilePath, desecratedZonesFilePath, overwrite: true);
+    }
+
+    private static async Task ApplyDesecratedZonesTweaksAsync(string? desecratedZonesFilePath, bool terrorizeAllZones)
+    {
+        if (string.IsNullOrWhiteSpace(desecratedZonesFilePath) || !File.Exists(desecratedZonesFilePath))
+        {
+            throw new FileNotFoundException("desecratedzones.json was not found in the Reimagined hd global excel folder.");
+        }
+
+        if (!terrorizeAllZones)
+        {
+            return;
+        }
+
+        var updatedEntries = await DesecratedZonesJsonService.MergeActAutoZonesAsync(desecratedZonesFilePath);
+        if (updatedEntries == 0)
+        {
+            throw new InvalidDataException("desecratedzones.json did not contain Act Auto zone boundaries to update.");
         }
     }
 
