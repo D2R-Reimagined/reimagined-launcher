@@ -26,16 +26,25 @@
                                Classes="muted"
                                Text="The button stays available here and will enable once the install directory is valid and the mod is detected."
                                TextWrapping="Wrap" />
-                    <Button x:Name="StartGameButton"
-                            Classes="accent"
-                            Content="Start Game"
-                            Click="OnRunClick"
-                            Width="220"
-                            HorizontalAlignment="Left"
-                            HorizontalContentAlignment="Center"
-                            VerticalContentAlignment="Center"
-                            MinHeight="48"
-                            IsEnabled="False" />
+                    <StackPanel Orientation="Horizontal" Spacing="16">
+                        <Button x:Name="StartGameButton"
+                                Classes="accent"
+                                Content="Start Game"
+                                Click="OnRunClick"
+                                Width="220"
+                                HorizontalContentAlignment="Center"
+                                VerticalContentAlignment="Center"
+                                MinHeight="48"
+                                IsEnabled="False" />
+                        <StackPanel VerticalAlignment="Center" Spacing="2">
+                            <TextBlock x:Name="BackupOnLaunchSummary"
+                                       Classes="muted"
+                                       FontSize="14" />
+                            <TextBlock x:Name="BackupIntervalSummary"
+                                       Classes="muted"
+                                       FontSize="14" />
+                        </StackPanel>
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
