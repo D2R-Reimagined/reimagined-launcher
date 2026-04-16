@@ -174,8 +174,8 @@ public partial class LaunchView : UserControl
 
         BackupOnLaunchSummary.Text = $"Backup on Launch: {(profile.AutomaticBackupsEnabled ? "Yes" : "No")}";
         BackupIntervalSummary.Text = profile.AutomaticBackupsEnabled
-            ? $"Backup Automatic Interval: {profile.BackupIntervalMinutes} min"
-            : "Backup Automatic Interval: No";
+            ? $"Auto-Backup Interval: {profile.BackupIntervalMinutes} min"
+            : "Auto-Backup Interval: N/A";
     }
 
     private async void OnInstallationTypeChanged(object? sender, SelectionChangedEventArgs e)

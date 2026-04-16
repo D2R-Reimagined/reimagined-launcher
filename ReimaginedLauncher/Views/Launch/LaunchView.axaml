@@ -39,10 +39,10 @@
                         <StackPanel VerticalAlignment="Center" Spacing="2">
                             <TextBlock x:Name="BackupOnLaunchSummary"
                                        Classes="muted"
-                                       FontSize="12" />
+                                       FontSize="14" />
                             <TextBlock x:Name="BackupIntervalSummary"
                                        Classes="muted"
-                                       FontSize="12" />
+                                       FontSize="14" />
                         </StackPanel>
                     </StackPanel>
                 </StackPanel>
