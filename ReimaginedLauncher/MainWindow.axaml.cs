@@ -714,7 +714,7 @@ public partial class MainWindow : Window
                        !UpdateLatestVersion.Equals("Unknown", StringComparison.OrdinalIgnoreCase);
 
             UpdateAvailableTextBlock.IsVisible = show;
-            UpdateAvailableTextBlock.Text = show ? $"(New v{UpdateLatestVersion} Available)" : string.Empty;
+            UpdateAvailableTextBlock.Text = show ? $"(Update v{UpdateLatestVersion} Available)" : string.Empty;
         }
 
         if (Dispatcher.UIThread.CheckAccess())
