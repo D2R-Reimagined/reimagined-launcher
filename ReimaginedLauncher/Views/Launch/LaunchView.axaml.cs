@@ -310,9 +310,14 @@ public partial class LaunchView : UserControl
                 {
                     LaunchDiagnostics.Log("Calling GameLauncherService.LaunchGame.");
                     SetLaunchStatus("Starting Diablo II: Resurrected...");
-                    LauncherService.LaunchGame();
+                    var gameProcess = LauncherService.LaunchGame();
                     LaunchDiagnostics.Log("GameLauncherService.LaunchGame returned without throwing.");
                     SetLaunchStatus($"{actionName} command sent.");
+
+                    if (gameProcess != null && MainWindow.Settings.MinimizeToTray && TopLevel.GetTopLevel(this) is MainWindow mainWindow)
+                    {
+                        _ = mainWindow.MinimizeToTrayAndWaitForExitAsync(gameProcess);
+                    }
                 }
             }
             catch (Exception ex)

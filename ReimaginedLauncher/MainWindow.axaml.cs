@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -64,6 +65,8 @@ public partial class MainWindow : Window
     private NexusModsSSO? _nexusSSO;
     private string? _localModVersion;
     private double _currentScale = 1.0;
+    private TrayIcon? _trayIcon;
+    private bool _isExiting;
 
     public MainWindow()
     {
@@ -90,6 +93,7 @@ public partial class MainWindow : Window
         
         // Set the window icon
         Icon = new WindowIcon("Assets/ReimaginedLauncher.ico");
+        InitializeTrayIcon();
     }
 
     private static string ResolveLauncherVersion()
@@ -1089,6 +1093,87 @@ public partial class MainWindow : Window
         Notifications.SendNotification("Logged out of Nexus Mods.", "Success");
     }
     
+    private void InitializeTrayIcon()
+    {
+        var showItem = new NativeMenuItem("Show Launcher");
+        showItem.Click += (_, _) => RestoreFromTray();
+
+        var exitItem = new NativeMenuItem("Exit Launcher");
+        exitItem.Click += (_, _) => ExitFromTray();
+
+        _trayIcon = new TrayIcon
+        {
+            Icon = Icon,
+            ToolTipText = "D2R Reimagined Launcher",
+            IsVisible = true,
+            Menu = new NativeMenu { showItem, exitItem }
+        };
+        _trayIcon.Clicked += (_, _) => RestoreFromTray();
+    }
+
+    public void MinimizeToTray()
+    {
+        Hide();
+    }
+
+    public void RestoreFromTray()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            Show();
+            WindowState = WindowState.Normal;
+            Activate();
+        });
+    }
+
+    private void ExitFromTray()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            _isExiting = true;
+            _trayIcon?.Dispose();
+            _trayIcon = null;
+            Close();
+        });
+    }
+
+    protected override void OnClosing(WindowClosingEventArgs e)
+    {
+        if (!_isExiting && Settings.MinimizeToTrayOnClose)
+        {
+            e.Cancel = true;
+            MinimizeToTray();
+            return;
+        }
+
+        _trayIcon?.Dispose();
+        _trayIcon = null;
+        base.OnClosing(e);
+    }
+
+    public async Task MinimizeToTrayAndWaitForExitAsync(Process gameProcess)
+    {
+        MinimizeToTray();
+
+        await Task.Run(() =>
+        {
+            try
+            {
+                gameProcess.WaitForExit();
+            }
+            catch (InvalidOperationException)
+            {
+                // Process already exited or handle is invalid
+            }
+            finally
+            {
+                gameProcess.Dispose();
+            }
+        });
+
+        RestoreFromTray();
+    }
+
     private async Task ValidateKey()
     {
         await SettingsManager.SaveAsync(Settings);
