@@ -41,6 +41,7 @@ public class InstallationProfile
     public bool TerrorZonePurpleOverlay { get; set; }
     public bool RemoveFadeEffect { get; set; }
     public bool RestoreTerrorZoneFanfare { get; set; }
+    public bool RemoveVignette { get; set; }
 }
 
 public class AppSettings

@@ -41,6 +41,7 @@ public partial class ModTweaksView : UserControl
         var terrorZonePurpleOverlay = profile.TerrorZonePurpleOverlay;
         var removeFadeEffect = profile.RemoveFadeEffect;
         var restoreTerrorZoneFanfare = profile.RestoreTerrorZoneFanfare;
+        var removeVignette = profile.RemoveVignette;
 
         profile.SkillPointsPerLevel = skillPointsPerLevel;
         profile.AttributesPerLevel = attributesPerLevel;
@@ -56,6 +57,7 @@ public partial class ModTweaksView : UserControl
         profile.TerrorZonePurpleOverlay = terrorZonePurpleOverlay;
         profile.RemoveFadeEffect = removeFadeEffect;
         profile.RestoreTerrorZoneFanfare = restoreTerrorZoneFanfare;
+        profile.RemoveVignette = removeVignette;
 
         SkillPointsComboBox.SelectedIndex = skillPointsPerLevel - 1;
         AttributesComboBox.SelectedIndex = attributesPerLevel - 1;
@@ -71,6 +73,7 @@ public partial class ModTweaksView : UserControl
         TerrorZonePurpleOverlayCheckBox.IsChecked = terrorZonePurpleOverlay;
         RemoveFadeEffectCheckBox.IsChecked = removeFadeEffect;
         RestoreTerrorZoneFanfareCheckBox.IsChecked = restoreTerrorZoneFanfare;
+        RemoveVignetteCheckBox.IsChecked = removeVignette;
         WarningBorder.IsVisible = HasNonDefaultTweaks(
             skillPointsPerLevel,
             attributesPerLevel,
@@ -148,6 +151,7 @@ public partial class ModTweaksView : UserControl
         profile.RemoveHelmetVisual = RemoveHelmetVisualCheckBox.IsChecked ?? false;
         profile.TerrorZonePurpleOverlay = TerrorZonePurpleOverlayCheckBox.IsChecked ?? false;
         profile.RemoveFadeEffect = RemoveFadeEffectCheckBox.IsChecked ?? false;
+        profile.RemoveVignette = RemoveVignetteCheckBox.IsChecked ?? false;
         WarningBorder.IsVisible = HasNonDefaultTweaks(
             profile.SkillPointsPerLevel,
             profile.AttributesPerLevel,
@@ -205,6 +209,7 @@ public partial class ModTweaksView : UserControl
         profile.TerrorZonePurpleOverlay = false;
         profile.RemoveFadeEffect = false;
         profile.RestoreTerrorZoneFanfare = false;
+        profile.RemoveVignette = false;
 
         await SettingsManager.SaveAsync(MainWindow.Settings);
         RefreshTweaksState();

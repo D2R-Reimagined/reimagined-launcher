@@ -47,6 +47,9 @@
        <None Include="Assets\Plugins\**\*">
          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
        </None>
+       <None Include="Assets\Vignette\**\*">
+         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+       </None>
      </ItemGroup>
 
 </Project>
