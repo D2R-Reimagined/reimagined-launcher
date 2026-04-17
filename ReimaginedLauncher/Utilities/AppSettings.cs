@@ -10,6 +10,13 @@ public enum InstallationType
     D2RMM
 }
 
+public enum StackDropOption
+{
+    Default,
+    Unstacked,
+    Stacked
+}
+
 public class InstallationProfile
 {
     public InstallationType Type { get; set; }
@@ -40,6 +47,8 @@ public class InstallationProfile
     public bool TerrorizeAllZones { get; set; }
     public bool TerrorZonePurpleOverlay { get; set; }
     public bool RestoreTerrorZoneFanfare { get; set; }
+    public StackDropOption OrbStackDrops { get; set; }
+    public StackDropOption RuneStackDrops { get; set; }
 }
 
 public class AppSettings

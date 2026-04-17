@@ -35,6 +35,7 @@ public static class ModTweaksService
     private const string DifficultyLevelsFileName = "DifficultyLevels.txt";
     private const string SkillsFileName = "skills.txt";
     private const string StatesFileName = "states.txt";
+    private const string TreasureClassExFileName = "treasureclassex.txt";
     private const string DesecratedZonesFileName = "desecratedzones.json";
     private const string CleanDesecratedZonesFileName = "desecratedzones_launcher_clean.json";
     private const string EnvDirectoryName = "env";
@@ -561,6 +562,12 @@ public static class ModTweaksService
         await ApplyStatesTweaksAsync(
             Path.Combine(excelDirectory, StatesFileName),
             profile.RemovePaladinAuraSound);
+        ReportProgress(progress, "Updating treasureclassex.txt...");
+        LaunchDiagnostics.Log($"Applying treasure class tweaks in {excelDirectory}.");
+        await ApplyTreasureClassExTweaksAsync(
+            Path.Combine(excelDirectory, TreasureClassExFileName),
+            profile.OrbStackDrops,
+            profile.RuneStackDrops);
     }
 
     private static void ReportProgress(IProgress<string>? progress, string message)
@@ -851,6 +858,94 @@ public static class ModTweaksService
             statesFilePath,
             (updatedEntriesList, filePath, outputDirectory, cancellationToken) =>
                 StatesParser.SaveEntries(updatedEntriesList, filePath, outputDirectory, cancellationToken));
+    }
+
+    private static readonly (string Unstacked, string Stacked)[] OrbReplacementPairs =
+    [
+        ("ooi", "1oi"),
+        ("ooa", "1oa"),
+        ("ooc", "1oc"),
+        ("ka3", "1ka"),
+        ("oos", "1os"),
+        ("ooe", "1oe"),
+        ("oor", "1or")
+    ];
+
+    private static async Task ApplyTreasureClassExTweaksAsync(
+        string treasureClassExFilePath,
+        StackDropOption orbStackDrops,
+        StackDropOption runeStackDrops)
+    {
+        if (orbStackDrops == StackDropOption.Default && runeStackDrops == StackDropOption.Default)
+        {
+            return;
+        }
+
+        if (!File.Exists(treasureClassExFilePath))
+        {
+            return;
+        }
+
+        var lines = await File.ReadAllLinesAsync(treasureClassExFilePath);
+
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var fields = lines[i].Split('\t');
+            var modified = false;
+
+            for (var f = 0; f < fields.Length; f++)
+            {
+                var field = fields[f];
+                if (string.IsNullOrEmpty(field))
+                {
+                    continue;
+                }
+
+                if (orbStackDrops != StackDropOption.Default)
+                {
+                    foreach (var (unstacked, stacked) in OrbReplacementPairs)
+                    {
+                        var from = orbStackDrops == StackDropOption.Unstacked ? stacked : unstacked;
+                        var to = orbStackDrops == StackDropOption.Unstacked ? unstacked : stacked;
+
+                        if (string.Equals(field, from, StringComparison.Ordinal))
+                        {
+                            fields[f] = to;
+                            modified = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (runeStackDrops != StackDropOption.Default && fields[f].Length == 3)
+                {
+                    var prefix = fields[f][0];
+                    var suffix = fields[f].Substring(1);
+
+                    if (runeStackDrops == StackDropOption.Unstacked
+                        && prefix == 's'
+                        && int.TryParse(suffix, out _))
+                    {
+                        fields[f] = "r" + suffix;
+                        modified = true;
+                    }
+                    else if (runeStackDrops == StackDropOption.Stacked
+                             && prefix == 'r'
+                             && int.TryParse(suffix, out _))
+                    {
+                        fields[f] = "s" + suffix;
+                        modified = true;
+                    }
+                }
+            }
+
+            if (modified)
+            {
+                lines[i] = string.Join('\t', fields);
+            }
+        }
+
+        await File.WriteAllLinesAsync(treasureClassExFilePath, lines);
     }
 
     private static async Task SaveGeneratedEntriesAsync<TEntry>(
