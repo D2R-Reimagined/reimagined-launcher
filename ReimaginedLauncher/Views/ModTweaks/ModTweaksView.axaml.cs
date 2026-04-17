@@ -40,6 +40,7 @@ public partial class ModTweaksView : UserControl
         var terrorizeAllZones = profile.TerrorizeAllZones;
         var terrorZonePurpleOverlay = profile.TerrorZonePurpleOverlay;
         var restoreTerrorZoneFanfare = profile.RestoreTerrorZoneFanfare;
+        var removeVignette = profile.RemoveVignette;
 
         profile.SkillPointsPerLevel = skillPointsPerLevel;
         profile.AttributesPerLevel = attributesPerLevel;
@@ -54,6 +55,7 @@ public partial class ModTweaksView : UserControl
         profile.TerrorizeAllZones = terrorizeAllZones;
         profile.TerrorZonePurpleOverlay = terrorZonePurpleOverlay;
         profile.RestoreTerrorZoneFanfare = restoreTerrorZoneFanfare;
+        profile.RemoveVignette = removeVignette;
 
         SkillPointsComboBox.SelectedIndex = skillPointsPerLevel - 1;
         AttributesComboBox.SelectedIndex = attributesPerLevel - 1;
@@ -68,6 +70,7 @@ public partial class ModTweaksView : UserControl
         TerrorizeAllZonesCheckBox.IsChecked = terrorizeAllZones;
         TerrorZonePurpleOverlayCheckBox.IsChecked = terrorZonePurpleOverlay;
         RestoreTerrorZoneFanfareCheckBox.IsChecked = restoreTerrorZoneFanfare;
+        RemoveVignetteCheckBox.IsChecked = removeVignette;
         WarningBorder.IsVisible = HasNonDefaultTweaks(
             skillPointsPerLevel,
             attributesPerLevel,
@@ -144,6 +147,7 @@ public partial class ModTweaksView : UserControl
         profile.MakeTooltipBackgroundOpaque = MakeTooltipBackgroundOpaqueCheckBox.IsChecked ?? false;
         profile.RemoveHelmetVisual = RemoveHelmetVisualCheckBox.IsChecked ?? false;
         profile.TerrorZonePurpleOverlay = TerrorZonePurpleOverlayCheckBox.IsChecked ?? false;
+        profile.RemoveVignette = RemoveVignetteCheckBox.IsChecked ?? false;
         WarningBorder.IsVisible = HasNonDefaultTweaks(
             profile.SkillPointsPerLevel,
             profile.AttributesPerLevel,
@@ -200,6 +204,7 @@ public partial class ModTweaksView : UserControl
         profile.TerrorizeAllZones = false;
         profile.TerrorZonePurpleOverlay = false;
         profile.RestoreTerrorZoneFanfare = false;
+        profile.RemoveVignette = false;
 
         await SettingsManager.SaveAsync(MainWindow.Settings);
         RefreshTweaksState();
