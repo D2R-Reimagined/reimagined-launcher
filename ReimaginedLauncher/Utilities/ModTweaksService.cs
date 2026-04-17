@@ -930,66 +930,84 @@ public static class ModTweaksService
             return;
         }
 
-        var lines = await File.ReadAllLinesAsync(treasureClassExFilePath);
-
-        for (var i = 0; i < lines.Length; i++)
+        var entries = (await TreasureClassParser.GetEntries(treasureClassExFilePath)).ToList();
+        if (entries.Count == 0)
         {
-            var fields = lines[i].Split('\t');
-            var modified = false;
+            return;
+        }
 
-            for (var f = 0; f < fields.Length; f++)
+        var updatedEntries = new List<D2RReimaginedTools.Models.TreasureClass>(entries.Count);
+
+        foreach (var entry in entries)
+        {
+            var updated = entry with
             {
-                var field = fields[f];
-                if (string.IsNullOrEmpty(field))
-                {
-                    continue;
-                }
+                Item1 = ReplaceDropCode(entry.Item1, orbStackDrops, runeStackDrops),
+                Item2 = ReplaceDropCode(entry.Item2, orbStackDrops, runeStackDrops),
+                Item3 = ReplaceDropCode(entry.Item3, orbStackDrops, runeStackDrops),
+                Item4 = ReplaceDropCode(entry.Item4, orbStackDrops, runeStackDrops),
+                Item5 = ReplaceDropCode(entry.Item5, orbStackDrops, runeStackDrops),
+                Item6 = ReplaceDropCode(entry.Item6, orbStackDrops, runeStackDrops),
+                Item7 = ReplaceDropCode(entry.Item7, orbStackDrops, runeStackDrops),
+                Item8 = ReplaceDropCode(entry.Item8, orbStackDrops, runeStackDrops),
+                Item9 = ReplaceDropCode(entry.Item9, orbStackDrops, runeStackDrops),
+                Item10 = ReplaceDropCode(entry.Item10, orbStackDrops, runeStackDrops)
+            };
+            updatedEntries.Add(updated);
+        }
 
-                if (orbStackDrops != StackDropOption.Default)
-                {
-                    foreach (var (unstacked, stacked) in OrbReplacementPairs)
-                    {
-                        var from = orbStackDrops == StackDropOption.Unstacked ? stacked : unstacked;
-                        var to = orbStackDrops == StackDropOption.Unstacked ? unstacked : stacked;
+        await SaveGeneratedEntriesAsync(
+            updatedEntries,
+            treasureClassExFilePath,
+            (updatedEntriesList, filePath, outputDirectory, cancellationToken) =>
+                TreasureClassParser.SaveEntries(updatedEntriesList, filePath, outputDirectory, cancellationToken));
+    }
 
-                        if (string.Equals(field, from, StringComparison.Ordinal))
-                        {
-                            fields[f] = to;
-                            modified = true;
-                            break;
-                        }
-                    }
-                }
+    private static string? ReplaceDropCode(
+        string? value,
+        StackDropOption orbStackDrops,
+        StackDropOption runeStackDrops)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
 
-                if (runeStackDrops != StackDropOption.Default && fields[f].Length == 3)
-                {
-                    var prefix = fields[f][0];
-                    var suffix = fields[f].Substring(1);
-
-                    if (runeStackDrops == StackDropOption.Unstacked
-                        && prefix == 's'
-                        && int.TryParse(suffix, out _))
-                    {
-                        fields[f] = "r" + suffix;
-                        modified = true;
-                    }
-                    else if (runeStackDrops == StackDropOption.Stacked
-                             && prefix == 'r'
-                             && int.TryParse(suffix, out _))
-                    {
-                        fields[f] = "s" + suffix;
-                        modified = true;
-                    }
-                }
-            }
-
-            if (modified)
+        if (orbStackDrops != StackDropOption.Default)
+        {
+            foreach (var (unstacked, stacked) in OrbReplacementPairs)
             {
-                lines[i] = string.Join('\t', fields);
+                var from = orbStackDrops == StackDropOption.Unstacked ? stacked : unstacked;
+                var to = orbStackDrops == StackDropOption.Unstacked ? unstacked : stacked;
+
+                if (string.Equals(value, from, StringComparison.Ordinal))
+                {
+                    return to;
+                }
             }
         }
 
-        await File.WriteAllLinesAsync(treasureClassExFilePath, lines);
+        if (runeStackDrops != StackDropOption.Default && value.Length == 3)
+        {
+            var prefix = value[0];
+            var suffix = value.Substring(1);
+
+            if (runeStackDrops == StackDropOption.Unstacked
+                && prefix == 's'
+                && int.TryParse(suffix, out _))
+            {
+                return "r" + suffix;
+            }
+
+            if (runeStackDrops == StackDropOption.Stacked
+                && prefix == 'r'
+                && int.TryParse(suffix, out _))
+            {
+                return "s" + suffix;
+            }
+        }
+
+        return value;
     }
 
     private static async Task SaveGeneratedEntriesAsync<TEntry>(
