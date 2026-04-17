@@ -42,6 +42,7 @@ public partial class ModTweaksView : UserControl
         var restoreTerrorZoneFanfare = profile.RestoreTerrorZoneFanfare;
         var orbStackDrops = profile.OrbStackDrops;
         var runeStackDrops = profile.RuneStackDrops;
+        var removeVignette = profile.RemoveVignette;
 
         profile.SkillPointsPerLevel = skillPointsPerLevel;
         profile.AttributesPerLevel = attributesPerLevel;
@@ -58,6 +59,7 @@ public partial class ModTweaksView : UserControl
         profile.RestoreTerrorZoneFanfare = restoreTerrorZoneFanfare;
         profile.OrbStackDrops = orbStackDrops;
         profile.RuneStackDrops = runeStackDrops;
+        profile.RemoveVignette = removeVignette;
 
         SkillPointsComboBox.SelectedIndex = skillPointsPerLevel - 1;
         AttributesComboBox.SelectedIndex = attributesPerLevel - 1;
@@ -74,6 +76,7 @@ public partial class ModTweaksView : UserControl
         RestoreTerrorZoneFanfareCheckBox.IsChecked = restoreTerrorZoneFanfare;
         OrbStackDropsComboBox.SelectedIndex = (int)orbStackDrops;
         RuneStackDropsComboBox.SelectedIndex = (int)runeStackDrops;
+        RemoveVignetteCheckBox.IsChecked = removeVignette;
         WarningBorder.IsVisible = HasNonDefaultTweaks(
             skillPointsPerLevel,
             attributesPerLevel,
@@ -163,6 +166,7 @@ public partial class ModTweaksView : UserControl
         profile.MakeTooltipBackgroundOpaque = MakeTooltipBackgroundOpaqueCheckBox.IsChecked ?? false;
         profile.RemoveHelmetVisual = RemoveHelmetVisualCheckBox.IsChecked ?? false;
         profile.TerrorZonePurpleOverlay = TerrorZonePurpleOverlayCheckBox.IsChecked ?? false;
+        profile.RemoveVignette = RemoveVignetteCheckBox.IsChecked ?? false;
         WarningBorder.IsVisible = HasNonDefaultTweaks(
             profile.SkillPointsPerLevel,
             profile.AttributesPerLevel,
@@ -221,6 +225,7 @@ public partial class ModTweaksView : UserControl
         profile.RestoreTerrorZoneFanfare = false;
         profile.OrbStackDrops = StackDropOption.Default;
         profile.RuneStackDrops = StackDropOption.Default;
+        profile.RemoveVignette = false;
 
         await SettingsManager.SaveAsync(MainWindow.Settings);
         RefreshTweaksState();

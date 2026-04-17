@@ -31,6 +31,10 @@ public static class ModTweaksService
     private const string LayoutsProfileHdFileName = "_profilehd.json";
     private const string CleanLayoutsProfileHdFileName = "layouts_profilehd_launcher_clean.json";
     private const string CleanArmorTweaksDirectoryName = "armor_launcher_clean";
+    private const string TexturesDirectoryName = "textures";
+    private const string VignetteDirectoryName = "vignette";
+    private const string VignetteFileName = "vignette.texture";
+    private const string BundledVignetteAssetPath = "Assets/Vignette/vignette.texture";
     private const string CharStatsFileName = "charstats.txt";
     private const string DifficultyLevelsFileName = "DifficultyLevels.txt";
     private const string SkillsFileName = "skills.txt";
@@ -186,6 +190,9 @@ public static class ModTweaksService
             ReportProgress(progress, "Applying terror zone fanfare tweaks...");
             LaunchDiagnostics.Log("Applying terror zone fanfare tweaks.");
             ApplyTerrorZoneFanfareTweak(profile.RestoreTerrorZoneFanfare);
+            ReportProgress(progress, "Applying vignette tweaks...");
+            LaunchDiagnostics.Log("Applying vignette tweaks.");
+            await ApplyVignetteTweakAsync(profile.RemoveVignette);
             LaunchDiagnostics.Log("Mod tweak preparation succeeded.");
 
             return true;
@@ -705,6 +712,43 @@ public static class ModTweaksService
 
             await File.WriteAllTextAsync(filePath, string.Empty);
         }
+    }
+
+    private static async Task ApplyVignetteTweakAsync(bool removeVignette)
+    {
+        var mpqBase = GetMpqBaseDirectory();
+        if (string.IsNullOrWhiteSpace(mpqBase))
+        {
+            return;
+        }
+
+        var vignetteDirectory = Path.Combine(
+            mpqBase,
+            DataDirectoryName,
+            HdDirectoryName,
+            GlobalDirectoryName,
+            TexturesDirectoryName,
+            VignetteDirectoryName);
+        var vignetteFilePath = Path.Combine(vignetteDirectory, VignetteFileName);
+
+        if (!removeVignette)
+        {
+            if (File.Exists(vignetteFilePath))
+            {
+                File.Delete(vignetteFilePath);
+            }
+
+            return;
+        }
+
+        var bundledVignetteFile = Path.Combine(AppContext.BaseDirectory, BundledVignetteAssetPath);
+        if (!File.Exists(bundledVignetteFile))
+        {
+            throw new FileNotFoundException("Bundled vignette.texture asset was not found.");
+        }
+
+        Directory.CreateDirectory(vignetteDirectory);
+        await CopyFileAsync(bundledVignetteFile, vignetteFilePath, overwrite: true);
     }
 
     private static async Task ApplyCharStatsTweaksAsync(

@@ -437,12 +437,12 @@ public class GameLauncherService
         return $"\"{executablePath}\" {launchParameters}";
     }
 
-    public void LaunchGame(string? launchParamOverride = null, string? gamePathOverride = null)
+    public Process? LaunchGame(string? launchParamOverride = null, string? gamePathOverride = null)
     {
         var profile = MainWindow.Settings.CurrentProfile;
         
         // D2RMM handled separately in LaunchView
-        if (profile.Type == InstallationType.D2RMM) return;
+        if (profile.Type == InstallationType.D2RMM) return null;
 
         if (!string.IsNullOrWhiteSpace(gamePathOverride))
         {
@@ -464,7 +464,7 @@ public class GameLauncherService
             if (!File.Exists(executablePath))
             {
                 Notifications.SendNotification($"Steam.exe not found at {executablePath}. Please locate it in the Install Directory section.");
-                return;
+                return null;
             }
         }
         else
@@ -475,7 +475,7 @@ public class GameLauncherService
             if (string.IsNullOrWhiteSpace(executablePath))
             {
                 Notifications.SendNotification("No valid game path found. Please set the game path in settings.");
-                return;
+                return null;
             }
         }
 
@@ -485,7 +485,7 @@ public class GameLauncherService
         if (!OperatingSystem.IsWindows())
         {
             Notifications.SendNotification("This only works on Windows");
-            return;
+            return null;
         }
 
         var processStartInfo = new ProcessStartInfo(executablePath)
@@ -501,15 +501,17 @@ public class GameLauncherService
             {
                 LaunchDiagnostics.Log("Process.Start returned null.");
                 Notifications.SendNotification($"Failed to start {Path.GetFileName(executablePath)}.", "Warning");
-                return;
+                return null;
             }
 
             LaunchDiagnostics.Log($"Process started with PID {process.Id}.");
+            return process;
         }
         catch (Win32Exception ex)
         {
             LaunchDiagnostics.LogException("Process.Start failed", ex);
             Notifications.SendNotification($"Failed to start {Path.GetFileName(executablePath)}: {ex.Message}", "Warning");
+            return null;
         }
     }
 

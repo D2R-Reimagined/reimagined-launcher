@@ -4,10 +4,10 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="520"
              x:Class="ReimaginedLauncher.Views.ModTweaks.ModTweaksView">
-    <Grid RowDefinitions="*,Auto"
+    <Grid RowDefinitions="Auto,*"
           RowSpacing="16">
         <ScrollViewer x:Name="RootScrollViewer"
-                      Grid.Row="0"
+                      Grid.Row="1"
                       HorizontalScrollBarVisibility="Disabled"
                       VerticalScrollBarVisibility="Auto"
                       HorizontalAlignment="Stretch"
@@ -258,6 +258,15 @@
                                    Margin="28,0,0,0"
                                    Text="Restores the purple screen overlay in terrorized areas."/>
                     </StackPanel>
+
+                    <StackPanel Spacing="4">
+                        <CheckBox x:Name="RemoveVignetteCheckBox"
+                                  Content="Remove Vignette"
+                                  IsCheckedChanged="OnVisualTweaksChanged"/>
+                        <TextBlock Classes="muted"
+                                   Margin="28,0,0,0"
+                                   Text="Removes the blurry black borders from the edge of the screen. Works with widescreen but does not remove engine-set black bars."/>
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
@@ -327,14 +336,14 @@
         </ScrollViewer>
 
         <Border x:Name="WarningBorder"
-                Grid.Row="1"
+                Grid.Row="0"
                 Classes="warning-banner"
                 IsVisible="False"
                 Padding="12">
             <TextBlock x:Name="WarningTextBlock"
                        Foreground="{StaticResource GoldTextBrush}"
                        TextWrapping="Wrap"
-                       Text="This is the unintended Reimagined experience. Defaults are 1 skill point, 5 attributes per level, max skill level 25, and default difficulty resist penalties of 0, -60, and -120."/>
+                       Text="The selected tweaks alter the balance for Reimagined and the gameplay will be easier/harder than intended. We balance based on the default values only."/>
         </Border>
     </Grid>
 </UserControl>
