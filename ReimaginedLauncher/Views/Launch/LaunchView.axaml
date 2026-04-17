@@ -10,9 +10,9 @@
               RowSpacing="18">
             <StackPanel Spacing="4">
                 <TextBlock Classes="view-title"
-                           Text="Enter The Hunt" />
+                           Text="Sanctuary Awaits" />
                 <TextBlock Classes="muted"
-                           Text="Point the launcher at your Diablo II: Resurrected install, verify the Reimagined files, and launch straight into the dark."
+                           Text="Select your Diablo II: Resurrected install type and location, manage and tweak your Reimagined files, and then launch into Sanctuary"
                            TextWrapping="Wrap" />
             </StackPanel>
 
