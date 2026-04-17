@@ -560,7 +560,8 @@ public static class ModTweaksService
         LaunchDiagnostics.Log($"Applying states tweaks in {excelDirectory}.");
         await ApplyStatesTweaksAsync(
             Path.Combine(excelDirectory, StatesFileName),
-            profile.RemovePaladinAuraSound);
+            profile.RemovePaladinAuraSound,
+            profile.RemoveFadeEffect);
     }
 
     private static void ReportProgress(IProgress<string>? progress, string message)
@@ -812,9 +813,9 @@ public static class ModTweaksService
                 SkillsParser.SaveEntries(updatedEntriesList, filePath, outputDirectory, cancellationToken));
     }
 
-    private static async Task ApplyStatesTweaksAsync(string statesFilePath, bool removePaladinAuraSound)
+    private static async Task ApplyStatesTweaksAsync(string statesFilePath, bool removePaladinAuraSound, bool removeFadeEffect)
     {
-        if (!removePaladinAuraSound)
+        if (!removePaladinAuraSound && !removeFadeEffect)
         {
             return;
         }
@@ -830,20 +831,29 @@ public static class ModTweaksService
 
         foreach (var entry in entries)
         {
-            if (string.IsNullOrWhiteSpace(entry.OnSound) ||
-                !entry.OnSound.StartsWith("paladin_aura_", StringComparison.OrdinalIgnoreCase))
+            var modified = entry;
+
+            if (removePaladinAuraSound
+                && !string.IsNullOrWhiteSpace(modified.OnSound)
+                && modified.OnSound.StartsWith("paladin_aura_", StringComparison.OrdinalIgnoreCase))
             {
-                updatedEntries.Add(entry);
-                continue;
+                modified = modified with { OnSound = string.Empty };
+                updatedRows++;
             }
 
-            updatedEntries.Add(entry with { OnSound = string.Empty });
-            updatedRows++;
+            if (removeFadeEffect
+                && string.Equals(modified.StateId, "fade", StringComparison.OrdinalIgnoreCase))
+            {
+                modified = modified with { Overlay1 = string.Empty };
+                updatedRows++;
+            }
+
+            updatedEntries.Add(modified);
         }
 
         if (updatedRows == 0)
         {
-            throw new InvalidDataException("states.txt did not contain any paladin_aura_ rows to update.");
+            throw new InvalidDataException("states.txt did not contain any matching rows to update.");
         }
 
         await SaveGeneratedEntriesAsync(

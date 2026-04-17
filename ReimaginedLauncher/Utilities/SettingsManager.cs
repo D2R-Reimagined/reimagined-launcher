@@ -57,6 +57,7 @@ public static class SettingsManager
             if (root.TryGetProperty("MakeTooltipBackgroundOpaque", out prop)) profile.MakeTooltipBackgroundOpaque = prop.GetBoolean();
             if (root.TryGetProperty("TerrorizeAllZones", out prop)) profile.TerrorizeAllZones = prop.GetBoolean();
             if (root.TryGetProperty("TerrorZonePurpleOverlay", out prop)) profile.TerrorZonePurpleOverlay = prop.GetBoolean();
+            if (root.TryGetProperty("RemoveFadeEffect", out prop)) profile.RemoveFadeEffect = prop.GetBoolean();
             if (root.TryGetProperty("RestoreTerrorZoneFanfare", out prop)) profile.RestoreTerrorZoneFanfare = prop.GetBoolean();
 
             if (root.TryGetProperty("Plugins", out prop) && prop.ValueKind == JsonValueKind.Array)

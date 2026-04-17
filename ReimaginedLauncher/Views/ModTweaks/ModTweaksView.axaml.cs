@@ -39,6 +39,7 @@ public partial class ModTweaksView : UserControl
         var removeHelmetVisual = profile.RemoveHelmetVisual;
         var terrorizeAllZones = profile.TerrorizeAllZones;
         var terrorZonePurpleOverlay = profile.TerrorZonePurpleOverlay;
+        var removeFadeEffect = profile.RemoveFadeEffect;
         var restoreTerrorZoneFanfare = profile.RestoreTerrorZoneFanfare;
 
         profile.SkillPointsPerLevel = skillPointsPerLevel;
@@ -53,6 +54,7 @@ public partial class ModTweaksView : UserControl
         profile.RemoveHelmetVisual = removeHelmetVisual;
         profile.TerrorizeAllZones = terrorizeAllZones;
         profile.TerrorZonePurpleOverlay = terrorZonePurpleOverlay;
+        profile.RemoveFadeEffect = removeFadeEffect;
         profile.RestoreTerrorZoneFanfare = restoreTerrorZoneFanfare;
 
         SkillPointsComboBox.SelectedIndex = skillPointsPerLevel - 1;
@@ -67,6 +69,7 @@ public partial class ModTweaksView : UserControl
         RemoveHelmetVisualCheckBox.IsChecked = removeHelmetVisual;
         TerrorizeAllZonesCheckBox.IsChecked = terrorizeAllZones;
         TerrorZonePurpleOverlayCheckBox.IsChecked = terrorZonePurpleOverlay;
+        RemoveFadeEffectCheckBox.IsChecked = removeFadeEffect;
         RestoreTerrorZoneFanfareCheckBox.IsChecked = restoreTerrorZoneFanfare;
         WarningBorder.IsVisible = HasNonDefaultTweaks(
             skillPointsPerLevel,
@@ -144,6 +147,7 @@ public partial class ModTweaksView : UserControl
         profile.MakeTooltipBackgroundOpaque = MakeTooltipBackgroundOpaqueCheckBox.IsChecked ?? false;
         profile.RemoveHelmetVisual = RemoveHelmetVisualCheckBox.IsChecked ?? false;
         profile.TerrorZonePurpleOverlay = TerrorZonePurpleOverlayCheckBox.IsChecked ?? false;
+        profile.RemoveFadeEffect = RemoveFadeEffectCheckBox.IsChecked ?? false;
         WarningBorder.IsVisible = HasNonDefaultTweaks(
             profile.SkillPointsPerLevel,
             profile.AttributesPerLevel,
@@ -199,6 +203,7 @@ public partial class ModTweaksView : UserControl
         profile.RemoveHelmetVisual = false;
         profile.TerrorizeAllZones = false;
         profile.TerrorZonePurpleOverlay = false;
+        profile.RemoveFadeEffect = false;
         profile.RestoreTerrorZoneFanfare = false;
 
         await SettingsManager.SaveAsync(MainWindow.Settings);

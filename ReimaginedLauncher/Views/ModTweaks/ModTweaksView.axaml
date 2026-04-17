@@ -258,6 +258,15 @@
                                    Margin="28,0,0,0"
                                    Text="Restores the purple screen overlay in terrorized areas."/>
                     </StackPanel>
+
+                    <StackPanel Spacing="4">
+                        <CheckBox x:Name="RemoveFadeEffectCheckBox"
+                                  Content="Remove Fade Effect"
+                                  IsCheckedChanged="OnVisualTweaksChanged"/>
+                        <TextBlock Classes="muted"
+                                   Margin="28,0,0,0"
+                                   Text="Disables the fade effect from the skill and from the 'You feel incorporeal' visual only stat."/>
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
