@@ -50,6 +50,9 @@ public partial class SettingsView : UserControl
                 : 0;
         }
 
+        MinimizeToTrayCheckBox.IsChecked = MainWindow.Settings.MinimizeToTray;
+        MinimizeToTrayOnCloseCheckBox.IsChecked = MainWindow.Settings.MinimizeToTrayOnClose;
+
         _isRefreshingSettings = false;
     }
 
@@ -82,6 +85,28 @@ public partial class SettingsView : UserControl
             _ => null
         };
 
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private async void OnMinimizeToTrayChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_isRefreshingSettings)
+        {
+            return;
+        }
+
+        MainWindow.Settings.MinimizeToTray = MinimizeToTrayCheckBox.IsChecked ?? false;
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private async void OnMinimizeToTrayOnCloseChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_isRefreshingSettings)
+        {
+            return;
+        }
+
+        MainWindow.Settings.MinimizeToTrayOnClose = MinimizeToTrayOnCloseCheckBox.IsChecked ?? false;
         await SettingsManager.SaveAsync(MainWindow.Settings);
     }
 

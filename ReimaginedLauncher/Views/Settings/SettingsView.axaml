@@ -112,6 +112,24 @@
                             <ComboBoxItem Content="100%"/>
                         </ComboBox>
                     </StackPanel>
+                    <StackPanel Spacing="4">
+                        <CheckBox x:Name="MinimizeToTrayCheckBox"
+                                  Content="Minimize to tray on game launch"
+                                  IsCheckedChanged="OnMinimizeToTrayChanged"/>
+                        <TextBlock Classes="muted"
+                                   Margin="28,0,0,0"
+                                   TextWrapping="Wrap"
+                                   Text="Minimizes the launcher to the system tray when the game starts and restores it when the game exits." />
+                    </StackPanel>
+                    <StackPanel Spacing="4">
+                        <CheckBox x:Name="MinimizeToTrayOnCloseCheckBox"
+                                  Content="Minimize to tray when window is closed"
+                                  IsCheckedChanged="OnMinimizeToTrayOnCloseChanged"/>
+                        <TextBlock Classes="muted"
+                                   Margin="28,0,0,0"
+                                   TextWrapping="Wrap"
+                                   Text="Minimizes the launcher to the system tray instead of exiting when the window is closed. Use the tray icon to exit." />
+                    </StackPanel>
                 </StackPanel>
             </Border>
         </StackPanel>

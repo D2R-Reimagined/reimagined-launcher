@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text.Json;
 using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Controls.Notifications;
@@ -21,6 +23,7 @@ using ReimaginedLauncher.HttpClients.Models;
 using ReimaginedLauncher.Utilities;
 using ReimaginedLauncher.Utilities.Json;
 using ReimaginedLauncher.Utilities.ViewModels;
+using Avalonia;
 using ReimaginedLauncher.Views.Backups;
 using ReimaginedLauncher.Views.Launch;
 using ReimaginedLauncher.Views.ModTweaks;
@@ -68,12 +71,17 @@ public partial class MainWindow : Window
     private NexusModsSSO? _nexusSSO;
     private string? _localModVersion;
     private double _currentScale = 1.0;
+    private TrayIcon? _trayIcon;
+    private bool _isExiting;
+    private readonly DispatcherTimer _saveWindowStateTimer;
+    private bool _isRestoringWindowState;
 
     public MainWindow()
     {
         Instance = this;
         _gitHubAnnouncementsHttpClient = Program.ServiceProvider.GetRequiredService<GitHubAnnouncementsHttpClient>();
         _nexusModsHttpClient = Program.ServiceProvider.GetRequiredService<NexusModsHttpClient>();;
+        Opacity = 0;
         InitializeComponent();
         NotificationManager = new WindowNotificationManager(this)
         {
@@ -95,6 +103,15 @@ public partial class MainWindow : Window
         
         // Set the window icon
         Icon = new WindowIcon("Assets/ReimaginedLauncher.ico");
+        InitializeTrayIcon();
+        _saveWindowStateTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _saveWindowStateTimer.Tick += async (_, _) =>
+        {
+            _saveWindowStateTimer.Stop();
+            await SettingsManager.SaveAsync(Settings);
+        };
+        PositionChanged += OnWindowPositionOrSizeChanged;
+        SizeChanged += OnWindowPositionOrSizeChanged;
     }
 
     private static string ResolveLauncherVersion()
@@ -116,6 +133,8 @@ public partial class MainWindow : Window
     private async Task LoadSettingsAsync()
     {
         Settings = await SettingsManager.LoadAsync();
+        RestoreWindowState();
+        Opacity = 1;
         Settings.UiScale = ClampUiScale(Settings.UiScale);
         var profile = Settings.CurrentProfile;
         profile.InstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(profile.InstallDirectory);
@@ -1094,6 +1113,228 @@ public partial class MainWindow : Window
         Notifications.SendNotification("Logged out of Nexus Mods.", "Success");
     }
     
+    private void InitializeTrayIcon()
+    {
+        var showItem = new NativeMenuItem("Show Launcher");
+        showItem.Click += (_, _) => RestoreFromTray();
+
+        var exitItem = new NativeMenuItem("Exit Launcher");
+        exitItem.Click += (_, _) => ExitFromTray();
+
+        _trayIcon = new TrayIcon
+        {
+            Icon = Icon,
+            ToolTipText = "D2R Reimagined Launcher",
+            IsVisible = true,
+            Menu = new NativeMenu { showItem, exitItem }
+        };
+        _trayIcon.Clicked += (_, _) => RestoreFromTray();
+    }
+
+    public void MinimizeToTray()
+    {
+        Hide();
+    }
+
+    public void RestoreFromTray()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            Show();
+            WindowState = Settings.IsMaximized ? WindowState.Maximized : WindowState.Normal;
+            Activate();
+        });
+    }
+
+    private void RestoreWindowState()
+    {
+        _isRestoringWindowState = true;
+        try
+        {
+            if (Settings.WindowWidth.HasValue && Settings.WindowHeight.HasValue)
+            {
+                Width = Settings.WindowWidth.Value;
+                Height = Settings.WindowHeight.Value;
+            }
+
+            if (Settings.WindowX.HasValue && Settings.WindowY.HasValue)
+            {
+                var x = (int)Settings.WindowX.Value;
+                var y = (int)Settings.WindowY.Value;
+                var w = (int)(Settings.WindowWidth ?? Width);
+                var h = (int)(Settings.WindowHeight ?? Height);
+
+                if (IsPositionWithinScreenBounds(x, y, w, h))
+                {
+                    Position = new PixelPoint(x, y);
+                    WindowStartupLocation = WindowStartupLocation.Manual;
+                }
+            }
+
+            if (Settings.IsMaximized)
+            {
+                WindowState = WindowState.Maximized;
+            }
+        }
+        finally
+        {
+            _isRestoringWindowState = false;
+        }
+    }
+
+    private bool IsPositionWithinScreenBounds(int x, int y, int width, int height)
+    {
+        var screens = Screens;
+        if (screens.ScreenCount == 0)
+            return false;
+
+        // Check that at least a meaningful portion of the window is visible on some screen
+        const int minVisiblePixels = 50;
+        foreach (var screen in screens.All)
+        {
+            var workArea = screen.WorkingArea;
+            var overlapLeft = Math.Max(x, workArea.X);
+            var overlapTop = Math.Max(y, workArea.Y);
+            var overlapRight = Math.Min(x + width, workArea.X + workArea.Width);
+            var overlapBottom = Math.Min(y + height, workArea.Y + workArea.Height);
+
+            if (overlapRight - overlapLeft >= minVisiblePixels && overlapBottom - overlapTop >= minVisiblePixels)
+                return true;
+        }
+
+        return false;
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property == WindowStateProperty)
+        {
+            OnWindowPositionOrSizeChanged(null, EventArgs.Empty);
+        }
+    }
+
+    private void OnWindowPositionOrSizeChanged(object? sender, EventArgs e)
+    {
+        if (_isRestoringWindowState)
+            return;
+
+        Settings.IsMaximized = WindowState == WindowState.Maximized;
+
+        if (WindowState == WindowState.Normal)
+        {
+            Settings.WindowWidth = Bounds.Width;
+            Settings.WindowHeight = Bounds.Height;
+            Settings.WindowX = Position.X;
+            Settings.WindowY = Position.Y;
+        }
+
+        _saveWindowStateTimer?.Stop();
+        _saveWindowStateTimer?.Start();
+    }
+
+    private void ExitFromTray()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            _isExiting = true;
+            _trayIcon?.Dispose();
+            _trayIcon = null;
+            Close();
+        });
+    }
+
+    protected override void OnClosing(WindowClosingEventArgs e)
+    {
+        if (!_isExiting && Settings.MinimizeToTrayOnClose)
+        {
+            e.Cancel = true;
+            MinimizeToTray();
+            return;
+        }
+
+        _trayIcon?.Dispose();
+        _trayIcon = null;
+        base.OnClosing(e);
+    }
+
+    public async Task MinimizeToTrayAndWaitForExitAsync(Process gameProcess, string? expectedExePath = null)
+    {
+        MinimizeToTray();
+
+        await Task.Run(() =>
+        {
+            Process? processToWatch = null;
+            try
+            {
+                // When launched via Steam, the returned process is Steam.exe, not the game.
+                // Poll briefly to find the actual D2R.exe process by its executable path.
+                processToWatch = gameProcess;
+                if (!string.IsNullOrEmpty(expectedExePath))
+                {
+                    var found = WaitForProcessByPath(expectedExePath, timeout: TimeSpan.FromSeconds(60));
+                    if (found != null)
+                    {
+                        gameProcess.Dispose();
+                        processToWatch = found;
+                    }
+                }
+
+                processToWatch.WaitForExit();
+            }
+            catch (InvalidOperationException)
+            {
+                // Process already exited or handle is invalid
+            }
+            finally
+            {
+                processToWatch?.Dispose();
+            }
+        });
+
+        RestoreFromTray();
+    }
+
+    private static Process? WaitForProcessByPath(string exePath, TimeSpan timeout)
+    {
+        var processName = Path.GetFileNameWithoutExtension(exePath);
+        var normalizedTarget = Path.GetFullPath(exePath);
+        var deadline = DateTime.UtcNow + timeout;
+
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                foreach (var proc in Process.GetProcessesByName(processName))
+                {
+                    try
+                    {
+                        var mainModule = proc.MainModule;
+                        if (mainModule != null &&
+                            string.Equals(Path.GetFullPath(mainModule.FileName), normalizedTarget, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return proc;
+                        }
+                    }
+                    catch
+                    {
+                        // Access denied or process exited — skip
+                    }
+
+                    proc.Dispose();
+                }
+            }
+            catch
+            {
+                // Enumeration failed — retry
+            }
+
+            Thread.Sleep(2000);
+        }
+
+        return null;
+    }
+
     private async Task ValidateKey()
     {
         await SettingsManager.SaveAsync(Settings);

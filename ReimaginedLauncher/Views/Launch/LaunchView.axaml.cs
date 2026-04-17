@@ -310,9 +310,22 @@ public partial class LaunchView : UserControl
                 {
                     LaunchDiagnostics.Log("Calling GameLauncherService.LaunchGame.");
                     SetLaunchStatus("Starting Diablo II: Resurrected...");
-                    LauncherService.LaunchGame();
+                    var gameProcess = LauncherService.LaunchGame();
                     LaunchDiagnostics.Log("GameLauncherService.LaunchGame returned without throwing.");
                     SetLaunchStatus($"{actionName} command sent.");
+
+                    if (gameProcess != null && MainWindow.Settings.MinimizeToTray && TopLevel.GetTopLevel(this) is MainWindow mainWindow)
+                    {
+                        // For Steam launches, pass the actual D2R.exe path so the launcher
+                        // waits for the game process rather than the Steam bootstrapper.
+                        string? expectedExePath = null;
+                        if (profile.Type == InstallationType.Steam)
+                        {
+                            expectedExePath = InstallDirectoryValidator.GetExecutablePath(profile.InstallDirectory);
+                        }
+
+                        _ = mainWindow.MinimizeToTrayAndWaitForExitAsync(gameProcess, expectedExePath);
+                    }
                 }
             }
             catch (Exception ex)
