@@ -22,6 +22,7 @@ using ReimaginedLauncher.HttpClients.Models;
 using ReimaginedLauncher.Utilities;
 using ReimaginedLauncher.Utilities.Json;
 using ReimaginedLauncher.Utilities.ViewModels;
+using Avalonia;
 using ReimaginedLauncher.Views.Backups;
 using ReimaginedLauncher.Views.Launch;
 using ReimaginedLauncher.Views.ModTweaks;
@@ -67,11 +68,14 @@ public partial class MainWindow : Window
     private double _currentScale = 1.0;
     private TrayIcon? _trayIcon;
     private bool _isExiting;
+    private readonly DispatcherTimer _saveWindowStateTimer;
+    private bool _isRestoringWindowState;
 
     public MainWindow()
     {
         _gitHubAnnouncementsHttpClient = Program.ServiceProvider.GetRequiredService<GitHubAnnouncementsHttpClient>();
         _nexusModsHttpClient = Program.ServiceProvider.GetRequiredService<NexusModsHttpClient>();;
+        Opacity = 0;
         InitializeComponent();
         NotificationManager = new WindowNotificationManager(this)
         {
@@ -94,6 +98,14 @@ public partial class MainWindow : Window
         // Set the window icon
         Icon = new WindowIcon("Assets/ReimaginedLauncher.ico");
         InitializeTrayIcon();
+        _saveWindowStateTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _saveWindowStateTimer.Tick += async (_, _) =>
+        {
+            _saveWindowStateTimer.Stop();
+            await SettingsManager.SaveAsync(Settings);
+        };
+        PositionChanged += OnWindowPositionOrSizeChanged;
+        SizeChanged += OnWindowPositionOrSizeChanged;
     }
 
     private static string ResolveLauncherVersion()
@@ -115,6 +127,8 @@ public partial class MainWindow : Window
     private async Task LoadSettingsAsync()
     {
         Settings = await SettingsManager.LoadAsync();
+        RestoreWindowState();
+        Opacity = 1;
         Settings.UiScale = ClampUiScale(Settings.UiScale);
         var profile = Settings.CurrentProfile;
         profile.InstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(profile.InstallDirectory);
@@ -1121,9 +1135,96 @@ public partial class MainWindow : Window
         Dispatcher.UIThread.Post(() =>
         {
             Show();
-            WindowState = WindowState.Normal;
+            WindowState = Settings.IsMaximized ? WindowState.Maximized : WindowState.Normal;
             Activate();
         });
+    }
+
+    private void RestoreWindowState()
+    {
+        _isRestoringWindowState = true;
+        try
+        {
+            if (Settings.WindowWidth.HasValue && Settings.WindowHeight.HasValue)
+            {
+                Width = Settings.WindowWidth.Value;
+                Height = Settings.WindowHeight.Value;
+            }
+
+            if (Settings.WindowX.HasValue && Settings.WindowY.HasValue)
+            {
+                var x = (int)Settings.WindowX.Value;
+                var y = (int)Settings.WindowY.Value;
+                var w = (int)(Settings.WindowWidth ?? Width);
+                var h = (int)(Settings.WindowHeight ?? Height);
+
+                if (IsPositionWithinScreenBounds(x, y, w, h))
+                {
+                    Position = new PixelPoint(x, y);
+                    WindowStartupLocation = WindowStartupLocation.Manual;
+                }
+            }
+
+            if (Settings.IsMaximized)
+            {
+                WindowState = WindowState.Maximized;
+            }
+        }
+        finally
+        {
+            _isRestoringWindowState = false;
+        }
+    }
+
+    private bool IsPositionWithinScreenBounds(int x, int y, int width, int height)
+    {
+        var screens = Screens;
+        if (screens.ScreenCount == 0)
+            return false;
+
+        // Check that at least a meaningful portion of the window is visible on some screen
+        const int minVisiblePixels = 50;
+        foreach (var screen in screens.All)
+        {
+            var workArea = screen.WorkingArea;
+            var overlapLeft = Math.Max(x, workArea.X);
+            var overlapTop = Math.Max(y, workArea.Y);
+            var overlapRight = Math.Min(x + width, workArea.X + workArea.Width);
+            var overlapBottom = Math.Min(y + height, workArea.Y + workArea.Height);
+
+            if (overlapRight - overlapLeft >= minVisiblePixels && overlapBottom - overlapTop >= minVisiblePixels)
+                return true;
+        }
+
+        return false;
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property == WindowStateProperty)
+        {
+            OnWindowPositionOrSizeChanged(null, EventArgs.Empty);
+        }
+    }
+
+    private void OnWindowPositionOrSizeChanged(object? sender, EventArgs e)
+    {
+        if (_isRestoringWindowState)
+            return;
+
+        Settings.IsMaximized = WindowState == WindowState.Maximized;
+
+        if (WindowState == WindowState.Normal)
+        {
+            Settings.WindowWidth = Bounds.Width;
+            Settings.WindowHeight = Bounds.Height;
+            Settings.WindowX = Position.X;
+            Settings.WindowY = Position.Y;
+        }
+
+        _saveWindowStateTimer?.Stop();
+        _saveWindowStateTimer?.Start();
     }
 
     private void ExitFromTray()

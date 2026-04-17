@@ -47,6 +47,11 @@ public class AppSettings
     public double UiScale { get; set; } = 1.0;
     public bool MinimizeToTray { get; set; }
     public bool MinimizeToTrayOnClose { get; set; }
+    public double? WindowWidth { get; set; }
+    public double? WindowHeight { get; set; }
+    public double? WindowX { get; set; }
+    public double? WindowY { get; set; }
+    public bool IsMaximized { get; set; }
     public int LastReadAnnouncementNumber { get; set; }
     public string? NexusModsSSOApiKey { get; set; }
     public bool? NexusPremiumDownloadAccess { get; set; }
