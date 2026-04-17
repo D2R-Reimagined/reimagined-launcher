@@ -61,12 +61,17 @@ public partial class MainWindow : Window
     public static string UpdateDownloadUrl { get; private set; } = NexusUrl;
     public static bool IsUpdateDownloadDirect { get; private set; }
     public static int? UpdateFileId { get; private set; }
+    public static bool IsInstallInProgress { get; set; }
+    public static string? InstallProgressTitle { get; set; }
+    public static string? InstallProgressMessage { get; set; }
+    public static MainWindow? Instance { get; private set; }
     private NexusModsSSO? _nexusSSO;
     private string? _localModVersion;
     private double _currentScale = 1.0;
 
     public MainWindow()
     {
+        Instance = this;
         _gitHubAnnouncementsHttpClient = Program.ServiceProvider.GetRequiredService<GitHubAnnouncementsHttpClient>();
         _nexusModsHttpClient = Program.ServiceProvider.GetRequiredService<NexusModsHttpClient>();;
         InitializeComponent();
