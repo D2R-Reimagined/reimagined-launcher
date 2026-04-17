@@ -7,6 +7,7 @@ using System.Linq;
 using System.Net;
 using System.Text.Json;
 using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Controls.Notifications;
@@ -1252,15 +1253,29 @@ public partial class MainWindow : Window
         base.OnClosing(e);
     }
 
-    public async Task MinimizeToTrayAndWaitForExitAsync(Process gameProcess)
+    public async Task MinimizeToTrayAndWaitForExitAsync(Process gameProcess, string? expectedExePath = null)
     {
         MinimizeToTray();
 
         await Task.Run(() =>
         {
+            Process? processToWatch = null;
             try
             {
-                gameProcess.WaitForExit();
+                // When launched via Steam, the returned process is Steam.exe, not the game.
+                // Poll briefly to find the actual D2R.exe process by its executable path.
+                processToWatch = gameProcess;
+                if (!string.IsNullOrEmpty(expectedExePath))
+                {
+                    var found = WaitForProcessByPath(expectedExePath, timeout: TimeSpan.FromSeconds(60));
+                    if (found != null)
+                    {
+                        gameProcess.Dispose();
+                        processToWatch = found;
+                    }
+                }
+
+                processToWatch.WaitForExit();
             }
             catch (InvalidOperationException)
             {
@@ -1268,11 +1283,51 @@ public partial class MainWindow : Window
             }
             finally
             {
-                gameProcess.Dispose();
+                processToWatch?.Dispose();
             }
         });
 
         RestoreFromTray();
+    }
+
+    private static Process? WaitForProcessByPath(string exePath, TimeSpan timeout)
+    {
+        var processName = Path.GetFileNameWithoutExtension(exePath);
+        var normalizedTarget = Path.GetFullPath(exePath);
+        var deadline = DateTime.UtcNow + timeout;
+
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                foreach (var proc in Process.GetProcessesByName(processName))
+                {
+                    try
+                    {
+                        var mainModule = proc.MainModule;
+                        if (mainModule != null &&
+                            string.Equals(Path.GetFullPath(mainModule.FileName), normalizedTarget, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return proc;
+                        }
+                    }
+                    catch
+                    {
+                        // Access denied or process exited — skip
+                    }
+
+                    proc.Dispose();
+                }
+            }
+            catch
+            {
+                // Enumeration failed — retry
+            }
+
+            Thread.Sleep(2000);
+        }
+
+        return null;
     }
 
     private async Task ValidateKey()

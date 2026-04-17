@@ -316,7 +316,15 @@ public partial class LaunchView : UserControl
 
                     if (gameProcess != null && MainWindow.Settings.MinimizeToTray && TopLevel.GetTopLevel(this) is MainWindow mainWindow)
                     {
-                        _ = mainWindow.MinimizeToTrayAndWaitForExitAsync(gameProcess);
+                        // For Steam launches, pass the actual D2R.exe path so the launcher
+                        // waits for the game process rather than the Steam bootstrapper.
+                        string? expectedExePath = null;
+                        if (profile.Type == InstallationType.Steam)
+                        {
+                            expectedExePath = InstallDirectoryValidator.GetExecutablePath(profile.InstallDirectory);
+                        }
+
+                        _ = mainWindow.MinimizeToTrayAndWaitForExitAsync(gameProcess, expectedExePath);
                     }
                 }
             }
