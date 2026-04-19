@@ -58,6 +58,8 @@ public static class SettingsManager
             if (root.TryGetProperty("TerrorizeAllZones", out prop)) profile.TerrorizeAllZones = prop.GetBoolean();
             if (root.TryGetProperty("TerrorZonePurpleOverlay", out prop)) profile.TerrorZonePurpleOverlay = prop.GetBoolean();
             if (root.TryGetProperty("RestoreTerrorZoneFanfare", out prop)) profile.RestoreTerrorZoneFanfare = prop.GetBoolean();
+            if (root.TryGetProperty("OrbStackDrops", out prop)) profile.OrbStackDrops = (StackDropOption)prop.GetInt32();
+            if (root.TryGetProperty("RuneStackDrops", out prop)) profile.RuneStackDrops = (StackDropOption)prop.GetInt32();
 
             if (root.TryGetProperty("Plugins", out prop) && prop.ValueKind == JsonValueKind.Array)
             {
