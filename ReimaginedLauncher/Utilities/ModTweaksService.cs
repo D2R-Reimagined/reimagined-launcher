@@ -39,6 +39,7 @@ public static class ModTweaksService
     private const string DifficultyLevelsFileName = "DifficultyLevels.txt";
     private const string SkillsFileName = "skills.txt";
     private const string StatesFileName = "states.txt";
+    private const string PropertiesFileName = "Properties.txt";
     private const string DesecratedZonesFileName = "desecratedzones.json";
     private const string CleanDesecratedZonesFileName = "desecratedzones_launcher_clean.json";
     private const string EnvDirectoryName = "env";
@@ -539,6 +540,12 @@ public static class ModTweaksService
             throw new FileNotFoundException($"states.txt was not found in the Reimagined excel folder: {excelDirectory}");
         }
 
+        var propertiesFilePath = Path.Combine(excelDirectory, PropertiesFileName);
+        if (!File.Exists(propertiesFilePath))
+        {
+            throw new FileNotFoundException($"Properties.txt was not found in the Reimagined excel folder: {excelDirectory}");
+        }
+
         return Task.CompletedTask;
     }
 
@@ -555,7 +562,8 @@ public static class ModTweaksService
         LaunchDiagnostics.Log($"Applying skills tweaks in {excelDirectory}.");
         await ApplySkillsTweaksAsync(
             Path.Combine(excelDirectory, SkillsFileName),
-            profile.MaxSkillLevel);
+            profile.MaxSkillLevel,
+            profile.RemoveFadeEffect);
         ReportProgress(progress, "Updating DifficultyLevels.txt...");
         LaunchDiagnostics.Log($"Applying difficulty tweaks in {excelDirectory}.");
         await ApplyDifficultyLevelsTweaksAsync(
@@ -568,6 +576,11 @@ public static class ModTweaksService
         await ApplyStatesTweaksAsync(
             Path.Combine(excelDirectory, StatesFileName),
             profile.RemovePaladinAuraSound,
+            profile.RemoveFadeEffect);
+        ReportProgress(progress, "Updating Properties.txt...");
+        LaunchDiagnostics.Log($"Applying properties tweaks in {excelDirectory}.");
+        await ApplyPropertiesTweaksAsync(
+            Path.Combine(excelDirectory, PropertiesFileName),
             profile.RemoveFadeEffect);
     }
 
@@ -820,7 +833,7 @@ public static class ModTweaksService
                 DifficultyLevelParser.SaveEntries(updatedEntries, filePath, outputDirectory, cancellationToken));
     }
 
-    private static async Task ApplySkillsTweaksAsync(string skillsFilePath, int maxSkillLevel)
+    private static async Task ApplySkillsTweaksAsync(string skillsFilePath, int maxSkillLevel, bool removeFadeEffect)
     {
         var entries = (await SkillsParser.GetEntries(skillsFilePath)).ToList();
         if (entries.Count == 0)
@@ -833,21 +846,29 @@ public static class ModTweaksService
 
         foreach (var entry in entries)
         {
-            if (string.IsNullOrWhiteSpace(entry.CharClass) ||
-                !int.TryParse(entry.MaxLvl, out var currentMaxLevel) ||
-                currentMaxLevel <= 0)
+            var modified = entry;
+
+            if (!string.IsNullOrWhiteSpace(modified.CharClass) &&
+                int.TryParse(modified.MaxLvl, out var currentMaxLevel) &&
+                currentMaxLevel > 0)
             {
-                updatedEntries.Add(entry);
-                continue;
+                modified = modified with { MaxLvl = maxSkillLevel.ToString() };
+                updatedRows++;
             }
 
-            updatedEntries.Add(entry with { MaxLvl = maxSkillLevel.ToString() });
-            updatedRows++;
+            if (removeFadeEffect
+                && string.Equals(modified.Skill, "Fade", StringComparison.OrdinalIgnoreCase))
+            {
+                modified = modified with { PassiveStat1 = string.Empty, PassiveCalc1 = string.Empty };
+                updatedRows++;
+            }
+
+            updatedEntries.Add(modified);
         }
 
         if (updatedRows == 0)
         {
-            throw new InvalidDataException("skills.txt did not contain any rows with maxlvl values.");
+            throw new InvalidDataException("skills.txt did not contain any matching rows to update.");
         }
 
         await SaveGeneratedEntriesAsync(
@@ -905,6 +926,47 @@ public static class ModTweaksService
             statesFilePath,
             (updatedEntriesList, filePath, outputDirectory, cancellationToken) =>
                 StatesParser.SaveEntries(updatedEntriesList, filePath, outputDirectory, cancellationToken));
+    }
+
+    private static async Task ApplyPropertiesTweaksAsync(string propertiesFilePath, bool removeFadeEffect)
+    {
+        if (!removeFadeEffect)
+        {
+            return;
+        }
+
+        var entries = (await PropertiesParser.GetEntries(propertiesFilePath)).ToList();
+        if (entries.Count == 0)
+        {
+            throw new InvalidDataException("Properties.txt did not contain any editable rows.");
+        }
+
+        var updatedRows = 0;
+        var updatedEntries = new List<D2RReimaginedTools.Models.Property>(entries.Count);
+
+        foreach (var entry in entries)
+        {
+            var modified = entry;
+
+            if (string.Equals(modified.Code, "fade", StringComparison.OrdinalIgnoreCase))
+            {
+                modified = modified with { Stat1 = string.Empty };
+                updatedRows++;
+            }
+
+            updatedEntries.Add(modified);
+        }
+
+        if (updatedRows == 0)
+        {
+            throw new InvalidDataException("Properties.txt did not contain a fade row to update.");
+        }
+
+        await SaveGeneratedEntriesAsync(
+            updatedEntries,
+            propertiesFilePath,
+            (updatedEntriesList, filePath, outputDirectory, cancellationToken) =>
+                PropertiesParser.SaveEntries(updatedEntriesList, filePath, outputDirectory, cancellationToken));
     }
 
     private static async Task SaveGeneratedEntriesAsync<TEntry>(
