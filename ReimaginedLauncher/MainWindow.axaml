@@ -83,11 +83,11 @@
                              SelectionChanged="OnNavigationSelectionChanged">
                         <ListBoxItem x:Name="NewsAnnouncementsNavItem" Tag="NewsAnnouncements" Content="News &amp; Announcements" />
                         <ListBoxItem x:Name="LaunchNavItem" Tag="Launch" Content="Launch" />
-                        <ListBoxItem x:Name="PluginsNavItem" Tag="Plugins" Content="Plugins" />
+                        <ListBoxItem x:Name="UpdateNavItem" Tag="Update" Content="Install/Update" />
                         <ListBoxItem x:Name="BackupsNavItem" Tag="Backups" Content="Backups" />
                         <ListBoxItem x:Name="SettingsNavItem" Tag="Settings" Content="Settings" />
                         <ListBoxItem x:Name="ModTweaksNavItem" Tag="ModTweaks" Content="Mod Tweaks" />
-                        <ListBoxItem x:Name="UpdateNavItem" Tag="Update" Content="Install/Update" />
+                        <ListBoxItem x:Name="PluginsNavItem" Tag="Plugins" Content="Plugins" />
                     </ListBox>
                 </DockPanel>
 
