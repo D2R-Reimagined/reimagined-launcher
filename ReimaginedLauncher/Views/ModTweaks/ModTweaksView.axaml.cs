@@ -39,6 +39,7 @@ public partial class ModTweaksView : UserControl
         var removeHelmetVisual = profile.RemoveHelmetVisual;
         var terrorizeAllZones = profile.TerrorizeAllZones;
         var terrorZonePurpleOverlay = profile.TerrorZonePurpleOverlay;
+        var removeFadeEffect = profile.RemoveFadeEffect;
         var restoreTerrorZoneFanfare = profile.RestoreTerrorZoneFanfare;
         var orbStackDrops = profile.OrbStackDrops;
         var runeStackDrops = profile.RuneStackDrops;
@@ -56,6 +57,7 @@ public partial class ModTweaksView : UserControl
         profile.RemoveHelmetVisual = removeHelmetVisual;
         profile.TerrorizeAllZones = terrorizeAllZones;
         profile.TerrorZonePurpleOverlay = terrorZonePurpleOverlay;
+        profile.RemoveFadeEffect = removeFadeEffect;
         profile.RestoreTerrorZoneFanfare = restoreTerrorZoneFanfare;
         profile.OrbStackDrops = orbStackDrops;
         profile.RuneStackDrops = runeStackDrops;
@@ -73,6 +75,7 @@ public partial class ModTweaksView : UserControl
         RemoveHelmetVisualCheckBox.IsChecked = removeHelmetVisual;
         TerrorizeAllZonesCheckBox.IsChecked = terrorizeAllZones;
         TerrorZonePurpleOverlayCheckBox.IsChecked = terrorZonePurpleOverlay;
+        RemoveFadeEffectCheckBox.IsChecked = removeFadeEffect;
         RestoreTerrorZoneFanfareCheckBox.IsChecked = restoreTerrorZoneFanfare;
         OrbStackDropsComboBox.SelectedIndex = (int)orbStackDrops;
         RuneStackDropsComboBox.SelectedIndex = (int)runeStackDrops;
@@ -166,6 +169,7 @@ public partial class ModTweaksView : UserControl
         profile.MakeTooltipBackgroundOpaque = MakeTooltipBackgroundOpaqueCheckBox.IsChecked ?? false;
         profile.RemoveHelmetVisual = RemoveHelmetVisualCheckBox.IsChecked ?? false;
         profile.TerrorZonePurpleOverlay = TerrorZonePurpleOverlayCheckBox.IsChecked ?? false;
+        profile.RemoveFadeEffect = RemoveFadeEffectCheckBox.IsChecked ?? false;
         profile.RemoveVignette = RemoveVignetteCheckBox.IsChecked ?? false;
         WarningBorder.IsVisible = HasNonDefaultTweaks(
             profile.SkillPointsPerLevel,
@@ -222,6 +226,7 @@ public partial class ModTweaksView : UserControl
         profile.RemoveHelmetVisual = false;
         profile.TerrorizeAllZones = false;
         profile.TerrorZonePurpleOverlay = false;
+        profile.RemoveFadeEffect = false;
         profile.RestoreTerrorZoneFanfare = false;
         profile.OrbStackDrops = StackDropOption.Default;
         profile.RuneStackDrops = StackDropOption.Default;

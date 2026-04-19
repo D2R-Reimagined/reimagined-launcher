@@ -46,6 +46,7 @@ public class InstallationProfile
     public bool RemoveHelmetVisual { get; set; }
     public bool TerrorizeAllZones { get; set; }
     public bool TerrorZonePurpleOverlay { get; set; }
+    public bool RemoveFadeEffect { get; set; }
     public bool RestoreTerrorZoneFanfare { get; set; }
     public StackDropOption OrbStackDrops { get; set; }
     public StackDropOption RuneStackDrops { get; set; }
