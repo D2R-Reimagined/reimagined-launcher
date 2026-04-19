@@ -298,6 +298,47 @@
                                    Margin="28,0,0,0"
                                    Text="Terrorize the entire game at one time, hourly warnings still apear but do nothing. You can save and exit to change the unique monster modifier."/>
                     </StackPanel>
+
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Orb &amp; Rune Stack Drops"
+                                   FontWeight="SemiBold"/>
+                        <TextBlock Classes="muted"
+                                   Margin="28,0,0,0"
+                                   Text="Make a selection to determine how Power Orbs and Runes will drop."/>
+                    </StackPanel>
+
+                    <WrapPanel Orientation="Horizontal"
+                               Margin="28,0,0,0"
+                               ItemSpacing="16"
+                               LineSpacing="16">
+                        <StackPanel Width="220"
+                                    Spacing="8">
+                            <TextBlock Text="Orbs"
+                                       FontWeight="SemiBold"/>
+                            <ComboBox x:Name="OrbStackDropsComboBox"
+                                      Width="180"
+                                      HorizontalAlignment="Left"
+                                      SelectionChanged="OnStackDropsChanged">
+                                <ComboBoxItem Content="Default"/>
+                                <ComboBoxItem Content="Unstacked"/>
+                                <ComboBoxItem Content="Stacked"/>
+                            </ComboBox>
+                        </StackPanel>
+
+                        <StackPanel Width="220"
+                                    Spacing="8">
+                            <TextBlock Text="Runes"
+                                       FontWeight="SemiBold"/>
+                            <ComboBox x:Name="RuneStackDropsComboBox"
+                                      Width="180"
+                                      HorizontalAlignment="Left"
+                                      SelectionChanged="OnStackDropsChanged">
+                                <ComboBoxItem Content="Default"/>
+                                <ComboBoxItem Content="Unstacked"/>
+                                <ComboBoxItem Content="Stacked"/>
+                            </ComboBox>
+                        </StackPanel>
+                    </WrapPanel>
                 </StackPanel>
             </Border>
             </StackPanel>

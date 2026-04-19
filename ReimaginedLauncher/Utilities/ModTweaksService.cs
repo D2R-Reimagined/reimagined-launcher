@@ -40,6 +40,7 @@ public static class ModTweaksService
     private const string SkillsFileName = "skills.txt";
     private const string StatesFileName = "states.txt";
     private const string PropertiesFileName = "Properties.txt";
+    private const string TreasureClassExFileName = "treasureclassex.txt";
     private const string DesecratedZonesFileName = "desecratedzones.json";
     private const string CleanDesecratedZonesFileName = "desecratedzones_launcher_clean.json";
     private const string EnvDirectoryName = "env";
@@ -582,6 +583,12 @@ public static class ModTweaksService
         await ApplyPropertiesTweaksAsync(
             Path.Combine(excelDirectory, PropertiesFileName),
             profile.RemoveFadeEffect);
+        ReportProgress(progress, "Updating treasureclassex.txt...");
+        LaunchDiagnostics.Log($"Applying treasure class tweaks in {excelDirectory}.");
+        await ApplyTreasureClassExTweaksAsync(
+            Path.Combine(excelDirectory, TreasureClassExFileName),
+            profile.OrbStackDrops,
+            profile.RuneStackDrops);
     }
 
     private static void ReportProgress(IProgress<string>? progress, string message)
@@ -967,6 +974,112 @@ public static class ModTweaksService
             propertiesFilePath,
             (updatedEntriesList, filePath, outputDirectory, cancellationToken) =>
                 PropertiesParser.SaveEntries(updatedEntriesList, filePath, outputDirectory, cancellationToken));
+    }
+
+    private static readonly (string Unstacked, string Stacked)[] OrbReplacementPairs =
+    [
+        ("ooi", "1oi"),
+        ("ooa", "1oa"),
+        ("ooc", "1oc"),
+        ("ka3", "1ka"),
+        ("oos", "1os"),
+        ("ooe", "1oe"),
+        ("oor", "1or")
+    ];
+
+    private static async Task ApplyTreasureClassExTweaksAsync(
+        string treasureClassExFilePath,
+        StackDropOption orbStackDrops,
+        StackDropOption runeStackDrops)
+    {
+        if (orbStackDrops == StackDropOption.Default && runeStackDrops == StackDropOption.Default)
+        {
+            return;
+        }
+
+        if (!File.Exists(treasureClassExFilePath))
+        {
+            return;
+        }
+
+        var entries = (await TreasureClassParser.GetEntries(treasureClassExFilePath)).ToList();
+        if (entries.Count == 0)
+        {
+            return;
+        }
+
+        var updatedEntries = new List<D2RReimaginedTools.Models.TreasureClass>(entries.Count);
+
+        foreach (var entry in entries)
+        {
+            var updated = entry with
+            {
+                Item1 = ReplaceDropCode(entry.Item1, orbStackDrops, runeStackDrops),
+                Item2 = ReplaceDropCode(entry.Item2, orbStackDrops, runeStackDrops),
+                Item3 = ReplaceDropCode(entry.Item3, orbStackDrops, runeStackDrops),
+                Item4 = ReplaceDropCode(entry.Item4, orbStackDrops, runeStackDrops),
+                Item5 = ReplaceDropCode(entry.Item5, orbStackDrops, runeStackDrops),
+                Item6 = ReplaceDropCode(entry.Item6, orbStackDrops, runeStackDrops),
+                Item7 = ReplaceDropCode(entry.Item7, orbStackDrops, runeStackDrops),
+                Item8 = ReplaceDropCode(entry.Item8, orbStackDrops, runeStackDrops),
+                Item9 = ReplaceDropCode(entry.Item9, orbStackDrops, runeStackDrops),
+                Item10 = ReplaceDropCode(entry.Item10, orbStackDrops, runeStackDrops)
+            };
+            updatedEntries.Add(updated);
+        }
+
+        await SaveGeneratedEntriesAsync(
+            updatedEntries,
+            treasureClassExFilePath,
+            (updatedEntriesList, filePath, outputDirectory, cancellationToken) =>
+                TreasureClassParser.SaveEntries(updatedEntriesList, filePath, outputDirectory, cancellationToken));
+    }
+
+    private static string? ReplaceDropCode(
+        string? value,
+        StackDropOption orbStackDrops,
+        StackDropOption runeStackDrops)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        if (orbStackDrops != StackDropOption.Default)
+        {
+            foreach (var (unstacked, stacked) in OrbReplacementPairs)
+            {
+                var from = orbStackDrops == StackDropOption.Unstacked ? stacked : unstacked;
+                var to = orbStackDrops == StackDropOption.Unstacked ? unstacked : stacked;
+
+                if (string.Equals(value, from, StringComparison.Ordinal))
+                {
+                    return to;
+                }
+            }
+        }
+
+        if (runeStackDrops != StackDropOption.Default && value.Length == 3)
+        {
+            var prefix = value[0];
+            var suffix = value.Substring(1);
+
+            if (runeStackDrops == StackDropOption.Unstacked
+                && prefix == 's'
+                && int.TryParse(suffix, out _))
+            {
+                return "r" + suffix;
+            }
+
+            if (runeStackDrops == StackDropOption.Stacked
+                && prefix == 'r'
+                && int.TryParse(suffix, out _))
+            {
+                return "s" + suffix;
+            }
+        }
+
+        return value;
     }
 
     private static async Task SaveGeneratedEntriesAsync<TEntry>(

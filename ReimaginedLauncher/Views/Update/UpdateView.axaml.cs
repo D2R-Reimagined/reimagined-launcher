@@ -8,13 +8,13 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using ReimaginedLauncher.Utilities;
 
 namespace ReimaginedLauncher.Views.Update;
 
 public partial class UpdateView : UserControl
 {
-    private bool _isInstalling;
     private bool _isLoading;
 
     public UpdateView()
@@ -31,11 +31,11 @@ public partial class UpdateView : UserControl
         var canDownload = isInstallMissing || MainWindow.IsUpdateAvailable;
 
         LoadingBanner.IsVisible = _isLoading;
-        InstallProgressBanner.IsVisible = _isInstalling;
-        StatusBorder.IsVisible = !_isLoading && !_isInstalling;
-        VersionsBorder.IsVisible = !_isLoading && !_isInstalling;
-        AuthWarningBanner.IsVisible = !_isLoading && !_isInstalling && !isAuthenticated;
-        NonPremiumWarningBanner.IsVisible = !_isLoading && !_isInstalling && usesDownloadsWatcher && canDownload;
+        InstallProgressBanner.IsVisible = MainWindow.IsInstallInProgress;
+        StatusBorder.IsVisible = !_isLoading && !MainWindow.IsInstallInProgress;
+        VersionsBorder.IsVisible = !_isLoading && !MainWindow.IsInstallInProgress;
+        AuthWarningBanner.IsVisible = !_isLoading && !MainWindow.IsInstallInProgress && !isAuthenticated;
+        NonPremiumWarningBanner.IsVisible = !_isLoading && !MainWindow.IsInstallInProgress && usesDownloadsWatcher && canDownload;
 
         StatusTitleText.Text = MainWindow.UpdateStatusTitle;
         StatusMessageText.Text = MainWindow.UpdateStatusMessage;
@@ -43,11 +43,11 @@ public partial class UpdateView : UserControl
         LatestVersionText.Text = MainWindow.UpdateLatestVersion;
         InstallOrUpdateButton.IsEnabled = !_isLoading &&
                                           MainWindow.CanInstallOrUpdate &&
-                                          !_isInstalling &&
+                                          !MainWindow.IsInstallInProgress &&
                                           isAuthenticated &&
                                           canDownload;
         SelectZipManuallyButton.IsEnabled = !_isLoading &&
-                                            !_isInstalling &&
+                                            !MainWindow.IsInstallInProgress &&
                                             MainWindow.Settings.CurrentProfile.IsInstallDirectoryValidated &&
                                             !string.IsNullOrWhiteSpace(MainWindow.Settings.CurrentProfile.InstallDirectory);
         OpenDownloadPageButton.IsEnabled = !_isLoading && !string.IsNullOrWhiteSpace(MainWindow.UpdateDownloadUrl);
@@ -55,6 +55,12 @@ public partial class UpdateView : UserControl
         InstallOrUpdateButton.Content = MainWindow.UpdateCurrentVersion.Equals("Not detected", StringComparison.OrdinalIgnoreCase)
             ? "Download and Install"
             : "Download and Update";
+
+        if (MainWindow.IsInstallInProgress)
+        {
+            InstallProgressTitle.Text = MainWindow.InstallProgressTitle ?? "Installing...";
+            InstallProgressMessage.Text = MainWindow.InstallProgressMessage ?? "Please wait while the mod is being installed.";
+        }
     }
 
     public void SetLoadingState(bool isLoading)
@@ -65,7 +71,7 @@ public partial class UpdateView : UserControl
 
     private async void OnInstallOrUpdateClick(object? sender, RoutedEventArgs e)
     {
-        if (_isInstalling || string.IsNullOrWhiteSpace(MainWindow.UpdateDownloadUrl))
+        if (MainWindow.IsInstallInProgress || string.IsNullOrWhiteSpace(MainWindow.UpdateDownloadUrl))
             return;
 
         if (MainWindow.UserViewModel.User == null)
@@ -90,7 +96,7 @@ public partial class UpdateView : UserControl
 
         try
         {
-            _isInstalling = true;
+            MainWindow.IsInstallInProgress = true;
             RefreshUpdateState();
 
             if (MainWindow.Settings.NexusPremiumDownloadAccess == false)
@@ -119,8 +125,10 @@ public partial class UpdateView : UserControl
         }
         finally
         {
-            _isInstalling = false;
-            RefreshUpdateState();
+            MainWindow.IsInstallInProgress = false;
+            MainWindow.InstallProgressTitle = null;
+            MainWindow.InstallProgressMessage = null;
+            RefreshVisibleUpdateView();
         }
     }
 
@@ -147,7 +155,7 @@ public partial class UpdateView : UserControl
 
     private async void OnSelectZipManuallyClick(object? sender, RoutedEventArgs e)
     {
-        if (_isInstalling)
+        if (MainWindow.IsInstallInProgress)
             return;
 
         var profile = MainWindow.Settings.CurrentProfile;
@@ -194,7 +202,7 @@ public partial class UpdateView : UserControl
 
         try
         {
-            _isInstalling = true;
+            MainWindow.IsInstallInProgress = true;
             RefreshUpdateState();
             SetInstallProgress("Installing...", "Extracting and installing mod files from selected zip.");
             await ExtractAndFinalizeInstallAsync(zipPath, installDirectory);
@@ -205,8 +213,10 @@ public partial class UpdateView : UserControl
         }
         finally
         {
-            _isInstalling = false;
-            RefreshUpdateState();
+            MainWindow.IsInstallInProgress = false;
+            MainWindow.InstallProgressTitle = null;
+            MainWindow.InstallProgressMessage = null;
+            RefreshVisibleUpdateView();
         }
     }
 
@@ -284,9 +294,18 @@ public partial class UpdateView : UserControl
 
     private void SetInstallProgress(string title, string message)
     {
-        InstallProgressTitle.Text = title;
-        InstallProgressMessage.Text = message;
-        InstallProgressBanner.IsVisible = true;
+        MainWindow.InstallProgressTitle = title;
+        MainWindow.InstallProgressMessage = message;
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (MainWindow.Instance?.ContentArea.Content is UpdateView visibleView)
+            {
+                visibleView.InstallProgressTitle.Text = title;
+                visibleView.InstallProgressMessage.Text = message;
+                visibleView.InstallProgressBanner.IsVisible = true;
+            }
+        });
     }
 
     private async Task ExtractAndFinalizeInstallAsync(string zipPath, string installDirectory)
@@ -365,7 +384,8 @@ public partial class UpdateView : UserControl
                     {
                         Directory.Delete(backupDir, recursive: true);
                     }
-                    Directory.Move(modDir, backupDir);
+                    CopyDirectory(modDir, backupDir);
+                    Directory.Delete(modDir, recursive: true);
                 }
 
                 ZipFile.ExtractToDirectory(zipPath, installDirectory, overwriteFiles: true);
@@ -374,7 +394,8 @@ public partial class UpdateView : UserControl
             Notifications.SendNotification("Mod installed successfully.", "Success");
         }
 
-        if (TopLevel.GetTopLevel(this) is MainWindow mainWindow)
+        var mainWindow = MainWindow.Instance;
+        if (mainWindow != null)
         {
             mainWindow.RefreshLocalModState();
             await mainWindow.RefreshUpdateStateAsync();
@@ -389,6 +410,22 @@ public partial class UpdateView : UserControl
             File.Copy(file, Path.Combine(targetDir, Path.GetFileName(file)), true);
         foreach (var directory in Directory.GetDirectories(sourceDir))
             CopyDirectory(directory, Path.Combine(targetDir, Path.GetFileName(directory)));
+    }
+
+    /// <summary>
+    /// Refreshes the currently visible UpdateView if one is active in the content area.
+    /// This allows the install operation to update the UI even when the original view
+    /// instance that started the install has been replaced by tab navigation.
+    /// </summary>
+    private static void RefreshVisibleUpdateView()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (MainWindow.Instance?.ContentArea.Content is UpdateView visibleView)
+            {
+                visibleView.RefreshUpdateState();
+            }
+        });
     }
 
     private static async Task<string?> WaitForNewZipFromDownloadsAsync(TimeSpan timeout)

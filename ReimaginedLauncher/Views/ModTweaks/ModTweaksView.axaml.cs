@@ -41,6 +41,8 @@ public partial class ModTweaksView : UserControl
         var terrorZonePurpleOverlay = profile.TerrorZonePurpleOverlay;
         var removeFadeEffect = profile.RemoveFadeEffect;
         var restoreTerrorZoneFanfare = profile.RestoreTerrorZoneFanfare;
+        var orbStackDrops = profile.OrbStackDrops;
+        var runeStackDrops = profile.RuneStackDrops;
         var removeVignette = profile.RemoveVignette;
 
         profile.SkillPointsPerLevel = skillPointsPerLevel;
@@ -57,6 +59,8 @@ public partial class ModTweaksView : UserControl
         profile.TerrorZonePurpleOverlay = terrorZonePurpleOverlay;
         profile.RemoveFadeEffect = removeFadeEffect;
         profile.RestoreTerrorZoneFanfare = restoreTerrorZoneFanfare;
+        profile.OrbStackDrops = orbStackDrops;
+        profile.RuneStackDrops = runeStackDrops;
         profile.RemoveVignette = removeVignette;
 
         SkillPointsComboBox.SelectedIndex = skillPointsPerLevel - 1;
@@ -73,6 +77,8 @@ public partial class ModTweaksView : UserControl
         TerrorZonePurpleOverlayCheckBox.IsChecked = terrorZonePurpleOverlay;
         RemoveFadeEffectCheckBox.IsChecked = removeFadeEffect;
         RestoreTerrorZoneFanfareCheckBox.IsChecked = restoreTerrorZoneFanfare;
+        OrbStackDropsComboBox.SelectedIndex = (int)orbStackDrops;
+        RuneStackDropsComboBox.SelectedIndex = (int)runeStackDrops;
         RemoveVignetteCheckBox.IsChecked = removeVignette;
         WarningBorder.IsVisible = HasNonDefaultTweaks(
             skillPointsPerLevel,
@@ -135,6 +141,19 @@ public partial class ModTweaksView : UserControl
         }
 
         MainWindow.Settings.CurrentProfile.TerrorizeAllZones = TerrorizeAllZonesCheckBox.IsChecked ?? false;
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private async void OnStackDropsChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_isRefreshing)
+        {
+            return;
+        }
+
+        var profile = MainWindow.Settings.CurrentProfile;
+        profile.OrbStackDrops = (StackDropOption)OrbStackDropsComboBox.SelectedIndex;
+        profile.RuneStackDrops = (StackDropOption)RuneStackDropsComboBox.SelectedIndex;
         await SettingsManager.SaveAsync(MainWindow.Settings);
     }
 
@@ -209,6 +228,8 @@ public partial class ModTweaksView : UserControl
         profile.TerrorZonePurpleOverlay = false;
         profile.RemoveFadeEffect = false;
         profile.RestoreTerrorZoneFanfare = false;
+        profile.OrbStackDrops = StackDropOption.Default;
+        profile.RuneStackDrops = StackDropOption.Default;
         profile.RemoveVignette = false;
 
         await SettingsManager.SaveAsync(MainWindow.Settings);
