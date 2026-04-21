@@ -1,0 +1,14 @@
+[
+  { 
+    "file": "skills.txt", 
+    "rowIdentifier": "Raven", 
+    "column": "param2", 
+    "updatedValue": 1 
+  },
+  { 
+    "file": "skills.txt", 
+    "rowIdentifier": "Raven", 
+    "column": "param5", 
+    "updatedValue": 50 
+  }
+]

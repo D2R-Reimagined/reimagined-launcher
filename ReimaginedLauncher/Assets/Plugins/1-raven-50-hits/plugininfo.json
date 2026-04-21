@@ -1,0 +1,8 @@
+{
+  "name": "One Raven To Rule Them All",
+  "version": "1.0",
+  "description": "Default Raven PetMax is 1, but has 50 base hits ",
+  "files": [
+    "ravens.json"
+  ]
+}
