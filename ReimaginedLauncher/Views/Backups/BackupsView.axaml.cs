@@ -28,7 +28,6 @@ public partial class BackupsView : UserControl
         AutomaticBackupsCheckBox.IsChecked = profile.AutomaticBackupsEnabled;
         BackupIntervalTextBox.Text = profile.BackupIntervalMinutes.ToString(CultureInfo.InvariantCulture);
         BackupAmountTextBox.Text = profile.BackupAmount.ToString(CultureInfo.InvariantCulture);
-        SaveDirectoryTextBlock.Text = BuildSaveDirectoryText();
         BackupsListBox.ItemsSource = BackupService.GetBackups();
         RestoreSelectionTextBlock.Text = "Select a backup to restore.";
         UpdateSaveDirectoryBrowseState();
@@ -194,7 +193,6 @@ public partial class BackupsView : UserControl
         await SettingsManager.SaveAsync(MainWindow.Settings);
         BackupService.UpdateSchedule();
         BackupService.EnforceBackupLimit();
-        SaveDirectoryTextBlock.Text = BuildSaveDirectoryText();
         BackupsListBox.ItemsSource = BackupService.GetBackups();
     }
 
@@ -214,11 +212,4 @@ public partial class BackupsView : UserControl
         SaveDirectoryBrowseButton.IsEnabled = string.IsNullOrWhiteSpace(autoResolved);
     }
 
-    private static string BuildSaveDirectoryText()
-    {
-        var saveDirectory = BackupService.GetResolvedSaveDirectory();
-        return string.IsNullOrWhiteSpace(saveDirectory)
-            ? "Save directory: not resolved — use Browse to select it."
-            : $"Save directory: {saveDirectory}";
-    }
 }
