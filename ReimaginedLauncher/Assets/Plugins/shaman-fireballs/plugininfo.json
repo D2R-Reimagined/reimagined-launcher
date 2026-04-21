@@ -1,0 +1,16 @@
+{
+  "name": "Shamans fire more fireballs",
+  "version": "1.0",
+  "description": "Modifies the amount of fireballs the shamans fire",
+  "files": [
+    "shaman-fireballs.json"
+  ],
+  "parameters": [
+    {
+      "key": "projectileCount",
+      "name": "Number of fireballs the shamans fire",
+      "description": "Fireball projectile count",
+      "defaultValue": "10"
+    }
+  ]
+}

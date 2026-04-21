@@ -1,0 +1,9 @@
+[
+  { 
+    "file": "skills.txt", 
+    "rowIdentifier": "ShamanFire", 
+    "column": "calc1", 
+    "operation": "", 
+    "parameterKey": "projectileCount" 
+  }
+]
