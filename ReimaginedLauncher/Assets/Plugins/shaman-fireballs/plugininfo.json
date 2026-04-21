@@ -1,15 +1,15 @@
 {
-  "name": "Shamans fire more fireballs",
+  "name": "Extra Shaman Fireball",
   "version": "1.0",
-  "description": "Modifies the amount of fireballs the shamans fire",
+  "description": "Adds extra fireballs to the shaman's attacks.",
   "files": [
     "shaman-fireballs.json"
   ],
   "parameters": [
     {
       "key": "projectileCount",
-      "name": "Number of fireballs the shamans fire",
-      "description": "Fireball projectile count",
+      "name": "Number of fireballs the shamans fire (base mod is 1 of 5 if the shaman is above level 8.",
+      "description": "Fireball projectile count (Plugin defaults to 10)",
       "defaultValue": "10"
     }
   ]
