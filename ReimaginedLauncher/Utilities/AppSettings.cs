@@ -14,7 +14,8 @@ public enum StackDropOption
 {
     Default,
     Unstacked,
-    Stacked
+    Stacked,
+    Disabled
 }
 
 public class InstallationProfile

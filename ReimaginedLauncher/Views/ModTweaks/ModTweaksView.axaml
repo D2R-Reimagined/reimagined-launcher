@@ -322,6 +322,7 @@
                                 <ComboBoxItem Content="Default"/>
                                 <ComboBoxItem Content="Unstacked"/>
                                 <ComboBoxItem Content="Stacked"/>
+                                <ComboBoxItem Content="Disabled (+Gold)"/>
                             </ComboBox>
                         </StackPanel>
 
@@ -336,6 +337,7 @@
                                 <ComboBoxItem Content="Default"/>
                                 <ComboBoxItem Content="Unstacked"/>
                                 <ComboBoxItem Content="Stacked"/>
+                                <ComboBoxItem Content="Disabled (+Gold)"/>
                             </ComboBox>
                         </StackPanel>
                     </WrapPanel>
