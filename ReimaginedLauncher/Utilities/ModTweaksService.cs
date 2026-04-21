@@ -907,7 +907,8 @@ public static class ModTweaksService
 
             if (removePaladinAuraSound
                 && !string.IsNullOrWhiteSpace(modified.OnSound)
-                && modified.OnSound.StartsWith("paladin_aura_", StringComparison.OrdinalIgnoreCase))
+                && (modified.OnSound.StartsWith("paladin_aura_", StringComparison.OrdinalIgnoreCase)
+                    || modified.OnSound.StartsWith("paladin_redeemed_soul", StringComparison.OrdinalIgnoreCase)))
             {
                 modified = modified with { OnSound = string.Empty };
                 updatedRows++;
