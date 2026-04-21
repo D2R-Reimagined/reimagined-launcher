@@ -23,7 +23,9 @@ public static class PluginsService
     private const string PluginInfoFileName = "plugininfo.json";
     private const string GeneratedPluginsFolderName = "plugins";
     private const string SkillsFileName = "skills.txt";
+    private const string CubeMainFileName = "cubemain.txt";
     private const string SkillsRowIdentifierPropertyName = "Skill";
+    private const string CubeMainRowIdentifierPropertyName = "Description";
     private static readonly JsonSerializerOptions JsonOptions = SerializerOptions.PropertyNameCaseInsensitive;
     private static readonly Regex ParameterTokenRegex = new(@"\{\{\s*parameter:([a-zA-Z0-9_\-]+)\s*\}\}", RegexOptions.Compiled);
 
@@ -503,7 +505,7 @@ public static class PluginsService
 
     public static string GetSupportedTargetsSummary()
     {
-        return "Supported now: skills.txt, with rowIdentifier matched against the skill column. Multiply-existing operations can reference parameters declared in plugininfo.json.";
+        return "Supported now: skills.txt (matched on Skill) and cubemain.txt (matched on Description). Multiply-existing operations can reference parameters declared in plugininfo.json.";
     }
 
     private static async Task ApplyOperationsAsync(
@@ -511,37 +513,71 @@ public static class PluginsService
         IReadOnlyList<PluginJsonOperation> operations,
         IReadOnlyDictionary<string, string> parameters)
     {
-        var skillsOperations = operations
-            .Where(operation => string.Equals(operation.File, SkillsFileName, StringComparison.OrdinalIgnoreCase))
+        await ApplyOperationsForTargetAsync<Skills>(
+            excelDirectory,
+            operations,
+            parameters,
+            SkillsFileName,
+            SkillsRowIdentifierPropertyName,
+            static entry => entry.Skill,
+            static filePath => SkillsParser.GetEntries(filePath),
+            static (updatedEntries, filePath, outputDirectory, cancellationToken) =>
+                SkillsParser.SaveEntries(updatedEntries, filePath, outputDirectory, cancellationToken));
+
+        await ApplyOperationsForTargetAsync<CubeMain>(
+            excelDirectory,
+            operations,
+            parameters,
+            CubeMainFileName,
+            CubeMainRowIdentifierPropertyName,
+            static entry => entry.Description,
+            static filePath => CubeMainParser.GetEntries(filePath),
+            static (updatedEntries, filePath, outputDirectory, cancellationToken) =>
+                CubeMainParser.SaveEntries(updatedEntries, filePath, outputDirectory, cancellationToken));
+    }
+
+    private static async Task ApplyOperationsForTargetAsync<TEntry>(
+        string excelDirectory,
+        IReadOnlyList<PluginJsonOperation> operations,
+        IReadOnlyDictionary<string, string> parameters,
+        string fileName,
+        string rowIdentifierPropertyName,
+        Func<TEntry, string?> rowIdentifierSelector,
+        Func<string, Task<IList<TEntry>>> loadEntriesAsync,
+        Func<IList<TEntry>, string, string, CancellationToken, Task<FileInfo>> saveEntriesAsync)
+        where TEntry : class
+    {
+        var targetOperations = operations
+            .Where(operation => string.Equals(operation.File, fileName, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
-        if (skillsOperations.Count == 0)
+        if (targetOperations.Count == 0)
         {
             return;
         }
 
-        var skillsFilePath = Path.Combine(excelDirectory, SkillsFileName);
-        if (!File.Exists(skillsFilePath))
+        var filePath = Path.Combine(excelDirectory, fileName);
+        if (!File.Exists(filePath))
         {
-            throw new FileNotFoundException($"skills.txt was not found in the target excel directory: {excelDirectory}");
+            throw new FileNotFoundException($"{fileName} was not found in the target excel directory: {excelDirectory}");
         }
 
-        var entries = (await SkillsParser.GetEntries(skillsFilePath)).ToList();
+        var entries = await loadEntriesAsync(filePath);
         if (entries.Count == 0)
         {
-            throw new InvalidDataException("skills.txt did not contain any editable rows for plugin execution.");
+            throw new InvalidDataException($"{fileName} did not contain any editable rows for plugin execution.");
         }
 
-        foreach (var operation in skillsOperations)
+        foreach (var operation in targetOperations)
         {
             var matchingIndices = Enumerable.Range(0, entries.Count)
-                .Where(i => string.Equals(entries[i].Skill, operation.RowIdentifier, StringComparison.OrdinalIgnoreCase))
+                .Where(i => string.Equals(rowIdentifierSelector(entries[i]), operation.RowIdentifier, StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
             if (matchingIndices.Count == 0)
             {
                 throw new InvalidDataException(
-                    $"Could not find row '{operation.RowIdentifier}' in skills.txt using the {SkillsRowIdentifierPropertyName} column.");
+                    $"Could not find row '{operation.RowIdentifier}' in {fileName} using the {rowIdentifierPropertyName} column.");
             }
 
             foreach (var entryIndex in matchingIndices)
@@ -549,37 +585,36 @@ public static class PluginsService
                 entries[entryIndex] = UpdateRecord(
                     entries[entryIndex],
                     operation.Column ?? string.Empty,
-                    ResolveOperationValue(entries[entryIndex], operation, parameters));
+                    ResolveOperationValue(entries[entryIndex], operation, parameters, fileName));
             }
         }
 
-        await SaveGeneratedEntriesAsync(
-            entries,
-            skillsFilePath,
-            (updatedEntries, filePath, outputDirectory, cancellationToken) =>
-                SkillsParser.SaveEntries(updatedEntries, filePath, outputDirectory, cancellationToken));
+        await SaveGeneratedEntriesAsync(entries, filePath, saveEntriesAsync);
     }
 
-    private static Skills UpdateRecord(Skills entry, string column, string? updatedValue)
+    private static TEntry UpdateRecord<TEntry>(TEntry entry, string column, string? updatedValue)
+        where TEntry : class
     {
-        var property = typeof(Skills).GetProperties(BindingFlags.Public | BindingFlags.Instance)
+        var property = typeof(TEntry).GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .FirstOrDefault(candidate => candidate.Name.Equals(column, StringComparison.OrdinalIgnoreCase));
 
         if (property == null)
         {
-            throw new InvalidDataException($"The column '{column}' is not supported for skills.txt.");
+            throw new InvalidDataException($"The column '{column}' is not supported for {GetDisplayFileName<TEntry>()}.");
         }
 
-        var clonedEntry = entry with { };
+        var clonedEntry = CloneEntry(entry);
         var convertedValue = ConvertValue(updatedValue, property.PropertyType, column);
         property.SetValue(clonedEntry, convertedValue);
         return clonedEntry;
     }
 
-    private static string? ResolveOperationValue(
-        Skills entry,
+    private static string? ResolveOperationValue<TEntry>(
+        TEntry entry,
         PluginJsonOperation operation,
-        IReadOnlyDictionary<string, string> parameters)
+        IReadOnlyDictionary<string, string> parameters,
+        string fileName)
+        where TEntry : class
     {
         var resolvedUpdatedValue = ResolveParameterTokens(operation.UpdatedValue, parameters);
         var operationType = operation.Operation?.Trim();
@@ -599,12 +634,12 @@ public static class PluginsService
         if (operationType.Equals("multiplyExisting", StringComparison.OrdinalIgnoreCase))
         {
             var column = operation.Column ?? string.Empty;
-            var property = typeof(Skills).GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            var property = typeof(TEntry).GetProperties(BindingFlags.Public | BindingFlags.Instance)
                 .FirstOrDefault(candidate => candidate.Name.Equals(column, StringComparison.OrdinalIgnoreCase));
 
             if (property == null)
             {
-                throw new InvalidDataException($"The column '{column}' is not supported for skills.txt.");
+                throw new InvalidDataException($"The column '{column}' is not supported for {fileName}.");
             }
 
             var currentValue = property.GetValue(entry)?.ToString();
@@ -674,6 +709,33 @@ public static class PluginsService
         return value == decimal.Truncate(value)
             ? decimal.Truncate(value).ToString(CultureInfo.InvariantCulture)
             : value.ToString("0.############################", CultureInfo.InvariantCulture);
+    }
+
+    private static TEntry CloneEntry<TEntry>(TEntry entry)
+        where TEntry : class
+    {
+        var cloneMethod = typeof(object).GetMethod("MemberwiseClone", BindingFlags.Instance | BindingFlags.NonPublic);
+        if (cloneMethod == null)
+        {
+            throw new InvalidOperationException($"Could not clone '{typeof(TEntry).Name}' plugin record.");
+        }
+
+        return (TEntry)cloneMethod.Invoke(entry, null)!;
+    }
+
+    private static string GetDisplayFileName<TEntry>()
+    {
+        if (typeof(TEntry) == typeof(Skills))
+        {
+            return SkillsFileName;
+        }
+
+        if (typeof(TEntry) == typeof(CubeMain))
+        {
+            return CubeMainFileName;
+        }
+
+        return typeof(TEntry).Name;
     }
 
     private static object? ConvertValue(string? value, Type targetType, string column)
@@ -829,30 +891,31 @@ public static class PluginsService
                 continue;
             }
 
-            if (!operation.File.Equals(SkillsFileName, StringComparison.OrdinalIgnoreCase))
+            var supportedTarget = GetSupportedTarget(operation.File);
+            if (supportedTarget == null)
             {
                 errors.Add(
-                    $"'{pluginFileName}' targets unsupported file '{operation.File}'. Only {SkillsFileName} is supported right now.");
+                    $"'{pluginFileName}' targets unsupported file '{operation.File}'. Only {SkillsFileName} and {CubeMainFileName} are supported right now.");
                 continue;
             }
 
             if (string.IsNullOrWhiteSpace(operation.RowIdentifier))
             {
-                errors.Add($"'{pluginFileName}' contains a skills.txt operation with no rowIdentifier.");
+                errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} operation with no rowIdentifier.");
             }
 
             if (string.IsNullOrWhiteSpace(operation.Column))
             {
-                errors.Add($"'{pluginFileName}' contains a skills.txt operation with no column.");
+                errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} operation with no column.");
                 continue;
             }
 
-            var propertyExists = typeof(Skills).GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            var propertyExists = supportedTarget.EntryType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
                 .Any(property => property.Name.Equals(operation.Column, StringComparison.OrdinalIgnoreCase));
 
             if (!propertyExists)
             {
-                errors.Add($"'{pluginFileName}' references unknown skills.txt column '{operation.Column}'.");
+                errors.Add($"'{pluginFileName}' references unknown {supportedTarget.FileName} column '{operation.Column}'.");
             }
 
             if (!string.IsNullOrWhiteSpace(operation.Operation) &&
@@ -869,6 +932,21 @@ public static class PluginsService
                 errors.Add($"'{pluginFileName}' references unknown parameter '{operation.ParameterKey}'.");
             }
         }
+    }
+
+    private static SupportedPluginTarget? GetSupportedTarget(string? fileName)
+    {
+        if (string.Equals(fileName, SkillsFileName, StringComparison.OrdinalIgnoreCase))
+        {
+            return new SupportedPluginTarget(SkillsFileName, typeof(Skills), SkillsRowIdentifierPropertyName);
+        }
+
+        if (string.Equals(fileName, CubeMainFileName, StringComparison.OrdinalIgnoreCase))
+        {
+            return new SupportedPluginTarget(CubeMainFileName, typeof(CubeMain), CubeMainRowIdentifierPropertyName);
+        }
+
+        return null;
     }
 
     private static async Task<PluginInfo> LoadPluginInfoAsync(string pluginInfoPath)
@@ -1164,6 +1242,8 @@ public static class PluginsService
         IReadOnlyList<PluginParameterItem> Parameters,
         IReadOnlyList<PluginCatalogFileItem> Files,
         IReadOnlyList<string> Errors);
+
+    private sealed record SupportedPluginTarget(string FileName, Type EntryType, string RowIdentifierPropertyName);
 
     private sealed class PluginInfo
     {

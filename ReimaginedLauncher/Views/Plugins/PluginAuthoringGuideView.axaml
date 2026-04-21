@@ -66,12 +66,12 @@
                                Text="Plugin JSON Operations" />
                     <TextBlock Text="Each plugin JSON file can be either a single object or an array of objects." TextWrapping="Wrap" />
                     <TextBlock Classes="muted"
-                               Text="Supported target today: skills.txt only. rowIdentifier is matched against the Skill column." TextWrapping="Wrap" />
+                               Text="Supported targets: skills.txt matches rowIdentifier against Skill, and cubemain.txt matches rowIdentifier against Description." TextWrapping="Wrap" />
                     <TextBox x:Name="OperationsExampleTextBox"
                              IsReadOnly="True"
                              AcceptsReturn="True"
                              Classes="code-editor"
-                             MinHeight="310" />
+                             MinHeight="360" />
                 </StackPanel>
             </Border>
 
@@ -80,9 +80,9 @@
                 <StackPanel Spacing="8">
                     <TextBlock Classes="section-title"
                                Text="Available Fields" />
-                    <TextBlock Text="file: Required. Must be skills.txt right now." TextWrapping="Wrap" />
-                    <TextBlock Text="rowIdentifier: Required for skills.txt. Must match a row's Skill value." TextWrapping="Wrap" />
-                    <TextBlock Text="column: Required. Must match a real skills.txt column name understood by the parser." TextWrapping="Wrap" />
+                    <TextBlock Text="file: Required. Must be skills.txt or cubemain.txt." TextWrapping="Wrap" />
+                    <TextBlock Text="rowIdentifier: Required. For skills.txt it must match a row's Skill value. For cubemain.txt it must match a row's Description value." TextWrapping="Wrap" />
+                    <TextBlock Text="column: Required. Must match a real column name on the target file's generated parser model." TextWrapping="Wrap" />
                     <TextBlock Text="updatedValue: The replacement value, or the multiplier when operation is multiplyExisting and parameterKey is not used." TextWrapping="Wrap" />
                     <TextBlock Text="operation: Optional. Leave empty or use replace for direct replacement. Use multiplyExisting to multiply the current numeric value." TextWrapping="Wrap" />
                     <TextBlock Text="parameterKey: Optional. References a parameter declared in plugininfo.json." TextWrapping="Wrap" />
@@ -108,7 +108,7 @@
                     <TextBlock Text="The launcher rejects plugin file paths that are absolute or that traverse outside the plugin folder." TextWrapping="Wrap" />
                     <TextBlock Text="plugininfo.json must list files that actually exist in the archive." TextWrapping="Wrap" />
                     <TextBlock Text="multiplyExisting only works on numeric columns and requires either parameterKey or updatedValue." TextWrapping="Wrap" />
-                    <TextBlock Text="Unknown parameters and unknown skills.txt columns are reported as plugin errors." TextWrapping="Wrap" />
+                    <TextBlock Text="Unknown parameters and unknown target columns are reported as plugin errors." TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
 
@@ -117,7 +117,7 @@
                 <StackPanel Spacing="8">
                     <TextBlock Classes="section-title"
                                Text="Current Limits" />
-                    <TextBlock Text="Only skills.txt is supported today." TextWrapping="Wrap" />
+                    <TextBlock Text="Only skills.txt and cubemain.txt are supported today." TextWrapping="Wrap" />
                     <TextBlock Text="replace and multiplyExisting are the only supported operations." TextWrapping="Wrap" />
                     <TextBlock Text="Values are written through the generated parser types, so the column name and value type still need to be valid." TextWrapping="Wrap" />
                 </StackPanel>
