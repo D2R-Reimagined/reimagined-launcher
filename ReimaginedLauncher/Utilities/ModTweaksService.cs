@@ -289,17 +289,14 @@ public static class ModTweaksService
 
     private static string? GetArmorDirectory()
     {
-        var installDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(MainWindow.Settings.CurrentProfile.InstallDirectory);
-        if (string.IsNullOrWhiteSpace(installDirectory))
+        var mpqBase = GetMpqBaseDirectory();
+        if (string.IsNullOrWhiteSpace(mpqBase))
         {
             return null;
         }
 
         return Path.Combine(
-            installDirectory,
-            "mods",
-            ModDirectoryName,
-            $"{ModDirectoryName}.mpq",
+            mpqBase,
             DataDirectoryName,
             HdDirectoryName,
             ItemsDirectoryName,
