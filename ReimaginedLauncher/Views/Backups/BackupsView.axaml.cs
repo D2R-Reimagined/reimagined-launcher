@@ -23,13 +23,14 @@ public partial class BackupsView : UserControl
     {
         _isRefreshing = true;
         var profile = MainWindow.Settings.CurrentProfile;
+        SaveDirectoryTextBox.Text = BackupService.GetResolvedSaveDirectory();
         BackupDirectoryTextBox.Text = profile.BackupSaveDirectory ?? string.Empty;
         AutomaticBackupsCheckBox.IsChecked = profile.AutomaticBackupsEnabled;
         BackupIntervalTextBox.Text = profile.BackupIntervalMinutes.ToString(CultureInfo.InvariantCulture);
         BackupAmountTextBox.Text = profile.BackupAmount.ToString(CultureInfo.InvariantCulture);
-        SaveDirectoryTextBlock.Text = BuildSaveDirectoryText();
         BackupsListBox.ItemsSource = BackupService.GetBackups();
         RestoreSelectionTextBlock.Text = "Select a backup to restore.";
+        UpdateSaveDirectoryBrowseState();
         _isRefreshing = false;
     }
 
@@ -53,6 +54,29 @@ public partial class BackupsView : UserControl
         _isLoading = isLoading;
         LoadingBanner.IsVisible = isLoading;
         ContentGrid.IsVisible = !isLoading;
+    }
+
+    private async void OnSaveDirectoryClick(object? sender, RoutedEventArgs e)
+    {
+        if (TopLevel.GetTopLevel(this) is not Window window)
+        {
+            return;
+        }
+
+        var folders = await window.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Select Save Folder",
+            AllowMultiple = false
+        });
+
+        if (folders.Count <= 0)
+        {
+            return;
+        }
+
+        MainWindow.Settings.CurrentProfile.SaveDirectory = folders[0].Path.LocalPath;
+        await PersistBackupSettingsAsync();
+        RefreshBackupState();
     }
 
     private async void OnBackupDirectoryClick(object? sender, RoutedEventArgs e)
@@ -169,15 +193,23 @@ public partial class BackupsView : UserControl
         await SettingsManager.SaveAsync(MainWindow.Settings);
         BackupService.UpdateSchedule();
         BackupService.EnforceBackupLimit();
-        SaveDirectoryTextBlock.Text = BuildSaveDirectoryText();
         BackupsListBox.ItemsSource = BackupService.GetBackups();
     }
 
-    private static string BuildSaveDirectoryText()
+    private void UpdateSaveDirectoryBrowseState()
     {
-        var saveDirectory = BackupService.GetResolvedSaveDirectory();
-        return string.IsNullOrWhiteSpace(saveDirectory)
-            ? "Save directory: install directory or modinfo.json not resolved yet."
-            : $"Save directory: {saveDirectory}";
+        var profile = MainWindow.Settings.CurrentProfile;
+
+        if (profile.Type == InstallationType.D2RMM)
+        {
+            // D2RMM: save directory must always be selected manually.
+            SaveDirectoryBrowseButton.IsEnabled = true;
+            return;
+        }
+
+        // Steam / B.net: disable browse when auto-resolution succeeds.
+        var autoResolved = BackupService.GetAutoResolvedSaveDirectory();
+        SaveDirectoryBrowseButton.IsEnabled = string.IsNullOrWhiteSpace(autoResolved);
     }
+
 }
