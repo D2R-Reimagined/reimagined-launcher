@@ -1,0 +1,16 @@
+{
+  "name": "Teleport Delay",
+  "version": "1.0",
+  "description": "Modifies the delay of the Teleport skill to 3 seconds by default.",
+  "files": [
+    "teleport-delay.json"
+  ],
+  "parameters": [
+    {
+      "key": "TeleportDelay",
+      "name": "Teleport Delay in Frames (25 = 1 second)",
+      "description": "Scales the delay of the Teleport skill.",
+      "defaultValue": "75"
+    }
+  ]
+}
