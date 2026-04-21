@@ -141,6 +141,25 @@ public static class BackupService
 
     public static string GetResolvedSaveDirectory()
     {
+        var profile = MainWindow.Settings.CurrentProfile;
+
+        // D2RMM profiles must always use the user-selected save directory.
+        if (profile.Type == InstallationType.D2RMM)
+        {
+            return !string.IsNullOrWhiteSpace(profile.SaveDirectory) ? profile.SaveDirectory : string.Empty;
+        }
+
+        // If the user has manually set a save directory, use it.
+        if (!string.IsNullOrWhiteSpace(profile.SaveDirectory))
+        {
+            return profile.SaveDirectory;
+        }
+
+        return GetAutoResolvedSaveDirectory();
+    }
+
+    public static string GetAutoResolvedSaveDirectory()
+    {
         var savePath = GetSavePathFromModInfo();
         if (string.IsNullOrWhiteSpace(savePath))
         {
@@ -593,25 +612,22 @@ public static class BackupService
 
     private static string? GetModInfoPath()
     {
-        var installDirectory = MainWindow.Settings.CurrentProfile.InstallDirectory;
+        var profile = MainWindow.Settings.CurrentProfile;
+        var installDirectory = profile.InstallDirectory;
         if (string.IsNullOrWhiteSpace(installDirectory))
         {
             return null;
         }
 
-        var expectedPath = Path.Combine(installDirectory, "mods", "Reimagined", "modinfo.json");
-        if (File.Exists(expectedPath))
+        if (profile.Type == InstallationType.D2RMM)
         {
-            return expectedPath;
+            var d2rmmPath = Path.Combine(installDirectory, "Reimagined.mpq", "modinfo.json");
+            return File.Exists(d2rmmPath) ? d2rmmPath : null;
         }
 
-        var modsDirectory = Path.Combine(installDirectory, "mods");
-        if (!Directory.Exists(modsDirectory))
-        {
-            return null;
-        }
-
-        return Directory.GetFiles(modsDirectory, "modinfo.json", SearchOption.AllDirectories).FirstOrDefault();
+        // For B.net and Steam, only use the canonical Reimagined.mpq location.
+        var modInfoPath = Path.Combine(installDirectory, "mods", "Reimagined", "Reimagined.mpq", "modinfo.json");
+        return File.Exists(modInfoPath) ? modInfoPath : null;
     }
 
     private sealed class ModInfo

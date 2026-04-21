@@ -23,6 +23,7 @@ public class InstallationProfile
     public string? InstallDirectory { get; set; }
     public string? SteamDirectory { get; set; }
     public bool IsInstallDirectoryValidated { get; set; }
+    public string? SaveDirectory { get; set; }
     public string? BackupSaveDirectory { get; set; }
     public bool AutomaticBackupsEnabled { get; set; } = true;
     public int BackupIntervalMinutes { get; set; } = 60;
