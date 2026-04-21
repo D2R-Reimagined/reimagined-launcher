@@ -420,7 +420,7 @@ public class GameLauncherService
         var profile = MainWindow.Settings.CurrentProfile;
         if (profile.Type == InstallationType.D2RMM)
         {
-            return "D2RMM Install: No launch command. Clicking install mod will install reimagined.mpq into D2RMM/mods.";
+            return "D2RMM Install: No launch command. Clicking install mod will install Reimagined into D2RMM/mods.";
         }
 
         var launchParameters = string.IsNullOrWhiteSpace(launchParamOverride)

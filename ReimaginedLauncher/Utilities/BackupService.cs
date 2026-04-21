@@ -621,7 +621,10 @@ public static class BackupService
 
         if (profile.Type == InstallationType.D2RMM)
         {
-            var d2rmmPath = Path.Combine(installDirectory, "Reimagined.mpq", "modinfo.json");
+            var resolvedFolder = InstallDirectoryValidator.ResolveD2RmmModFolder(installDirectory);
+            if (resolvedFolder == null)
+                return null;
+            var d2rmmPath = Path.Combine(resolvedFolder, "modinfo.json");
             return File.Exists(d2rmmPath) ? d2rmmPath : null;
         }
 

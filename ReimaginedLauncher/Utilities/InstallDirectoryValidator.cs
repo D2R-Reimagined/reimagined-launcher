@@ -87,4 +87,30 @@ public static class InstallDirectoryValidator
         var executablePath = Path.Combine(normalizedDirectory, ExecutableName);
         return File.Exists(executablePath) ? executablePath : null;
     }
+
+    /// <summary>
+    /// Resolves the D2RMM mod folder inside the given mods directory.
+    /// Accepts either "Reimagined" or "Reimagined.mpq" as long as the folder
+    /// contains a "data" subfolder with a "modinfo.json" file.
+    /// Prefers "Reimagined" over "Reimagined.mpq" when both exist.
+    /// </summary>
+    public static string? ResolveD2RmmModFolder(string? modsDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(modsDirectory))
+            return null;
+
+        var candidates = new[] { "Reimagined", "Reimagined.mpq" };
+        foreach (var candidate in candidates)
+        {
+            var candidatePath = Path.Combine(modsDirectory, candidate);
+            if (Directory.Exists(candidatePath) &&
+                Directory.Exists(Path.Combine(candidatePath, "data")) &&
+                File.Exists(Path.Combine(candidatePath, "modinfo.json")))
+            {
+                return candidatePath;
+            }
+        }
+
+        return null;
+    }
 }

@@ -330,28 +330,29 @@ public partial class UpdateView : UserControl
                     Directory.CreateDirectory(tempDir);
                     ZipFile.ExtractToDirectory(zipPath, tempDir);
 
-                    var sourceMpqDir = Path.Combine(tempDir, "mods", "Reimagined", "Reimagined.mpq");
-                    if (!Directory.Exists(sourceMpqDir))
-                        sourceMpqDir = Path.Combine(tempDir, "Reimagined", "Reimagined.mpq");
-                    if (!Directory.Exists(sourceMpqDir))
-                    {
-                        var found = Directory.GetDirectories(tempDir, "Reimagined.mpq", SearchOption.AllDirectories);
-                        if (found.Length > 0)
-                            sourceMpqDir = found[0];
-                    }
+                    var sourceMpqDir = ResolveSourceModFolder(tempDir);
 
-                    if (!Directory.Exists(sourceMpqDir))
+                    if (sourceMpqDir == null || !Directory.Exists(sourceMpqDir))
                         return false;
 
-                    var targetMpqDir = Path.Combine(installDirectory, "Reimagined.mpq");
+                    var targetMpqDir = Path.Combine(installDirectory, "Reimagined");
                     if (Directory.Exists(targetMpqDir))
                         Directory.Delete(targetMpqDir, recursive: true);
 
+                    // Also clean up legacy Reimagined.mpq folder if present
+                    var legacyTargetDir = Path.Combine(installDirectory, "Reimagined.mpq");
+                    if (Directory.Exists(legacyTargetDir))
+                        Directory.Delete(legacyTargetDir, recursive: true);
+
                     CopyDirectory(sourceMpqDir, targetMpqDir);
 
-                    var backupDir = Path.Combine(installDirectory, "Reimagined.mpq.backup");
+                    var backupDir = Path.Combine(installDirectory, "Reimagined.backup");
                     if (Directory.Exists(backupDir))
                         Directory.Delete(backupDir, recursive: true);
+
+                    var legacyBackupDir = Path.Combine(installDirectory, "Reimagined.mpq.backup");
+                    if (Directory.Exists(legacyBackupDir))
+                        Directory.Delete(legacyBackupDir, recursive: true);
 
                     return true;
                 }
@@ -366,7 +367,7 @@ public partial class UpdateView : UserControl
 
             if (!result)
             {
-                Notifications.SendNotification("Reimagined.mpq not found in the mod archive.", "Warning");
+                Notifications.SendNotification("Reimagined mod folder not found in the mod archive.", "Warning");
                 return;
             }
 
@@ -401,6 +402,43 @@ public partial class UpdateView : UserControl
             await mainWindow.RefreshUpdateStateAsync();
             await mainWindow.NavigateToLaunchViewAsync();
         }
+    }
+
+    private static string? ResolveSourceModFolder(string tempDir)
+    {
+        string[] searchPaths =
+        [
+            Path.Combine(tempDir, "mods", "Reimagined", "Reimagined"),
+            Path.Combine(tempDir, "mods", "Reimagined", "Reimagined.mpq"),
+            Path.Combine(tempDir, "Reimagined", "Reimagined"),
+            Path.Combine(tempDir, "Reimagined", "Reimagined.mpq")
+        ];
+
+        foreach (var path in searchPaths)
+        {
+            if (Directory.Exists(path) &&
+                Directory.Exists(Path.Combine(path, "data")) &&
+                File.Exists(Path.Combine(path, "modinfo.json")))
+            {
+                return path;
+            }
+        }
+
+        // Fallback: search recursively for either folder name containing data/modinfo.json
+        foreach (var name in new[] { "Reimagined", "Reimagined.mpq" })
+        {
+            var found = Directory.GetDirectories(tempDir, name, SearchOption.AllDirectories);
+            foreach (var dir in found)
+            {
+                if (Directory.Exists(Path.Combine(dir, "data")) &&
+                    File.Exists(Path.Combine(dir, "modinfo.json")))
+                {
+                    return dir;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static void CopyDirectory(string sourceDir, string targetDir)

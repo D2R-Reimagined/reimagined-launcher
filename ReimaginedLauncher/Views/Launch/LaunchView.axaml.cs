@@ -109,12 +109,12 @@ public partial class LaunchView : UserControl
         if (profile.Type == InstallationType.D2RMM)
         {
             InstallDirectoryTitle.Text = "D2RMM Mods Folder";
-            InstallDirectoryDescription.Text = "Select your D2RMM mods folder where Reimagined.mpq will be installed.";
+            InstallDirectoryDescription.Text = "Select your D2RMM mods folder where Reimagined will be installed.";
             
             isValidated = InstallDirectoryValidator.IsValidD2RmmModsDirectory(profile.InstallDirectory) && Directory.Exists(profile.InstallDirectory);
             
-            // For D2RMM, check if Reimagined.mpq exists in the mods folder
-            isModDetected = isValidated && Directory.Exists(Path.Combine(profile.InstallDirectory!, "Reimagined.mpq"));
+            // For D2RMM, check if Reimagined or Reimagined.mpq exists in the mods folder
+            isModDetected = isValidated && InstallDirectoryValidator.ResolveD2RmmModFolder(profile.InstallDirectory) != null;
         }
         else
         {
@@ -131,7 +131,7 @@ public partial class LaunchView : UserControl
         if (profile.Type == InstallationType.D2RMM)
         {
             StartGameButton.Content = "Install Tweaks";
-            StartGameDescription.Text = "Clicking 'Install Tweaks' will apply tweaks and adjustments to the files in your D2RMM/mods/Reimagined.mpq/data directory.";
+            StartGameDescription.Text = "Clicking 'Install Tweaks' will apply tweaks and adjustments to the files in your D2RMM/mods/Reimagined/data directory.";
             StartGameButton.IsEnabled = !_isLaunching && isValidated && isModDetected;
         }
         else
@@ -155,7 +155,7 @@ public partial class LaunchView : UserControl
                 : !InstallDirectoryValidator.IsValidD2RmmModsDirectory(profile.InstallDirectory)
                     ? InstallDirectoryValidator.GetD2RmmValidationMessage(profile.InstallDirectory)
                     : !isModDetected && isValidated
-                        ? "Reimagined.mpq not yet installed in this mods folder."
+                        ? "Reimagined not yet installed in this mods folder."
                         : "The selected folder could not be found.";
         }
         else

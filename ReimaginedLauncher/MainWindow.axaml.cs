@@ -495,11 +495,11 @@ public partial class MainWindow : Window
         {
             if (!string.IsNullOrWhiteSpace(profile.InstallDirectory))
             {
-                var modPath = Path.Combine(profile.InstallDirectory, "Reimagined.mpq");
-                var modInfoPath = Path.Combine(modPath, "modinfo.json");
-                var layoutsDir = Path.Combine(modPath, "data", "global", "ui", "layouts");
+                var modPath = InstallDirectoryValidator.ResolveD2RmmModFolder(profile.InstallDirectory);
+                IsLocalModDetected = modPath != null;
 
-                IsLocalModDetected = Directory.Exists(modPath);
+                var modInfoPath = modPath != null ? Path.Combine(modPath, "modinfo.json") : string.Empty;
+                var layoutsDir = modPath != null ? Path.Combine(modPath, "data", "global", "ui", "layouts") : string.Empty;
 
                 var panel = CharacterSelectPanelService.FromJson(layoutsDir);
                 var panelVersion = panel?.GetModVersion();
