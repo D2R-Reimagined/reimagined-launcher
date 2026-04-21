@@ -2,8 +2,7 @@
   { 
     "file": "skills.txt", 
     "rowIdentifier": "Teleport", 
-    "column": "localdelay", 
-    "operation": "", 
+    "column": "localdelay",
     "parameterKey": "TeleportDelay" 
   }
 ]
