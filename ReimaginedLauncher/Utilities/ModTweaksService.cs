@@ -217,9 +217,13 @@ public static class ModTweaksService
             return null;
         }
 
-        return profile.Type == InstallationType.D2RMM
-            ? Path.Combine(installDirectory, $"{ModDirectoryName}.mpq")
-            : Path.Combine(installDirectory, "mods", ModDirectoryName, $"{ModDirectoryName}.mpq");
+        if (profile.Type == InstallationType.D2RMM)
+        {
+            return InstallDirectoryValidator.ResolveD2RmmModFolder(installDirectory) ??
+                   Path.Combine(installDirectory, ModDirectoryName);
+        }
+
+        return Path.Combine(installDirectory, "mods", ModDirectoryName, $"{ModDirectoryName}.mpq");
     }
 
     private static string? GetExcelDirectory()
