@@ -1,0 +1,112 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:models="clr-namespace:ReimaginedLauncher.HttpClients.Models"
+             mc:Ignorable="d" d:DesignWidth="980" d:DesignHeight="560"
+             x:Class="ReimaginedLauncher.Views.Plugins.UserPluginsView">
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                  VerticalScrollBarVisibility="Auto">
+        <StackPanel Spacing="18">
+            <StackPanel Spacing="4">
+                <TextBlock Classes="view-title"
+                           Text="User Plugins" />
+                <TextBlock Classes="muted"
+                           Text="Browse community plugins shared on the GitHub discussions board. Install them directly from here." />
+            </StackPanel>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <Grid ColumnDefinitions="*,Auto,Auto"
+                      ColumnSpacing="12"
+                      RowDefinitions="Auto,Auto,Auto"
+                      RowSpacing="12">
+                    <StackPanel Grid.Row="0"
+                                Grid.Column="0"
+                                Spacing="4">
+                        <TextBlock Classes="section-title"
+                                   Text="Available User Plugins" />
+                        <TextBlock x:Name="UserPluginsSummaryTextBlock"
+                                   Classes="muted"
+                                   Text="Loading user plugins from GitHub discussions..." />
+                    </StackPanel>
+
+                    <Button Grid.Row="0"
+                            Grid.Column="1"
+                            Content="Back to Installed Plugins"
+                            Click="OnBackClicked" />
+                    <Button Grid.Row="0"
+                            Grid.Column="2"
+                            Content="Refresh"
+                            Click="OnRefreshClicked" />
+
+                    <Border x:Name="LoadingBanner"
+                            Grid.Row="1"
+                            Grid.ColumnSpan="3"
+                            Classes="panel"
+                            Padding="16"
+                            IsVisible="False">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="Loading user plugins..."
+                                       FontWeight="SemiBold" />
+                            <ProgressBar IsIndeterminate="True"
+                                         Height="8" />
+                        </StackPanel>
+                    </Border>
+
+                    <StackPanel x:Name="EmptyStatePanel"
+                                Grid.Row="2"
+                                Grid.ColumnSpan="3"
+                                Spacing="4"
+                                IsVisible="False">
+                        <TextBlock Text="No user plugins were found."
+                                   FontWeight="SemiBold" />
+                        <TextBlock Classes="muted"
+                                   Text="Discussion posts must include Title:, Desc:/Description:, Mod:/ModVer:/ModVersion: (#.#.#), and a .zip file link to appear here." />
+                    </StackPanel>
+
+                    <ItemsControl x:Name="UserPluginsItemsControl"
+                                  Grid.Row="2"
+                                  Grid.ColumnSpan="3">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="models:UserPluginEntry">
+                                <Border Classes="panel"
+                                        Margin="0,0,0,12"
+                                        Padding="16">
+                                    <Grid ColumnDefinitions="*,Auto"
+                                          ColumnSpacing="12">
+                                        <StackPanel Grid.Column="0"
+                                                    Spacing="3">
+                                            <StackPanel Orientation="Horizontal"
+                                                        Spacing="10">
+                                                <TextBlock FontWeight="SemiBold"
+                                                           Text="{Binding Title}" />
+                                                <TextBlock FontWeight="SemiBold"
+                                                           Text="{Binding ModVersion, StringFormat=Mod {0}}"
+                                                           Opacity="0.6" />
+                                            </StackPanel>
+                                            <TextBlock Classes="muted"
+                                                       Text="{Binding Description}"
+                                                       TextWrapping="Wrap" />
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Column="1"
+                                                    Orientation="Horizontal"
+                                                    Spacing="8"
+                                                    VerticalAlignment="Center">
+                                            <Button Content="View on GitHub"
+                                                    Click="OnViewOnGitHubClicked" />
+                                            <Button Classes="accent"
+                                                    Content="Download &amp; Install"
+                                                    Click="OnInstallClicked" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Grid>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

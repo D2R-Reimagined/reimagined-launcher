@@ -159,6 +159,14 @@ public partial class PluginsView : UserControl
         }
     }
 
+    private void OnOpenUserPluginsClicked(object? sender, RoutedEventArgs e)
+    {
+        if (TopLevel.GetTopLevel(this) is MainWindow window)
+        {
+            window.NavigateToUserPluginsView();
+        }
+    }
+
     private async void OnPluginEnabledClicked(object? sender, RoutedEventArgs e)
     {
         if (sender is not CheckBox { DataContext: PluginCatalogItem plugin } checkBox)
@@ -365,7 +373,7 @@ public partial class PluginsView : UserControl
                 : "Saved";
     }
 
-    private static async Task<bool> ShowReplacePluginConfirmationAsync(
+    public static async Task<bool> ShowReplacePluginConfirmationAsync(
         Window owner,
         string pluginName,
         string existingVersion,

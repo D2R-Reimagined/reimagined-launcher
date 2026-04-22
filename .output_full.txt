@@ -1,0 +1,392 @@
+﻿diff --git a/ReimaginedLauncher/Assets/Plugins/duration-editor/plugininfo.json b/ReimaginedLauncher/Assets/Plugins/duration-editor/plugininfo.json
+index 085cda0..533607d 100644
+--- a/ReimaginedLauncher/Assets/Plugins/duration-editor/plugininfo.json
++++ b/ReimaginedLauncher/Assets/Plugins/duration-editor/plugininfo.json
+@@ -1,6 +1,8 @@
+ {
+   "name": "Duration Editor",
+   "version": "1.2",
++  "modVersion": "3.0.7",
++  "author": "Ephyr",
+   "description": "Modifies skill duration based on configurable multipliers.",
+   "files": [
+     "duration-modifier.json"
+diff --git a/ReimaginedLauncher/MainWindow.axaml.cs b/ReimaginedLauncher/MainWindow.axaml.cs
+index 3a51077..d2dfcea 100644
+--- a/ReimaginedLauncher/MainWindow.axaml.cs
++++ b/ReimaginedLauncher/MainWindow.axaml.cs
+@@ -945,6 +945,22 @@ public partial class MainWindow : Window
+         }
+     }
+ 
++    public void NavigateToUserPluginsView()
++    {
++        if (!Dispatcher.UIThread.CheckAccess())
++        {
++            Dispatcher.UIThread.Post(NavigateToUserPluginsView);
++            return;
++        }
++
++        ContentArea.Content = new UserPluginsView();
++
++        if (PluginsNavItem != null && NavigationList.SelectedItem != PluginsNavItem)
++        {
++            NavigationList.SelectedItem = PluginsNavItem;
++        }
++    }
++
+     private void RefreshCurrentContent()
+     {
+         if (!Dispatcher.UIThread.CheckAccess())
+@@ -981,6 +997,10 @@ public partial class MainWindow : Window
+         {
+             _ = officialPluginsView.RefreshOfficialPluginsStateAsync();
+         }
++        else if (ContentArea.Content is UserPluginsView userPluginsView)
++        {
++            _ = userPluginsView.RefreshUserPluginsAsync();
++        }
+         else if (ContentArea.Content is UpdateView updateView)
+         {
+             updateView.RefreshUpdateState();
+diff --git a/ReimaginedLauncher/Program.cs b/ReimaginedLauncher/Program.cs
+index 0484ae1..9fe798d 100644
+--- a/ReimaginedLauncher/Program.cs
++++ b/ReimaginedLauncher/Program.cs
+@@ -21,6 +21,7 @@ class Program
+ 
+         var services = new ServiceCollection();
+         services.AddHttpClient<GitHubAnnouncementsHttpClient>();
++        services.AddHttpClient<GitHubDiscussionPluginsHttpClient>();
+         services.AddHttpClient<NexusModsHttpClient>();
+         
+         ServiceProvider = services.BuildServiceProvider();
+diff --git a/ReimaginedLauncher/Utilities/PluginsModels.cs b/ReimaginedLauncher/Utilities/PluginsModels.cs
+index bc1696c..ea65d05 100644
+--- a/ReimaginedLauncher/Utilities/PluginsModels.cs
++++ b/ReimaginedLauncher/Utilities/PluginsModels.cs
+@@ -11,6 +11,8 @@ public sealed class PluginCatalogItem : INotifyPropertyChanged
+     public string Id { get; init; } = string.Empty;
+     public string Name { get; init; } = string.Empty;
+     public string Version { get; init; } = string.Empty;
++    public string ModVersion { get; init; } = string.Empty;
++    public string Author { get; init; } = string.Empty;
+     public string Description { get; init; } = string.Empty;
+     public bool IsEnabled { get; init; }
+     public int Order { get; init; }
+@@ -20,6 +22,8 @@ public sealed class PluginCatalogItem : INotifyPropertyChanged
+     public bool HasErrors => Errors.Count > 0;
+     public bool HasParameters => Parameters.Count > 0;
+     public bool HasDescription => !string.IsNullOrWhiteSpace(Description);
++    public bool HasModVersion => !string.IsNullOrWhiteSpace(ModVersion);
++    public bool HasAuthor => !string.IsNullOrWhiteSpace(Author);
+     public bool IsParametersExpanded
+     {
+         get => _isParametersExpanded;
+diff --git a/ReimaginedLauncher/Utilities/PluginsService.cs b/ReimaginedLauncher/Utilities/PluginsService.cs
+index aa37d8a..ad71315 100644
+--- a/ReimaginedLauncher/Utilities/PluginsService.cs
++++ b/ReimaginedLauncher/Utilities/PluginsService.cs
+@@ -26,6 +26,7 @@ public static class PluginsService
+     private const string SkillsRowIdentifierPropertyName = "Skill";
+     private static readonly JsonSerializerOptions JsonOptions = SerializerOptions.PropertyNameCaseInsensitive;
+     private static readonly Regex ParameterTokenRegex = new(@"\{\{\s*parameter:([a-zA-Z0-9_\-]+)\s*\}\}", RegexOptions.Compiled);
++    private static readonly Regex ModVersionRegex = new(@"^\d+\.\d+\.\d+$", RegexOptions.Compiled);
+ 
+     public static string PluginsDirectoryPath => Path.Combine(SettingsManager.AppDirectoryPath, PluginsDirectoryName);
+ 
+@@ -116,10 +117,10 @@ public static class PluginsService
+             }
+             catch (Exception ex)
+             {
+-                errors.Add($"plugininfo.json is invalid: {ex.Message}");
++                errors.Add(FormatJsonError("plugininfo.json", ex));
+             }
+ 
+-            catalog.Add(new OfficialPluginCatalogItem
++                catalog.Add(new OfficialPluginCatalogItem
+             {
+                 FolderName = folderName,
+                 PluginId = registration?.Id ?? string.Empty,
+@@ -149,6 +150,8 @@ public static class PluginsService
+                 Id = registration.Id,
+                 Name = pluginState.Name,
+                 Version = pluginState.Version,
++                ModVersion = pluginState.ModVersion,
++                Author = pluginState.Author,
+                 Description = pluginState.Description,
+                 IsEnabled = registration.IsEnabled,
+                 Order = index + 1,
+@@ -736,19 +739,21 @@ public static class PluginsService
+         var parameters = new List<PluginParameterItem>();
+         var name = registration.FolderName;
+         var version = "Unknown";
++        var modVersion = string.Empty;
++        var author = string.Empty;
+         var description = string.Empty;
+ 
+         if (!Directory.Exists(pluginDirectory))
+         {
+             errors.Add("Imported plugin files are missing from disk.");
+-            return new PluginState(name, version, description, parameters, files, errors);
++            return new PluginState(name, version, modVersion, author, description, parameters, files, errors);
+         }
+ 
+         var pluginInfoPath = Path.Combine(pluginDirectory, PluginInfoFileName);
+         if (!File.Exists(pluginInfoPath))
+         {
+             errors.Add("plugininfo.json is missing.");
+-            return new PluginState(name, version, description, parameters, files, errors);
++            return new PluginState(name, version, modVersion, author, description, parameters, files, errors);
+         }
+ 
+         try
+@@ -756,6 +761,8 @@ public static class PluginsService
+             var pluginInfo = await LoadPluginInfoAsync(pluginInfoPath);
+             name = pluginInfo.Name;
+             version = pluginInfo.Version;
++            modVersion = pluginInfo.ModVersion ?? string.Empty;
++            author = pluginInfo.Author ?? string.Empty;
+             description = pluginInfo.Description ?? string.Empty;
+             parameters = pluginInfo.Parameters.Select(parameter => new PluginParameterItem
+             {
+@@ -770,7 +777,7 @@ public static class PluginsService
+             if (pluginInfo.Files.Count == 0)
+             {
+                 errors.Add("plugininfo.json does not list any plugin JSON files.");
+-                return new PluginState(name, version, description, parameters, files, errors);
++                return new PluginState(name, version, modVersion, author, description, parameters, files, errors);
+             }
+ 
+             foreach (var relativePath in pluginInfo.Files)
+@@ -797,16 +804,16 @@ public static class PluginsService
+                 }
+                 catch (Exception ex)
+                 {
+-                    errors.Add($"'{normalizedRelativePath}' is invalid: {ex.Message}");
++                    errors.Add(FormatJsonError(normalizedRelativePath, ex));
+                 }
+             }
+         }
+         catch (Exception ex)
+         {
+-            errors.Add($"plugininfo.json is invalid: {ex.Message}");
++            errors.Add(FormatJsonError("plugininfo.json", ex));
+         }
+ 
+-        return new PluginState(name, version, description, parameters, files, errors);
++        return new PluginState(name, version, modVersion, author, description, parameters, files, errors);
+     }
+ 
+     private static void ValidateOperations(
+@@ -884,6 +891,8 @@ public static class PluginsService
+         {
+             Name = pluginInfo.Name ?? string.Empty,
+             Version = pluginInfo.Version ?? string.Empty,
++            ModVersion = pluginInfo.ModVersion,
++            Author = pluginInfo.Author,
+             Description = pluginInfo.Description,
+             Files = pluginInfo.Files ?? [],
+             Parameters = pluginInfo.Parameters ?? []
+@@ -908,6 +917,16 @@ public static class PluginsService
+             throw new InvalidDataException("plugininfo.json must include a version.");
+         }
+ 
++        if (string.IsNullOrWhiteSpace(pluginInfo.ModVersion))
++        {
++            throw new InvalidDataException("plugininfo.json must include a modVersion.");
++        }
++
++        if (!ModVersionRegex.IsMatch(pluginInfo.ModVersion))
++        {
++            throw new InvalidDataException("plugininfo.json modVersion must be in #.#.# format (e.g. 1.0.0).");
++        }
++
+         if (pluginInfo.Files.Count == 0)
+         {
+             throw new InvalidDataException("plugininfo.json must include at least one plugin JSON file.");
+@@ -1079,6 +1098,39 @@ public static class PluginsService
+         return string.Join(Path.DirectorySeparatorChar, segments);
+     }
+ 
++    private static string FormatJsonError(string fileName, Exception ex)
++    {
++        if (ex is JsonException jsonEx)
++        {
++            var path = jsonEx.Path;
++            if (!string.IsNullOrWhiteSpace(path))
++            {
++                var propertyName = path.Contains('.')
++                    ? path[(path.LastIndexOf('.') + 1)..]
++                    : path;
++
++                var innerMessage = jsonEx.InnerException?.Message;
++                if (!string.IsNullOrWhiteSpace(innerMessage))
++                {
++                    return $"'{fileName}' has an invalid value for '{propertyName}': {innerMessage}";
++                }
++
++                return $"'{fileName}' has an invalid value for '{propertyName}'.";
++            }
++
++            var message = jsonEx.Message;
++            var pipeIndex = message.IndexOf('|');
++            if (pipeIndex > 0)
++            {
++                message = message[..pipeIndex].Trim();
++            }
++
++            return $"'{fileName}' has invalid JSON: {message}";
++        }
++
++        return $"'{fileName}' is invalid: {ex.Message}";
++    }
++
+     private static string SanitizePathSegment(string value)
+     {
+         var builder = new StringBuilder(value.Length);
+@@ -1160,6 +1212,8 @@ public static class PluginsService
+     private sealed record PluginState(
+         string Name,
+         string Version,
++        string ModVersion,
++        string Author,
+         string Description,
+         IReadOnlyList<PluginParameterItem> Parameters,
+         IReadOnlyList<PluginCatalogFileItem> Files,
+@@ -1169,6 +1223,8 @@ public static class PluginsService
+     {
+         public string Name { get; set; } = string.Empty;
+         public string Version { get; set; } = string.Empty;
++        public string? ModVersion { get; set; }
++        public string? Author { get; set; }
+         public string? Description { get; set; }
+         public List<string> Files { get; set; } = [];
+         public List<PluginParameterDefinition> Parameters { get; set; } = [];
+diff --git a/ReimaginedLauncher/Views/Plugins/PluginAuthoringGuideView.axaml b/ReimaginedLauncher/Views/Plugins/PluginAuthoringGuideView.axaml
+index 67a61a8..db10742 100644
+--- a/ReimaginedLauncher/Views/Plugins/PluginAuthoringGuideView.axaml
++++ b/ReimaginedLauncher/Views/Plugins/PluginAuthoringGuideView.axaml
+@@ -48,7 +48,7 @@
+                 <StackPanel Spacing="10">
+                     <TextBlock Classes="section-title"
+                                Text="plugininfo.json" />
+-                    <TextBlock Text="plugininfo.json must include a name, version, and at least one plugin JSON file path." TextWrapping="Wrap" />
++                    <TextBlock Text="plugininfo.json must include name, version, modVersion (in #.#.# format), and at least one plugin JSON file path. author and description are optional." TextWrapping="Wrap" />
+                     <TextBlock Classes="muted"
+                                Text="Parameters are optional, but each one needs key, name, and defaultValue." TextWrapping="Wrap" />
+                     <TextBox x:Name="PluginInfoExampleTextBox"
+@@ -107,11 +107,27 @@
+                                Text="Validation Rules" />
+                     <TextBlock Text="The launcher rejects plugin file paths that are absolute or that traverse outside the plugin folder." TextWrapping="Wrap" />
+                     <TextBlock Text="plugininfo.json must list files that actually exist in the archive." TextWrapping="Wrap" />
++                    <TextBlock Text="modVersion is required and must be in #.#.# format (e.g. 3.0.7) or the plugin will be rejected." TextWrapping="Wrap" />
+                     <TextBlock Text="multiplyExisting only works on numeric columns and requires either parameterKey or updatedValue." TextWrapping="Wrap" />
+                     <TextBlock Text="Unknown parameters and unknown skills.txt columns are reported as plugin errors." TextWrapping="Wrap" />
+                 </StackPanel>
+             </Border>
+ 
++            <Border Classes="panel"
++                    Padding="20">
++                <StackPanel Spacing="8">
++                    <TextBlock Classes="section-title"
++                               Text="Sharing on GitHub Discussions" />
++                    <TextBlock Text="To share your plugin through the launcher's User Plugins page, create a post in the Plugins discussion category on GitHub. The launcher scrapes discussion posts and requires specific fields in the post body." TextWrapping="Wrap" />
++                    <TextBlock Text="Title: Your Plugin Name — displayed as the plugin title in the launcher." TextWrapping="Wrap" />
++                    <TextBlock Text="Desc: or Description: A short summary — displayed under the title." TextWrapping="Wrap" />
++                    <TextBlock Text="Mod: or ModVer: or ModVersion: followed by a version in #.#.# format — displayed next to the title. Posts without a valid mod version are not loaded." TextWrapping="Wrap" />
++                    <TextBlock Text="Attach a .zip file to the post containing your plugin. Posts without a .zip attachment are not loaded." TextWrapping="Wrap" />
++                    <TextBlock Classes="muted"
++                               Text="The .zip must still contain a valid plugininfo.json with all required fields (name, version, modVersion, files). The launcher validates the archive on install." TextWrapping="Wrap" />
++                </StackPanel>
++            </Border>
++
+             <Border Classes="panel"
+                     Padding="20">
+                 <StackPanel Spacing="8">
+diff --git a/ReimaginedLauncher/Views/Plugins/PluginAuthoringGuideView.axaml.cs b/ReimaginedLauncher/Views/Plugins/PluginAuthoringGuideView.axaml.cs
+index 96650ae..c6ada40 100644
+--- a/ReimaginedLauncher/Views/Plugins/PluginAuthoringGuideView.axaml.cs
++++ b/ReimaginedLauncher/Views/Plugins/PluginAuthoringGuideView.axaml.cs
+@@ -15,6 +15,9 @@ public partial class PluginAuthoringGuideView : UserControl
+                                              {
+                                                "name": "Lightning Balance",
+                                                "version": "1.0.0",
++                                               "modVersion": "3.0.7",
++                                               "author": "YourName",
++                                               "description": "Scales lightning skill damage.",
+                                                "files": [
+                                                  "skills.json"
+                                                ],
+diff --git a/ReimaginedLauncher/Views/Plugins/PluginsView.axaml b/ReimaginedLauncher/Views/Plugins/PluginsView.axaml
+index 7694b31..c660b6a 100644
+--- a/ReimaginedLauncher/Views/Plugins/PluginsView.axaml
++++ b/ReimaginedLauncher/Views/Plugins/PluginsView.axaml
+@@ -60,6 +60,8 @@
+                                LineSpacing="12">
+                         <Button Content="Install Official Plugins"
+                                 Click="OnOpenOfficialPluginsClicked" />
++                        <Button Content="User Plugins"
++                                Click="OnOpenUserPluginsClicked" />
+                         <Button Content="How To Write a Plugin"
+                                 Click="OnOpenAuthoringGuideClicked" />
+                         <Button Content="Refresh"
+@@ -108,17 +110,27 @@
+                                                            Text="{Binding Description}"
+                                                            TextWrapping="Wrap"
+                                                            IsVisible="{Binding HasDescription}" />
+-                                                <TextBlock Classes="muted"
+-                                                           Text="{Binding Version, StringFormat=Version {0}}" />
++                                                <StackPanel Orientation="Horizontal"
++                                                            Spacing="12">
++                                                    <TextBlock Classes="muted"
++                                                               Text="{Binding Version, StringFormat=Version {0}}" />
++                                                    <TextBlock Classes="muted"
++                                                               Text="{Binding ModVersion, StringFormat=Mod {0}}"
++                                                               IsVisible="{Binding HasModVersion}" />
++                                                    <TextBlock Classes="muted"
++                                                               Text="{Binding Author, StringFormat=Author {0}}"
++                                                               IsVisible="{Binding HasAuthor}" />
++                                                </StackPanel>
+                                                 <TextBlock Classes="muted"
+                                                            Text="{Binding Order, StringFormat=Execution order {0}}" />
+                                             </StackPanel>
+ 
+                                             <TextBlock Grid.Column="2"
+                                                        Grid.Row="0"
+-                                                       VerticalAlignment="Center"
+                                                        Foreground="{StaticResource GoldTextBrush}"
+                                                        FontWeight="SemiBold"
++                                                       VerticalAlignment="Center"
++                                                       HorizontalAlignment="Right"
+                                                        Text="{Binding StatusText}" />
+ 
+                                             <WrapPanel Grid.Column="1"
+diff --git a/ReimaginedLauncher/Views/Plugins/PluginsView.axaml.cs b/ReimaginedLauncher/Views/Plugins/PluginsView.axaml.cs
+index 65eb06b..15c9e13 100644
+--- a/ReimaginedLauncher/Views/Plugins/PluginsView.axaml.cs
++++ b/ReimaginedLauncher/Views/Plugins/PluginsView.axaml.cs
+@@ -159,6 +159,14 @@ public partial class PluginsView : UserControl
+         }
+     }
+ 
++    private void OnOpenUserPluginsClicked(object? sender, RoutedEventArgs e)
++    {
++        if (TopLevel.GetTopLevel(this) is MainWindow window)
++        {
++            window.NavigateToUserPluginsView();
++        }
++    }
++
+     private async void OnPluginEnabledClicked(object? sender, RoutedEventArgs e)
+     {
+         if (sender is not CheckBox { DataContext: PluginCatalogItem plugin } checkBox)
+@@ -365,7 +373,7 @@ public partial class PluginsView : UserControl
+                 : "Saved";
+     }
+ 
+-    private static async Task<bool> ShowReplacePluginConfirmationAsync(
++    public static async Task<bool> ShowReplacePluginConfirmationAsync(
+         Window owner,
+         string pluginName,
+         string existingVersion,

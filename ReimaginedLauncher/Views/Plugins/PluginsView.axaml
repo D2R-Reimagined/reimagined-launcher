@@ -60,6 +60,8 @@
                                LineSpacing="12">
                         <Button Content="Install Official Plugins"
                                 Click="OnOpenOfficialPluginsClicked" />
+                        <Button Content="User Plugins"
+                                Click="OnOpenUserPluginsClicked" />
                         <Button Content="How To Write a Plugin"
                                 Click="OnOpenAuthoringGuideClicked" />
                         <Button Content="Refresh"
@@ -108,17 +110,27 @@
                                                            Text="{Binding Description}"
                                                            TextWrapping="Wrap"
                                                            IsVisible="{Binding HasDescription}" />
-                                                <TextBlock Classes="muted"
-                                                           Text="{Binding Version, StringFormat=Version {0}}" />
+                                                <StackPanel Orientation="Horizontal"
+                                                            Spacing="12">
+                                                    <TextBlock Classes="muted"
+                                                               Text="{Binding Version, StringFormat=Version {0}}" />
+                                                    <TextBlock Classes="muted"
+                                                               Text="{Binding ModVersion, StringFormat=Mod {0}}"
+                                                               IsVisible="{Binding HasModVersion}" />
+                                                    <TextBlock Classes="muted"
+                                                               Text="{Binding Author, StringFormat=Author {0}}"
+                                                               IsVisible="{Binding HasAuthor}" />
+                                                </StackPanel>
                                                 <TextBlock Classes="muted"
                                                            Text="{Binding Order, StringFormat=Execution order {0}}" />
                                             </StackPanel>
 
                                             <TextBlock Grid.Column="2"
                                                        Grid.Row="0"
-                                                       VerticalAlignment="Center"
                                                        Foreground="{StaticResource GoldTextBrush}"
                                                        FontWeight="SemiBold"
+                                                       VerticalAlignment="Center"
+                                                       HorizontalAlignment="Right"
                                                        Text="{Binding StatusText}" />
 
                                             <WrapPanel Grid.Column="1"
