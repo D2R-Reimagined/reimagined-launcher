@@ -978,6 +978,8 @@ public static class ModTweaksService
                 PropertiesParser.SaveEntries(updatedEntriesList, filePath, outputDirectory, cancellationToken));
     }
 
+    private const string GoldReplacement = "Gold 1x";
+
     private static readonly (string Unstacked, string Stacked)[] OrbReplacementPairs =
     [
         ("ooi", "1oi"),
@@ -1051,12 +1053,23 @@ public static class ModTweaksService
         {
             foreach (var (unstacked, stacked) in OrbReplacementPairs)
             {
-                var from = orbStackDrops == StackDropOption.Unstacked ? stacked : unstacked;
-                var to = orbStackDrops == StackDropOption.Unstacked ? unstacked : stacked;
-
-                if (string.Equals(value, from, StringComparison.Ordinal))
+                if (orbStackDrops == StackDropOption.Disabled)
                 {
-                    return to;
+                    if (string.Equals(value, unstacked, StringComparison.Ordinal)
+                        || string.Equals(value, stacked, StringComparison.Ordinal))
+                    {
+                        return GoldReplacement;
+                    }
+                }
+                else
+                {
+                    var from = orbStackDrops == StackDropOption.Unstacked ? stacked : unstacked;
+                    var to = orbStackDrops == StackDropOption.Unstacked ? unstacked : stacked;
+
+                    if (string.Equals(value, from, StringComparison.Ordinal))
+                    {
+                        return to;
+                    }
                 }
             }
         }
@@ -1066,18 +1079,29 @@ public static class ModTweaksService
             var prefix = value[0];
             var suffix = value.Substring(1);
 
-            if (runeStackDrops == StackDropOption.Unstacked
-                && prefix == 's'
-                && int.TryParse(suffix, out _))
+            if (runeStackDrops == StackDropOption.Disabled)
             {
-                return "r" + suffix;
+                if ((prefix == 'r' || prefix == 's')
+                    && int.TryParse(suffix, out _))
+                {
+                    return GoldReplacement;
+                }
             }
-
-            if (runeStackDrops == StackDropOption.Stacked
-                && prefix == 'r'
-                && int.TryParse(suffix, out _))
+            else
             {
-                return "s" + suffix;
+                if (runeStackDrops == StackDropOption.Unstacked
+                    && prefix == 's'
+                    && int.TryParse(suffix, out _))
+                {
+                    return "r" + suffix;
+                }
+
+                if (runeStackDrops == StackDropOption.Stacked
+                    && prefix == 'r'
+                    && int.TryParse(suffix, out _))
+                {
+                    return "s" + suffix;
+                }
             }
         }
 
