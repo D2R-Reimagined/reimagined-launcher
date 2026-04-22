@@ -43,6 +43,12 @@ public partial class PluginAuthoringGuideView : UserControl
                                                  "column": "EMin",
                                                  "operation": "multiplyExisting",
                                                  "parameterKey": "damageMultiplier"
+                                               },
+                                               {
+                                                 "file": "cubemain.txt",
+                                                 "rowIdentifier": "Socketed Magic Weapon",
+                                                 "column": "NumMods",
+                                                 "updatedValue": "2"
                                                }
                                              ]
                                              """;
