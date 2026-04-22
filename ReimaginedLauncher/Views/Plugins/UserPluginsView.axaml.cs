@@ -52,6 +52,24 @@ public partial class UserPluginsView : UserControl
         await RefreshUserPluginsAsync();
     }
 
+    private void OnSubmitPluginClicked(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            using var process = new Process();
+            process.StartInfo = new ProcessStartInfo
+            {
+                FileName = "https://github.com/D2R-Reimagined/reimagined-launcher/discussions/categories/plugins",
+                UseShellExecute = true
+            };
+            process.Start();
+        }
+        catch (Exception)
+        {
+            // Keep launcher stable if the shell cannot open the URL.
+        }
+    }
+
     private void OnBackClicked(object? sender, RoutedEventArgs e)
     {
         if (TopLevel.GetTopLevel(this) is MainWindow window)

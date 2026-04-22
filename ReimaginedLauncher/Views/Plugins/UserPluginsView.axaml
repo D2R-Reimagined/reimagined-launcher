@@ -31,14 +31,21 @@
                                    Text="Loading user plugins from GitHub discussions..." />
                     </StackPanel>
 
-                    <Button Grid.Row="0"
-                            Grid.Column="1"
-                            Content="Back to Installed Plugins"
-                            Click="OnBackClicked" />
+                    <StackPanel Grid.Row="0"
+                                Grid.Column="1"
+                                Orientation="Horizontal"
+                                Spacing="8">
+                        <Button Content="Back to Installed Plugins"
+                                Click="OnBackClicked" />
+                        <Button Content="Refresh"
+                                Click="OnRefreshClicked" />
+                    </StackPanel>
+
                     <Button Grid.Row="0"
                             Grid.Column="2"
-                            Content="Refresh"
-                            Click="OnRefreshClicked" />
+                            Content="Submit a Plugin"
+                            Click="OnSubmitPluginClicked"
+                            HorizontalAlignment="Right" />
 
                     <Border x:Name="LoadingBanner"
                             Grid.Row="1"
