@@ -53,7 +53,7 @@ public partial class PluginAuthoringGuideView : UserControl
                                                {
                                                  "file": "skills.txt",
                                                  "rowIdentifier": "amazonlightningfury",
-                                                 "column": "EMin",
+                                                 "column": "calc1",
                                                  "operation": "append",
                                                  "updatedValue": "+10*20"
                                                }
