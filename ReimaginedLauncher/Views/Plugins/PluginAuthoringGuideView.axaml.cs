@@ -49,6 +49,13 @@ public partial class PluginAuthoringGuideView : UserControl
                                                  "rowIdentifier": "Socketed Magic Weapon",
                                                  "column": "NumMods",
                                                  "updatedValue": "2"
+                                               },
+                                               {
+                                                 "file": "skills.txt",
+                                                 "rowIdentifier": "amazonlightningfury",
+                                                 "column": "EMin",
+                                                 "operation": "append",
+                                                 "updatedValue": "+10*20"
                                                }
                                              ]
                                              """;
