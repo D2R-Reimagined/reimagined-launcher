@@ -367,3 +367,6 @@ gamedata/
 # Jetbrains Products
 .idea/
 .DS_Store
+# Stray tool output
+.output_full.txt
+

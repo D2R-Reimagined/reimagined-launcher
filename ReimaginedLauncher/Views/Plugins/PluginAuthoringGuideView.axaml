@@ -64,7 +64,7 @@
                 <StackPanel Spacing="10">
                     <TextBlock Classes="section-title"
                                Text="plugininfo.json" />
-                    <TextBlock Text="plugininfo.json must include a name, version, and at least one plugin JSON file path." TextWrapping="Wrap" />
+                    <TextBlock Text="plugininfo.json must include name, version, modVersion (in #.#.# format), and at least one plugin JSON file path. author and description are optional." TextWrapping="Wrap" />
                     <TextBlock Classes="muted"
                                Text="Parameters are optional, but each one needs key, name, and defaultValue." TextWrapping="Wrap" />
                     <TextBox x:Name="PluginInfoExampleTextBox"
@@ -124,8 +124,24 @@
                                Text="Validation Rules" />
                     <TextBlock Text="The launcher rejects plugin file paths that are absolute or that traverse outside the plugin folder." TextWrapping="Wrap" />
                     <TextBlock Text="plugininfo.json must list files that actually exist in the archive." TextWrapping="Wrap" />
+                    <TextBlock Text="modVersion is required and must be in #.#.# format (e.g. 3.0.7) or the plugin will be rejected." TextWrapping="Wrap" />
                     <TextBlock Text="multiplyExisting only works on numeric columns and requires either parameterKey or updatedValue." TextWrapping="Wrap" />
                     <TextBlock Text="Unknown parameters and unknown target columns are reported as plugin errors." TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="8">
+                    <TextBlock Classes="section-title"
+                               Text="Sharing on GitHub Discussions" />
+                    <TextBlock Text="To share your plugin through the launcher's User Plugins page, create a post in the Plugins discussion category on GitHub. The launcher scrapes discussion posts and requires specific fields in the post body." TextWrapping="Wrap" />
+                    <TextBlock Text="Title: Your Plugin Name — displayed as the plugin title in the launcher." TextWrapping="Wrap" />
+                    <TextBlock Text="Desc: or Description: A short summary — displayed under the title." TextWrapping="Wrap" />
+                    <TextBlock Text="Mod: or ModVer: or ModVersion: followed by a version in #.#.# format — displayed next to the title. Posts without a valid mod version are not loaded." TextWrapping="Wrap" />
+                    <TextBlock Text="Attach a .zip file to the post containing your plugin. Posts without a .zip attachment are not loaded." TextWrapping="Wrap" />
+                    <TextBlock Classes="muted"
+                               Text="The .zip must still contain a valid plugininfo.json with all required fields (name, version, modVersion, files). The launcher validates the archive on install." TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
 

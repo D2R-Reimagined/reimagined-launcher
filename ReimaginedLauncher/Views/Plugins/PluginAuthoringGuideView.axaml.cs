@@ -19,6 +19,9 @@ public partial class PluginAuthoringGuideView : UserControl
                                              {
                                                "name": "Lightning Balance",
                                                "version": "1.0.0",
+                                               "modVersion": "3.0.7",
+                                               "author": "YourName",
+                                               "description": "Scales lightning skill damage.",
                                                "files": [
                                                  "skills.json"
                                                ],

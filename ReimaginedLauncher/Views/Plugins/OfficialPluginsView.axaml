@@ -69,7 +69,7 @@
                                                            TextWrapping="Wrap"
                                                            IsVisible="{Binding HasDescription}" />
                                                 <TextBlock Classes="muted"
-                                                           Text="{Binding Version, StringFormat=Version {0}}" />
+                                                           Text="{Binding Version, StringFormat=Version: {0}}" />
                                             </StackPanel>
 
                                             <TextBlock Grid.Column="1"
