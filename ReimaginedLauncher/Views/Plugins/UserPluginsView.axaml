@@ -89,7 +89,7 @@
                                                 <TextBlock FontWeight="SemiBold"
                                                            Text="{Binding Title}" />
                                                 <TextBlock FontWeight="SemiBold"
-                                                           Text="{Binding ModVersion, StringFormat=Mod {0}}"
+                                                           Text="{Binding ModVersion, StringFormat=Mod: {0}}"
                                                            Opacity="0.6" />
                                             </StackPanel>
                                             <TextBlock Classes="muted"
