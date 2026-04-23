@@ -47,6 +47,7 @@ public class InstallationProfile
     public bool MakeTooltipBackgroundOpaque { get; set; }
     public bool RemoveHelmetVisual { get; set; }
     public bool TerrorizeAllZones { get; set; }
+    public int ZoneDurationMinutes { get; set; } = 60;
     public bool TerrorZonePurpleOverlay { get; set; }
     public bool RemoveFadeEffect { get; set; }
     public bool RestoreTerrorZoneFanfare { get; set; }

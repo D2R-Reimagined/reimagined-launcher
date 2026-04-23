@@ -178,7 +178,10 @@ public static class ModTweaksService
             await RestoreDesecratedZonesFileAsync(cleanDesecratedZonesFilePath, desecratedZonesFilePath);
             ReportProgress(progress, "Applying desecrated zones tweaks...");
             LaunchDiagnostics.Log("Applying desecrated zones tweaks.");
-            await ApplyDesecratedZonesTweaksAsync(desecratedZonesFilePath, profile.TerrorizeAllZones);
+            await ApplyDesecratedZonesTweaksAsync(
+                desecratedZonesFilePath,
+                profile.TerrorizeAllZones,
+                profile.ZoneDurationMinutes);
             ReportProgress(progress, "Restoring desecrated vis files...");
             LaunchDiagnostics.Log("Restoring desecrated vis files from clean copy.");
             await RestoreVisFilesAsync();
@@ -478,12 +481,19 @@ public static class ModTweaksService
         await CopyFileAsync(cleanDesecratedZonesFilePath, desecratedZonesFilePath, overwrite: true);
     }
 
-    private static async Task ApplyDesecratedZonesTweaksAsync(string? desecratedZonesFilePath, bool terrorizeAllZones)
+    private static async Task ApplyDesecratedZonesTweaksAsync(
+        string? desecratedZonesFilePath,
+        bool terrorizeAllZones,
+        int zoneDurationMinutes)
     {
         if (string.IsNullOrWhiteSpace(desecratedZonesFilePath) || !File.Exists(desecratedZonesFilePath))
         {
             throw new FileNotFoundException("desecratedzones.json was not found in the Reimagined hd global excel folder.");
         }
+
+        await DesecratedZonesJsonService.ApplyTerrorZoneTweaksAsync(
+            desecratedZonesFilePath,
+            zoneDurationMinutes);
 
         if (!terrorizeAllZones)
         {
