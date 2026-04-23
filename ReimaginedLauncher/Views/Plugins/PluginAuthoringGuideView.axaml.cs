@@ -58,6 +58,13 @@ public partial class PluginAuthoringGuideView : UserControl
                                                  "updatedValue": "2"
                                                },
                                                {
+                                                 "file": "skills.txt",
+                                                 "rowIdentifier": "amazonlightningfury",
+                                                 "column": "calc1",
+                                                 "operation": "append",
+                                                 "updatedValue": "+10*20"
+                                               },
+                                               {
                                                  "file": "monstats.txt",
                                                  "rowIdentifier": "skeleton1",
                                                  "column": "Level",

@@ -99,7 +99,8 @@
                     <TextBlock Classes="section-title"
                                Text="Available Fields" />
                     <TextBlock Text="file: Required. Any .txt file from the base excel folder except itemstatcost.txt, or any .json file under data/local/lng/strings." TextWrapping="Wrap" />
-                    <TextBlock Text="Excel (.txt) targets: rowIdentifier is required (value from the identifier column, or numeric row ID for files with duplicate identifiers); column is required (a column name on the target file); updatedValue is the replacement value or the multiplier; operation is optional (empty/replace or multiplyExisting); parameterKey is optional (references a parameter in plugininfo.json)." TextWrapping="Wrap" />
+                    <TextBlock Text="Excel (.txt) targets: rowIdentifier is required (value from the identifier column, or numeric row ID for files with duplicate identifiers); column is required (a column name on the target file); updatedValue is the replacement value, the multiplier when operation is multiplyExisting, or the text appended when operation is append; operation is optional (empty/replace, multiplyExisting, or append); parameterKey is optional (references a parameter in plugininfo.json)." TextWrapping="Wrap" />
+                    <TextBlock Text="append wraps the existing value in parentheses and concatenates your entry, e.g. (existingValue)+10*20." TextWrapping="Wrap" />
                     <TextBlock Text="Strings (.json) targets: Key is required and matches the D2R entry's Key. Alongside Key, add any of the 13 language fields (enUS, zhTW, deDE, esES, frFR, itIT, koKR, plPL, esMX, jaJP, ptBR, ruRU, zhCN) with the replacement string — only the listed language fields on the matched entry are overwritten." TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
@@ -126,6 +127,7 @@
                     <TextBlock Text="plugininfo.json must list files that actually exist in the archive." TextWrapping="Wrap" />
                     <TextBlock Text="modVersion is required and must be in #.#.# format (e.g. 3.0.7) or the plugin will be rejected." TextWrapping="Wrap" />
                     <TextBlock Text="multiplyExisting only works on numeric columns and requires either parameterKey or updatedValue." TextWrapping="Wrap" />
+                    <TextBlock Text="append requires either parameterKey or updatedValue and works on any column type." TextWrapping="Wrap" />
                     <TextBlock Text="Unknown parameters and unknown target columns are reported as plugin errors." TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
@@ -151,7 +153,7 @@
                     <TextBlock Classes="section-title"
                                Text="Current Limits" />
                     <TextBlock Text="All .txt files in the base excel folder are supported except itemstatcost.txt. Most files match rows by a unique column; files with duplicate identifier values use numeric row IDs." TextWrapping="Wrap" />
-                    <TextBlock Text="replace and multiplyExisting are the only supported operations." TextWrapping="Wrap" />
+                    <TextBlock Text="replace, multiplyExisting, and append are the supported operations." TextWrapping="Wrap" />
                     <TextBlock Text="Most files use typed parsers from the D2RReimaginedTools library for column validation and data integrity." TextWrapping="Wrap" />
                 </StackPanel>
             </Border>

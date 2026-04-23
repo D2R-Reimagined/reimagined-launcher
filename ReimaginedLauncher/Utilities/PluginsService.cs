@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -516,7 +516,7 @@ public static class PluginsService
 
     public static string GetSupportedTargetsSummary()
     {
-        return "All .txt files in the base excel folder are supported except itemstatcost.txt. Most files match rows by a unique column; files with duplicate values in their identifier column use a numeric row ID (0-based data row index) instead. Multiply-existing operations can reference parameters declared in plugininfo.json. String JSON files from data/local/lng/strings (e.g. item-runes.json) are also supported using the same flat d2rr-style layout: each entry lists the target file, the D2R Key, and one or more language fields (enUS, zhTW, deDE, esES, frFR, itIT, koKR, plPL, esMX, jaJP, ptBR, ruRU, zhCN); only the listed languages are replaced and any other languages on that entry are left untouched.";
+        return "All .txt files in the base excel folder are supported except itemstatcost.txt. Most files match rows by a unique column; files with duplicate values in their identifier column use a numeric row ID (0-based data row index) instead. Multiply-existing and append operations can reference parameters declared in plugininfo.json. String JSON files from data/local/lng/strings (e.g. item-runes.json) are also supported using the same flat d2rr-style layout: each entry lists the target file, the D2R Key, and one or more language fields (enUS, zhTW, deDE, esES, frFR, itIT, koKR, plPL, esMX, jaJP, ptBR, ruRU, zhCN); only the listed languages are replaced and any other languages on that entry are left untouched.";
     }
 
     private static async Task ApplyOperationsAsync(
@@ -786,6 +786,28 @@ public static class PluginsService
             }
 
             return FormatDecimalValue(currentNumber * multiplier);
+        }
+
+        if (operationType.Equals("append", StringComparison.OrdinalIgnoreCase))
+        {
+            var column = operation.Column ?? string.Empty;
+            var property = typeof(TEntry).GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .FirstOrDefault(candidate => candidate.Name.Equals(column, StringComparison.OrdinalIgnoreCase));
+
+            if (property == null)
+            {
+                throw new InvalidDataException(
+                    $"The column '{column}' is not supported for {fileName} (row '{operation.RowIdentifier ?? "<unknown>"}').");
+            }
+
+            var currentValue = property.GetValue(entry)?.ToString() ?? string.Empty;
+
+            var appendText = !string.IsNullOrWhiteSpace(operation.ParameterKey) &&
+                             parameters.TryGetValue(operation.ParameterKey, out var parameterValue)
+                ? parameterValue
+                : resolvedUpdatedValue ?? string.Empty;
+
+            return $"({currentValue}){appendText}";
         }
 
         throw new InvalidDataException($"Unsupported plugin operation '{operationType}' (file '{fileName}', row '{operation.RowIdentifier ?? "<unknown>"}', column '{operation.Column ?? string.Empty}').");
@@ -1194,11 +1216,12 @@ public static class PluginsService
             }
 
             if (!string.IsNullOrWhiteSpace(operation.Operation) &&
-                operation.Operation.Equals("multiplyExisting", StringComparison.OrdinalIgnoreCase) &&
+                (operation.Operation.Equals("multiplyExisting", StringComparison.OrdinalIgnoreCase) ||
+                 operation.Operation.Equals("append", StringComparison.OrdinalIgnoreCase)) &&
                 string.IsNullOrWhiteSpace(operation.ParameterKey) &&
                 string.IsNullOrWhiteSpace(operation.UpdatedValue))
             {
-                errors.Add($"'{pluginFileName}' contains a multiplyExisting operation without parameterKey or updatedValue.");
+                errors.Add($"'{pluginFileName}' contains a {operation.Operation} operation without parameterKey or updatedValue.");
             }
 
             if (!string.IsNullOrWhiteSpace(operation.ParameterKey) &&
