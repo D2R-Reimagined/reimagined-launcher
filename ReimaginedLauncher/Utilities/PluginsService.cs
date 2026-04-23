@@ -36,7 +36,9 @@ public static class PluginsService
     private static readonly Regex ModVersionRegex = new(@"^\d+\.\d+\.\d+$", RegexOptions.Compiled);
     // Matches a numeric row-index range in the form "start-end" (inclusive), e.g. "50-100".
     // Whitespace around the numbers and the dash is allowed so plugins can be formatted loosely.
-    private static readonly Regex RowRangeRegex = new(@"^\s*(\d+)\s*-\s*(\d+)\s*$", RegexOptions.Compiled);
+    // Accepts common Unicode dash variants (hyphen-minus, non-breaking hyphen, figure dash,
+    // en dash, em dash, horizontal bar, minus sign) because some editors auto-replace "-".
+    private static readonly Regex RowRangeRegex = new(@"^\s*(\d+)\s*[-\u2010-\u2015\u2212]\s*(\d+)\s*$", RegexOptions.Compiled);
 
     private static readonly Dictionary<string, FileParserRegistration> ParserRegistry =
         BuildParserRegistry();
