@@ -1,0 +1,16 @@
+﻿[
+    {
+        "file":  "shrines.txt",
+        "rowIdentifier":  "None",
+        "column":  "Code",
+        "operation":  "replace",
+        "updatedValue":  "1"
+    },
+    {
+        "file":  "shrines.txt",
+        "rowIdentifier":  "None",
+        "column":  "Arg0",
+        "operation":  "replace",
+        "updatedValue":  "1"
+    }
+]

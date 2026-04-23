@@ -1,0 +1,16 @@
+[
+  {
+    "file": "missiles.txt",
+    "rowIdentifier": "arrow",
+    "column": "Param1",
+    "operation": "replace",
+    "updatedValue": "0"
+  },
+  {
+    "file": "missiles.txt",
+    "rowIdentifier": "guidedarrow",
+    "column": "Param2",
+    "operation": "multiplyExisting",
+    "parameterKey": "testMultiplier"
+  }
+]

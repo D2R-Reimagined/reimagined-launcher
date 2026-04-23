@@ -1,0 +1,16 @@
+﻿[
+  {
+    "file": "gems.txt",
+    "rowIdentifier": "Chipped Amethyst",
+    "column": "WeaponMod1Min",
+    "operation": "replace",
+    "updatedValue": "40"
+  },
+  {
+    "file": "gems.txt",
+    "rowIdentifier": "Chipped Amethyst",
+    "column": "WeaponMod1Max",
+    "operation": "replace",
+    "updatedValue": "60"
+  }
+]

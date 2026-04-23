@@ -1,0 +1,16 @@
+[
+  {
+    "file": "storepage.txt",
+    "rowIdentifier": "Armor Page",
+    "column": "Code",
+    "operation": "replace",
+    "updatedValue": "armo"
+  },
+  {
+    "file": "storepage.txt",
+    "rowIdentifier": "Weapons Page",
+    "column": "Code",
+    "operation": "replace",
+    "updatedValue": "weap"
+  }
+]

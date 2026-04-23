@@ -1,0 +1,16 @@
+[
+  {
+    "file": "cubemod.txt",
+    "rowIdentifier": "amethyst",
+    "column": "Code",
+    "operation": "replace",
+    "updatedValue": "ame"
+  },
+  {
+    "file": "cubemod.txt",
+    "rowIdentifier": "ruby",
+    "column": "Code",
+    "operation": "replace",
+    "updatedValue": "rub"
+  }
+]

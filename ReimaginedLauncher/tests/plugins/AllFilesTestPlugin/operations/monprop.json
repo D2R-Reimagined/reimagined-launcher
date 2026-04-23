@@ -1,0 +1,16 @@
+﻿[
+    {
+        "file":  "monprop.txt",
+        "rowIdentifier":  "baboon6",
+        "column":  "Chance1",
+        "operation":  "replace",
+        "updatedValue":  "1"
+    },
+    {
+        "file":  "monprop.txt",
+        "rowIdentifier":  "baboon6",
+        "column":  "Min1",
+        "operation":  "multiplyExisting",
+        "parameterKey":  "testMultiplier"
+    }
+]

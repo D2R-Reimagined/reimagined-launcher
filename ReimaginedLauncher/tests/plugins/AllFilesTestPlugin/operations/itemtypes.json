@@ -1,0 +1,16 @@
+﻿[
+    {
+        "file":  "itemtypes.txt",
+        "rowIdentifier":  "none",
+        "column":  "MaxSockets1",
+        "operation":  "replace",
+        "updatedValue":  "1"
+    },
+    {
+        "file":  "itemtypes.txt",
+        "rowIdentifier":  "none",
+        "column":  "MaxSocketsLevelThreshold1",
+        "operation":  "multiplyExisting",
+        "parameterKey":  "testMultiplier"
+    }
+]

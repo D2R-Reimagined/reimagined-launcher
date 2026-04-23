@@ -1,0 +1,16 @@
+[
+  {
+    "file": "monumod.txt",
+    "rowIdentifier": "none",
+    "column": "Enabled",
+    "operation": "replace",
+    "updatedValue": "0"
+  },
+  {
+    "file": "monumod.txt",
+    "rowIdentifier": "none",
+    "column": "Version",
+    "operation": "multiplyExisting",
+    "parameterKey": "testMultiplier"
+  }
+]

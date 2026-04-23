@@ -1,0 +1,16 @@
+﻿[
+  {
+    "file": "overlay.txt",
+    "rowIdentifier": "lightning",
+    "column": "Frames",
+    "operation": "replace",
+    "updatedValue": "21"
+  },
+  {
+    "file": "overlay.txt",
+    "rowIdentifier": "lightning",
+    "column": "Frames",
+    "operation": "multiplyExisting",
+    "parameterKey": "testMultiplier"
+  }
+]

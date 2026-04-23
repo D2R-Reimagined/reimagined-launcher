@@ -1,0 +1,16 @@
+[
+  {
+    "file": "skilldesc.txt",
+    "rowIdentifier": "attack",
+    "column": "SkillPage",
+    "operation": "replace",
+    "updatedValue": "0"
+  },
+  {
+    "file": "skilldesc.txt",
+    "rowIdentifier": "attack",
+    "column": "SkillRow",
+    "operation": "multiplyExisting",
+    "parameterKey": "testMultiplier"
+  }
+]

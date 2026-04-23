@@ -1,0 +1,16 @@
+﻿[
+  {
+    "file": "gamble.txt",
+    "rowIdentifier": "amulet",
+    "column": "Code",
+    "operation": "replace",
+    "updatedValue": "amu"
+  },
+  {
+    "file": "gamble.txt",
+    "rowIdentifier": "ring",
+    "column": "Code",
+    "operation": "replace",
+    "updatedValue": "rin"
+  }
+]

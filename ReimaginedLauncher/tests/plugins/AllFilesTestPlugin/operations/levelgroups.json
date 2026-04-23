@@ -1,0 +1,16 @@
+﻿[
+    {
+        "file":  "levelgroups.txt",
+        "rowIdentifier":  "Null",
+        "column":  "ParentLevelGroupId",
+        "operation":  "replace",
+        "updatedValue":  "1"
+    },
+    {
+        "file":  "levelgroups.txt",
+        "rowIdentifier":  "Null",
+        "column":  "CompleteThreshold",
+        "operation":  "replace",
+        "updatedValue":  "1"
+    }
+]

@@ -1,0 +1,16 @@
+﻿[
+  {
+    "file": "skillcalc.txt",
+    "rowIdentifier": "ln12",
+    "column": "Description",
+    "operation": "replace",
+    "updatedValue": "Test description"
+  },
+  {
+    "file": "skillcalc.txt",
+    "rowIdentifier": "ln12",
+    "column": "Code",
+    "operation": "replace",
+    "updatedValue": "ln12"
+  }
+]

@@ -1,0 +1,16 @@
+﻿[
+    {
+        "file":  "objects.txt",
+        "rowIdentifier":  "0",
+        "column":  "Class",
+        "operation":  "replace",
+        "updatedValue":  "1"
+    },
+    {
+        "file":  "objects.txt",
+        "rowIdentifier":  "0",
+        "column":  "ID",
+        "operation":  "multiplyExisting",
+        "parameterKey":  "testMultiplier"
+    }
+]

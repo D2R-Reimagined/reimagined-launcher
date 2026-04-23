@@ -1,0 +1,16 @@
+﻿[
+    {
+        "file":  "inventory.txt",
+        "rowIdentifier":  "Amazon",
+        "column":  "InvLeft",
+        "operation":  "replace",
+        "updatedValue":  "1"
+    },
+    {
+        "file":  "inventory.txt",
+        "rowIdentifier":  "Amazon",
+        "column":  "InvRight",
+        "operation":  "multiplyExisting",
+        "parameterKey":  "testMultiplier"
+    }
+]

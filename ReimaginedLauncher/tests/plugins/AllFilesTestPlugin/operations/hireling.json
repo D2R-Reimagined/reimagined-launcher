@@ -1,0 +1,16 @@
+﻿[
+    {
+        "file":  "hireling.txt",
+        "rowIdentifier":  "0",
+        "column":  "Version",
+        "operation":  "replace",
+        "updatedValue":  "1"
+    },
+    {
+        "file":  "hireling.txt",
+        "rowIdentifier":  "0",
+        "column":  "Id",
+        "operation":  "multiplyExisting",
+        "parameterKey":  "testMultiplier"
+    }
+]

@@ -1,0 +1,16 @@
+﻿[
+    {
+        "file":  "monpreset.txt",
+        "rowIdentifier":  "0",
+        "column":  "Act",
+        "operation":  "replace",
+        "updatedValue":  "1"
+    },
+    {
+        "file":  "monpreset.txt",
+        "rowIdentifier":  "0",
+        "column":  "Ds1Id",
+        "operation":  "multiplyExisting",
+        "parameterKey":  "testMultiplier"
+    }
+]

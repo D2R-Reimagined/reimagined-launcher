@@ -1,0 +1,16 @@
+﻿[
+    {
+        "file":  "superuniques.txt",
+        "rowIdentifier":  "Bishibosh",
+        "column":  "HcIdx",
+        "operation":  "replace",
+        "updatedValue":  "1"
+    },
+    {
+        "file":  "superuniques.txt",
+        "rowIdentifier":  "Bishibosh",
+        "column":  "Mod1",
+        "operation":  "multiplyExisting",
+        "parameterKey":  "testMultiplier"
+    }
+]

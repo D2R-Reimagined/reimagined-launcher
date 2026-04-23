@@ -1,0 +1,16 @@
+[
+  {
+    "file": "pettype.txt",
+    "rowIdentifier": "single",
+    "column": "BaseMax",
+    "operation": "replace",
+    "updatedValue": "2"
+  },
+  {
+    "file": "pettype.txt",
+    "rowIdentifier": "single",
+    "column": "Warp",
+    "operation": "multiplyExisting",
+    "parameterKey": "testMultiplier"
+  }
+]

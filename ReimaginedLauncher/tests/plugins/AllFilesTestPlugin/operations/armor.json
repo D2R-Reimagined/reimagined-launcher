@@ -1,0 +1,16 @@
+﻿[
+    {
+        "file":  "armor.txt",
+        "rowIdentifier":  "cap",
+        "column":  "Version",
+        "operation":  "replace",
+        "updatedValue":  "1"
+    },
+    {
+        "file":  "armor.txt",
+        "rowIdentifier":  "cap",
+        "column":  "CompactSave",
+        "operation":  "multiplyExisting",
+        "parameterKey":  "testMultiplier"
+    }
+]

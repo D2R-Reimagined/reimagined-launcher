@@ -1,0 +1,16 @@
+﻿[
+    {
+        "file":  "automagic.txt",
+        "rowIdentifier":  "Fletcher\u0027s",
+        "column":  "Version",
+        "operation":  "replace",
+        "updatedValue":  "1"
+    },
+    {
+        "file":  "automagic.txt",
+        "rowIdentifier":  "Fletcher\u0027s",
+        "column":  "Level",
+        "operation":  "multiplyExisting",
+        "parameterKey":  "testMultiplier"
+    }
+]
