@@ -41,6 +41,8 @@ public static class ModTweaksService
     private const string StatesFileName = "states.txt";
     private const string PropertiesFileName = "Properties.txt";
     private const string TreasureClassExFileName = "treasureclassex.txt";
+    private const string SoundsFileName = "sounds.txt";
+    private const string DesecratedEnterHdSoundKey = "desecrated_enter_hd";
     private const string DesecratedZonesFileName = "desecratedzones.json";
     private const string CleanDesecratedZonesFileName = "desecratedzones_launcher_clean.json";
     private const string EnvDirectoryName = "env";
@@ -50,7 +52,6 @@ public static class ModTweaksService
     private const string SfxDirectoryName = "sfx";
     private const string QuestDirectoryName = "quest";
     private const string DesecratedEnterHdFileName = "desecrated_enter_hd.flac";
-    private const string CleanDesecratedEnterHdFileName = "desecrated_enter_hd_launcher_clean.flac";
     private const string GeneratedTweaksFolderName = "mod-tweaks";
     private static readonly string[] HelmetVisualRelativePaths =
     [
@@ -136,9 +137,6 @@ public static class ModTweaksService
             ReportProgress(progress, "Preparing clean vis copy...");
             LaunchDiagnostics.Log("Ensuring clean vis directory copy.");
             await EnsureCleanVisCopyAsync();
-            ReportProgress(progress, "Preparing clean terror zone fanfare copy...");
-            LaunchDiagnostics.Log("Ensuring clean desecrated_enter_hd.flac copy.");
-            EnsureCleanTerrorZoneFanfareCopy();
 
             foreach (var targetExcelDirectory in excelDirectories)
             {
@@ -188,9 +186,6 @@ public static class ModTweaksService
             ReportProgress(progress, "Applying terror zone purple overlay tweaks...");
             LaunchDiagnostics.Log("Applying terror zone purple overlay tweaks.");
             ApplyTerrorZonePurpleOverlayTweak(profile.TerrorZonePurpleOverlay);
-            ReportProgress(progress, "Restoring terror zone fanfare...");
-            LaunchDiagnostics.Log("Restoring desecrated_enter_hd.flac from clean copy.");
-            RestoreTerrorZoneFanfareFile();
             ReportProgress(progress, "Applying terror zone fanfare tweaks...");
             LaunchDiagnostics.Log("Applying terror zone fanfare tweaks.");
             ApplyTerrorZoneFanfareTweak(profile.RestoreTerrorZoneFanfare);
@@ -600,6 +595,59 @@ public static class ModTweaksService
             Path.Combine(excelDirectory, TreasureClassExFileName),
             profile.OrbStackDrops,
             profile.RuneStackDrops);
+        var soundsFilePath = Path.Combine(excelDirectory, SoundsFileName);
+        if (File.Exists(soundsFilePath))
+        {
+            ReportProgress(progress, "Updating sounds.txt...");
+            LaunchDiagnostics.Log($"Applying sounds tweaks in {excelDirectory}.");
+            await ApplySoundsTweaksAsync(soundsFilePath, profile.RestoreTerrorZoneFanfare);
+        }
+    }
+
+    private static async Task ApplySoundsTweaksAsync(string soundsFilePath, bool restoreTerrorZoneFanfare)
+    {
+        var entries = (await SoundsParser.GetEntries(soundsFilePath)).ToList();
+        if (entries.Count == 0)
+        {
+            throw new InvalidDataException("sounds.txt did not contain any editable rows.");
+        }
+
+        var volume = restoreTerrorZoneFanfare ? 255 : 0;
+        var pitch = restoreTerrorZoneFanfare ? 100 : 0;
+
+        var updatedRows = 0;
+        var updatedEntries = new List<D2RReimaginedTools.Models.Sounds>(entries.Count);
+
+        foreach (var entry in entries)
+        {
+            var modified = entry;
+
+            if (string.Equals(modified.Sound, DesecratedEnterHdSoundKey, StringComparison.OrdinalIgnoreCase))
+            {
+                modified = modified with
+                {
+                    VolumeMin = volume,
+                    VolumeMax = volume,
+                    PitchMin = pitch,
+                    PitchMax = pitch
+                };
+                updatedRows++;
+            }
+
+            updatedEntries.Add(modified);
+        }
+
+        if (updatedRows == 0)
+        {
+            throw new InvalidDataException(
+                $"sounds.txt did not contain a '{DesecratedEnterHdSoundKey}' row to update.");
+        }
+
+        await SaveGeneratedEntriesAsync(
+            updatedEntries,
+            soundsFilePath,
+            (rows, filePath, outputDirectory, cancellationToken) =>
+                SoundsParser.SaveEntries(rows, filePath, outputDirectory, cancellationToken));
     }
 
     private static void ReportProgress(IProgress<string>? progress, string message)
@@ -1288,67 +1336,6 @@ public static class ModTweaksService
             SfxDirectoryName,
             QuestDirectoryName,
             DesecratedEnterHdFileName);
-    }
-
-    private static string? GetCleanTerrorZoneFanfareFilePath()
-    {
-        var fanfareFilePath = GetTerrorZoneFanfareFilePath();
-        if (string.IsNullOrWhiteSpace(fanfareFilePath))
-        {
-            return null;
-        }
-
-        var parentDirectory = Path.GetDirectoryName(fanfareFilePath);
-        if (string.IsNullOrWhiteSpace(parentDirectory))
-        {
-            return null;
-        }
-
-        return Path.Combine(parentDirectory, CleanDesecratedEnterHdFileName);
-    }
-
-    private static void EnsureCleanTerrorZoneFanfareCopy()
-    {
-        var fanfareFilePath = GetTerrorZoneFanfareFilePath();
-        if (string.IsNullOrWhiteSpace(fanfareFilePath) || !File.Exists(fanfareFilePath))
-        {
-            LaunchDiagnostics.Log($"Terror zone fanfare file not found, skipping clean copy: {fanfareFilePath ?? "<null>"}");
-            return;
-        }
-
-        var cleanFilePath = GetCleanTerrorZoneFanfareFilePath();
-        if (string.IsNullOrWhiteSpace(cleanFilePath))
-        {
-            return;
-        }
-
-        if (File.Exists(cleanFilePath))
-        {
-            return;
-        }
-
-        File.Copy(fanfareFilePath, cleanFilePath);
-        LaunchDiagnostics.Log($"Backed up terror zone fanfare file: {DesecratedEnterHdFileName}");
-    }
-
-    private static void RestoreTerrorZoneFanfareFile()
-    {
-        var fanfareFilePath = GetTerrorZoneFanfareFilePath();
-        var cleanFilePath = GetCleanTerrorZoneFanfareFilePath();
-        if (string.IsNullOrWhiteSpace(fanfareFilePath) || string.IsNullOrWhiteSpace(cleanFilePath))
-        {
-            LaunchDiagnostics.Log("Terror zone fanfare paths could not be resolved, skipping restore.");
-            return;
-        }
-
-        if (!File.Exists(cleanFilePath))
-        {
-            LaunchDiagnostics.Log("Clean terror zone fanfare file not found, skipping restore.");
-            return;
-        }
-
-        File.Copy(cleanFilePath, fanfareFilePath, overwrite: true);
-        LaunchDiagnostics.Log($"Restored terror zone fanfare file: {DesecratedEnterHdFileName}");
     }
 
     private static void ApplyTerrorZoneFanfareTweak(bool restoreTerrorZoneFanfare)
