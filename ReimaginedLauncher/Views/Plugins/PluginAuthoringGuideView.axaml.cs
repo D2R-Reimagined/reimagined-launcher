@@ -8,7 +8,7 @@ namespace ReimaginedLauncher.Views.Plugins;
 public partial class PluginAuthoringGuideView : UserControl
 {
     private const string PluginCreationWikiUrl =
-        "https://github.com/D2R-Reimagined/reimagined-launcher/wiki/Plugin-Creation";
+        "https://wiki.d2r-reimagined.com/en/DesktopLauncher/PluginCreation";
     private const string FolderLayoutExample = """
                                               MyPlugin.zip
                                                 plugininfo.json
