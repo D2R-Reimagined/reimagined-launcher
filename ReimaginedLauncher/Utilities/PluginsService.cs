@@ -648,6 +648,7 @@ public static class PluginsService
         Func<TEntry, string?> rowIdentifierSelector,
         Func<string, Task<IList<TEntry>>> loadEntriesAsync,
         Func<IList<TEntry>, string, string, CancellationToken, Task<FileInfo>> saveEntriesAsync,
+        Func<string, PropertyInfo?> resolveColumn,
         bool usesRowId = false)
         where TEntry : class
     {
@@ -719,8 +720,9 @@ public static class PluginsService
                 entries[entryIndex] = UpdateRecord(
                     entries[entryIndex],
                     operation.Column ?? string.Empty,
-                    ResolveOperationValue(entries[entryIndex], operation, parameters, fileName),
+                    ResolveOperationValue(entries[entryIndex], operation, parameters, fileName, resolveColumn),
                     fileName,
+                    resolveColumn,
                     operation.RowIdentifier);
             }
         }
@@ -751,11 +753,18 @@ public static class PluginsService
                && int.TryParse(match.Groups[2].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out end);
     }
 
-    private static TEntry UpdateRecord<TEntry>(TEntry entry, string column, string? updatedValue, string fileName, string? rowIdentifier = null)
+    private static TEntry UpdateRecord<TEntry>(
+        TEntry entry,
+        string column,
+        string? updatedValue,
+        string fileName,
+        Func<string, PropertyInfo?>? resolveColumn = null,
+        string? rowIdentifier = null)
         where TEntry : class
     {
-        var property = typeof(TEntry).GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .FirstOrDefault(candidate => candidate.Name.Equals(column, StringComparison.OrdinalIgnoreCase));
+        var property = resolveColumn?.Invoke(column)
+            ?? typeof(TEntry).GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .FirstOrDefault(candidate => candidate.Name.Equals(column, StringComparison.OrdinalIgnoreCase));
 
         if (property == null)
         {
@@ -782,7 +791,8 @@ public static class PluginsService
         TEntry entry,
         PluginJsonOperation operation,
         IReadOnlyDictionary<string, string> parameters,
-        string fileName)
+        string fileName,
+        Func<string, PropertyInfo?>? resolveColumn = null)
         where TEntry : class
     {
         var resolvedUpdatedValue = ResolveParameterTokens(operation.UpdatedValue, parameters);
@@ -803,8 +813,9 @@ public static class PluginsService
         if (operationType.Equals("multiplyExisting", StringComparison.OrdinalIgnoreCase))
         {
             var column = operation.Column ?? string.Empty;
-            var property = typeof(TEntry).GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                .FirstOrDefault(candidate => candidate.Name.Equals(column, StringComparison.OrdinalIgnoreCase));
+            var property = resolveColumn?.Invoke(column)
+                ?? typeof(TEntry).GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(candidate => candidate.Name.Equals(column, StringComparison.OrdinalIgnoreCase));
 
             if (property == null)
             {
@@ -832,8 +843,9 @@ public static class PluginsService
         if (operationType.Equals("append", StringComparison.OrdinalIgnoreCase))
         {
             var column = operation.Column ?? string.Empty;
-            var property = typeof(TEntry).GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                .FirstOrDefault(candidate => candidate.Name.Equals(column, StringComparison.OrdinalIgnoreCase));
+            var property = resolveColumn?.Invoke(column)
+                ?? typeof(TEntry).GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(candidate => candidate.Name.Equals(column, StringComparison.OrdinalIgnoreCase));
 
             if (property == null)
             {
@@ -1253,6 +1265,11 @@ public static class PluginsService
             var propertyExists = supportedTarget.EntryType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
                 .Any(property => property.Name.Equals(operation.Column, StringComparison.OrdinalIgnoreCase));
 
+            if (!propertyExists && supportedTarget.ResolveColumn != null)
+            {
+                propertyExists = supportedTarget.ResolveColumn(operation.Column!) != null;
+            }
+
             if (!propertyExists)
             {
                 errors.Add($"'{pluginFileName}' references unknown {supportedTarget.FileName} column '{operation.Column}'.");
@@ -1294,7 +1311,13 @@ public static class PluginsService
 
         if (ParserRegistry.TryGetValue(fileName, out var registration))
         {
-            return new SupportedPluginTarget(fileName, registration.EntryType, registration.RowIdentifierPropertyName, registration.UsesRowId, IsStringsTarget: false);
+            return new SupportedPluginTarget(
+                fileName,
+                registration.EntryType,
+                registration.RowIdentifierPropertyName,
+                registration.UsesRowId,
+                registration.ResolveColumn,
+                IsStringsTarget: false);
         }
 
         if (IsStringsTargetFile(fileName))
@@ -1711,23 +1734,30 @@ public static class PluginsService
         IReadOnlyList<PluginCatalogFileItem> Files,
         IReadOnlyList<string> Errors);
 
-    private sealed record SupportedPluginTarget(string FileName, Type EntryType, string RowIdentifierPropertyName, bool UsesRowId, bool IsStringsTarget = false);
+    private sealed record SupportedPluginTarget(
+        string FileName,
+        Type EntryType,
+        string RowIdentifierPropertyName,
+        bool UsesRowId,
+        Func<string, PropertyInfo?>? ResolveColumn = null,
+        bool IsStringsTarget = false);
 
     private sealed record FileParserRegistration(
         Type EntryType,
         string RowIdentifierPropertyName,
         bool UsesRowId,
-        Func<string, IReadOnlyList<PluginJsonOperation>, IReadOnlyDictionary<string, string>, Task> ApplyAsync);
+        Func<string, IReadOnlyList<PluginJsonOperation>, IReadOnlyDictionary<string, string>, Task> ApplyAsync,
+        Func<string, PropertyInfo?> ResolveColumn);
 
-    private static FileParserRegistration CreateRegistration<TEntry>(
+    private static FileParserRegistration CreateRegistration<TEntry, TParser>(
         string fileName,
         string rowIdentifierPropertyName,
         Func<TEntry, string?> rowIdentifierSelector,
-        Func<string, Task<IList<TEntry>>> loadEntriesAsync,
-        Func<IList<TEntry>, string, string, CancellationToken, Task<FileInfo>> saveEntriesAsync,
         bool usesRowId = false)
         where TEntry : class
+        where TParser : HeaderMappedTextFileParser<TEntry, TParser>, new()
     {
+        var resolver = BuildColumnResolver<TEntry, TParser>();
         return new FileParserRegistration(
             typeof(TEntry),
             rowIdentifierPropertyName,
@@ -1736,248 +1766,147 @@ public static class PluginsService
                 ApplyOperationsForTargetAsync(
                     excelDirectory, operations, parameters, fileName,
                     rowIdentifierPropertyName, rowIdentifierSelector,
-                    loadEntriesAsync, saveEntriesAsync, usesRowId));
+                    path => HeaderMappedTextFileParser<TEntry, TParser>.GetEntries(path),
+                    (entries, source, output, token) =>
+                        HeaderMappedTextFileParser<TEntry, TParser>.SaveEntriesPreservingUnchanged(entries, source, output, token),
+                    resolver,
+                    usesRowId),
+            resolver);
+    }
+
+    /// <summary>
+    /// Builds a column-name resolver for the given parser type by reflecting its protected
+    /// <c>PropertyColumnAliases</c> member. Mirrors the lookup logic of
+    /// <c>HeaderMappedTextFileParser.GetOrBuildPropertyMap</c> so that raw D2R column headers
+    /// (e.g. <c>dsc2calca1</c>) resolve to the corresponding <see cref="PropertyInfo"/>
+    /// (e.g. <c>Dsc2CalculationA1</c>) without requiring library-side API additions.
+    /// </summary>
+    private static Func<string, PropertyInfo?> BuildColumnResolver<TEntry, TParser>()
+        where TEntry : class
+        where TParser : HeaderMappedTextFileParser<TEntry, TParser>, new()
+    {
+        var map = new Dictionary<string, PropertyInfo>(StringComparer.OrdinalIgnoreCase);
+
+        IReadOnlyDictionary<string, string[]> aliases =
+            new Dictionary<string, string[]>(StringComparer.Ordinal);
+        var aliasesProperty = typeof(TParser).GetProperty(
+            "PropertyColumnAliases",
+            BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+        if (aliasesProperty is not null)
+        {
+            try
+            {
+                var instance = new TParser();
+                if (aliasesProperty.GetValue(instance) is IReadOnlyDictionary<string, string[]> value)
+                {
+                    aliases = value;
+                }
+            }
+            catch
+            {
+                // Fall back to property-name-only resolution.
+            }
+        }
+
+        var properties = typeof(TEntry)
+            .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+            .Where(p => p.CanRead && p.CanWrite && p.GetIndexParameters().Length == 0);
+
+        foreach (var property in properties)
+        {
+            map.TryAdd(NormalizePluginColumnName(property.Name), property);
+            if (aliases.TryGetValue(property.Name, out var propertyAliases))
+            {
+                foreach (var alias in propertyAliases)
+                {
+                    map.TryAdd(NormalizePluginColumnName(alias), property);
+                }
+            }
+        }
+
+        return column => string.IsNullOrWhiteSpace(column)
+            ? null
+            : map.TryGetValue(NormalizePluginColumnName(column), out var property) ? property : null;
+    }
+
+    private static string NormalizePluginColumnName(string name)
+    {
+        return new string(name
+            .Trim()
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToLowerInvariant)
+            .ToArray());
     }
 
     private static Dictionary<string, FileParserRegistration> BuildParserRegistry()
     {
         var registry = new Dictionary<string, FileParserRegistration>(StringComparer.OrdinalIgnoreCase);
 
-        void Register<TEntry>(
+        void Register<TEntry, TParser>(
             string fileName,
             string rowIdentifierPropertyName,
             Func<TEntry, string?> rowIdentifierSelector,
-            Func<string, Task<IList<TEntry>>> loadEntriesAsync,
-            Func<IList<TEntry>, string, string, CancellationToken, Task<FileInfo>> saveEntriesAsync,
             bool usesRowId = false)
             where TEntry : class
+            where TParser : HeaderMappedTextFileParser<TEntry, TParser>, new()
         {
-            registry[fileName] = CreateRegistration(
-                fileName, rowIdentifierPropertyName, rowIdentifierSelector,
-                loadEntriesAsync, saveEntriesAsync, usesRowId);
+            registry[fileName] = CreateRegistration<TEntry, TParser>(
+                fileName, rowIdentifierPropertyName, rowIdentifierSelector, usesRowId);
         }
 
-        Register<Armor>("armor.txt", "Code", static e => e.Code,
-            static f => ArmorParser.GetEntries(f),
-            static (e, f, o, c) => ArmorParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<AutoMagic>("automagic.txt", "Name", static e => e.Name,
-            static f => AutoMagicParser.GetEntries(f),
-            static (e, f, o, c) => AutoMagicParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<CharStats>("charstats.txt", "Class", static e => e.Class,
-            static f => CharStatsParser.GetEntries(f),
-            static (e, f, o, c) => CharStatsParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<CubeMain>("cubemain.txt", "RowId", static e => e.Description,
-            static f => CubeMainParser.GetEntries(f),
-            static (e, f, o, c) => CubeMainParser.SaveEntriesPreservingUnchanged(e, f, o, c),
-            usesRowId: true);
-
-        Register<CubeModifierType>("cubemod.txt", "CubeModifierTypeName", static e => e.CubeModifierTypeName,
-            static f => CubeModifierTypeParser.GetEntries(f),
-            static (e, f, o, c) => CubeModifierTypeParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<DifficultyLevel>("difficultylevels.txt", "Name", static e => e.Name,
-            static f => DifficultyLevelParser.GetEntries(f),
-            static (e, f, o, c) => DifficultyLevelParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<Experience>("experience.txt", "Level", static e => e.Level,
-            static f => ExperienceParser.GetEntries(f),
-            static (e, f, o, c) => ExperienceParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<Gamble>("gamble.txt", "Name", static e => e.Name,
-            static f => GambleParser.GetEntries(f),
-            static (e, f, o, c) => GambleParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<Gem>("gems.txt", "Name", static e => e.Name,
-            static f => GemParser.GetEntries(f),
-            static (e, f, o, c) => GemParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<Hirelings>("hireling.txt", "RowId", static e => e.Hireling,
-            static f => HirelingParser.GetEntries(f),
-            static (e, f, o, c) => HirelingParser.SaveEntriesPreservingUnchanged(e, f, o, c),
-            usesRowId: true);
-
-        Register<Inventory>("inventory.txt", "Class", static e => e.Class,
-            static f => InventoryParser.GetEntries(f),
-            static (e, f, o, c) => InventoryParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<ItemType>("itemtypes.txt", "Code", static e => e.Code,
-            static f => ItemTypeParser.GetEntries(f),
-            static (e, f, o, c) => ItemTypeParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<LvlMaze>("lvlmaze.txt", "RowId", static e => e.Name,
-            static f => LvlMazeParser.GetEntries(f),
-            static (e, f, o, c) => LvlMazeParser.SaveEntriesPreservingUnchanged(e, f, o, c),
-            usesRowId: true);
-
-        Register<LevelsPreset>("lvlprest.txt", "RowId", static e => e.Name,
-            static f => LvlPrestParser.GetEntries(f),
-            static (e, f, o, c) => LvlPrestParser.SaveEntriesPreservingUnchanged(e, f, o, c),
-            usesRowId: true);
-
-        Register<LvlWarp>("lvlwarp.txt", "Name", static e => e.Name,
-            static f => LvlWarpParser.GetEntries(f),
-            static (e, f, o, c) => LvlWarpParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<MagicPrefix>("magicprefix.txt", "RowId", static e => e.Name,
-            static f => MagicPrefixParser.GetEntries(f),
-            static (e, f, o, c) => MagicPrefixParser.SaveEntriesPreservingUnchanged(e, f, o, c),
-            usesRowId: true);
-
-        Register<MagicSuffix>("magicsuffix.txt", "RowId", static e => e.Name,
-            static f => MagicSuffixParser.GetEntries(f),
-            static (e, f, o, c) => MagicSuffixParser.SaveEntriesPreservingUnchanged(e, f, o, c),
-            usesRowId: true);
-
-        Register<Misc>("misc.txt", "Code", static e => e.Code,
-            static f => MiscParser.GetEntries(f),
-            static (e, f, o, c) => MiscParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<Missiles>("missiles.txt", "MissileName", static e => e.MissileName,
-            static f => MissilesParser.GetEntries(f),
-            static (e, f, o, c) => MissilesParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<MonEquip>("monequip.txt", "RowId", static e => e.Monster,
-            static f => MonEquipParser.GetEntries(f),
-            static (e, f, o, c) => MonEquipParser.SaveEntriesPreservingUnchanged(e, f, o, c),
-            usesRowId: true);
-
-        Register<MonPreset>("monpreset.txt", "RowId", static e => e.Act?.ToString(),
-            static f => MonPresetParser.GetEntries(f),
-            static (e, f, o, c) => MonPresetParser.SaveEntriesPreservingUnchanged(e, f, o, c),
-            usesRowId: true);
-
-        Register<MonProp>("monprop.txt", "Id", static e => e.Id,
-            static f => MonPropParser.GetEntries(f),
-            static (e, f, o, c) => MonPropParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<MonStat>("monstats.txt", "Id", static e => e.Id,
-            static f => MonStatsParser.GetEntries(f),
-            static (e, f, o, c) => MonStatsParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<MonStats2>("monstats2.txt", "Id", static e => e.Id,
-            static f => MonStats2Parser.GetEntries(f),
-            static (e, f, o, c) => MonStats2Parser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<MonType>("montype.txt", "Type", static e => e.Type,
-            static f => MonTypeParser.GetEntries(f),
-            static (e, f, o, c) => MonTypeParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<MonUMod>("monumod.txt", "UniqueModId", static e => e.UniqueModId,
-            static f => MonUModParser.GetEntries(f),
-            static (e, f, o, c) => MonUModParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<Npc>("npc.txt", "NpcName", static e => e.NpcName,
-            static f => NpcParser.GetEntries(f),
-            static (e, f, o, c) => NpcParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<PetType>("pettype.txt", "PetTypeId", static e => e.PetTypeId,
-            static f => PetTypeParser.GetEntries(f),
-            static (e, f, o, c) => PetTypeParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<Property>("properties.txt", "Code", static e => e.Code,
-            static f => PropertiesParser.GetEntries(f),
-            static (e, f, o, c) => PropertiesParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<PropertyGroup>("propertygroups.txt", "Code", static e => e.Code,
-            static f => PropertyGroupParser.GetEntries(f),
-            static (e, f, o, c) => PropertyGroupParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<RuneWord>("runes.txt", "Name", static e => e.Name,
-            static f => RunesParser.GetEntries(f),
-            static (e, f, o, c) => RunesParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<SetItem>("setitems.txt", "Index", static e => e.Index,
-            static f => SetItemParser.GetEntries(f),
-            static (e, f, o, c) => SetItemParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<Sets>("sets.txt", "Index", static e => e.Index,
-            static f => SetsParser.GetEntries(f),
-            static (e, f, o, c) => SetsParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<Shrines>("shrines.txt", "Name", static e => e.Name,
-            static f => ShrinesParser.GetEntries(f),
-            static (e, f, o, c) => ShrinesParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<SkillCalc>("skillcalc.txt", "Code", static e => e.Code,
-            static f => SkillCalcParser.GetEntries(f),
-            static (e, f, o, c) => SkillCalcParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<SkillDesc>("skilldesc.txt", "SkillName", static e => e.SkillName,
-            static f => SkillDescParser.GetEntries(f),
-            static (e, f, o, c) => SkillDescParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<Skills>("skills.txt", "Skill", static e => e.Skill,
-            static f => SkillsParser.GetEntries(f),
-            static (e, f, o, c) => SkillsParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<Sounds>("sounds.txt", "Sound", static e => e.Sound,
-            static f => SoundsParser.GetEntries(f),
-            static (e, f, o, c) => SoundsParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<States>("states.txt", "StateId", static e => e.StateId,
-            static f => StatesParser.GetEntries(f),
-            static (e, f, o, c) => StatesParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<StorePage>("storepage.txt", "StorePageName", static e => e.StorePageName,
-            static f => StorePageParser.GetEntries(f),
-            static (e, f, o, c) => StorePageParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<SuperUnique>("superuniques.txt", "Superunique", static e => e.Superunique,
-            static f => SuperUniquesParser.GetEntries(f),
-            static (e, f, o, c) => SuperUniquesParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<TreasureClass>("treasureclassex.txt", "TreasureClassName", static e => e.TreasureClassName,
-            static f => TreasureClassParser.GetEntries(f),
-            static (e, f, o, c) => TreasureClassParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<UniqueItem>("uniqueitems.txt", "Index", static e => e.Index,
-            static f => UniqueItemsParser.GetEntries(f),
-            static (e, f, o, c) => UniqueItemsParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<Weapon>("weapons.txt", "Code", static e => e.Code,
-            static f => WeaponParser.GetEntries(f),
-            static (e, f, o, c) => WeaponParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<ActInfo>("actinfo.txt", "Act", static e => e.Act?.ToString(),
-            static f => ActInfoParser.GetEntries(f),
-            static (e, f, o, c) => ActInfoParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<Automap>("automap.txt", "RowId", static e => e.LevelName,
-            static f => AutomapParser.GetEntries(f),
-            static (e, f, o, c) => AutomapParser.SaveEntriesPreservingUnchanged(e, f, o, c),
-            usesRowId: true);
-
-        Register<ItemUiCategory>("itemuicategories.txt", "Name", static e => e.Name,
-            static f => ItemUiCategoryParser.GetEntries(f),
-            static (e, f, o, c) => ItemUiCategoryParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<LevelGroup>("levelgroups.txt", "LevelGroupId", static e => e.LevelGroupId?.ToString(),
-            static f => LevelGroupParser.GetEntries(f),
-            static (e, f, o, c) => LevelGroupParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<Level>("levels.txt", "Name", static e => e.Name,
-            static f => LevelParser.GetEntries(f),
-            static (e, f, o, c) => LevelParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<MonLvl>("monlvl.txt", "Level", static e => e.Level?.ToString(),
-            static f => MonLvlParser.GetEntries(f),
-            static (e, f, o, c) => MonLvlParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<MonPet>("monpet.txt", "Monster", static e => e.Monster,
-            static f => MonPetParser.GetEntries(f),
-            static (e, f, o, c) => MonPetParser.SaveEntriesPreservingUnchanged(e, f, o, c));
-
-        Register<GameObject>("objects.txt", "RowId", static e => e.Name,
-            static f => ObjectsParser.GetEntries(f),
-            static (e, f, o, c) => ObjectsParser.SaveEntriesPreservingUnchanged(e, f, o, c),
-            usesRowId: true);
-
-        Register<Overlay>("overlay.txt", "OverlayName", static e => e.OverlayName,
-            static f => OverlayParser.GetEntries(f),
-            static (e, f, o, c) => OverlayParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+        Register<Armor, ArmorParser>("armor.txt", "Code", static e => e.Code);
+        Register<AutoMagic, AutoMagicParser>("automagic.txt", "Name", static e => e.Name);
+        Register<CharStats, CharStatsParser>("charstats.txt", "Class", static e => e.Class);
+        Register<CubeMain, CubeMainParser>("cubemain.txt", "RowId", static e => e.Description, usesRowId: true);
+        Register<CubeModifierType, CubeModifierTypeParser>("cubemod.txt", "CubeModifierTypeName", static e => e.CubeModifierTypeName);
+        Register<DifficultyLevel, DifficultyLevelParser>("difficultylevels.txt", "Name", static e => e.Name);
+        Register<Experience, ExperienceParser>("experience.txt", "Level", static e => e.Level);
+        Register<Gamble, GambleParser>("gamble.txt", "Name", static e => e.Name);
+        Register<Gem, GemParser>("gems.txt", "Name", static e => e.Name);
+        Register<Hirelings, HirelingParser>("hireling.txt", "RowId", static e => e.Hireling, usesRowId: true);
+        Register<Inventory, InventoryParser>("inventory.txt", "Class", static e => e.Class);
+        Register<ItemType, ItemTypeParser>("itemtypes.txt", "Code", static e => e.Code);
+        Register<LvlMaze, LvlMazeParser>("lvlmaze.txt", "RowId", static e => e.Name, usesRowId: true);
+        Register<LevelsPreset, LvlPrestParser>("lvlprest.txt", "RowId", static e => e.Name, usesRowId: true);
+        Register<LvlWarp, LvlWarpParser>("lvlwarp.txt", "Name", static e => e.Name);
+        Register<MagicPrefix, MagicPrefixParser>("magicprefix.txt", "RowId", static e => e.Name, usesRowId: true);
+        Register<MagicSuffix, MagicSuffixParser>("magicsuffix.txt", "RowId", static e => e.Name, usesRowId: true);
+        Register<Misc, MiscParser>("misc.txt", "Code", static e => e.Code);
+        Register<Missiles, MissilesParser>("missiles.txt", "MissileName", static e => e.MissileName);
+        Register<MonEquip, MonEquipParser>("monequip.txt", "RowId", static e => e.Monster, usesRowId: true);
+        Register<MonPreset, MonPresetParser>("monpreset.txt", "RowId", static e => e.Act?.ToString(), usesRowId: true);
+        Register<MonProp, MonPropParser>("monprop.txt", "Id", static e => e.Id);
+        Register<MonStat, MonStatsParser>("monstats.txt", "Id", static e => e.Id);
+        Register<MonStats2, MonStats2Parser>("monstats2.txt", "Id", static e => e.Id);
+        Register<MonType, MonTypeParser>("montype.txt", "Type", static e => e.Type);
+        Register<MonUMod, MonUModParser>("monumod.txt", "UniqueModId", static e => e.UniqueModId);
+        Register<Npc, NpcParser>("npc.txt", "NpcName", static e => e.NpcName);
+        Register<PetType, PetTypeParser>("pettype.txt", "PetTypeId", static e => e.PetTypeId);
+        Register<Property, PropertiesParser>("properties.txt", "Code", static e => e.Code);
+        Register<PropertyGroup, PropertyGroupParser>("propertygroups.txt", "Code", static e => e.Code);
+        Register<RuneWord, RunesParser>("runes.txt", "Name", static e => e.Name);
+        Register<SetItem, SetItemParser>("setitems.txt", "Index", static e => e.Index);
+        Register<Sets, SetsParser>("sets.txt", "Index", static e => e.Index);
+        Register<Shrines, ShrinesParser>("shrines.txt", "Name", static e => e.Name);
+        Register<SkillCalc, SkillCalcParser>("skillcalc.txt", "Code", static e => e.Code);
+        Register<SkillDesc, SkillDescParser>("skilldesc.txt", "SkillName", static e => e.SkillName);
+        Register<Skills, SkillsParser>("skills.txt", "Skill", static e => e.Skill);
+        Register<Sounds, SoundsParser>("sounds.txt", "Sound", static e => e.Sound);
+        Register<States, StatesParser>("states.txt", "StateId", static e => e.StateId);
+        Register<StorePage, StorePageParser>("storepage.txt", "StorePageName", static e => e.StorePageName);
+        Register<SuperUnique, SuperUniquesParser>("superuniques.txt", "Superunique", static e => e.Superunique);
+        Register<TreasureClass, TreasureClassParser>("treasureclassex.txt", "TreasureClassName", static e => e.TreasureClassName);
+        Register<UniqueItem, UniqueItemsParser>("uniqueitems.txt", "Index", static e => e.Index);
+        Register<Weapon, WeaponParser>("weapons.txt", "Code", static e => e.Code);
+        Register<ActInfo, ActInfoParser>("actinfo.txt", "Act", static e => e.Act?.ToString());
+        Register<Automap, AutomapParser>("automap.txt", "RowId", static e => e.LevelName, usesRowId: true);
+        Register<ItemUiCategory, ItemUiCategoryParser>("itemuicategories.txt", "Name", static e => e.Name);
+        Register<LevelGroup, LevelGroupParser>("levelgroups.txt", "LevelGroupId", static e => e.LevelGroupId?.ToString());
+        Register<Level, LevelParser>("levels.txt", "Name", static e => e.Name);
+        Register<MonLvl, MonLvlParser>("monlvl.txt", "Level", static e => e.Level?.ToString());
+        Register<MonPet, MonPetParser>("monpet.txt", "Monster", static e => e.Monster);
+        Register<GameObject, ObjectsParser>("objects.txt", "RowId", static e => e.Name, usesRowId: true);
+        Register<Overlay, OverlayParser>("overlay.txt", "OverlayName", static e => e.OverlayName);
 
         return registry;
     }
