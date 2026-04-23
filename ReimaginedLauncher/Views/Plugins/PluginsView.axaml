@@ -113,12 +113,12 @@
                                                 <StackPanel Orientation="Horizontal"
                                                             Spacing="12">
                                                     <TextBlock Classes="muted"
-                                                               Text="{Binding Version, StringFormat=Version {0}}" />
+                                                               Text="{Binding Version, StringFormat=Version: {0}}" />
                                                     <TextBlock Classes="muted"
-                                                               Text="{Binding ModVersion, StringFormat=Mod {0}}"
+                                                               Text="{Binding ModVersion, StringFormat=Mod: {0}}"
                                                                IsVisible="{Binding HasModVersion}" />
                                                     <TextBlock Classes="muted"
-                                                               Text="{Binding Author, StringFormat=Author {0}}"
+                                                               Text="{Binding Author, StringFormat=Author: {0}}"
                                                                IsVisible="{Binding HasAuthor}" />
                                                 </StackPanel>
                                                 <TextBlock Classes="muted"
