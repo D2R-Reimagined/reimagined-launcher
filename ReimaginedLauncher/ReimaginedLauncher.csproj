@@ -33,7 +33,7 @@
             <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
             <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
         </PackageReference>
-        <ProjectReference Include="..\..\d2r-dotnet-tools\FileExtensions\FileExtensions.csproj" />
+        <PackageReference Include="D2RReimaginedTools.FileExtensions" Version="0.4.0" />
         <PackageReference Include="Material.Icons.Avalonia" Version="3.0.1" />
         <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.5" />
         <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.5" />
