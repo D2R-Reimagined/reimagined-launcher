@@ -508,7 +508,7 @@ public static class PluginsService
 
     public static string GetSupportedTargetsSummary()
     {
-        return "Supported now: skills.txt (matched on Skill) and cubemain.txt (matched on Description). Multiply-existing operations can reference parameters declared in plugininfo.json.";
+        return "Supported now: skills.txt (matched on Skill) and cubemain.txt (matched on Description). Multiply-existing and append operations can reference parameters declared in plugininfo.json.";
     }
 
     private static async Task ApplyOperationsAsync(
@@ -660,6 +660,27 @@ public static class PluginsService
             }
 
             return FormatDecimalValue(currentNumber * multiplier);
+        }
+
+        if (operationType.Equals("append", StringComparison.OrdinalIgnoreCase))
+        {
+            var column = operation.Column ?? string.Empty;
+            var property = typeof(TEntry).GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .FirstOrDefault(candidate => candidate.Name.Equals(column, StringComparison.OrdinalIgnoreCase));
+
+            if (property == null)
+            {
+                throw new InvalidDataException($"The column '{column}' is not supported for {fileName}.");
+            }
+
+            var currentValue = property.GetValue(entry)?.ToString() ?? string.Empty;
+
+            var appendText = !string.IsNullOrWhiteSpace(operation.ParameterKey) &&
+                             parameters.TryGetValue(operation.ParameterKey, out var parameterValue)
+                ? parameterValue
+                : resolvedUpdatedValue ?? string.Empty;
+
+            return $"({currentValue}){appendText}";
         }
 
         throw new InvalidDataException($"Unsupported plugin operation '{operationType}'.");
@@ -926,11 +947,12 @@ public static class PluginsService
             }
 
             if (!string.IsNullOrWhiteSpace(operation.Operation) &&
-                operation.Operation.Equals("multiplyExisting", StringComparison.OrdinalIgnoreCase) &&
+                (operation.Operation.Equals("multiplyExisting", StringComparison.OrdinalIgnoreCase) ||
+                 operation.Operation.Equals("append", StringComparison.OrdinalIgnoreCase)) &&
                 string.IsNullOrWhiteSpace(operation.ParameterKey) &&
                 string.IsNullOrWhiteSpace(operation.UpdatedValue))
             {
-                errors.Add($"'{pluginFileName}' contains a multiplyExisting operation without parameterKey or updatedValue.");
+                errors.Add($"'{pluginFileName}' contains a {operation.Operation} operation without parameterKey or updatedValue.");
             }
 
             if (!string.IsNullOrWhiteSpace(operation.ParameterKey) &&
