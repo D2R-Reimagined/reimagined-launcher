@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using ReimaginedLauncher.HttpClients.Models;
 
@@ -15,6 +16,11 @@ public class GitHubDiscussionPluginsHttpClient
     private const string BaseUrl = "https://github.com";
     private const string PluginsDiscussionsUrl =
         $"{BaseUrl}/D2R-Reimagined/reimagined-launcher/discussions/categories/plugins";
+
+    private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
+    private static readonly SemaphoreSlim CacheLock = new(1, 1);
+    private static IReadOnlyList<UserPluginEntry>? _cachedPlugins;
+    private static DateTimeOffset _cacheTimestamp;
 
     private static readonly Regex DiscussionLinkRegex = new(
         @"<a[^>]+href=""(?<href>/D2R-Reimagined/reimagined-launcher/discussions/(?<number>\d+))""[^>]*class=""[^""]*markdown-title[^""]*""[^>]*>(?<title>.*?)</a>",
@@ -36,8 +42,11 @@ public class GitHubDiscussionPluginsHttpClient
         @"(?:Desc|Description):\s*(?<value>.+)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    // Accepts SemVer-ish versions: 2-4 numeric segments with an optional
+    // pre-release (-beta, -rc.1) or build metadata (+abc) suffix.
+    // Examples matched: 1.0, 1.2.3, 1.2.3.4, 1.2.3-beta, 1.2.3-rc.1+build5.
     private static readonly Regex ModVersionFieldRegex = new(
-        @"(?:Mod|ModVer|ModVersion):\s*(?<value>\d+\.\d+\.\d+)",
+        @"(?:Mod|ModVer|ModVersion):\s*(?<value>\d+(?:\.\d+){1,3}(?:[-+][0-9A-Za-z.\-]+)?)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private readonly HttpClient _httpClient;
@@ -48,35 +57,56 @@ public class GitHubDiscussionPluginsHttpClient
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("ReimaginedLauncher/1.0");
     }
 
-    public async Task<IReadOnlyList<UserPluginEntry>> GetUserPluginsAsync()
+    public async Task<IReadOnlyList<UserPluginEntry>> GetUserPluginsAsync(bool forceRefresh = false)
     {
+        // Serialize concurrent callers so only one fetch hits GitHub at a time,
+        // and so a second caller can re-use a just-populated cache.
+        await CacheLock.WaitAsync();
         try
         {
-            var html = await _httpClient.GetStringAsync(PluginsDiscussionsUrl);
-            var plugins = new List<UserPluginEntry>();
-            var seenNumbers = new HashSet<int>();
-
-            foreach (Match match in DiscussionLinkRegex.Matches(html))
+            if (!forceRefresh &&
+                _cachedPlugins != null &&
+                DateTimeOffset.UtcNow - _cacheTimestamp < CacheDuration)
             {
-                if (!int.TryParse(match.Groups["number"].Value, out var number) ||
-                    !seenNumbers.Add(number))
-                {
-                    continue;
-                }
-
-                var discussionUrl = $"{BaseUrl}{match.Groups["href"].Value}";
-                var entry = await ParseDiscussionAsync(discussionUrl);
-                if (entry != null)
-                {
-                    plugins.Add(entry);
-                }
+                return _cachedPlugins;
             }
 
-            return plugins;
+            try
+            {
+                var html = await GetStringWithRateLimitAsync(PluginsDiscussionsUrl);
+                var plugins = new List<UserPluginEntry>();
+                var seenNumbers = new HashSet<int>();
+
+                foreach (Match match in DiscussionLinkRegex.Matches(html))
+                {
+                    if (!int.TryParse(match.Groups["number"].Value, out var number) ||
+                        !seenNumbers.Add(number))
+                    {
+                        continue;
+                    }
+
+                    var discussionUrl = $"{BaseUrl}{match.Groups["href"].Value}";
+                    var entry = await ParseDiscussionAsync(discussionUrl);
+                    if (entry != null)
+                    {
+                        plugins.Add(entry);
+                    }
+                }
+
+                _cachedPlugins = plugins;
+                _cacheTimestamp = DateTimeOffset.UtcNow;
+                return plugins;
+            }
+            catch
+            {
+                // On failure, fall back to any previously cached result to avoid
+                // repeatedly hammering GitHub on transient errors.
+                return _cachedPlugins ?? [];
+            }
         }
-        catch
+        finally
         {
-            return [];
+            CacheLock.Release();
         }
     }
 
@@ -94,11 +124,18 @@ public class GitHubDiscussionPluginsHttpClient
             Directory.CreateDirectory(directory);
         }
 
-        var response = await _httpClient.GetAsync(zipUrl);
-        response.EnsureSuccessStatusCode();
+        var response = await GetWithRateLimitAsync(zipUrl);
+        try
+        {
+            response.EnsureSuccessStatusCode();
 
-        await using var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None);
-        await response.Content.CopyToAsync(fileStream);
+            await using var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None);
+            await response.Content.CopyToAsync(fileStream);
+        }
+        finally
+        {
+            response.Dispose();
+        }
 
         return tempPath;
     }
@@ -107,7 +144,7 @@ public class GitHubDiscussionPluginsHttpClient
     {
         try
         {
-            var html = await _httpClient.GetStringAsync(discussionUrl);
+            var html = await GetStringWithRateLimitAsync(discussionUrl);
 
             var bodyMatch = BodyRegex.Match(html);
             if (!bodyMatch.Success)
@@ -161,6 +198,72 @@ public class GitHubDiscussionPluginsHttpClient
         {
             return null;
         }
+    }
+
+    // Maximum time we will voluntarily wait for a 429/403 Retry-After before
+    // giving up; anything longer is reported as a failure to the caller.
+    private static readonly TimeSpan MaxRetryAfter = TimeSpan.FromSeconds(30);
+
+    private async Task<string> GetStringWithRateLimitAsync(string url)
+    {
+        using var response = await GetWithRateLimitAsync(url);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadAsStringAsync();
+    }
+
+    private async Task<HttpResponseMessage> GetWithRateLimitAsync(string url)
+    {
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+
+            if ((int)response.StatusCode == 429 ||
+                (response.StatusCode == HttpStatusCode.Forbidden &&
+                 response.Headers.RetryAfter != null))
+            {
+                // GitHub's secondary/abuse limits return 429 or 403 with a
+                // Retry-After header. Honour it exactly once, then fail.
+                var delay = GetRetryAfterDelay(response);
+                var statusCode = (int)response.StatusCode;
+                response.Dispose();
+
+                if (attempt == 0 && delay > TimeSpan.Zero && delay <= MaxRetryAfter)
+                {
+                    await Task.Delay(delay);
+                    continue;
+                }
+
+                throw new HttpRequestException(
+                    $"GitHub rate-limited request to {url} (status {statusCode}, Retry-After {delay.TotalSeconds:F0}s).");
+            }
+
+            return response;
+        }
+
+        // Unreachable: the loop always returns or throws.
+        throw new HttpRequestException($"Failed to fetch {url} after retry.");
+    }
+
+    private static TimeSpan GetRetryAfterDelay(HttpResponseMessage response)
+    {
+        var retryAfter = response.Headers.RetryAfter;
+        if (retryAfter == null)
+        {
+            return TimeSpan.FromSeconds(5);
+        }
+
+        if (retryAfter.Delta is { } delta)
+        {
+            return delta;
+        }
+
+        if (retryAfter.Date is { } date)
+        {
+            var delay = date - DateTimeOffset.UtcNow;
+            return delay > TimeSpan.Zero ? delay : TimeSpan.Zero;
+        }
+
+        return TimeSpan.FromSeconds(5);
     }
 
     private static string ConvertHtmlToText(string html)

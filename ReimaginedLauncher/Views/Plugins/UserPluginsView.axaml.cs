@@ -13,14 +13,27 @@ namespace ReimaginedLauncher.Views.Plugins;
 
 public partial class UserPluginsView : UserControl
 {
+    private bool _isRefreshing;
+
     public UserPluginsView()
     {
         InitializeComponent();
         _ = RefreshUserPluginsAsync();
     }
 
-    public async Task RefreshUserPluginsAsync()
+    public Task RefreshUserPluginsAsync() => RefreshUserPluginsAsync(forceRefresh: false);
+
+    public async Task RefreshUserPluginsAsync(bool forceRefresh)
     {
+        // Guard against overlapping refreshes (e.g. rapid button clicks or
+        // navigation events firing while a previous fetch is still in flight).
+        if (_isRefreshing)
+        {
+            return;
+        }
+
+        _isRefreshing = true;
+
         LoadingBanner.IsVisible = true;
         EmptyStatePanel.IsVisible = false;
         UserPluginsItemsControl.ItemsSource = null;
@@ -28,7 +41,7 @@ public partial class UserPluginsView : UserControl
         try
         {
             var client = Program.ServiceProvider.GetRequiredService<GitHubDiscussionPluginsHttpClient>();
-            var plugins = await client.GetUserPluginsAsync();
+            var plugins = await client.GetUserPluginsAsync(forceRefresh);
 
             UserPluginsItemsControl.ItemsSource = plugins;
             EmptyStatePanel.IsVisible = plugins.Count == 0;
@@ -44,12 +57,14 @@ public partial class UserPluginsView : UserControl
         finally
         {
             LoadingBanner.IsVisible = false;
+            _isRefreshing = false;
         }
     }
 
     private async void OnRefreshClicked(object? sender, RoutedEventArgs e)
     {
-        await RefreshUserPluginsAsync();
+        // Explicit user-initiated refresh bypasses the TTL cache.
+        await RefreshUserPluginsAsync(forceRefresh: true);
     }
 
     private void OnSubmitPluginClicked(object? sender, RoutedEventArgs e)
