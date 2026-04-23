@@ -34,6 +34,9 @@ public static class PluginsService
     private static readonly JsonSerializerOptions JsonOptions = SerializerOptions.PropertyNameCaseInsensitive;
     private static readonly Regex ParameterTokenRegex = new(@"\{\{\s*parameter:([a-zA-Z0-9_\-]+)\s*\}\}", RegexOptions.Compiled);
     private static readonly Regex ModVersionRegex = new(@"^\d+\.\d+\.\d+$", RegexOptions.Compiled);
+    // Matches a numeric row-index range in the form "start-end" (inclusive), e.g. "50-100".
+    // Whitespace around the numbers and the dash is allowed so plugins can be formatted loosely.
+    private static readonly Regex RowRangeRegex = new(@"^\s*(\d+)\s*-\s*(\d+)\s*$", RegexOptions.Compiled);
 
     private static readonly Dictionary<string, FileParserRegistration> ParserRegistry =
         BuildParserRegistry();
@@ -673,7 +676,22 @@ public static class PluginsService
         {
             List<int> matchingIndices;
 
-            if (usesRowId)
+            if (TryParseRowRange(operation.RowIdentifier, out var rangeStart, out var rangeEnd))
+            {
+                if (rangeStart > rangeEnd)
+                {
+                    (rangeStart, rangeEnd) = (rangeEnd, rangeStart);
+                }
+
+                if (rangeStart < 0 || rangeEnd >= entries.Count)
+                {
+                    throw new InvalidDataException(
+                        $"Row range '{operation.RowIdentifier}' is out of bounds for {fileName}. Valid range is 0 to {entries.Count - 1}.");
+                }
+
+                matchingIndices = Enumerable.Range(rangeStart, rangeEnd - rangeStart + 1).ToList();
+            }
+            else if (usesRowId)
             {
                 if (!int.TryParse(operation.RowIdentifier, out var rowIndex) || rowIndex < 0 || rowIndex >= entries.Count)
                 {
@@ -708,6 +726,29 @@ public static class PluginsService
         }
 
         await SaveGeneratedEntriesAsync(entries, filePath, saveEntriesAsync);
+    }
+
+    // Parses a plugin rowIdentifier of the form "start-end" (e.g. "50-100") into inclusive numeric
+    // row-index bounds. Returns false when the identifier is null/empty or not a range, allowing the
+    // caller to fall back to exact row-ID or identifier-column matching.
+    private static bool TryParseRowRange(string? rowIdentifier, out int start, out int end)
+    {
+        start = 0;
+        end = 0;
+
+        if (string.IsNullOrWhiteSpace(rowIdentifier))
+        {
+            return false;
+        }
+
+        var match = RowRangeRegex.Match(rowIdentifier);
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        return int.TryParse(match.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out start)
+               && int.TryParse(match.Groups[2].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out end);
     }
 
     private static TEntry UpdateRecord<TEntry>(TEntry entry, string column, string? updatedValue, string fileName, string? rowIdentifier = null)
@@ -1196,9 +1237,11 @@ public static class PluginsService
             {
                 errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} operation with no rowIdentifier.");
             }
-            else if (supportedTarget.UsesRowId && !int.TryParse(operation.RowIdentifier, out _))
+            else if (supportedTarget.UsesRowId
+                     && !int.TryParse(operation.RowIdentifier, out _)
+                     && !TryParseRowRange(operation.RowIdentifier, out _, out _))
             {
-                errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} operation with non-numeric rowIdentifier '{operation.RowIdentifier}'. This file uses numeric row IDs.");
+                errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} operation with non-numeric rowIdentifier '{operation.RowIdentifier}'. This file uses numeric row IDs (e.g. \"5\" or a range like \"50-100\").");
             }
 
             if (string.IsNullOrWhiteSpace(operation.Column))
