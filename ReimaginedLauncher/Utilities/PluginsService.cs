@@ -28,6 +28,7 @@ public static class PluginsService
     private const string CubeMainRowIdentifierPropertyName = "Description";
     private static readonly JsonSerializerOptions JsonOptions = SerializerOptions.PropertyNameCaseInsensitive;
     private static readonly Regex ParameterTokenRegex = new(@"\{\{\s*parameter:([a-zA-Z0-9_\-]+)\s*\}\}", RegexOptions.Compiled);
+    private static readonly Regex ModVersionRegex = new(@"^\d+\.\d+\.\d+$", RegexOptions.Compiled);
 
     public static string PluginsDirectoryPath => Path.Combine(SettingsManager.AppDirectoryPath, PluginsDirectoryName);
 
@@ -118,7 +119,7 @@ public static class PluginsService
             }
             catch (Exception ex)
             {
-                errors.Add($"plugininfo.json is invalid: {ex.Message}");
+                errors.Add(FormatJsonError("plugininfo.json", ex));
             }
 
             catalog.Add(new OfficialPluginCatalogItem
@@ -151,6 +152,8 @@ public static class PluginsService
                 Id = registration.Id,
                 Name = pluginState.Name,
                 Version = pluginState.Version,
+                ModVersion = pluginState.ModVersion,
+                Author = pluginState.Author,
                 Description = pluginState.Description,
                 IsEnabled = registration.IsEnabled,
                 Order = index + 1,
@@ -819,19 +822,21 @@ public static class PluginsService
         var parameters = new List<PluginParameterItem>();
         var name = registration.FolderName;
         var version = "Unknown";
+        var modVersion = string.Empty;
+        var author = string.Empty;
         var description = string.Empty;
 
         if (!Directory.Exists(pluginDirectory))
         {
             errors.Add("Imported plugin files are missing from disk.");
-            return new PluginState(name, version, description, parameters, files, errors);
+            return new PluginState(name, version, modVersion, author, description, parameters, files, errors);
         }
 
         var pluginInfoPath = Path.Combine(pluginDirectory, PluginInfoFileName);
         if (!File.Exists(pluginInfoPath))
         {
             errors.Add("plugininfo.json is missing.");
-            return new PluginState(name, version, description, parameters, files, errors);
+            return new PluginState(name, version, modVersion, author, description, parameters, files, errors);
         }
 
         try
@@ -839,6 +844,8 @@ public static class PluginsService
             var pluginInfo = await LoadPluginInfoAsync(pluginInfoPath);
             name = pluginInfo.Name;
             version = pluginInfo.Version;
+            modVersion = pluginInfo.ModVersion ?? string.Empty;
+            author = pluginInfo.Author ?? string.Empty;
             description = pluginInfo.Description ?? string.Empty;
             parameters = pluginInfo.Parameters.Select(parameter => new PluginParameterItem
             {
@@ -853,7 +860,7 @@ public static class PluginsService
             if (pluginInfo.Files.Count == 0)
             {
                 errors.Add("plugininfo.json does not list any plugin JSON files.");
-                return new PluginState(name, version, description, parameters, files, errors);
+                return new PluginState(name, version, modVersion, author, description, parameters, files, errors);
             }
 
             foreach (var relativePath in pluginInfo.Files)
@@ -880,16 +887,16 @@ public static class PluginsService
                 }
                 catch (Exception ex)
                 {
-                    errors.Add($"'{normalizedRelativePath}' is invalid: {ex.Message}");
+                    errors.Add(FormatJsonError(normalizedRelativePath, ex));
                 }
             }
         }
         catch (Exception ex)
         {
-            errors.Add($"plugininfo.json is invalid: {ex.Message}");
+            errors.Add(FormatJsonError("plugininfo.json", ex));
         }
 
-        return new PluginState(name, version, description, parameters, files, errors);
+        return new PluginState(name, version, modVersion, author, description, parameters, files, errors);
     }
 
     private static void ValidateOperations(
@@ -984,6 +991,8 @@ public static class PluginsService
         {
             Name = pluginInfo.Name ?? string.Empty,
             Version = pluginInfo.Version ?? string.Empty,
+            ModVersion = pluginInfo.ModVersion,
+            Author = pluginInfo.Author,
             Description = pluginInfo.Description,
             Files = pluginInfo.Files ?? [],
             Parameters = pluginInfo.Parameters ?? []
@@ -1006,6 +1015,16 @@ public static class PluginsService
         if (string.IsNullOrWhiteSpace(pluginInfo.Version))
         {
             throw new InvalidDataException("plugininfo.json must include a version.");
+        }
+
+        if (string.IsNullOrWhiteSpace(pluginInfo.ModVersion))
+        {
+            throw new InvalidDataException("plugininfo.json must include a modVersion.");
+        }
+
+        if (!ModVersionRegex.IsMatch(pluginInfo.ModVersion))
+        {
+            throw new InvalidDataException("plugininfo.json modVersion must be in #.#.# format (e.g. 1.0.0).");
         }
 
         if (pluginInfo.Files.Count == 0)
@@ -1179,6 +1198,39 @@ public static class PluginsService
         return string.Join(Path.DirectorySeparatorChar, segments);
     }
 
+    private static string FormatJsonError(string fileName, Exception ex)
+    {
+        if (ex is JsonException jsonEx)
+        {
+            var path = jsonEx.Path;
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                var propertyName = path.Contains('.')
+                    ? path[(path.LastIndexOf('.') + 1)..]
+                    : path;
+
+                var innerMessage = jsonEx.InnerException?.Message;
+                if (!string.IsNullOrWhiteSpace(innerMessage))
+                {
+                    return $"'{fileName}' has an invalid value for '{propertyName}': {innerMessage}";
+                }
+
+                return $"'{fileName}' has an invalid value for '{propertyName}'.";
+            }
+
+            var message = jsonEx.Message;
+            var pipeIndex = message.IndexOf('|');
+            if (pipeIndex > 0)
+            {
+                message = message[..pipeIndex].Trim();
+            }
+
+            return $"'{fileName}' has invalid JSON: {message}";
+        }
+
+        return $"'{fileName}' is invalid: {ex.Message}";
+    }
+
     private static string SanitizePathSegment(string value)
     {
         var builder = new StringBuilder(value.Length);
@@ -1260,6 +1312,8 @@ public static class PluginsService
     private sealed record PluginState(
         string Name,
         string Version,
+        string ModVersion,
+        string Author,
         string Description,
         IReadOnlyList<PluginParameterItem> Parameters,
         IReadOnlyList<PluginCatalogFileItem> Files,
@@ -1271,6 +1325,8 @@ public static class PluginsService
     {
         public string Name { get; set; } = string.Empty;
         public string Version { get; set; } = string.Empty;
+        public string? ModVersion { get; set; }
+        public string? Author { get; set; }
         public string? Description { get; set; }
         public List<string> Files { get; set; } = [];
         public List<PluginParameterDefinition> Parameters { get; set; } = [];
