@@ -1,3 +1,5 @@
+using System;
+using System.Diagnostics;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 
@@ -5,6 +7,8 @@ namespace ReimaginedLauncher.Views.Plugins;
 
 public partial class PluginAuthoringGuideView : UserControl
 {
+    private const string PluginCreationWikiUrl =
+        "https://github.com/D2R-Reimagined/reimagined-launcher/wiki/Plugin-Creation";
     private const string FolderLayoutExample = """
                                               MyPlugin.zip
                                                 plugininfo.json
@@ -46,9 +50,33 @@ public partial class PluginAuthoringGuideView : UserControl
                                                },
                                                {
                                                  "file": "cubemain.txt",
-                                                 "rowIdentifier": "Socketed Magic Weapon",
+                                                 "rowIdentifier": "5",
                                                  "column": "NumMods",
                                                  "updatedValue": "2"
+                                               },
+                                               {
+                                                 "file": "monstats.txt",
+                                                 "rowIdentifier": "skeleton1",
+                                                 "column": "Level",
+                                                 "updatedValue": "50"
+                                               },
+                                               {
+                                                 "file": "magicprefix.txt",
+                                                 "rowIdentifier": "86",
+                                                 "column": "Spawnable",
+                                                 "updatedValue": "0"
+                                               },
+                                               {
+                                                 "file": "item-runes.json",
+                                                 "Key": "DoomStaff",
+                                                 "enUS": "NoDoom"
+                                               },
+                                               {
+                                                 "file": "item-runes.json",
+                                                 "Key": "DoomStaff",
+                                                 "enUS": "NoDoom",
+                                                 "ptBR": "SemFatalidade",
+                                                 "frFR": "PasDeDévastation"
                                                }
                                              ]
                                              """;
@@ -66,6 +94,24 @@ public partial class PluginAuthoringGuideView : UserControl
         if (TopLevel.GetTopLevel(this) is MainWindow window)
         {
             window.NavigateToPluginsView();
+        }
+    }
+
+    private void OnOpenWikiClicked(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            using var process = new Process();
+            process.StartInfo = new ProcessStartInfo
+            {
+                FileName = PluginCreationWikiUrl,
+                UseShellExecute = true
+            };
+            process.Start();
+        }
+        catch (Exception)
+        {
+            // Keep launcher stable if the shell cannot open the URL.
         }
     }
 }

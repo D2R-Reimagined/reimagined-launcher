@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -10,6 +10,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Text.RegularExpressions;
+using D2RReimaginedTools.JsonFileParsers;
 using D2RReimaginedTools.Models;
 using D2RReimaginedTools.TextFileParsers;
 using ReimaginedLauncher.Generators;
@@ -22,12 +23,19 @@ public static class PluginsService
     private const string BundledPluginsDirectoryName = "Assets/Plugins";
     private const string PluginInfoFileName = "plugininfo.json";
     private const string GeneratedPluginsFolderName = "plugins";
-    private const string SkillsFileName = "skills.txt";
-    private const string CubeMainFileName = "cubemain.txt";
-    private const string SkillsRowIdentifierPropertyName = "Skill";
-    private const string CubeMainRowIdentifierPropertyName = "Description";
+    private const string StringsDirectoryRelativePath = "local/lng/strings";
+
+    // The 13 language columns that D2R ships in its string JSON files. Strings-plugin entries may
+    // only target these keys; any other property on a plugin entry is ignored.
+    private static readonly HashSet<string> KnownStringLanguageColumns = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "enUS", "zhTW", "deDE", "esES", "frFR", "itIT", "koKR", "plPL", "esMX", "jaJP", "ptBR", "ruRU", "zhCN"
+    };
     private static readonly JsonSerializerOptions JsonOptions = SerializerOptions.PropertyNameCaseInsensitive;
     private static readonly Regex ParameterTokenRegex = new(@"\{\{\s*parameter:([a-zA-Z0-9_\-]+)\s*\}\}", RegexOptions.Compiled);
+
+    private static readonly Dictionary<string, FileParserRegistration> ParserRegistry =
+        BuildParserRegistry();
 
     public static string PluginsDirectoryPath => Path.Combine(SettingsManager.AppDirectoryPath, PluginsDirectoryName);
 
@@ -505,7 +513,7 @@ public static class PluginsService
 
     public static string GetSupportedTargetsSummary()
     {
-        return "Supported now: skills.txt (matched on Skill) and cubemain.txt (matched on Description). Multiply-existing operations can reference parameters declared in plugininfo.json.";
+        return "All .txt files in the base excel folder are supported except itemstatcost.txt. Most files match rows by a unique column; files with duplicate values in their identifier column use a numeric row ID (0-based data row index) instead. Multiply-existing operations can reference parameters declared in plugininfo.json. String JSON files from data/local/lng/strings (e.g. item-runes.json) are also supported using the same flat d2rr-style layout: each entry lists the target file, the D2R Key, and one or more language fields (enUS, zhTW, deDE, esES, frFR, itIT, koKR, plPL, esMX, jaJP, ptBR, ruRU, zhCN); only the listed languages are replaced and any other languages on that entry are left untouched.";
     }
 
     private static async Task ApplyOperationsAsync(
@@ -513,27 +521,116 @@ public static class PluginsService
         IReadOnlyList<PluginJsonOperation> operations,
         IReadOnlyDictionary<string, string> parameters)
     {
-        await ApplyOperationsForTargetAsync<Skills>(
-            excelDirectory,
-            operations,
-            parameters,
-            SkillsFileName,
-            SkillsRowIdentifierPropertyName,
-            static entry => entry.Skill,
-            static filePath => SkillsParser.GetEntries(filePath),
-            static (updatedEntries, filePath, outputDirectory, cancellationToken) =>
-                SkillsParser.SaveEntries(updatedEntries, filePath, outputDirectory, cancellationToken));
+        var fileNames = operations
+            .Where(operation => !string.IsNullOrWhiteSpace(operation.File) && IsSupportedTargetFile(operation.File))
+            .Select(operation => operation.File!)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
 
-        await ApplyOperationsForTargetAsync<CubeMain>(
-            excelDirectory,
-            operations,
-            parameters,
-            CubeMainFileName,
-            CubeMainRowIdentifierPropertyName,
-            static entry => entry.Description,
-            static filePath => CubeMainParser.GetEntries(filePath),
-            static (updatedEntries, filePath, outputDirectory, cancellationToken) =>
-                CubeMainParser.SaveEntries(updatedEntries, filePath, outputDirectory, cancellationToken));
+        string? resolvedStringsDirectory = null;
+
+        foreach (var fileName in fileNames)
+        {
+            if (ParserRegistry.TryGetValue(fileName, out var registration))
+            {
+                await registration.ApplyAsync(excelDirectory, operations, parameters);
+                continue;
+            }
+
+            if (IsStringsTargetFile(fileName))
+            {
+                resolvedStringsDirectory ??= ResolveStringsDirectory(excelDirectory)
+                    ?? throw new DirectoryNotFoundException(
+                        $"Could not resolve the strings directory ({StringsDirectoryRelativePath}) relative to '{excelDirectory}'.");
+
+                await ApplyStringsOperationsForTargetAsync(resolvedStringsDirectory, operations, fileName);
+            }
+        }
+    }
+
+    private static async Task ApplyStringsOperationsForTargetAsync(
+        string stringsDirectory,
+        IReadOnlyList<PluginJsonOperation> operations,
+        string fileName)
+    {
+        var targetOperations = operations
+            .Where(operation => string.Equals(operation.File, fileName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (targetOperations.Count == 0)
+        {
+            return;
+        }
+
+        var filePath = Path.Combine(stringsDirectory, fileName);
+        if (!File.Exists(filePath))
+        {
+            throw new FileNotFoundException($"{fileName} was not found in the target strings directory: {stringsDirectory}");
+        }
+
+        var parser = new TranslationFileParser(filePath);
+
+        foreach (var operation in targetOperations)
+        {
+            if (string.IsNullOrWhiteSpace(operation.Key))
+            {
+                throw new InvalidDataException($"A {fileName} entry is missing its Key.");
+            }
+
+            var languageValues = operation.LanguageValues;
+            if (languageValues == null || languageValues.Count == 0)
+            {
+                throw new InvalidDataException(
+                    $"The {fileName} entry for Key '{operation.Key}' does not list any language fields to replace.");
+            }
+
+            var matchedAny = false;
+            foreach (var pair in languageValues)
+            {
+                var matched = await parser.ReplaceLanguageValueAsync(
+                    operation.Key!,
+                    pair.Key,
+                    pair.Value);
+
+                matchedAny |= matched;
+            }
+
+            if (!matchedAny)
+            {
+                throw new InvalidDataException(
+                    $"Could not find entry with Key '{operation.Key}' in {fileName}.");
+            }
+        }
+    }
+
+    private static bool IsStringsTargetFile(string? fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return false;
+        }
+
+        return fileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? ResolveStringsDirectory(string excelDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(excelDirectory))
+        {
+            return null;
+        }
+
+        var current = new DirectoryInfo(excelDirectory);
+        while (current != null && !string.Equals(current.Name, "data", StringComparison.OrdinalIgnoreCase))
+        {
+            current = current.Parent;
+        }
+
+        if (current == null)
+        {
+            return null;
+        }
+
+        return Path.Combine(current.FullName, "local", "lng", "strings");
     }
 
     private static async Task ApplyOperationsForTargetAsync<TEntry>(
@@ -544,7 +641,8 @@ public static class PluginsService
         string rowIdentifierPropertyName,
         Func<TEntry, string?> rowIdentifierSelector,
         Func<string, Task<IList<TEntry>>> loadEntriesAsync,
-        Func<IList<TEntry>, string, string, CancellationToken, Task<FileInfo>> saveEntriesAsync)
+        Func<IList<TEntry>, string, string, CancellationToken, Task<FileInfo>> saveEntriesAsync,
+        bool usesRowId = false)
         where TEntry : class
     {
         var targetOperations = operations
@@ -570,14 +668,29 @@ public static class PluginsService
 
         foreach (var operation in targetOperations)
         {
-            var matchingIndices = Enumerable.Range(0, entries.Count)
-                .Where(i => string.Equals(rowIdentifierSelector(entries[i]), operation.RowIdentifier, StringComparison.OrdinalIgnoreCase))
-                .ToList();
+            List<int> matchingIndices;
 
-            if (matchingIndices.Count == 0)
+            if (usesRowId)
             {
-                throw new InvalidDataException(
-                    $"Could not find row '{operation.RowIdentifier}' in {fileName} using the {rowIdentifierPropertyName} column.");
+                if (!int.TryParse(operation.RowIdentifier, out var rowIndex) || rowIndex < 0 || rowIndex >= entries.Count)
+                {
+                    throw new InvalidDataException(
+                        $"Row ID '{operation.RowIdentifier}' is not a valid index for {fileName}. Valid range is 0 to {entries.Count - 1}.");
+                }
+
+                matchingIndices = [rowIndex];
+            }
+            else
+            {
+                matchingIndices = Enumerable.Range(0, entries.Count)
+                    .Where(i => string.Equals(rowIdentifierSelector(entries[i]), operation.RowIdentifier, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                if (matchingIndices.Count == 0)
+                {
+                    throw new InvalidDataException(
+                        $"Could not find row '{operation.RowIdentifier}' in {fileName} using the {rowIdentifierPropertyName} column.");
+                }
             }
 
             foreach (var entryIndex in matchingIndices)
@@ -585,14 +698,16 @@ public static class PluginsService
                 entries[entryIndex] = UpdateRecord(
                     entries[entryIndex],
                     operation.Column ?? string.Empty,
-                    ResolveOperationValue(entries[entryIndex], operation, parameters, fileName));
+                    ResolveOperationValue(entries[entryIndex], operation, parameters, fileName),
+                    fileName,
+                    operation.RowIdentifier);
             }
         }
 
         await SaveGeneratedEntriesAsync(entries, filePath, saveEntriesAsync);
     }
 
-    private static TEntry UpdateRecord<TEntry>(TEntry entry, string column, string? updatedValue)
+    private static TEntry UpdateRecord<TEntry>(TEntry entry, string column, string? updatedValue, string fileName, string? rowIdentifier = null)
         where TEntry : class
     {
         var property = typeof(TEntry).GetProperties(BindingFlags.Public | BindingFlags.Instance)
@@ -600,12 +715,22 @@ public static class PluginsService
 
         if (property == null)
         {
-            throw new InvalidDataException($"The column '{column}' is not supported for {GetDisplayFileName<TEntry>()}.");
+            throw new InvalidDataException(
+                $"The column '{column}' is not supported for {fileName} (row '{rowIdentifier ?? "<unknown>"}', attempted value '{updatedValue ?? string.Empty}').");
         }
 
         var clonedEntry = CloneEntry(entry);
-        var convertedValue = ConvertValue(updatedValue, property.PropertyType, column);
-        property.SetValue(clonedEntry, convertedValue);
+        try
+        {
+            var convertedValue = ConvertValue(updatedValue, property.PropertyType, column);
+            property.SetValue(clonedEntry, convertedValue);
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new InvalidDataException(
+                $"{ex.Message} (file '{fileName}', row '{rowIdentifier ?? "<unknown>"}', column '{column}', attempted value '{updatedValue ?? string.Empty}')",
+                ex);
+        }
         return clonedEntry;
     }
 
@@ -639,27 +764,28 @@ public static class PluginsService
 
             if (property == null)
             {
-                throw new InvalidDataException($"The column '{column}' is not supported for {fileName}.");
+                throw new InvalidDataException(
+                    $"The column '{column}' is not supported for {fileName} (row '{operation.RowIdentifier ?? "<unknown>"}').");
             }
 
             var currentValue = property.GetValue(entry)?.ToString();
             if (!decimal.TryParse(currentValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var currentNumber))
             {
                 throw new InvalidDataException(
-                    $"The existing value '{currentValue}' in column '{column}' is not numeric and cannot be multiplied.");
+                    $"The existing value '{currentValue}' in column '{column}' is not numeric and cannot be multiplied (file '{fileName}', row '{operation.RowIdentifier ?? "<unknown>"}').");
             }
 
             var multiplierText = ResolveMultiplierValue(operation, parameters, resolvedUpdatedValue);
             if (!decimal.TryParse(multiplierText, NumberStyles.Float, CultureInfo.InvariantCulture, out var multiplier))
             {
                 throw new InvalidDataException(
-                    $"The multiplier value '{multiplierText}' is not a valid decimal number.");
+                    $"The multiplier value '{multiplierText}' is not a valid decimal number (file '{fileName}', row '{operation.RowIdentifier ?? "<unknown>"}', column '{column}').");
             }
 
             return FormatDecimalValue(currentNumber * multiplier);
         }
 
-        throw new InvalidDataException($"Unsupported plugin operation '{operationType}'.");
+        throw new InvalidDataException($"Unsupported plugin operation '{operationType}' (file '{fileName}', row '{operation.RowIdentifier ?? "<unknown>"}', column '{operation.Column ?? string.Empty}').");
     }
 
     private static string ResolveMultiplierValue(
@@ -723,19 +849,32 @@ public static class PluginsService
         return (TEntry)cloneMethod.Invoke(entry, null)!;
     }
 
-    private static string GetDisplayFileName<TEntry>()
+    /// <summary>
+    /// Normalizes a user-supplied value for an integer-typed target column. Game .txt files do not
+    /// accept decimals, so any fractional portion is truncated toward negative infinity (floor),
+    /// mirroring the way the game itself handles such values at runtime.
+    /// </summary>
+    private static string? FloorIntegerInput(string? value)
     {
-        if (typeof(TEntry) == typeof(Skills))
+        if (string.IsNullOrWhiteSpace(value))
         {
-            return SkillsFileName;
+            return value;
         }
 
-        if (typeof(TEntry) == typeof(CubeMain))
+        var trimmed = value.Trim();
+
+        if (long.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out _) ||
+            ulong.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
         {
-            return CubeMainFileName;
+            return trimmed;
         }
 
-        return typeof(TEntry).Name;
+        if (decimal.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture, out var asDecimal))
+        {
+            return decimal.Floor(asDecimal).ToString(CultureInfo.InvariantCulture);
+        }
+
+        return value;
     }
 
     private static object? ConvertValue(string? value, Type targetType, string column)
@@ -758,12 +897,120 @@ public static class PluginsService
 
         if (targetType == typeof(int))
         {
-            if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedInt))
+            var normalized = FloorIntegerInput(value);
+            if (int.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedInt))
             {
                 return parsedInt;
             }
 
             throw new InvalidDataException($"The value '{value}' is not a valid integer for column '{column}'.");
+        }
+
+        if (targetType == typeof(uint))
+        {
+            var normalized = FloorIntegerInput(value);
+            if (uint.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedUInt))
+            {
+                return parsedUInt;
+            }
+
+            throw new InvalidDataException($"The value '{value}' is not a valid unsigned integer for column '{column}'.");
+        }
+
+        if (targetType == typeof(long))
+        {
+            var normalized = FloorIntegerInput(value);
+            if (long.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedLong))
+            {
+                return parsedLong;
+            }
+
+            throw new InvalidDataException($"The value '{value}' is not a valid long for column '{column}'.");
+        }
+
+        if (targetType == typeof(ulong))
+        {
+            var normalized = FloorIntegerInput(value);
+            if (ulong.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedULong))
+            {
+                return parsedULong;
+            }
+
+            throw new InvalidDataException($"The value '{value}' is not a valid unsigned long for column '{column}'.");
+        }
+
+        if (targetType == typeof(short))
+        {
+            var normalized = FloorIntegerInput(value);
+            if (short.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedShort))
+            {
+                return parsedShort;
+            }
+
+            throw new InvalidDataException($"The value '{value}' is not a valid short for column '{column}'.");
+        }
+
+        if (targetType == typeof(ushort))
+        {
+            var normalized = FloorIntegerInput(value);
+            if (ushort.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedUShort))
+            {
+                return parsedUShort;
+            }
+
+            throw new InvalidDataException($"The value '{value}' is not a valid unsigned short for column '{column}'.");
+        }
+
+        if (targetType == typeof(byte))
+        {
+            var normalized = FloorIntegerInput(value);
+            if (byte.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedByte))
+            {
+                return parsedByte;
+            }
+
+            throw new InvalidDataException($"The value '{value}' is not a valid byte for column '{column}'.");
+        }
+
+        if (targetType == typeof(sbyte))
+        {
+            var normalized = FloorIntegerInput(value);
+            if (sbyte.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedSByte))
+            {
+                return parsedSByte;
+            }
+
+            throw new InvalidDataException($"The value '{value}' is not a valid signed byte for column '{column}'.");
+        }
+
+        if (targetType == typeof(double))
+        {
+            if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedDouble))
+            {
+                return parsedDouble;
+            }
+
+            throw new InvalidDataException($"The value '{value}' is not a valid number for column '{column}'.");
+        }
+
+        if (targetType == typeof(float))
+        {
+            if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedFloat))
+            {
+                return parsedFloat;
+            }
+
+            throw new InvalidDataException($"The value '{value}' is not a valid number for column '{column}'.");
+        }
+
+        if (targetType == typeof(decimal))
+        {
+            if (decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedDecimal))
+            {
+                return parsedDecimal;
+            }
+
+            throw new InvalidDataException($"The value '{value}' is not a valid decimal for column '{column}'.");
         }
 
         if (targetType == typeof(bool))
@@ -895,13 +1142,34 @@ public static class PluginsService
             if (supportedTarget == null)
             {
                 errors.Add(
-                    $"'{pluginFileName}' targets unsupported file '{operation.File}'. Only {SkillsFileName} and {CubeMainFileName} are supported right now.");
+                    $"'{pluginFileName}' targets unsupported file '{operation.File}'. All .txt files except itemstatcost.txt are supported, and any .json file under data/local/lng/strings is supported.");
+                continue;
+            }
+
+            if (supportedTarget.IsStringsTarget)
+            {
+                if (string.IsNullOrWhiteSpace(operation.Key))
+                {
+                    errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} entry with no Key.");
+                }
+
+                if (operation.LanguageValues == null || operation.LanguageValues.Count == 0)
+                {
+                    var known = string.Join(", ", KnownStringLanguageColumns);
+                    errors.Add(
+                        $"'{pluginFileName}' contains a {supportedTarget.FileName} entry for Key '{operation.Key}' with no language fields to replace. Add one or more of: {known}.");
+                }
+
                 continue;
             }
 
             if (string.IsNullOrWhiteSpace(operation.RowIdentifier))
             {
                 errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} operation with no rowIdentifier.");
+            }
+            else if (supportedTarget.UsesRowId && !int.TryParse(operation.RowIdentifier, out _))
+            {
+                errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} operation with non-numeric rowIdentifier '{operation.RowIdentifier}'. This file uses numeric row IDs.");
             }
 
             if (string.IsNullOrWhiteSpace(operation.Column))
@@ -934,16 +1202,31 @@ public static class PluginsService
         }
     }
 
-    private static SupportedPluginTarget? GetSupportedTarget(string? fileName)
+    private static bool IsSupportedTargetFile(string? fileName)
     {
-        if (string.Equals(fileName, SkillsFileName, StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(fileName))
         {
-            return new SupportedPluginTarget(SkillsFileName, typeof(Skills), SkillsRowIdentifierPropertyName);
+            return false;
         }
 
-        if (string.Equals(fileName, CubeMainFileName, StringComparison.OrdinalIgnoreCase))
+        return ParserRegistry.ContainsKey(fileName) || IsStringsTargetFile(fileName);
+    }
+
+    private static SupportedPluginTarget? GetSupportedTarget(string? fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
         {
-            return new SupportedPluginTarget(CubeMainFileName, typeof(CubeMain), CubeMainRowIdentifierPropertyName);
+            return null;
+        }
+
+        if (ParserRegistry.TryGetValue(fileName, out var registration))
+        {
+            return new SupportedPluginTarget(fileName, registration.EntryType, registration.RowIdentifierPropertyName, registration.UsesRowId, IsStringsTarget: false);
+        }
+
+        if (IsStringsTargetFile(fileName))
+        {
+            return new SupportedPluginTarget(fileName, typeof(object), "Key", UsesRowId: false, IsStringsTarget: true);
         }
 
         return null;
@@ -1045,24 +1328,88 @@ public static class PluginsService
 
     private static IReadOnlyList<PluginJsonOperation> DeserializeSingleOperation(string json)
     {
-        var operation = JsonSerializer.Deserialize<PluginJsonOperation>(json, JsonOptions);
+        using var document = JsonDocument.Parse(json);
+        return [NormalizeOperation(DeserializeOperationElement(document.RootElement))];
+    }
+
+    private static IReadOnlyList<PluginJsonOperation> DeserializeOperationArray(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        var operations = new List<PluginJsonOperation>(document.RootElement.GetArrayLength());
+        foreach (var element in document.RootElement.EnumerateArray())
+        {
+            if (element.ValueKind != JsonValueKind.Object)
+            {
+                throw new InvalidDataException("Plugin JSON array entries must be objects.");
+            }
+
+            operations.Add(NormalizeOperation(DeserializeOperationElement(element)));
+        }
+
+        return operations;
+    }
+
+    private static PluginJsonOperation DeserializeOperationElement(JsonElement element)
+    {
+        // Excel (.txt) targets use the standard {file, rowIdentifier, column, operation, ...} schema.
+        // Strings (.json) targets use a flat d2rr-style layout: {file, Key, enUS, zhTW, ...}
+        // where every known language field present on the object is applied as a direct replacement.
+        var file = element.TryGetProperty("file", out var fileProperty) && fileProperty.ValueKind == JsonValueKind.String
+            ? fileProperty.GetString()
+            : null;
+
+        if (IsStringsTargetFile(file))
+        {
+            string? key = null;
+            if (element.TryGetProperty("Key", out var keyProperty) && keyProperty.ValueKind == JsonValueKind.String)
+            {
+                key = keyProperty.GetString();
+            }
+            else if (element.TryGetProperty("key", out var keyPropertyLower) && keyPropertyLower.ValueKind == JsonValueKind.String)
+            {
+                key = keyPropertyLower.GetString();
+            }
+
+            var languageValues = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var property in element.EnumerateObject())
+            {
+                if (property.NameEquals("file") || property.NameEquals("Key") || property.NameEquals("key") || property.NameEquals("id"))
+                {
+                    continue;
+                }
+
+                if (property.Value.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                if (!KnownStringLanguageColumns.Contains(property.Name))
+                {
+                    // Ignore unknown fields per the flat d2rr-style schema (e.g. extra metadata).
+                    continue;
+                }
+
+                languageValues[property.Name] = property.Value.GetString() ?? string.Empty;
+            }
+
+            return new PluginJsonOperation(
+                File: file,
+                RowIdentifier: null,
+                Column: null,
+                Operation: null,
+                ParameterKey: null,
+                UpdatedValue: null,
+                Key: key,
+                LanguageValues: languageValues);
+        }
+
+        var operation = JsonSerializer.Deserialize<PluginJsonOperation>(element.GetRawText(), JsonOptions);
         if (operation == null)
         {
             throw new InvalidDataException("Plugin JSON could not be parsed.");
         }
 
-        return [NormalizeOperation(operation)];
-    }
-
-    private static IReadOnlyList<PluginJsonOperation> DeserializeOperationArray(string json)
-    {
-        var operations = JsonSerializer.Deserialize<List<PluginJsonOperation>>(json, JsonOptions);
-        if (operations == null)
-        {
-            throw new InvalidDataException("Plugin JSON array could not be parsed.");
-        }
-
-        return operations.Select(NormalizeOperation).ToList();
+        return operation;
     }
 
     private static PluginJsonOperation NormalizeOperation(PluginJsonOperation operation)
@@ -1073,7 +1420,8 @@ public static class PluginsService
             RowIdentifier = operation.RowIdentifier?.Trim() ?? string.Empty,
             Column = operation.Column?.Trim() ?? string.Empty,
             Operation = operation.Operation?.Trim(),
-            ParameterKey = operation.ParameterKey?.Trim()
+            ParameterKey = operation.ParameterKey?.Trim(),
+            Key = operation.Key?.Trim()
         };
     }
 
@@ -1243,7 +1591,276 @@ public static class PluginsService
         IReadOnlyList<PluginCatalogFileItem> Files,
         IReadOnlyList<string> Errors);
 
-    private sealed record SupportedPluginTarget(string FileName, Type EntryType, string RowIdentifierPropertyName);
+    private sealed record SupportedPluginTarget(string FileName, Type EntryType, string RowIdentifierPropertyName, bool UsesRowId, bool IsStringsTarget = false);
+
+    private sealed record FileParserRegistration(
+        Type EntryType,
+        string RowIdentifierPropertyName,
+        bool UsesRowId,
+        Func<string, IReadOnlyList<PluginJsonOperation>, IReadOnlyDictionary<string, string>, Task> ApplyAsync);
+
+    private static FileParserRegistration CreateRegistration<TEntry>(
+        string fileName,
+        string rowIdentifierPropertyName,
+        Func<TEntry, string?> rowIdentifierSelector,
+        Func<string, Task<IList<TEntry>>> loadEntriesAsync,
+        Func<IList<TEntry>, string, string, CancellationToken, Task<FileInfo>> saveEntriesAsync,
+        bool usesRowId = false)
+        where TEntry : class
+    {
+        return new FileParserRegistration(
+            typeof(TEntry),
+            rowIdentifierPropertyName,
+            usesRowId,
+            (excelDirectory, operations, parameters) =>
+                ApplyOperationsForTargetAsync(
+                    excelDirectory, operations, parameters, fileName,
+                    rowIdentifierPropertyName, rowIdentifierSelector,
+                    loadEntriesAsync, saveEntriesAsync, usesRowId));
+    }
+
+    private static Dictionary<string, FileParserRegistration> BuildParserRegistry()
+    {
+        var registry = new Dictionary<string, FileParserRegistration>(StringComparer.OrdinalIgnoreCase);
+
+        void Register<TEntry>(
+            string fileName,
+            string rowIdentifierPropertyName,
+            Func<TEntry, string?> rowIdentifierSelector,
+            Func<string, Task<IList<TEntry>>> loadEntriesAsync,
+            Func<IList<TEntry>, string, string, CancellationToken, Task<FileInfo>> saveEntriesAsync,
+            bool usesRowId = false)
+            where TEntry : class
+        {
+            registry[fileName] = CreateRegistration(
+                fileName, rowIdentifierPropertyName, rowIdentifierSelector,
+                loadEntriesAsync, saveEntriesAsync, usesRowId);
+        }
+
+        Register<Armor>("armor.txt", "Code", static e => e.Code,
+            static f => ArmorParser.GetEntries(f),
+            static (e, f, o, c) => ArmorParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<AutoMagic>("automagic.txt", "Name", static e => e.Name,
+            static f => AutoMagicParser.GetEntries(f),
+            static (e, f, o, c) => AutoMagicParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<CharStats>("charstats.txt", "Class", static e => e.Class,
+            static f => CharStatsParser.GetEntries(f),
+            static (e, f, o, c) => CharStatsParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<CubeMain>("cubemain.txt", "RowId", static e => e.Description,
+            static f => CubeMainParser.GetEntries(f),
+            static (e, f, o, c) => CubeMainParser.SaveEntriesPreservingUnchanged(e, f, o, c),
+            usesRowId: true);
+
+        Register<CubeModifierType>("cubemod.txt", "CubeModifierTypeName", static e => e.CubeModifierTypeName,
+            static f => CubeModifierTypeParser.GetEntries(f),
+            static (e, f, o, c) => CubeModifierTypeParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<DifficultyLevel>("difficultylevels.txt", "Name", static e => e.Name,
+            static f => DifficultyLevelParser.GetEntries(f),
+            static (e, f, o, c) => DifficultyLevelParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<Experience>("experience.txt", "Level", static e => e.Level,
+            static f => ExperienceParser.GetEntries(f),
+            static (e, f, o, c) => ExperienceParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<Gamble>("gamble.txt", "Name", static e => e.Name,
+            static f => GambleParser.GetEntries(f),
+            static (e, f, o, c) => GambleParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<Gem>("gems.txt", "Name", static e => e.Name,
+            static f => GemParser.GetEntries(f),
+            static (e, f, o, c) => GemParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<Hirelings>("hireling.txt", "RowId", static e => e.Hireling,
+            static f => HirelingParser.GetEntries(f),
+            static (e, f, o, c) => HirelingParser.SaveEntriesPreservingUnchanged(e, f, o, c),
+            usesRowId: true);
+
+        Register<Inventory>("inventory.txt", "Class", static e => e.Class,
+            static f => InventoryParser.GetEntries(f),
+            static (e, f, o, c) => InventoryParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<ItemType>("itemtypes.txt", "Code", static e => e.Code,
+            static f => ItemTypeParser.GetEntries(f),
+            static (e, f, o, c) => ItemTypeParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<LvlMaze>("lvlmaze.txt", "RowId", static e => e.Name,
+            static f => LvlMazeParser.GetEntries(f),
+            static (e, f, o, c) => LvlMazeParser.SaveEntriesPreservingUnchanged(e, f, o, c),
+            usesRowId: true);
+
+        Register<LevelsPreset>("lvlprest.txt", "RowId", static e => e.Name,
+            static f => LvlPrestParser.GetEntries(f),
+            static (e, f, o, c) => LvlPrestParser.SaveEntriesPreservingUnchanged(e, f, o, c),
+            usesRowId: true);
+
+        Register<LvlWarp>("lvlwarp.txt", "Name", static e => e.Name,
+            static f => LvlWarpParser.GetEntries(f),
+            static (e, f, o, c) => LvlWarpParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<MagicPrefix>("magicprefix.txt", "RowId", static e => e.Name,
+            static f => MagicPrefixParser.GetEntries(f),
+            static (e, f, o, c) => MagicPrefixParser.SaveEntriesPreservingUnchanged(e, f, o, c),
+            usesRowId: true);
+
+        Register<MagicSuffix>("magicsuffix.txt", "RowId", static e => e.Name,
+            static f => MagicSuffixParser.GetEntries(f),
+            static (e, f, o, c) => MagicSuffixParser.SaveEntriesPreservingUnchanged(e, f, o, c),
+            usesRowId: true);
+
+        Register<Misc>("misc.txt", "Code", static e => e.Code,
+            static f => MiscParser.GetEntries(f),
+            static (e, f, o, c) => MiscParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<Missiles>("missiles.txt", "MissileName", static e => e.MissileName,
+            static f => MissilesParser.GetEntries(f),
+            static (e, f, o, c) => MissilesParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<MonEquip>("monequip.txt", "RowId", static e => e.Monster,
+            static f => MonEquipParser.GetEntries(f),
+            static (e, f, o, c) => MonEquipParser.SaveEntriesPreservingUnchanged(e, f, o, c),
+            usesRowId: true);
+
+        Register<MonPreset>("monpreset.txt", "RowId", static e => e.Act?.ToString(),
+            static f => MonPresetParser.GetEntries(f),
+            static (e, f, o, c) => MonPresetParser.SaveEntriesPreservingUnchanged(e, f, o, c),
+            usesRowId: true);
+
+        Register<MonProp>("monprop.txt", "Id", static e => e.Id,
+            static f => MonPropParser.GetEntries(f),
+            static (e, f, o, c) => MonPropParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<MonStat>("monstats.txt", "Id", static e => e.Id,
+            static f => MonStatsParser.GetEntries(f),
+            static (e, f, o, c) => MonStatsParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<MonStats2>("monstats2.txt", "Id", static e => e.Id,
+            static f => MonStats2Parser.GetEntries(f),
+            static (e, f, o, c) => MonStats2Parser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<MonType>("montype.txt", "Type", static e => e.Type,
+            static f => MonTypeParser.GetEntries(f),
+            static (e, f, o, c) => MonTypeParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<MonUMod>("monumod.txt", "UniqueModId", static e => e.UniqueModId,
+            static f => MonUModParser.GetEntries(f),
+            static (e, f, o, c) => MonUModParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<Npc>("npc.txt", "NpcName", static e => e.NpcName,
+            static f => NpcParser.GetEntries(f),
+            static (e, f, o, c) => NpcParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<PetType>("pettype.txt", "PetTypeId", static e => e.PetTypeId,
+            static f => PetTypeParser.GetEntries(f),
+            static (e, f, o, c) => PetTypeParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<Property>("properties.txt", "Code", static e => e.Code,
+            static f => PropertiesParser.GetEntries(f),
+            static (e, f, o, c) => PropertiesParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<PropertyGroup>("propertygroups.txt", "Code", static e => e.Code,
+            static f => PropertyGroupParser.GetEntries(f),
+            static (e, f, o, c) => PropertyGroupParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<RuneWord>("runes.txt", "Name", static e => e.Name,
+            static f => RunesParser.GetEntries(f),
+            static (e, f, o, c) => RunesParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<SetItem>("setitems.txt", "Index", static e => e.Index,
+            static f => SetItemParser.GetEntries(f),
+            static (e, f, o, c) => SetItemParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<Sets>("sets.txt", "Index", static e => e.Index,
+            static f => SetsParser.GetEntries(f),
+            static (e, f, o, c) => SetsParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<Shrines>("shrines.txt", "Name", static e => e.Name,
+            static f => ShrinesParser.GetEntries(f),
+            static (e, f, o, c) => ShrinesParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<SkillCalc>("skillcalc.txt", "Code", static e => e.Code,
+            static f => SkillCalcParser.GetEntries(f),
+            static (e, f, o, c) => SkillCalcParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<SkillDesc>("skilldesc.txt", "SkillName", static e => e.SkillName,
+            static f => SkillDescParser.GetEntries(f),
+            static (e, f, o, c) => SkillDescParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<Skills>("skills.txt", "Skill", static e => e.Skill,
+            static f => SkillsParser.GetEntries(f),
+            static (e, f, o, c) => SkillsParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<Sounds>("sounds.txt", "Sound", static e => e.Sound,
+            static f => SoundsParser.GetEntries(f),
+            static (e, f, o, c) => SoundsParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<States>("states.txt", "StateId", static e => e.StateId,
+            static f => StatesParser.GetEntries(f),
+            static (e, f, o, c) => StatesParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<StorePage>("storepage.txt", "StorePageName", static e => e.StorePageName,
+            static f => StorePageParser.GetEntries(f),
+            static (e, f, o, c) => StorePageParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<SuperUnique>("superuniques.txt", "Superunique", static e => e.Superunique,
+            static f => SuperUniquesParser.GetEntries(f),
+            static (e, f, o, c) => SuperUniquesParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<TreasureClass>("treasureclassex.txt", "TreasureClassName", static e => e.TreasureClassName,
+            static f => TreasureClassParser.GetEntries(f),
+            static (e, f, o, c) => TreasureClassParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<UniqueItem>("uniqueitems.txt", "Index", static e => e.Index,
+            static f => UniqueItemsParser.GetEntries(f),
+            static (e, f, o, c) => UniqueItemsParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<Weapon>("weapons.txt", "Code", static e => e.Code,
+            static f => WeaponParser.GetEntries(f),
+            static (e, f, o, c) => WeaponParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<ActInfo>("actinfo.txt", "Act", static e => e.Act?.ToString(),
+            static f => ActInfoParser.GetEntries(f),
+            static (e, f, o, c) => ActInfoParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<Automap>("automap.txt", "RowId", static e => e.LevelName,
+            static f => AutomapParser.GetEntries(f),
+            static (e, f, o, c) => AutomapParser.SaveEntriesPreservingUnchanged(e, f, o, c),
+            usesRowId: true);
+
+        Register<ItemUiCategory>("itemuicategories.txt", "Name", static e => e.Name,
+            static f => ItemUiCategoryParser.GetEntries(f),
+            static (e, f, o, c) => ItemUiCategoryParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<LevelGroup>("levelgroups.txt", "LevelGroupId", static e => e.LevelGroupId?.ToString(),
+            static f => LevelGroupParser.GetEntries(f),
+            static (e, f, o, c) => LevelGroupParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<Level>("levels.txt", "Name", static e => e.Name,
+            static f => LevelParser.GetEntries(f),
+            static (e, f, o, c) => LevelParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<MonLvl>("monlvl.txt", "Level", static e => e.Level?.ToString(),
+            static f => MonLvlParser.GetEntries(f),
+            static (e, f, o, c) => MonLvlParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<MonPet>("monpet.txt", "Monster", static e => e.Monster,
+            static f => MonPetParser.GetEntries(f),
+            static (e, f, o, c) => MonPetParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        Register<GameObject>("objects.txt", "RowId", static e => e.Name,
+            static f => ObjectsParser.GetEntries(f),
+            static (e, f, o, c) => ObjectsParser.SaveEntriesPreservingUnchanged(e, f, o, c),
+            usesRowId: true);
+
+        Register<Overlay>("overlay.txt", "OverlayName", static e => e.OverlayName,
+            static f => OverlayParser.GetEntries(f),
+            static (e, f, o, c) => OverlayParser.SaveEntriesPreservingUnchanged(e, f, o, c));
+
+        return registry;
+    }
 
     private sealed class PluginInfo
     {
@@ -1269,5 +1886,7 @@ public static class PluginsService
         string? Column,
         string? Operation,
         string? ParameterKey,
-        string? UpdatedValue);
+        string? UpdatedValue,
+        string? Key = null,
+        IReadOnlyDictionary<string, string>? LanguageValues = null);
 }

@@ -13,10 +13,26 @@
                                Text="Use this guide to package a launcher plugin, declare parameters, and write supported JSON operations." />
                 </StackPanel>
 
-                <Button Grid.Column="1"
-                        Content="Back to Plugins"
-                        Click="OnBackToPluginsClicked" />
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            Spacing="8">
+                    <Button x:Name="OpenWikiButton"
+                            Content="Open Full Wiki Guide"
+                            Click="OnOpenWikiClicked" />
+                    <Button Content="Back to Plugins"
+                            Click="OnBackToPluginsClicked" />
+                </StackPanel>
             </Grid>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="8">
+                    <TextBlock Classes="section-title"
+                               Text="Full Documentation" />
+                    <TextBlock Text="The complete, up-to-date plugin authoring guide — including a per-file identification table and worked examples — lives on the project wiki. Click &quot;Open Full Wiki Guide&quot; above to open it in your browser."
+                               TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
 
             <Border Classes="panel"
                     Padding="20">
@@ -66,7 +82,9 @@
                                Text="Plugin JSON Operations" />
                     <TextBlock Text="Each plugin JSON file can be either a single object or an array of objects." TextWrapping="Wrap" />
                     <TextBlock Classes="muted"
-                               Text="Supported targets: skills.txt matches rowIdentifier against Skill, and cubemain.txt matches rowIdentifier against Description." TextWrapping="Wrap" />
+                               Text="All .txt files in the base excel folder are supported except itemstatcost.txt. Most files match rows by a unique column (e.g. Skill for skills.txt, Id for monstats.txt). Files whose identifier column contains duplicates use a numeric row ID (0-based data row index) instead (e.g. magicprefix.txt, cubemain.txt, hireling.txt)." TextWrapping="Wrap" />
+                    <TextBlock Classes="muted"
+                               Text="String JSON files under data/local/lng/strings (e.g. item-runes.json) use a flat d2rr-style layout. Each entry lists 'file', the entry 'Key', and one or more language fields (enUS, zhTW, deDE, esES, frFR, itIT, koKR, plPL, esMX, jaJP, ptBR, ruRU, zhCN). Only the language fields present on that entry are replaced; all other languages on the matched D2R entry, and every other entry in the file, are left untouched. Fields that are not one of the recognized language codes are ignored." TextWrapping="Wrap" />
                     <TextBox x:Name="OperationsExampleTextBox"
                              IsReadOnly="True"
                              AcceptsReturn="True"
@@ -80,12 +98,9 @@
                 <StackPanel Spacing="8">
                     <TextBlock Classes="section-title"
                                Text="Available Fields" />
-                    <TextBlock Text="file: Required. Must be skills.txt or cubemain.txt." TextWrapping="Wrap" />
-                    <TextBlock Text="rowIdentifier: Required. For skills.txt it must match a row's Skill value. For cubemain.txt it must match a row's Description value." TextWrapping="Wrap" />
-                    <TextBlock Text="column: Required. Must match a real column name on the target file's generated parser model." TextWrapping="Wrap" />
-                    <TextBlock Text="updatedValue: The replacement value, or the multiplier when operation is multiplyExisting and parameterKey is not used." TextWrapping="Wrap" />
-                    <TextBlock Text="operation: Optional. Leave empty or use replace for direct replacement. Use multiplyExisting to multiply the current numeric value." TextWrapping="Wrap" />
-                    <TextBlock Text="parameterKey: Optional. References a parameter declared in plugininfo.json." TextWrapping="Wrap" />
+                    <TextBlock Text="file: Required. Any .txt file from the base excel folder except itemstatcost.txt, or any .json file under data/local/lng/strings." TextWrapping="Wrap" />
+                    <TextBlock Text="Excel (.txt) targets: rowIdentifier is required (value from the identifier column, or numeric row ID for files with duplicate identifiers); column is required (a column name on the target file); updatedValue is the replacement value or the multiplier; operation is optional (empty/replace or multiplyExisting); parameterKey is optional (references a parameter in plugininfo.json)." TextWrapping="Wrap" />
+                    <TextBlock Text="Strings (.json) targets: Key is required and matches the D2R entry's Key. Alongside Key, add any of the 13 language fields (enUS, zhTW, deDE, esES, frFR, itIT, koKR, plPL, esMX, jaJP, ptBR, ruRU, zhCN) with the replacement string — only the listed language fields on the matched entry are overwritten." TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
 
@@ -97,6 +112,8 @@
                     <TextBlock Text="updatedValue also supports inline parameter tokens in the form {{parameter:key}}." TextWrapping="Wrap" />
                     <TextBlock Classes="muted"
                                Text="Example: set updatedValue to {{parameter:damageMultiplier}} if you want the value resolved from plugininfo.json at runtime." TextWrapping="Wrap" />
+                    <TextBlock Classes="muted"
+                               Text="Parameter tokens are not resolved inside string JSON language values — provide the final replacement text directly on those entries." TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
 
@@ -117,9 +134,9 @@
                 <StackPanel Spacing="8">
                     <TextBlock Classes="section-title"
                                Text="Current Limits" />
-                    <TextBlock Text="Only skills.txt and cubemain.txt are supported today." TextWrapping="Wrap" />
+                    <TextBlock Text="All .txt files in the base excel folder are supported except itemstatcost.txt. Most files match rows by a unique column; files with duplicate identifier values use numeric row IDs." TextWrapping="Wrap" />
                     <TextBlock Text="replace and multiplyExisting are the only supported operations." TextWrapping="Wrap" />
-                    <TextBlock Text="Values are written through the generated parser types, so the column name and value type still need to be valid." TextWrapping="Wrap" />
+                    <TextBlock Text="Most files use typed parsers from the D2RReimaginedTools library for column validation and data integrity." TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
         </StackPanel>
