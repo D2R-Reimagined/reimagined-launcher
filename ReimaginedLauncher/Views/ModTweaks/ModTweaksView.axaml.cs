@@ -14,6 +14,8 @@ public partial class ModTweaksView : UserControl
     private const int DefaultNormalResistPenalty = 0;
     private const int DefaultNightmareResistPenalty = -60;
     private const int DefaultHellResistPenalty = -120;
+    private const int DefaultZoneDurationMinutes = 60;
+    private static readonly int[] ZoneDurationMinuteOptions = { 15, 30, 45, 60, 75, 90, 105, 120 };
     private bool _isRefreshing;
 
     public ModTweaksView()
@@ -33,6 +35,7 @@ public partial class ModTweaksView : UserControl
         var normalResistPenalty = profile.NormalResistPenalty;
         var nightmareResistPenalty = profile.NightmareResistPenalty;
         var hellResistPenalty = profile.HellResistPenalty;
+        var zoneDurationMinutes = NormalizeZoneDurationMinutes(profile.ZoneDurationMinutes);
         var removePaladinAuraSound = profile.RemovePaladinAuraSound;
         var removeSplashVfx = profile.RemoveSplashVfx;
         var makeTooltipBackgroundOpaque = profile.MakeTooltipBackgroundOpaque;
@@ -51,6 +54,7 @@ public partial class ModTweaksView : UserControl
         profile.NormalResistPenalty = normalResistPenalty;
         profile.NightmareResistPenalty = nightmareResistPenalty;
         profile.HellResistPenalty = hellResistPenalty;
+        profile.ZoneDurationMinutes = zoneDurationMinutes;
         profile.RemovePaladinAuraSound = removePaladinAuraSound;
         profile.RemoveSplashVfx = removeSplashVfx;
         profile.MakeTooltipBackgroundOpaque = makeTooltipBackgroundOpaque;
@@ -69,6 +73,7 @@ public partial class ModTweaksView : UserControl
         NormalResistPenaltyTextBox.Text = normalResistPenalty.ToString();
         NightmareResistPenaltyTextBox.Text = nightmareResistPenalty.ToString();
         HellResistPenaltyTextBox.Text = hellResistPenalty.ToString();
+        ZoneDurationMinutesComboBox.SelectedIndex = IndexOfZoneDuration(zoneDurationMinutes);
         RemovePaladinAuraSoundCheckBox.IsChecked = removePaladinAuraSound;
         RemoveSplashVfxCheckBox.IsChecked = removeSplashVfx;
         MakeTooltipBackgroundOpaqueCheckBox.IsChecked = makeTooltipBackgroundOpaque;
@@ -220,6 +225,7 @@ public partial class ModTweaksView : UserControl
         profile.NormalResistPenalty = DefaultNormalResistPenalty;
         profile.NightmareResistPenalty = DefaultNightmareResistPenalty;
         profile.HellResistPenalty = DefaultHellResistPenalty;
+        profile.ZoneDurationMinutes = DefaultZoneDurationMinutes;
         profile.RemovePaladinAuraSound = false;
         profile.RemoveSplashVfx = false;
         profile.MakeTooltipBackgroundOpaque = false;
@@ -234,6 +240,49 @@ public partial class ModTweaksView : UserControl
 
         await SettingsManager.SaveAsync(MainWindow.Settings);
         RefreshTweaksState();
+    }
+
+    private async void OnZoneDurationChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_isRefreshing)
+        {
+            return;
+        }
+
+        var index = ZoneDurationMinutesComboBox.SelectedIndex;
+        if (index < 0 || index >= ZoneDurationMinuteOptions.Length)
+        {
+            return;
+        }
+
+        MainWindow.Settings.CurrentProfile.ZoneDurationMinutes = ZoneDurationMinuteOptions[index];
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private static int NormalizeZoneDurationMinutes(int value)
+    {
+        for (var i = 0; i < ZoneDurationMinuteOptions.Length; i++)
+        {
+            if (ZoneDurationMinuteOptions[i] == value)
+            {
+                return value;
+            }
+        }
+
+        return DefaultZoneDurationMinutes;
+    }
+
+    private static int IndexOfZoneDuration(int value)
+    {
+        for (var i = 0; i < ZoneDurationMinuteOptions.Length; i++)
+        {
+            if (ZoneDurationMinuteOptions[i] == value)
+            {
+                return i;
+            }
+        }
+
+        return IndexOfZoneDuration(DefaultZoneDurationMinutes);
     }
 
     private void OnBackgroundPointerPressed(object? sender, PointerPressedEventArgs e)
