@@ -11,6 +11,8 @@ public sealed class PluginCatalogItem : INotifyPropertyChanged
     public string Id { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;
     public string Version { get; init; } = string.Empty;
+    public string ModVersion { get; init; } = string.Empty;
+    public string Author { get; init; } = string.Empty;
     public string Description { get; init; } = string.Empty;
     public bool IsEnabled { get; init; }
     public int Order { get; init; }
@@ -20,6 +22,8 @@ public sealed class PluginCatalogItem : INotifyPropertyChanged
     public bool HasErrors => Errors.Count > 0;
     public bool HasParameters => Parameters.Count > 0;
     public bool HasDescription => !string.IsNullOrWhiteSpace(Description);
+    public bool HasModVersion => !string.IsNullOrWhiteSpace(ModVersion);
+    public bool HasAuthor => !string.IsNullOrWhiteSpace(Author);
     public bool IsParametersExpanded
     {
         get => _isParametersExpanded;

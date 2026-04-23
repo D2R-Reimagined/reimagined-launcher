@@ -21,6 +21,7 @@ class Program
 
         var services = new ServiceCollection();
         services.AddHttpClient<GitHubAnnouncementsHttpClient>();
+        services.AddHttpClient<GitHubDiscussionPluginsHttpClient>();
         services.AddHttpClient<NexusModsHttpClient>();
         
         ServiceProvider = services.BuildServiceProvider();

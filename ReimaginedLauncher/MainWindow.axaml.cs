@@ -945,6 +945,22 @@ public partial class MainWindow : Window
         }
     }
 
+    public void NavigateToUserPluginsView()
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(NavigateToUserPluginsView);
+            return;
+        }
+
+        ContentArea.Content = new UserPluginsView();
+
+        if (PluginsNavItem != null && NavigationList.SelectedItem != PluginsNavItem)
+        {
+            NavigationList.SelectedItem = PluginsNavItem;
+        }
+    }
+
     private void RefreshCurrentContent()
     {
         if (!Dispatcher.UIThread.CheckAccess())
@@ -980,6 +996,10 @@ public partial class MainWindow : Window
         else if (ContentArea.Content is OfficialPluginsView officialPluginsView)
         {
             _ = officialPluginsView.RefreshOfficialPluginsStateAsync();
+        }
+        else if (ContentArea.Content is UserPluginsView userPluginsView)
+        {
+            _ = userPluginsView.RefreshUserPluginsAsync();
         }
         else if (ContentArea.Content is UpdateView updateView)
         {
