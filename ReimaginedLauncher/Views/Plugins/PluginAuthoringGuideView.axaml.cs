@@ -71,6 +71,16 @@ public partial class PluginAuthoringGuideView : UserControl
                                                  "updatedValue": "50"
                                                },
                                                {
+                                                 "file": "monstats.txt",
+                                                 "rowIdentifier": {
+                                                   "Id": "skeleton1",
+                                                   "NameStr": "Skeleton",
+                                                   "hcIdx": "86"
+                                                 },
+                                                 "column": "Level",
+                                                 "updatedValue": "55"
+                                               },
+                                               {
                                                  "file": "magicprefix.txt",
                                                  "rowIdentifier": "86",
                                                  "column": "Spawnable",
