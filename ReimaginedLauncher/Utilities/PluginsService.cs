@@ -688,9 +688,14 @@ public static class PluginsService
                 }
 
                 var newEntry = new TEntry();
+                // For addRow, each column assignment is materialized into the new row via the
+                // standard value-resolution pipeline. The parent's Operation ("addRow") is not a
+                // value-producing operation, so we strip it before building per-column ops; this
+                // lets per-assignment Operation overrides win and otherwise falls back to "replace".
+                var addRowParent = operation with { Operation = null };
                 foreach (var assignment in assignments)
                 {
-                    var perColumnOp = BuildPerColumnOperation(operation, assignment, defaultOperation: "replace");
+                    var perColumnOp = BuildPerColumnOperation(addRowParent, assignment, defaultOperation: "replace");
                     newEntry = UpdateRecord(
                         newEntry,
                         perColumnOp.Column ?? string.Empty,
