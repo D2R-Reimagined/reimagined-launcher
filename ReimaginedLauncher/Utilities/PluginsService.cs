@@ -448,17 +448,35 @@ public static class PluginsService
 
     public static async Task<PluginEditorDocument> LoadEditorDocumentAsync(string pluginId, string relativePath)
     {
-        var pluginState = await LoadPluginStateAsync(GetRegistration(pluginId));
+        var registration = GetRegistration(pluginId);
         var absolutePath = GetPluginFilePath(pluginId, relativePath);
         if (!File.Exists(absolutePath))
         {
             throw new FileNotFoundException("The selected plugin JSON file could not be found.", relativePath);
         }
 
+        // Avoid a full LoadPluginStateAsync (which validates every file in the
+        // plugin); the editor only needs the display name.
+        var pluginInfoPath = Path.Combine(GetPluginDirectory(registration), PluginInfoFileName);
+        var pluginName = registration.FolderName;
+        if (File.Exists(pluginInfoPath))
+        {
+            try
+            {
+                var pluginInfo = await LoadPluginInfoAsync(pluginInfoPath);
+                pluginName = pluginInfo.Name;
+            }
+            catch (Exception ex)
+            {
+                LaunchDiagnostics.LogException(
+                    $"Failed to read plugin name for '{registration.FolderName}'", ex);
+            }
+        }
+
         return new PluginEditorDocument
         {
             PluginId = pluginId,
-            PluginName = pluginState.Name,
+            PluginName = pluginName,
             RelativePath = relativePath,
             Content = await File.ReadAllTextAsync(absolutePath)
         };
@@ -500,6 +518,10 @@ public static class PluginsService
     {
         MainWindow.Settings.CurrentProfile.Plugins ??= [];
 
+        // Notify the backup service that a fresh apply pass is starting so it
+        // can re-snapshot any targets the launcher regenerated since last run.
+        await PluginAssetBackupService.BeginApplyPassAsync();
+
         foreach (var registration in MainWindow.Settings.CurrentProfile.Plugins.Where(plugin => plugin.IsEnabled))
         {
             var pluginState = await LoadPluginStateAsync(registration);
@@ -521,13 +543,16 @@ public static class PluginsService
 
             try
             {
+                // Build the parameter dictionary once per plugin instead of
+                // per file; the values are constant for the entire apply pass.
+                var parameters = pluginState.Parameters.ToDictionary(
+                    parameter => parameter.Key,
+                    parameter => parameter.Value,
+                    StringComparer.OrdinalIgnoreCase);
+
                 foreach (var pluginFile in pluginState.Files)
                 {
                     var operations = await LoadPluginOperationsAsync(GetPluginFilePath(registration.Id, pluginFile.RelativePath));
-                    var parameters = pluginState.Parameters.ToDictionary(
-                        parameter => parameter.Key,
-                        parameter => parameter.Value,
-                        StringComparer.OrdinalIgnoreCase);
                     await ApplyOperationsAsync(excelDirectory, operations, parameters);
                 }
 
@@ -555,31 +580,42 @@ public static class PluginsService
 
         ReportProgress(progress, $"Applying plugin assets for {pluginState.Name}...");
 
+        // Resolve the mod root once; every asset is validated against it.
+        var modRootFull = Path.GetFullPath(modRoot);
+
         foreach (var asset in pluginState.Assets)
         {
-            var destinationPath = Path.GetFullPath(Path.Combine(modRoot, asset.TargetRelativePath));
-            var modRootFull = Path.GetFullPath(modRoot);
-            if (!destinationPath.StartsWith(modRootFull, StringComparison.OrdinalIgnoreCase))
+            try
             {
-                throw new InvalidDataException(
-                    $"Asset target '{asset.TargetRelativePath}' resolves outside the mod folder.");
-            }
+                var destinationPath = Path.GetFullPath(Path.Combine(modRootFull, asset.TargetRelativePath));
 
-            var destinationFolder = Path.GetDirectoryName(destinationPath);
-            if (!string.IsNullOrWhiteSpace(destinationFolder))
+                // Use Path.GetRelativePath so we can detect both `..` traversal
+                // and sibling-prefix attacks (e.g. "<modRoot>-evil\foo").
+                var relative = Path.GetRelativePath(modRootFull, destinationPath);
+                if (string.IsNullOrEmpty(relative) ||
+                    relative.StartsWith("..", StringComparison.Ordinal) ||
+                    Path.IsPathRooted(relative))
+                {
+                    throw new InvalidDataException(
+                        $"Asset target '{asset.TargetRelativePath}' resolves outside the mod folder.");
+                }
+
+                // Capture the pre-plugin original (if any) before we overwrite it,
+                // so the file can be restored when the plugin is disabled or deleted.
+                await PluginAssetBackupService.RegisterReplacementAsync(pluginId, destinationPath);
+                await FileCopyHelper.CopyFileAsync(asset.SourceAbsolutePath, destinationPath);
+
+                ReportProgress(progress, $"Copied asset to {asset.TargetRelativePath}.");
+            }
+            catch (Exception ex)
             {
-                Directory.CreateDirectory(destinationFolder);
+                LaunchDiagnostics.LogException(
+                    $"Failed to apply asset '{asset.TargetRelativePath}' for plugin '{pluginState.Name}'", ex);
+                Notifications.SendNotification(
+                    $"Plugin '{pluginState.Name}': failed to apply asset '{asset.TargetRelativePath}': {ex.Message}",
+                    "Warning");
+                ReportProgress(progress, $"Asset '{asset.TargetRelativePath}' failed: {ex.Message}");
             }
-
-            // Capture the pre-plugin original (if any) before we overwrite it,
-            // so the file can be restored when the plugin is disabled or deleted.
-            await PluginAssetBackupService.RegisterReplacementAsync(pluginId, destinationPath);
-
-            await using var sourceStream = new FileStream(asset.SourceAbsolutePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-            await using var destinationStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None);
-            await sourceStream.CopyToAsync(destinationStream);
-
-            ReportProgress(progress, $"Copied asset to {asset.TargetRelativePath}.");
         }
     }
 

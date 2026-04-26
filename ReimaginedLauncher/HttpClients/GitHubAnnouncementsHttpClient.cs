@@ -6,8 +6,10 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using ReimaginedLauncher.HttpClients.Models;
+using ReimaginedLauncher.Utilities;
 
 namespace ReimaginedLauncher.HttpClients;
 
@@ -19,6 +21,9 @@ public class GitHubAnnouncementsHttpClient
         "<(?<tag>h[1-6]|p|li)[^>]*>(?<content>.*?)</(?<endtag>h[1-6]|p|li)>",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
+    // Serialize concurrent callers so the static fallback cache is mutated
+    // and read under a single lock (mirrors GitHubDiscussionPluginsHttpClient).
+    private static readonly SemaphoreSlim FetchLock = new(1, 1);
     private static IReadOnlyList<GitHubAnnouncement>? _lastKnownGood;
 
     private readonly HttpClient _httpClient;
@@ -31,10 +36,13 @@ public class GitHubAnnouncementsHttpClient
 
     public async Task<IReadOnlyList<GitHubAnnouncement>> GetAnnouncementsAsync()
     {
+        await FetchLock.WaitAsync();
         try
         {
-            var payload = await _httpClient.GetFromJsonAsync<ProxyAnnouncement[]>(AnnouncementsUrl)
-                          ?? [];
+            using var response = await ProxyHttpHelper.GetWithRateLimitAsync(_httpClient, AnnouncementsUrl);
+            response.EnsureSuccessStatusCode();
+
+            var payload = await response.Content.ReadFromJsonAsync<ProxyAnnouncement[]>() ?? [];
 
             var announcements = payload
                 .Select(ToAnnouncement)
@@ -44,9 +52,16 @@ public class GitHubAnnouncementsHttpClient
             _lastKnownGood = announcements;
             return announcements;
         }
-        catch
+        catch (Exception ex)
         {
+            // Fall back to the last good copy so a single transient outage
+            // doesn't blank the announcements panel.
+            LaunchDiagnostics.LogException("Failed to fetch announcements from proxy", ex);
             return _lastKnownGood ?? [];
+        }
+        finally
+        {
+            FetchLock.Release();
         }
     }
 
