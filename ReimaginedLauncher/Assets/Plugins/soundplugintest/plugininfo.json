@@ -1,0 +1,15 @@
+{
+  "name": "Sound Plugin Test",
+  "version": "1.0",
+  "modVersion": "3.0.7",
+  "author": "Ephyr",
+  "description": "Example plugin that replaces the Flippy gem pickup sound with an alternate gem sound.",
+  "files": [],
+  "parameters": [],
+  "assets": [
+    {
+      "source": "assets/item_gem_hd.flac",
+      "target": "data/hd/global/sfx/item/item_flippy_hd.flac"
+    }
+  ]
+}

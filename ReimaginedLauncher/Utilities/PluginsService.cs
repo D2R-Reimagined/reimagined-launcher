@@ -24,6 +24,9 @@ public static class PluginsService
     private const string PluginInfoFileName = "plugininfo.json";
     private const string GeneratedPluginsFolderName = "plugins";
     private const string StringsDirectoryRelativePath = "local/lng/strings";
+    private const string PluginAssetsDirectoryName = "assets";
+    private const string PluginAssetWarningMessage =
+        "This plugin directly copies an asset into the mod without reading the mods data, it may cause problems if it is not setup correctly.";
 
     // The 13 language columns that D2R ships in its string JSON files. Strings-plugin entries may
     // only target these keys; any other property on a plugin entry is ignored.
@@ -517,6 +520,11 @@ public static class PluginsService
                         StringComparer.OrdinalIgnoreCase);
                     await ApplyOperationsAsync(excelDirectory, operations, parameters);
                 }
+
+                if (pluginState.Assets.Count > 0)
+                {
+                    await ApplyPluginAssetsAsync(excelDirectory, pluginState, progress);
+                }
             }
             catch (Exception ex)
             {
@@ -524,6 +532,59 @@ public static class PluginsService
                 Notifications.SendNotification($"Plugin '{pluginState.Name}' failed: {ex.Message}", "Warning");
             }
         }
+    }
+
+    private static async Task ApplyPluginAssetsAsync(string excelDirectory, PluginState pluginState, IProgress<string>? progress)
+    {
+        var modRoot = ResolveModRootDirectory(excelDirectory);
+        if (string.IsNullOrWhiteSpace(modRoot))
+        {
+            ReportProgress(progress, $"Skipped assets for plugin '{pluginState.Name}': mod root could not be resolved.");
+            return;
+        }
+
+        ReportProgress(progress, $"Applying plugin assets for {pluginState.Name}...");
+
+        foreach (var asset in pluginState.Assets)
+        {
+            var destinationPath = Path.GetFullPath(Path.Combine(modRoot, asset.TargetRelativePath));
+            var modRootFull = Path.GetFullPath(modRoot);
+            if (!destinationPath.StartsWith(modRootFull, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException(
+                    $"Asset target '{asset.TargetRelativePath}' resolves outside the mod folder.");
+            }
+
+            var destinationFolder = Path.GetDirectoryName(destinationPath);
+            if (!string.IsNullOrWhiteSpace(destinationFolder))
+            {
+                Directory.CreateDirectory(destinationFolder);
+            }
+
+            await using var sourceStream = new FileStream(asset.SourceAbsolutePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            await using var destinationStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None);
+            await sourceStream.CopyToAsync(destinationStream);
+
+            ReportProgress(progress, $"Copied asset to {asset.TargetRelativePath}.");
+        }
+    }
+
+    private static string? ResolveModRootDirectory(string excelDirectory)
+    {
+        // excelDirectory is expected to be "<modRoot>/data/global/excel" (or a base/ variant beneath it).
+        // Walk up until we find the parent of a "data" segment to get the mod root.
+        var current = new DirectoryInfo(excelDirectory);
+        while (current is not null)
+        {
+            if (string.Equals(current.Name, "data", StringComparison.OrdinalIgnoreCase) && current.Parent is not null)
+            {
+                return current.Parent.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        return null;
     }
 
     public static string GetSupportedTargetsSummary()
@@ -1291,6 +1352,7 @@ public static class PluginsService
         var warnings = new List<string>();
         var files = new List<PluginCatalogFileItem>();
         var parameters = new List<PluginParameterItem>();
+        var assets = new List<PluginAssetCopy>();
         var name = registration.FolderName;
         var version = "Unknown";
         var modVersion = string.Empty;
@@ -1300,14 +1362,14 @@ public static class PluginsService
         if (!Directory.Exists(pluginDirectory))
         {
             errors.Add("Imported plugin files are missing from disk.");
-            return new PluginState(name, version, modVersion, author, description, parameters, files, errors, warnings);
+            return new PluginState(name, version, modVersion, author, description, parameters, files, assets, errors, warnings);
         }
 
         var pluginInfoPath = Path.Combine(pluginDirectory, PluginInfoFileName);
         if (!File.Exists(pluginInfoPath))
         {
             errors.Add("plugininfo.json is missing.");
-            return new PluginState(name, version, modVersion, author, description, parameters, files, errors, warnings);
+            return new PluginState(name, version, modVersion, author, description, parameters, files, assets, errors, warnings);
         }
 
         try
@@ -1328,10 +1390,10 @@ public static class PluginsService
                 Value = string.IsNullOrWhiteSpace(parameter.Value) ? parameter.DefaultValue : parameter.Value
             }).ToList();
 
-            if (pluginInfo.Files.Count == 0)
+            if (pluginInfo.Files.Count == 0 && pluginInfo.Assets.Count == 0)
             {
-                errors.Add("plugininfo.json does not list any plugin JSON files.");
-                return new PluginState(name, version, modVersion, author, description, parameters, files, errors, warnings);
+                errors.Add("plugininfo.json does not list any plugin JSON files or assets.");
+                return new PluginState(name, version, modVersion, author, description, parameters, files, assets, errors, warnings);
             }
 
             foreach (var relativePath in pluginInfo.Files)
@@ -1361,13 +1423,38 @@ public static class PluginsService
                     errors.Add(FormatJsonError(normalizedRelativePath, ex));
                 }
             }
+
+            foreach (var asset in pluginInfo.Assets)
+            {
+                if (string.IsNullOrWhiteSpace(asset.Source) || string.IsNullOrWhiteSpace(asset.Target))
+                {
+                    errors.Add("plugininfo.json contains an asset entry with an empty source or target.");
+                    continue;
+                }
+
+                var normalizedSource = NormalizeRelativePath(asset.Source);
+                var sourceAbsolutePath = Path.Combine(pluginDirectory, normalizedSource);
+                if (!File.Exists(sourceAbsolutePath))
+                {
+                    errors.Add($"Referenced asset '{normalizedSource}' was not found.");
+                    continue;
+                }
+
+                var normalizedTarget = NormalizeRelativePath(asset.Target);
+                assets.Add(new PluginAssetCopy(sourceAbsolutePath, normalizedTarget));
+            }
+
+            if (assets.Count > 0)
+            {
+                warnings.Add(PluginAssetWarningMessage);
+            }
         }
         catch (Exception ex)
         {
             errors.Add(FormatJsonError("plugininfo.json", ex));
         }
 
-        return new PluginState(name, version, modVersion, author, description, parameters, files, errors, warnings);
+        return new PluginState(name, version, modVersion, author, description, parameters, files, assets, errors, warnings);
     }
 
     private static void ValidateOperations(
@@ -1577,7 +1664,8 @@ public static class PluginsService
             Author = pluginInfo.Author,
             Description = pluginInfo.Description,
             Files = pluginInfo.Files ?? [],
-            Parameters = pluginInfo.Parameters ?? []
+            Parameters = pluginInfo.Parameters ?? [],
+            Assets = pluginInfo.Assets ?? []
         };
     }
 
@@ -1609,9 +1697,9 @@ public static class PluginsService
             throw new InvalidDataException("plugininfo.json modVersion must be in #.#.# format (e.g. 1.0.0).");
         }
 
-        if (pluginInfo.Files.Count == 0)
+        if (pluginInfo.Files.Count == 0 && pluginInfo.Assets.Count == 0)
         {
-            throw new InvalidDataException("plugininfo.json must include at least one plugin JSON file.");
+            throw new InvalidDataException("plugininfo.json must include at least one plugin JSON file or asset.");
         }
 
         foreach (var parameter in pluginInfo.Parameters)
@@ -1645,6 +1733,41 @@ public static class PluginsService
             {
                 throw new FileNotFoundException(
                     $"The plugin JSON file '{normalizedRelativePath}' listed in plugininfo.json was not found.");
+            }
+        }
+
+        foreach (var asset in pluginInfo.Assets)
+        {
+            if (string.IsNullOrWhiteSpace(asset.Source))
+            {
+                throw new InvalidDataException("plugininfo.json contains an asset entry with no source.");
+            }
+
+            if (string.IsNullOrWhiteSpace(asset.Target))
+            {
+                throw new InvalidDataException("plugininfo.json contains an asset entry with no target.");
+            }
+
+            var normalizedSource = NormalizeRelativePath(asset.Source);
+            if (!normalizedSource.StartsWith(PluginAssetsDirectoryName + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                && !normalizedSource.StartsWith(PluginAssetsDirectoryName + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException(
+                    $"Asset source '{asset.Source}' must live under the '{PluginAssetsDirectoryName}/' folder inside the plugin.");
+            }
+
+            var sourceAbsolutePath = Path.Combine(pluginRootDirectory, normalizedSource);
+            if (!File.Exists(sourceAbsolutePath))
+            {
+                throw new FileNotFoundException(
+                    $"The asset '{normalizedSource}' listed in plugininfo.json was not found.");
+            }
+
+            var normalizedTarget = NormalizeRelativePath(asset.Target);
+            if (Path.IsPathRooted(normalizedTarget) || normalizedTarget.Split(Path.DirectorySeparatorChar).Contains(".."))
+            {
+                throw new InvalidDataException(
+                    $"Asset target '{asset.Target}' must be a relative path inside the mod folder.");
             }
         }
     }
@@ -2074,8 +2197,11 @@ public static class PluginsService
         string Description,
         IReadOnlyList<PluginParameterItem> Parameters,
         IReadOnlyList<PluginCatalogFileItem> Files,
+        IReadOnlyList<PluginAssetCopy> Assets,
         IReadOnlyList<string> Errors,
         IReadOnlyList<string> Warnings);
+
+    private sealed record PluginAssetCopy(string SourceAbsolutePath, string TargetRelativePath);
 
     private sealed record SupportedPluginTarget(
         string FileName,
@@ -2263,6 +2389,13 @@ public static class PluginsService
         public string? Description { get; set; }
         public List<string> Files { get; set; } = [];
         public List<PluginParameterDefinition> Parameters { get; set; } = [];
+        public List<PluginAssetDefinition> Assets { get; set; } = [];
+    }
+
+    private sealed class PluginAssetDefinition
+    {
+        public string Source { get; set; } = string.Empty;
+        public string Target { get; set; } = string.Empty;
     }
 
     private sealed class PluginParameterDefinition

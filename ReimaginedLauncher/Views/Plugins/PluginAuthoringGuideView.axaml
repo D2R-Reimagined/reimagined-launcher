@@ -92,6 +92,17 @@
                     <StackPanel Spacing="2">
                         <TextBlock Classes="bullet" Text="•  author, description." />
                         <TextBlock Classes="bullet" Text="•  parameters — each parameter requires key, name, and defaultValue." />
+                        <TextBlock Classes="bullet" Text="•  assets — list of {source, target} entries that copy raw files into the mod folder. Sources must live under the plugin's assets/ folder; targets are paths relative to the mod root (e.g. data/hd/global/sfx/...)." />
+                    </StackPanel>
+
+                    <TextBlock Classes="sub-title" Text="Asset copies" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet"
+                                   TextWrapping="Wrap"
+                                   Text="•  Asset copies are applied last, after every operation, and overwrite any existing file at the target path." />
+                        <TextBlock Classes="bullet"
+                                   TextWrapping="Wrap"
+                                   Text="•  Warning: This plugin directly copies an asset into the mod without reading the mods data, it may cause problems if it is not setup correctly." />
                     </StackPanel>
 
                     <TextBlock Classes="sub-title" Text="Example" />

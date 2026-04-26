@@ -13,6 +13,8 @@ public partial class PluginAuthoringGuideView : UserControl
                                               MyPlugin.zip
                                                 plugininfo.json
                                                 skills.json
+                                                assets/
+                                                  item_flippy_hd.flac
                                               """;
 
     private const string PluginInfoExample = """
@@ -31,6 +33,12 @@ public partial class PluginAuthoringGuideView : UserControl
                                                    "name": "Damage Multiplier",
                                                    "description": "Scales the chosen skill damage.",
                                                    "defaultValue": "1.25"
+                                                 }
+                                               ],
+                                               "assets": [
+                                                 {
+                                                   "source": "assets/item_flippy_hd.flac",
+                                                   "target": "data/hd/global/sfx/item/item_flippy_hd.flac"
                                                  }
                                                ]
                                              }
