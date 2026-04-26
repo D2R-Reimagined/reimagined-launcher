@@ -2,7 +2,7 @@
   "name": "Duration Editor",
   "version": "1.2",
   "modVersion": "3.0.7",
-  "author": "Ephyr",
+  "author": "Claude",
   "description": "Modifies skill duration based on configurable multipliers.",
   "files": [
     "duration-modifier.json"
