@@ -399,6 +399,13 @@ public static class PluginsService
         var registration = GetRegistration(pluginId);
         registration.IsEnabled = isEnabled;
         await SettingsManager.SaveAsync(MainWindow.Settings);
+
+        if (!isEnabled)
+        {
+            // Restore any mod files this plugin replaced via asset operations
+            // so disabling truly reverts its on-disk effects.
+            await PluginAssetBackupService.RestoreForPluginAsync(pluginId);
+        }
     }
 
     public static async Task MovePluginAsync(string pluginId, int direction)
@@ -428,6 +435,9 @@ public static class PluginsService
         var registration = GetRegistration(pluginId);
         MainWindow.Settings.CurrentProfile.Plugins.Remove(registration);
         await SettingsManager.SaveAsync(MainWindow.Settings);
+
+        // Restore any replaced mod files before the plugin's metadata is gone.
+        await PluginAssetBackupService.RestoreForPluginAsync(pluginId);
 
         var pluginDirectory = GetPluginDirectory(registration);
         if (Directory.Exists(pluginDirectory))
@@ -523,7 +533,7 @@ public static class PluginsService
 
                 if (pluginState.Assets.Count > 0)
                 {
-                    await ApplyPluginAssetsAsync(excelDirectory, pluginState, progress);
+                    await ApplyPluginAssetsAsync(excelDirectory, registration.Id, pluginState, progress);
                 }
             }
             catch (Exception ex)
@@ -534,7 +544,7 @@ public static class PluginsService
         }
     }
 
-    private static async Task ApplyPluginAssetsAsync(string excelDirectory, PluginState pluginState, IProgress<string>? progress)
+    private static async Task ApplyPluginAssetsAsync(string excelDirectory, string pluginId, PluginState pluginState, IProgress<string>? progress)
     {
         var modRoot = ResolveModRootDirectory(excelDirectory);
         if (string.IsNullOrWhiteSpace(modRoot))
@@ -560,6 +570,10 @@ public static class PluginsService
             {
                 Directory.CreateDirectory(destinationFolder);
             }
+
+            // Capture the pre-plugin original (if any) before we overwrite it,
+            // so the file can be restored when the plugin is disabled or deleted.
+            await PluginAssetBackupService.RegisterReplacementAsync(pluginId, destinationPath);
 
             await using var sourceStream = new FileStream(asset.SourceAbsolutePath, FileMode.Open, FileAccess.Read, FileShare.Read);
             await using var destinationStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None);
