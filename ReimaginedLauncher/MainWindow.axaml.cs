@@ -736,7 +736,8 @@ public partial class MainWindow : Window
         {
             var show = IsUpdateAvailable &&
                        !string.IsNullOrWhiteSpace(UpdateLatestVersion) &&
-                       !UpdateLatestVersion.Equals("Unknown", StringComparison.OrdinalIgnoreCase);
+                       !UpdateLatestVersion.Equals("Unknown", StringComparison.OrdinalIgnoreCase) &&
+                       !UpdateLatestVersion.Equals("Latest available", StringComparison.OrdinalIgnoreCase);
 
             UpdateAvailableTextBlock.IsVisible = show;
             UpdateAvailableTextBlock.Text = show ? $"(Update v{UpdateLatestVersion} Available)" : string.Empty;

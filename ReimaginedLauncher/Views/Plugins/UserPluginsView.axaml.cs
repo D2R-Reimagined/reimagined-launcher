@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
@@ -14,6 +16,7 @@ namespace ReimaginedLauncher.Views.Plugins;
 public partial class UserPluginsView : UserControl
 {
     private bool _isRefreshing;
+    private IReadOnlyList<UserPluginEntry> _allPlugins = [];
 
     public UserPluginsView()
     {
@@ -43,11 +46,8 @@ public partial class UserPluginsView : UserControl
             var client = Program.ServiceProvider.GetRequiredService<GitHubDiscussionPluginsHttpClient>();
             var plugins = await client.GetUserPluginsAsync(forceRefresh);
 
-            UserPluginsItemsControl.ItemsSource = plugins;
-            EmptyStatePanel.IsVisible = plugins.Count == 0;
-            UserPluginsSummaryTextBlock.Text = plugins.Count == 0
-                ? "No user plugins were found."
-                : $"{plugins.Count} user plugin(s) available.";
+            _allPlugins = plugins;
+            ApplySearchFilter();
         }
         catch (Exception ex)
         {
@@ -65,6 +65,41 @@ public partial class UserPluginsView : UserControl
     {
         // Explicit user-initiated refresh bypasses the TTL cache.
         await RefreshUserPluginsAsync(forceRefresh: true);
+    }
+
+    private void OnSearchTextChanged(object? sender, TextChangedEventArgs e)
+    {
+        ApplySearchFilter();
+    }
+
+    private void ApplySearchFilter()
+    {
+        var query = SearchTextBox?.Text?.Trim() ?? string.Empty;
+        IReadOnlyList<UserPluginEntry> filtered = _allPlugins;
+        if (query.Length > 0)
+        {
+            filtered = _allPlugins.Where(plugin =>
+                (plugin.Title?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (plugin.Description?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false))
+                .ToList();
+        }
+
+        UserPluginsItemsControl.ItemsSource = filtered;
+        EmptyStatePanel.IsVisible = filtered.Count == 0;
+
+        if (_allPlugins.Count == 0)
+        {
+            UserPluginsSummaryTextBlock.Text = "No user plugins were found.";
+        }
+        else if (query.Length == 0)
+        {
+            UserPluginsSummaryTextBlock.Text = $"{_allPlugins.Count} user plugin(s) available.";
+        }
+        else
+        {
+            UserPluginsSummaryTextBlock.Text =
+                $"{filtered.Count} of {_allPlugins.Count} user plugin(s) match \"{query}\".";
+        }
     }
 
     private void OnSubmitPluginClicked(object? sender, RoutedEventArgs e)
