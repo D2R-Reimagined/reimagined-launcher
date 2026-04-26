@@ -87,6 +87,38 @@ public partial class PluginAuthoringGuideView : UserControl
                                                  "enUS": "NoDoom",
                                                  "ptBR": "SemFatalidade",
                                                  "frFR": "PasDeDévastation"
+                                               },
+                                               {
+                                                 "file": "skills.txt",
+                                                 "rowIdentifier": "amazonlightningfury",
+                                                 "operation": "multiplyExisting",
+                                                 "parameterKey": "damageMultiplier",
+                                                 "columns": [
+                                                   { "column": "EMin" },
+                                                   { "column": "EMax" },
+                                                   { "column": "EMinLev" },
+                                                   { "column": "EMaxLev" }
+                                                 ]
+                                               },
+                                               {
+                                                 "file": "skills.txt",
+                                                 "operation": "addRow",
+                                                 "columns": [
+                                                   { "column": "Skill", "updatedValue": "MyNewSkill" },
+                                                   { "column": "charclass", "updatedValue": "ama" },
+                                                   { "column": "reqlevel", "updatedValue": "30" },
+                                                   { "column": "manacost", "updatedValue": "10" }
+                                                 ]
+                                               },
+                                               {
+                                                 "file": "cubemain.txt",
+                                                 "rowIdentifier": "10",
+                                                 "operation": "addRow",
+                                                 "columns": [
+                                                   { "column": "Description", "updatedValue": "My Custom Recipe" },
+                                                   { "column": "NumInputs", "updatedValue": "2" },
+                                                   { "column": "Output", "updatedValue": "ssp" }
+                                                 ]
                                                }
                                              ]
                                              """;

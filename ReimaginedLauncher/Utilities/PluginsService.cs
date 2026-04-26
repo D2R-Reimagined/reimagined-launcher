@@ -652,7 +652,7 @@ public static class PluginsService
         Func<IList<TEntry>, string, string, CancellationToken, Task<FileInfo>> saveEntriesAsync,
         Func<string, PropertyInfo?> resolveColumn,
         bool usesRowId = false)
-        where TEntry : class
+        where TEntry : class, new()
     {
         var targetOperations = operations
             .Where(operation => string.Equals(operation.File, fileName, StringComparison.OrdinalIgnoreCase))
@@ -677,6 +677,62 @@ public static class PluginsService
 
         foreach (var operation in targetOperations)
         {
+            var assignments = GetColumnAssignments(operation);
+
+            if (string.Equals(operation.Operation, "addRow", StringComparison.OrdinalIgnoreCase))
+            {
+                if (assignments.Count == 0)
+                {
+                    throw new InvalidDataException(
+                        $"addRow operation for {fileName} must specify at least one column (use 'columns' array or 'column'/'updatedValue').");
+                }
+
+                var newEntry = new TEntry();
+                foreach (var assignment in assignments)
+                {
+                    var perColumnOp = BuildPerColumnOperation(operation, assignment, defaultOperation: "replace");
+                    newEntry = UpdateRecord(
+                        newEntry,
+                        perColumnOp.Column ?? string.Empty,
+                        ResolveOperationValue(newEntry, perColumnOp, parameters, fileName, resolveColumn),
+                        fileName,
+                        resolveColumn,
+                        operation.RowIdentifier);
+                }
+
+                int insertIndex;
+                if (string.IsNullOrWhiteSpace(operation.RowIdentifier))
+                {
+                    insertIndex = entries.Count;
+                }
+                else if (int.TryParse(operation.RowIdentifier, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedIndex))
+                {
+                    if (parsedIndex < 0 || parsedIndex > entries.Count)
+                    {
+                        throw new InvalidDataException(
+                            $"addRow rowIdentifier '{operation.RowIdentifier}' is out of bounds for {fileName}. Valid range is 0 to {entries.Count} (inclusive, where {entries.Count} appends to the end).");
+                    }
+
+                    insertIndex = parsedIndex;
+                }
+                else
+                {
+                    throw new InvalidDataException(
+                        $"addRow rowIdentifier '{operation.RowIdentifier}' must be a numeric 0-based index or empty (to append).");
+                }
+
+                if (insertIndex == entries.Count)
+                {
+                    entries.Add(newEntry);
+                }
+                else
+                {
+                    entries.Insert(insertIndex, newEntry);
+                }
+
+                continue;
+            }
+
             List<int> matchingIndices;
 
             if (TryParseRowRange(operation.RowIdentifier, out var rangeStart, out var rangeEnd))
@@ -717,19 +773,69 @@ public static class PluginsService
                 }
             }
 
+            if (assignments.Count == 0)
+            {
+                throw new InvalidDataException(
+                    $"Operation for {fileName} (row '{operation.RowIdentifier}') has no column to update. Provide 'column' or a non-empty 'columns' array.");
+            }
+
             foreach (var entryIndex in matchingIndices)
             {
-                entries[entryIndex] = UpdateRecord(
-                    entries[entryIndex],
-                    operation.Column ?? string.Empty,
-                    ResolveOperationValue(entries[entryIndex], operation, parameters, fileName, resolveColumn),
-                    fileName,
-                    resolveColumn,
-                    operation.RowIdentifier);
+                foreach (var assignment in assignments)
+                {
+                    var perColumnOp = BuildPerColumnOperation(operation, assignment, defaultOperation: operation.Operation);
+                    entries[entryIndex] = UpdateRecord(
+                        entries[entryIndex],
+                        perColumnOp.Column ?? string.Empty,
+                        ResolveOperationValue(entries[entryIndex], perColumnOp, parameters, fileName, resolveColumn),
+                        fileName,
+                        resolveColumn,
+                        operation.RowIdentifier);
+                }
             }
         }
 
         await SaveGeneratedEntriesAsync(entries, filePath, saveEntriesAsync);
+    }
+
+    // Returns the effective list of column assignments for an operation. When a 'columns' array is
+    // provided it is used as-is; otherwise the operation's top-level column/updatedValue/parameterKey
+    // become a single implicit assignment. The list will be empty when neither is supplied.
+    private static IReadOnlyList<PluginJsonColumnAssignment> GetColumnAssignments(PluginJsonOperation operation)
+    {
+        if (operation.Columns is { Count: > 0 } columns)
+        {
+            return columns;
+        }
+
+        if (!string.IsNullOrWhiteSpace(operation.Column))
+        {
+            return [new PluginJsonColumnAssignment(operation.Column, operation.UpdatedValue, operation.ParameterKey, operation.Operation)];
+        }
+
+        return Array.Empty<PluginJsonColumnAssignment>();
+    }
+
+    // Produces an effective single-column PluginJsonOperation by overlaying a column assignment on
+    // top of its parent operation, so the existing ResolveOperationValue/UpdateRecord helpers can be
+    // reused unchanged for multi-column and addRow execution paths.
+    private static PluginJsonOperation BuildPerColumnOperation(
+        PluginJsonOperation parent,
+        PluginJsonColumnAssignment assignment,
+        string? defaultOperation)
+    {
+        var operationName = !string.IsNullOrWhiteSpace(assignment.Operation)
+            ? assignment.Operation
+            : !string.IsNullOrWhiteSpace(parent.Operation) ? parent.Operation : defaultOperation;
+
+        return parent with
+        {
+            Column = assignment.Column,
+            UpdatedValue = assignment.UpdatedValue ?? parent.UpdatedValue,
+            ParameterKey = assignment.ParameterKey ?? parent.ParameterKey,
+            Operation = operationName,
+            Columns = null
+        };
     }
 
     // Parses a plugin rowIdentifier of the form "start-end" (e.g. "50-100") into inclusive numeric
@@ -1247,7 +1353,18 @@ public static class PluginsService
                 continue;
             }
 
-            if (string.IsNullOrWhiteSpace(operation.RowIdentifier))
+            var isAddRow = !string.IsNullOrWhiteSpace(operation.Operation)
+                           && operation.Operation.Equals("addRow", StringComparison.OrdinalIgnoreCase);
+
+            if (isAddRow)
+            {
+                if (!string.IsNullOrWhiteSpace(operation.RowIdentifier)
+                    && !int.TryParse(operation.RowIdentifier, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+                {
+                    errors.Add($"'{pluginFileName}' contains an addRow operation for {supportedTarget.FileName} with non-numeric rowIdentifier '{operation.RowIdentifier}'. Use a 0-based row index, or omit it to append at the end.");
+                }
+            }
+            else if (string.IsNullOrWhiteSpace(operation.RowIdentifier))
             {
                 errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} operation with no rowIdentifier.");
             }
@@ -1258,32 +1375,54 @@ public static class PluginsService
                 errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} operation with non-numeric rowIdentifier '{operation.RowIdentifier}'. This file uses numeric row IDs (e.g. \"5\" or a range like \"50-100\").");
             }
 
-            if (string.IsNullOrWhiteSpace(operation.Column))
+            var assignments = GetColumnAssignments(operation);
+            if (assignments.Count == 0)
             {
-                errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} operation with no column.");
+                errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} operation with no column. Provide a 'column' field or a non-empty 'columns' array.");
                 continue;
             }
 
-            var propertyExists = supportedTarget.EntryType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                .Any(property => property.Name.Equals(operation.Column, StringComparison.OrdinalIgnoreCase));
-
-            if (!propertyExists && supportedTarget.ResolveColumn != null)
+            foreach (var assignment in assignments)
             {
-                propertyExists = supportedTarget.ResolveColumn(operation.Column!) != null;
-            }
+                if (string.IsNullOrWhiteSpace(assignment.Column))
+                {
+                    errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} operation with a 'columns' entry that is missing its column name.");
+                    continue;
+                }
 
-            if (!propertyExists)
-            {
-                errors.Add($"'{pluginFileName}' references unknown {supportedTarget.FileName} column '{operation.Column}'.");
-            }
+                var propertyExists = supportedTarget.EntryType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .Any(property => property.Name.Equals(assignment.Column, StringComparison.OrdinalIgnoreCase));
 
-            if (!string.IsNullOrWhiteSpace(operation.Operation) &&
-                (operation.Operation.Equals("multiplyExisting", StringComparison.OrdinalIgnoreCase) ||
-                 operation.Operation.Equals("append", StringComparison.OrdinalIgnoreCase)) &&
-                string.IsNullOrWhiteSpace(operation.ParameterKey) &&
-                string.IsNullOrWhiteSpace(operation.UpdatedValue))
-            {
-                errors.Add($"'{pluginFileName}' contains a {operation.Operation} operation without parameterKey or updatedValue.");
+                if (!propertyExists && supportedTarget.ResolveColumn != null)
+                {
+                    propertyExists = supportedTarget.ResolveColumn(assignment.Column!) != null;
+                }
+
+                if (!propertyExists)
+                {
+                    errors.Add($"'{pluginFileName}' references unknown {supportedTarget.FileName} column '{assignment.Column}'.");
+                }
+
+                var effectiveOperation = !string.IsNullOrWhiteSpace(assignment.Operation)
+                    ? assignment.Operation
+                    : operation.Operation;
+
+                if (!string.IsNullOrWhiteSpace(effectiveOperation) &&
+                    (effectiveOperation.Equals("multiplyExisting", StringComparison.OrdinalIgnoreCase) ||
+                     effectiveOperation.Equals("append", StringComparison.OrdinalIgnoreCase)) &&
+                    string.IsNullOrWhiteSpace(assignment.ParameterKey) &&
+                    string.IsNullOrWhiteSpace(assignment.UpdatedValue) &&
+                    string.IsNullOrWhiteSpace(operation.ParameterKey) &&
+                    string.IsNullOrWhiteSpace(operation.UpdatedValue))
+                {
+                    errors.Add($"'{pluginFileName}' contains a {effectiveOperation} operation on column '{assignment.Column}' without parameterKey or updatedValue.");
+                }
+
+                if (!string.IsNullOrWhiteSpace(assignment.ParameterKey) &&
+                    parameters.All(parameter => !parameter.Key.Equals(assignment.ParameterKey, StringComparison.OrdinalIgnoreCase)))
+                {
+                    errors.Add($"'{pluginFileName}' references unknown parameter '{assignment.ParameterKey}'.");
+                }
             }
 
             if (!string.IsNullOrWhiteSpace(operation.ParameterKey) &&
@@ -1524,6 +1663,21 @@ public static class PluginsService
 
     private static PluginJsonOperation NormalizeOperation(PluginJsonOperation operation)
     {
+        IReadOnlyList<PluginJsonColumnAssignment>? normalizedColumns = null;
+        if (operation.Columns is { Count: > 0 } columns)
+        {
+            var list = new List<PluginJsonColumnAssignment>(columns.Count);
+            foreach (var column in columns)
+            {
+                list.Add(new PluginJsonColumnAssignment(
+                    Column: column.Column?.Trim() ?? string.Empty,
+                    UpdatedValue: column.UpdatedValue,
+                    ParameterKey: column.ParameterKey?.Trim(),
+                    Operation: column.Operation?.Trim()));
+            }
+            normalizedColumns = list;
+        }
+
         return operation with
         {
             File = NormalizeRelativePath(operation.File ?? string.Empty),
@@ -1531,7 +1685,8 @@ public static class PluginsService
             Column = operation.Column?.Trim() ?? string.Empty,
             Operation = operation.Operation?.Trim(),
             ParameterKey = operation.ParameterKey?.Trim(),
-            Key = operation.Key?.Trim()
+            Key = operation.Key?.Trim(),
+            Columns = normalizedColumns
         };
     }
 
@@ -1756,7 +1911,7 @@ public static class PluginsService
         string rowIdentifierPropertyName,
         Func<TEntry, string?> rowIdentifierSelector,
         bool usesRowId = false)
-        where TEntry : class
+        where TEntry : class, new()
         where TParser : HeaderMappedTextFileParser<TEntry, TParser>, new()
     {
         var resolver = BuildColumnResolver<TEntry, TParser>();
@@ -1849,7 +2004,7 @@ public static class PluginsService
             string rowIdentifierPropertyName,
             Func<TEntry, string?> rowIdentifierSelector,
             bool usesRowId = false)
-            where TEntry : class
+            where TEntry : class, new()
             where TParser : HeaderMappedTextFileParser<TEntry, TParser>, new()
         {
             registry[fileName] = CreateRegistration<TEntry, TParser>(
@@ -1941,5 +2096,16 @@ public static class PluginsService
         string? ParameterKey,
         string? UpdatedValue,
         string? Key = null,
-        IReadOnlyDictionary<string, string>? LanguageValues = null);
+        IReadOnlyDictionary<string, string>? LanguageValues = null,
+        IReadOnlyList<PluginJsonColumnAssignment>? Columns = null);
+
+    // Per-column assignment used either for multi-column updates that share a single rowIdentifier,
+    // or to specify the column/value pairs of a new row produced by the addRow operation.
+    // When a per-column field is null/empty, the parent operation's matching field is used as the
+    // fallback (Operation defaults to the parent's Operation, "replace" semantics for addRow).
+    private sealed record PluginJsonColumnAssignment(
+        string? Column,
+        string? UpdatedValue = null,
+        string? ParameterKey = null,
+        string? Operation = null);
 }
