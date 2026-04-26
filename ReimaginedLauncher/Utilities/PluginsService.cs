@@ -172,7 +172,8 @@ public static class PluginsService
                 Order = index + 1,
                 Parameters = pluginState.Parameters,
                 Files = pluginState.Files,
-                Errors = pluginState.Errors
+                Errors = pluginState.Errors,
+                Warnings = pluginState.Warnings
             });
         }
 
@@ -497,6 +498,12 @@ public static class PluginsService
                 continue;
             }
 
+            foreach (var warning in pluginState.Warnings)
+            {
+                ReportProgress(progress, $"Plugin '{pluginState.Name}' warning: {warning}");
+                Notifications.SendNotification($"Plugin '{pluginState.Name}': {warning}", "Warning");
+            }
+
             ReportProgress(progress, $"Applying plugin {pluginState.Name}...");
 
             try
@@ -740,7 +747,23 @@ public static class PluginsService
 
             List<int> matchingIndices;
 
-            if (TryParseRowRange(operation.RowIdentifier, out var rangeStart, out var rangeEnd))
+            if (operation.RowIdentifiers is { Count: > 0 } identifierMap)
+            {
+                // Multi-column identifier override: a row matches only when every listed
+                // column equals the supplied value (case-insensitive). This bypasses the
+                // file's default identifier column and any usesRowId numeric requirement.
+                matchingIndices = Enumerable.Range(0, entries.Count)
+                    .Where(i => MatchesAllRowIdentifiers(entries[i], identifierMap, resolveColumn))
+                    .ToList();
+
+                if (matchingIndices.Count == 0)
+                {
+                    var description = string.Join(", ", identifierMap.Select(p => $"{p.Key}='{p.Value}'"));
+                    throw new InvalidDataException(
+                        $"Could not find row in {fileName} matching identifiers: {description}.");
+                }
+            }
+            else if (TryParseRowRange(operation.RowIdentifier, out var rangeStart, out var rangeEnd))
             {
                 if (rangeStart > rangeEnd)
                 {
@@ -841,6 +864,39 @@ public static class PluginsService
             Operation = operationName,
             Columns = null
         };
+    }
+
+    // Returns true when every key/value pair in the supplied identifier map matches the entry's
+    // corresponding column (case-insensitive). Unknown columns or missing values fail the match
+    // so authors get a clear "row not found" error rather than a false positive.
+    private static bool MatchesAllRowIdentifiers<TEntry>(
+        TEntry entry,
+        IReadOnlyDictionary<string, string> identifiers,
+        Func<string, PropertyInfo?> resolveColumn)
+    {
+        foreach (var pair in identifiers)
+        {
+            var property = resolveColumn(pair.Key);
+            if (property == null)
+            {
+                return false;
+            }
+
+            var actual = property.GetValue(entry);
+            var actualText = actual switch
+            {
+                null => string.Empty,
+                IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
+                _ => actual.ToString() ?? string.Empty
+            };
+
+            if (!string.Equals(actualText, pair.Value, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     // Parses a plugin rowIdentifier of the form "start-end" (e.g. "50-100") into inclusive numeric
@@ -1232,6 +1288,7 @@ public static class PluginsService
     {
         var pluginDirectory = GetPluginDirectory(registration);
         var errors = new List<string>();
+        var warnings = new List<string>();
         var files = new List<PluginCatalogFileItem>();
         var parameters = new List<PluginParameterItem>();
         var name = registration.FolderName;
@@ -1243,14 +1300,14 @@ public static class PluginsService
         if (!Directory.Exists(pluginDirectory))
         {
             errors.Add("Imported plugin files are missing from disk.");
-            return new PluginState(name, version, modVersion, author, description, parameters, files, errors);
+            return new PluginState(name, version, modVersion, author, description, parameters, files, errors, warnings);
         }
 
         var pluginInfoPath = Path.Combine(pluginDirectory, PluginInfoFileName);
         if (!File.Exists(pluginInfoPath))
         {
             errors.Add("plugininfo.json is missing.");
-            return new PluginState(name, version, modVersion, author, description, parameters, files, errors);
+            return new PluginState(name, version, modVersion, author, description, parameters, files, errors, warnings);
         }
 
         try
@@ -1274,7 +1331,7 @@ public static class PluginsService
             if (pluginInfo.Files.Count == 0)
             {
                 errors.Add("plugininfo.json does not list any plugin JSON files.");
-                return new PluginState(name, version, modVersion, author, description, parameters, files, errors);
+                return new PluginState(name, version, modVersion, author, description, parameters, files, errors, warnings);
             }
 
             foreach (var relativePath in pluginInfo.Files)
@@ -1297,7 +1354,7 @@ public static class PluginsService
                 try
                 {
                     var operations = await LoadPluginOperationsAsync(absolutePath);
-                    ValidateOperations(operations, normalizedRelativePath, parameters, errors);
+                    ValidateOperations(operations, normalizedRelativePath, parameters, errors, warnings);
                 }
                 catch (Exception ex)
                 {
@@ -1310,14 +1367,15 @@ public static class PluginsService
             errors.Add(FormatJsonError("plugininfo.json", ex));
         }
 
-        return new PluginState(name, version, modVersion, author, description, parameters, files, errors);
+        return new PluginState(name, version, modVersion, author, description, parameters, files, errors, warnings);
     }
 
     private static void ValidateOperations(
         IReadOnlyList<PluginJsonOperation> operations,
         string pluginFileName,
         IReadOnlyList<PluginParameterItem> parameters,
-        List<string> errors)
+        List<string> errors,
+        List<string> warnings)
     {
         if (operations.Count == 0)
         {
@@ -1367,6 +1425,34 @@ public static class PluginsService
                     && !int.TryParse(operation.RowIdentifier, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
                 {
                     errors.Add($"'{pluginFileName}' contains an addRow operation for {supportedTarget.FileName} with non-numeric rowIdentifier '{operation.RowIdentifier}'. Use a 0-based row index, or omit it to append at the end.");
+                }
+            }
+            else if (operation.RowIdentifiers is { Count: > 0 } identifierMap)
+            {
+                // Multi-column rowIdentifier override is allowed; validate the listed columns and
+                // warn the author when the override does not narrow the match enough on rowID files.
+                foreach (var pair in identifierMap)
+                {
+                    var columnExists = supportedTarget.EntryType
+                        .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                        .Any(property => property.Name.Equals(pair.Key, StringComparison.OrdinalIgnoreCase));
+
+                    if (!columnExists && supportedTarget.ResolveColumn != null)
+                    {
+                        columnExists = supportedTarget.ResolveColumn(pair.Key) != null;
+                    }
+
+                    if (!columnExists)
+                    {
+                        errors.Add($"'{pluginFileName}' references unknown {supportedTarget.FileName} rowIdentifier column '{pair.Key}'.");
+                    }
+                }
+
+                if (supportedTarget.UsesRowId && identifierMap.Count < 2)
+                {
+                    warnings.Add(
+                        $"'{pluginFileName}' targets {supportedTarget.FileName}, which contains duplicate identifier values. " +
+                        $"The rowIdentifier override only lists {identifierMap.Count} column(s); add at least two so the intended row is uniquely matched.");
                 }
             }
             else if (string.IsNullOrWhiteSpace(operation.RowIdentifier))
@@ -1657,13 +1743,85 @@ public static class PluginsService
                 LanguageValues: languageValues);
         }
 
-        var operation = JsonSerializer.Deserialize<PluginJsonOperation>(element.GetRawText(), JsonOptions);
+        // Allow rowIdentifier to be either a string (legacy/default behavior) or an object that
+        // declares one or more identifier columns ({"key1":"col1","key2":"col2"}). A dedicated
+        // "rowIdentifiers" property is also accepted as a plural alias. When the property is an
+        // object we strip it from the element before deserialization so the standard string-typed
+        // RowIdentifier remains valid, then re-attach the parsed dictionary.
+        var rowIdentifiers = TryReadRowIdentifierMap(element, "rowIdentifier")
+                             ?? TryReadRowIdentifierMap(element, "rowIdentifiers");
+
+        string elementJson;
+        if (rowIdentifiers != null)
+        {
+            using var buffer = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(buffer))
+            {
+                writer.WriteStartObject();
+                foreach (var property in element.EnumerateObject())
+                {
+                    if (property.NameEquals("rowIdentifier") || property.NameEquals("rowIdentifiers"))
+                    {
+                        continue;
+                    }
+
+                    property.WriteTo(writer);
+                }
+                writer.WriteEndObject();
+            }
+
+            elementJson = Encoding.UTF8.GetString(buffer.ToArray());
+        }
+        else
+        {
+            elementJson = element.GetRawText();
+        }
+
+        var operation = JsonSerializer.Deserialize<PluginJsonOperation>(elementJson, JsonOptions);
         if (operation == null)
         {
             throw new InvalidDataException("Plugin JSON could not be parsed.");
         }
 
+        if (rowIdentifiers != null)
+        {
+            operation = operation with { RowIdentifiers = rowIdentifiers };
+        }
+
         return operation;
+    }
+
+    // Reads an object-shaped rowIdentifier override into a column-name -> expected-value dictionary.
+    // Returns null when the property is missing or not an object so callers can fall back to the
+    // legacy string-typed rowIdentifier path.
+    private static IReadOnlyDictionary<string, string>? TryReadRowIdentifierMap(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in property.EnumerateObject())
+        {
+            string? value = entry.Value.ValueKind switch
+            {
+                JsonValueKind.String => entry.Value.GetString(),
+                JsonValueKind.Number => entry.Value.ToString(),
+                JsonValueKind.True => "true",
+                JsonValueKind.False => "false",
+                _ => null
+            };
+
+            if (value == null)
+            {
+                continue;
+            }
+
+            dict[entry.Name] = value;
+        }
+
+        return dict;
     }
 
     private static PluginJsonOperation NormalizeOperation(PluginJsonOperation operation)
@@ -1683,6 +1841,27 @@ public static class PluginsService
             normalizedColumns = list;
         }
 
+        IReadOnlyDictionary<string, string>? normalizedRowIdentifiers = null;
+        if (operation.RowIdentifiers is { Count: > 0 } rowIdentifiers)
+        {
+            var dict = new Dictionary<string, string>(rowIdentifiers.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var pair in rowIdentifiers)
+            {
+                var key = pair.Key?.Trim();
+                if (string.IsNullOrEmpty(key))
+                {
+                    continue;
+                }
+
+                dict[key] = pair.Value?.Trim() ?? string.Empty;
+            }
+
+            if (dict.Count > 0)
+            {
+                normalizedRowIdentifiers = dict;
+            }
+        }
+
         return operation with
         {
             File = NormalizeRelativePath(operation.File ?? string.Empty),
@@ -1691,7 +1870,8 @@ public static class PluginsService
             Operation = operation.Operation?.Trim(),
             ParameterKey = operation.ParameterKey?.Trim(),
             Key = operation.Key?.Trim(),
-            Columns = normalizedColumns
+            Columns = normalizedColumns,
+            RowIdentifiers = normalizedRowIdentifiers
         };
     }
 
@@ -1894,7 +2074,8 @@ public static class PluginsService
         string Description,
         IReadOnlyList<PluginParameterItem> Parameters,
         IReadOnlyList<PluginCatalogFileItem> Files,
-        IReadOnlyList<string> Errors);
+        IReadOnlyList<string> Errors,
+        IReadOnlyList<string> Warnings);
 
     private sealed record SupportedPluginTarget(
         string FileName,
@@ -2102,7 +2283,13 @@ public static class PluginsService
         string? UpdatedValue,
         string? Key = null,
         IReadOnlyDictionary<string, string>? LanguageValues = null,
-        IReadOnlyList<PluginJsonColumnAssignment>? Columns = null);
+        IReadOnlyList<PluginJsonColumnAssignment>? Columns = null,
+        // Optional override of the default rowIdentifier matching: when present, a row is considered
+        // a match only when every key/value pair (column-name -> expected-value) matches the entry's
+        // corresponding column. Authors can supply this either as an object literal under the
+        // "rowIdentifier" property (e.g. {"key1":"col1","key2":"col2"}) or via a dedicated
+        // "rowIdentifiers" property.
+        IReadOnlyDictionary<string, string>? RowIdentifiers = null);
 
     // Per-column assignment used either for multi-column updates that share a single rowIdentifier,
     // or to specify the column/value pairs of a new row produced by the addRow operation.

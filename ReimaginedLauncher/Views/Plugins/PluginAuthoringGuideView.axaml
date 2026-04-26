@@ -153,6 +153,9 @@
                         <TextBlock Classes="bullet" Text="•  rowIdentifier (required) — value from the identifier column, or numeric row ID for files with duplicate identifiers." />
                         <TextBlock Classes="bullet"
                                    Text="•  rowIdentifier range — also accepts &quot;start-end&quot; (inclusive, 0-based) to target many rows at once, e.g. &quot;50-100&quot; on automap.txt or &quot;300-400&quot; on skills.txt. Ranges target rows by data-row index on any supported .txt file." />
+                        <TextBlock Classes="bullet"
+                                   TextWrapping="Wrap"
+                                   Text="•  rowIdentifier object — also accepts an object that overrides the default match logic by listing one or more {column: expectedValue} pairs (e.g. {&quot;Name&quot;: &quot;Skeleton&quot;, &quot;hcIdx&quot;: &quot;86&quot;}). The row must satisfy every pair. On files with duplicate identifier values (rowID files) you should list at least two columns; the launcher emits a warning otherwise so the intended row stays uniquely matched." />
                         <TextBlock Classes="bullet" Text="•  column (required unless 'columns' is provided) — a column name on the target file." />
                         <TextBlock Classes="bullet" Text="•  columns (optional) — an array of {column, updatedValue, parameterKey, operation} objects to update multiple columns on the same row(s) with a single rowIdentifier. Each entry inherits operation/updatedValue/parameterKey from the parent operation when omitted." />
                         <TextBlock Classes="bullet" Text="•  operation (optional) — replace (default), multiplyExisting, append, or addRow." />
