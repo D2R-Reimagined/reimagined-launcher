@@ -79,17 +79,17 @@ public partial class UserPluginsView : UserControl
 
     private IReadOnlyList<UserPluginEntry> ApplySort(IReadOnlyList<UserPluginEntry> source)
     {
-        // Index 0 = Date Created (default), 1 = Last Updated.
+        // Index 0 = Last Updated (default), 1 = Date Created.
         // For unknown timestamps fall back to PublishedAt so plugins without
         // the new fields still show up in a stable, sensible order.
         var index = SortComboBox?.SelectedIndex ?? 0;
         return index switch
         {
             1 => source
-                .OrderByDescending(p => p.UpdatedAt ?? p.PublishedAt ?? DateTimeOffset.MinValue)
+                .OrderByDescending(p => p.PublishedAt ?? DateTimeOffset.MinValue)
                 .ToList(),
             _ => source
-                .OrderByDescending(p => p.PublishedAt ?? DateTimeOffset.MinValue)
+                .OrderByDescending(p => p.UpdatedAt ?? p.PublishedAt ?? DateTimeOffset.MinValue)
                 .ToList()
         };
     }

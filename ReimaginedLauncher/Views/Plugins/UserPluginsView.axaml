@@ -66,8 +66,8 @@
                                       MinWidth="160"
                                       SelectedIndex="0"
                                       SelectionChanged="OnSortChanged">
-                                <ComboBoxItem Content="Date Created" />
                                 <ComboBoxItem Content="Last Updated" />
+                                <ComboBoxItem Content="Date Created" />
                             </ComboBox>
                         </StackPanel>
                     </Grid>
