@@ -1,53 +1,24 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Net;
 using System.Net.Http;
-using System.Text.RegularExpressions;
+using System.Net.Http.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using ReimaginedLauncher.HttpClients.Models;
+using ReimaginedLauncher.Utilities;
 
 namespace ReimaginedLauncher.HttpClients;
 
 public class GitHubDiscussionPluginsHttpClient
 {
-    private const string BaseUrl = "https://github.com";
-    private const string PluginsDiscussionsUrl =
-        $"{BaseUrl}/D2R-Reimagined/reimagined-launcher/discussions/categories/plugins";
+    private const string PluginsUrl = ProxyEndpoints.Plugins;
 
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
     private static readonly SemaphoreSlim CacheLock = new(1, 1);
     private static IReadOnlyList<UserPluginEntry>? _cachedPlugins;
     private static DateTimeOffset _cacheTimestamp;
-
-    private static readonly Regex DiscussionLinkRegex = new(
-        @"<a[^>]+href=""(?<href>/D2R-Reimagined/reimagined-launcher/discussions/(?<number>\d+))""[^>]*class=""[^""]*markdown-title[^""]*""[^>]*>(?<title>.*?)</a>",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
-
-    private static readonly Regex BodyRegex = new(
-        @"<td\s+class=""[^""]*comment-body markdown-body js-comment-body[^""]*""[^>]*>(?<body>.*?)</td>",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
-
-    private static readonly Regex ZipLinkRegex = new(
-        @"<a[^>]+href=""(?<url>[^""]+\.zip)""[^>]*>",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-    private static readonly Regex TitleFieldRegex = new(
-        @"Title:\s*(?<value>.+)",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-    private static readonly Regex DescriptionFieldRegex = new(
-        @"(?:Desc|Description):\s*(?<value>.+)",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-    // Accepts SemVer-ish versions: 2-4 numeric segments with an optional
-    // pre-release (-beta, -rc.1) or build metadata (+abc) suffix.
-    // Examples matched: 1.0, 1.2.3, 1.2.3.4, 1.2.3-beta, 1.2.3-rc.1+build5.
-    private static readonly Regex ModVersionFieldRegex = new(
-        @"(?:Mod|ModVer|ModVersion):\s*(?<value>\d+(?:\.\d+){1,3}(?:[-+][0-9A-Za-z.\-]+)?)",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private readonly HttpClient _httpClient;
 
@@ -59,8 +30,8 @@ public class GitHubDiscussionPluginsHttpClient
 
     public async Task<IReadOnlyList<UserPluginEntry>> GetUserPluginsAsync(bool forceRefresh = false)
     {
-        // Serialize concurrent callers so only one fetch hits GitHub at a time,
-        // and so a second caller can re-use a just-populated cache.
+        // Serialize concurrent callers so only one fetch hits the proxy at a
+        // time, and so a second caller can re-use a just-populated cache.
         await CacheLock.WaitAsync();
         try
         {
@@ -73,34 +44,17 @@ public class GitHubDiscussionPluginsHttpClient
 
             try
             {
-                var html = await GetStringWithRateLimitAsync(PluginsDiscussionsUrl);
-                var plugins = new List<UserPluginEntry>();
-                var seenNumbers = new HashSet<int>();
-
-                foreach (Match match in DiscussionLinkRegex.Matches(html))
-                {
-                    if (!int.TryParse(match.Groups["number"].Value, out var number) ||
-                        !seenNumbers.Add(number))
-                    {
-                        continue;
-                    }
-
-                    var discussionUrl = $"{BaseUrl}{match.Groups["href"].Value}";
-                    var entry = await ParseDiscussionAsync(discussionUrl);
-                    if (entry != null)
-                    {
-                        plugins.Add(entry);
-                    }
-                }
-
+                var plugins = await FetchPluginsAsync();
                 _cachedPlugins = plugins;
                 _cacheTimestamp = DateTimeOffset.UtcNow;
                 return plugins;
             }
-            catch
+            catch (Exception ex)
             {
-                // On failure, fall back to any previously cached result to avoid
-                // repeatedly hammering GitHub on transient errors.
+                // On failure, fall back to any previously cached result so we
+                // don't hammer the proxy on transient errors and so users keep
+                // seeing the last known good list.
+                LaunchDiagnostics.LogException("Failed to fetch user plugins from proxy", ex);
                 return _cachedPlugins ?? [];
             }
         }
@@ -124,7 +78,7 @@ public class GitHubDiscussionPluginsHttpClient
             Directory.CreateDirectory(directory);
         }
 
-        var response = await GetWithRateLimitAsync(zipUrl);
+        var response = await ProxyHttpHelper.GetWithRateLimitAsync(_httpClient, zipUrl);
         try
         {
             response.EnsureSuccessStatusCode();
@@ -140,140 +94,64 @@ public class GitHubDiscussionPluginsHttpClient
         return tempPath;
     }
 
-    private async Task<UserPluginEntry?> ParseDiscussionAsync(string discussionUrl)
+    private async Task<IReadOnlyList<UserPluginEntry>> FetchPluginsAsync()
     {
-        try
-        {
-            var html = await GetStringWithRateLimitAsync(discussionUrl);
-
-            var bodyMatch = BodyRegex.Match(html);
-            if (!bodyMatch.Success)
-            {
-                return null;
-            }
-
-            var bodyHtml = bodyMatch.Groups["body"].Value;
-            var bodyText = ConvertHtmlToText(bodyHtml);
-
-            var titleMatch = TitleFieldRegex.Match(bodyText);
-            if (!titleMatch.Success)
-            {
-                return null;
-            }
-
-            var descriptionMatch = DescriptionFieldRegex.Match(bodyText);
-            if (!descriptionMatch.Success)
-            {
-                return null;
-            }
-
-            var modVersionMatch = ModVersionFieldRegex.Match(bodyText);
-            if (!modVersionMatch.Success)
-            {
-                return null;
-            }
-
-            var zipMatch = ZipLinkRegex.Match(bodyHtml);
-            if (!zipMatch.Success)
-            {
-                return null;
-            }
-
-            var zipUrl = WebUtility.HtmlDecode(zipMatch.Groups["url"].Value);
-            if (!zipUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-            {
-                zipUrl = $"{BaseUrl}{zipUrl}";
-            }
-
-            return new UserPluginEntry
-            {
-                Title = titleMatch.Groups["value"].Value.Trim(),
-                Description = descriptionMatch.Groups["value"].Value.Trim(),
-                ModVersion = modVersionMatch.Groups["value"].Value.Trim(),
-                ZipUrl = zipUrl,
-                DiscussionUrl = discussionUrl
-            };
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    // Maximum time we will voluntarily wait for a 429/403 Retry-After before
-    // giving up; anything longer is reported as a failure to the caller.
-    private static readonly TimeSpan MaxRetryAfter = TimeSpan.FromSeconds(30);
-
-    private async Task<string> GetStringWithRateLimitAsync(string url)
-    {
-        using var response = await GetWithRateLimitAsync(url);
+        using var response = await ProxyHttpHelper.GetWithRateLimitAsync(_httpClient, PluginsUrl);
         response.EnsureSuccessStatusCode();
-        return await response.Content.ReadAsStringAsync();
-    }
 
-    private async Task<HttpResponseMessage> GetWithRateLimitAsync(string url)
-    {
-        for (var attempt = 0; attempt < 2; attempt++)
+        var payload = await response.Content.ReadFromJsonAsync<ProxyPlugin[]>() ?? [];
+        var plugins = new List<UserPluginEntry>(payload.Length);
+        foreach (var entry in payload)
         {
-            var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
-
-            if ((int)response.StatusCode == 429 ||
-                (response.StatusCode == HttpStatusCode.Forbidden &&
-                 response.Headers.RetryAfter != null))
+            if (string.IsNullOrWhiteSpace(entry.Title) ||
+                string.IsNullOrWhiteSpace(entry.Description) ||
+                string.IsNullOrWhiteSpace(entry.ModVersion) ||
+                string.IsNullOrWhiteSpace(entry.ZipUrl) ||
+                string.IsNullOrWhiteSpace(entry.DiscussionUrl))
             {
-                // GitHub's secondary/abuse limits return 429 or 403 with a
-                // Retry-After header. Honour it exactly once, then fail.
-                var delay = GetRetryAfterDelay(response);
-                var statusCode = (int)response.StatusCode;
-                response.Dispose();
-
-                if (attempt == 0 && delay > TimeSpan.Zero && delay <= MaxRetryAfter)
-                {
-                    await Task.Delay(delay);
-                    continue;
-                }
-
-                throw new HttpRequestException(
-                    $"GitHub rate-limited request to {url} (status {statusCode}, Retry-After {delay.TotalSeconds:F0}s).");
+                continue;
             }
 
-            return response;
+            plugins.Add(new UserPluginEntry
+            {
+                Title = entry.Title!.Trim(),
+                Description = entry.Description!.Trim(),
+                ModVersion = entry.ModVersion!.Trim(),
+                ZipUrl = entry.ZipUrl!,
+                DiscussionUrl = entry.DiscussionUrl!,
+                PublishedAt = entry.PublishedAt,
+                UpdatedAt = entry.UpdatedAt,
+                LastActivityAt = entry.LastActivityAt
+            });
         }
 
-        // Unreachable: the loop always returns or throws.
-        throw new HttpRequestException($"Failed to fetch {url} after retry.");
+        return plugins;
     }
 
-    private static TimeSpan GetRetryAfterDelay(HttpResponseMessage response)
+    private sealed class ProxyPlugin
     {
-        var retryAfter = response.Headers.RetryAfter;
-        if (retryAfter == null)
-        {
-            return TimeSpan.FromSeconds(5);
-        }
+        [JsonPropertyName("title")]
+        public string? Title { get; set; }
 
-        if (retryAfter.Delta is { } delta)
-        {
-            return delta;
-        }
+        [JsonPropertyName("description")]
+        public string? Description { get; set; }
 
-        if (retryAfter.Date is { } date)
-        {
-            var delay = date - DateTimeOffset.UtcNow;
-            return delay > TimeSpan.Zero ? delay : TimeSpan.Zero;
-        }
+        [JsonPropertyName("modVersion")]
+        public string? ModVersion { get; set; }
 
-        return TimeSpan.FromSeconds(5);
-    }
+        [JsonPropertyName("zipUrl")]
+        public string? ZipUrl { get; set; }
 
-    private static string ConvertHtmlToText(string html)
-    {
-        var text = html;
-        text = Regex.Replace(text, @"<br\s*/?>", "\n", RegexOptions.IgnoreCase);
-        text = Regex.Replace(text, @"<[^>]+>", string.Empty, RegexOptions.IgnoreCase);
-        text = WebUtility.HtmlDecode(text);
-        text = text.Replace("\r\n", "\n");
-        text = Regex.Replace(text, @"\n{3,}", "\n\n");
-        return text.Trim();
+        [JsonPropertyName("discussionUrl")]
+        public string? DiscussionUrl { get; set; }
+
+        [JsonPropertyName("publishedAt")]
+        public DateTimeOffset? PublishedAt { get; set; }
+
+        [JsonPropertyName("updatedAt")]
+        public DateTimeOffset? UpdatedAt { get; set; }
+
+        [JsonPropertyName("lastActivityAt")]
+        public DateTimeOffset? LastActivityAt { get; set; }
     }
 }

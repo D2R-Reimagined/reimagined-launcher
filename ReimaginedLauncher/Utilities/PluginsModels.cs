@@ -19,7 +19,9 @@ public sealed class PluginCatalogItem : INotifyPropertyChanged
     public IReadOnlyList<PluginParameterItem> Parameters { get; init; } = [];
     public IReadOnlyList<PluginCatalogFileItem> Files { get; init; } = [];
     public IReadOnlyList<string> Errors { get; init; } = [];
+    public IReadOnlyList<string> Warnings { get; init; } = [];
     public bool HasErrors => Errors.Count > 0;
+    public bool HasWarnings => Warnings.Count > 0;
     public bool HasParameters => Parameters.Count > 0;
     public bool HasDescription => !string.IsNullOrWhiteSpace(Description);
     public bool HasModVersion => !string.IsNullOrWhiteSpace(ModVersion);

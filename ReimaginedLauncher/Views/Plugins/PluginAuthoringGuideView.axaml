@@ -1,6 +1,20 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="ReimaginedLauncher.Views.Plugins.PluginAuthoringGuideView">
+    <UserControl.Styles>
+        <Style Selector="TextBlock.sub-title">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="Margin" Value="0,4,0,2" />
+        </Style>
+        <Style Selector="TextBlock.bullet">
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="14,0,0,0" />
+        </Style>
+        <Style Selector="TextBlock.lead">
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+    </UserControl.Styles>
     <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                   VerticalScrollBarVisibility="Auto">
         <StackPanel Spacing="18">
@@ -10,31 +24,47 @@
                     <TextBlock Classes="view-title"
                                Text="How To Write a Plugin" />
                     <TextBlock Classes="muted"
-                               Text="Use this guide to package a launcher plugin, declare parameters, and write supported JSON operations." />
+                               Text="Package a launcher plugin, declare parameters, and write supported JSON operations." />
                 </StackPanel>
 
-                <Button Grid.Column="1"
-                        Content="Back to Plugins"
-                        Click="OnBackToPluginsClicked" />
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            Spacing="8">
+                    <Button x:Name="OpenWikiButton"
+                            Content="Open Full Wiki Guide"
+                            Click="OnOpenWikiClicked" />
+                    <Button Content="Back to Plugins"
+                            Click="OnBackToPluginsClicked" />
+                </StackPanel>
             </Grid>
 
-            <Border Classes="panel"
-                    Padding="20">
-                <StackPanel Spacing="8">
-                    <TextBlock Classes="section-title"
-                               Text="What a Plugin Is" />
-                    <TextBlock Text="A plugin is a zip archive that contains a plugininfo.json file plus one or more plugin JSON files." TextWrapping="Wrap" />
-                    <TextBlock Classes="muted"
-                               Text="When a plugin is enabled, the launcher reads each listed JSON file and applies its operations before launch." TextWrapping="Wrap" />
-                </StackPanel>
-            </Border>
-
+            <!-- Quick links / overview -->
             <Border Classes="panel"
                     Padding="20">
                 <StackPanel Spacing="10">
                     <TextBlock Classes="section-title"
-                               Text="Required Folder Layout" />
-                    <TextBlock Text="The archive can contain folders, but it must include exactly one plugininfo.json." TextWrapping="Wrap" />
+                               Text="At a Glance" />
+                    <TextBlock Classes="lead"
+                               Text="A plugin is a .zip archive that bundles a plugininfo.json manifest and one or more operation files. When enabled, the launcher applies those operations to game data before launch." />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  Manifest: plugininfo.json (name, version, modVersion, files)." />
+                        <TextBlock Classes="bullet" Text="•  Excel edits: any base-folder .txt file except itemstatcost.txt." />
+                        <TextBlock Classes="bullet" Text="•  String edits: .json files under data/local/lng/strings." />
+                    </StackPanel>
+                    <TextBlock Classes="muted"
+                               TextWrapping="Wrap"
+                               Text="The complete, up-to-date guide — with a per-file identification table and worked examples — lives on the project wiki. Click &quot;Open Full Wiki Guide&quot; above to open it in your browser." />
+                </StackPanel>
+            </Border>
+
+            <!-- Folder layout -->
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="10">
+                    <TextBlock Classes="section-title"
+                               Text="1. Required Folder Layout" />
+                    <TextBlock Classes="lead"
+                               Text="The archive can contain folders, but it must include exactly one plugininfo.json at any level." />
                     <TextBox x:Name="FolderLayoutTextBox"
                              IsReadOnly="True"
                              AcceptsReturn="True"
@@ -43,14 +73,39 @@
                 </StackPanel>
             </Border>
 
+            <!-- Manifest -->
             <Border Classes="panel"
                     Padding="20">
                 <StackPanel Spacing="10">
                     <TextBlock Classes="section-title"
-                               Text="plugininfo.json" />
-                    <TextBlock Text="plugininfo.json must include name, version, modVersion (in #.#.# format), and at least one plugin JSON file path. author and description are optional." TextWrapping="Wrap" />
-                    <TextBlock Classes="muted"
-                               Text="Parameters are optional, but each one needs key, name, and defaultValue." TextWrapping="Wrap" />
+                               Text="2. plugininfo.json" />
+
+                    <TextBlock Classes="sub-title" Text="Required fields" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  name — display name of your plugin." />
+                        <TextBlock Classes="bullet" Text="•  version — your plugin's own version string." />
+                        <TextBlock Classes="bullet" Text="•  modVersion — the D2R Reimagined mod version you target, in #.#.# format (e.g. 3.0.7)." />
+                        <TextBlock Classes="bullet" Text="•  files — at least one path to a plugin JSON operation file inside the archive." />
+                    </StackPanel>
+
+                    <TextBlock Classes="sub-title" Text="Optional fields" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  author, description." />
+                        <TextBlock Classes="bullet" Text="•  parameters — each parameter requires key, name, and defaultValue." />
+                        <TextBlock Classes="bullet" Text="•  assets — list of {source, target} entries that copy raw files into the mod folder. Sources must live under the plugin's assets/ folder; targets are paths relative to the mod root (e.g. data/hd/global/sfx/...)." />
+                    </StackPanel>
+
+                    <TextBlock Classes="sub-title" Text="Asset copies" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet"
+                                   TextWrapping="Wrap"
+                                   Text="•  Asset copies are applied last, after every operation, and overwrite any existing file at the target path." />
+                        <TextBlock Classes="bullet"
+                                   TextWrapping="Wrap"
+                                   Text="•  Warning: This plugin directly copies an asset into the mod without reading the mods data, it may cause problems if it is not setup correctly." />
+                    </StackPanel>
+
+                    <TextBlock Classes="sub-title" Text="Example" />
                     <TextBox x:Name="PluginInfoExampleTextBox"
                              IsReadOnly="True"
                              AcceptsReturn="True"
@@ -59,14 +114,31 @@
                 </StackPanel>
             </Border>
 
+            <!-- Operations -->
             <Border Classes="panel"
                     Padding="20">
                 <StackPanel Spacing="10">
                     <TextBlock Classes="section-title"
-                               Text="Plugin JSON Operations" />
-                    <TextBlock Text="Each plugin JSON file can be either a single object or an array of objects." TextWrapping="Wrap" />
-                    <TextBlock Classes="muted"
-                               Text="Supported targets: skills.txt matches rowIdentifier against Skill, and cubemain.txt matches rowIdentifier against Description." TextWrapping="Wrap" />
+                               Text="3. Plugin JSON Operations" />
+                    <TextBlock Classes="lead"
+                               Text="Each plugin JSON file is either a single operation object or an array of them." />
+
+                    <TextBlock Classes="sub-title" Text="Excel (.txt) targets" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  All base-folder .txt files are supported except itemstatcost.txt." />
+                        <TextBlock Classes="bullet" Text="•  Most files match rows by a unique column (e.g. Skill in skills.txt, Id in monstats.txt)." />
+                        <TextBlock Classes="bullet" Text="•  Files whose identifier column contains duplicates use a 0-based numeric row ID instead (e.g. magicprefix.txt, cubemain.txt, hireling.txt)." />
+                    </StackPanel>
+
+                    <TextBlock Classes="sub-title" Text="String (.json) targets" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  Used for files under data/local/lng/strings (e.g. item-runes.json)." />
+                        <TextBlock Classes="bullet" Text="•  Flat d2rr-style layout: file, Key, plus one or more language fields." />
+                        <TextBlock Classes="bullet" Text="•  Supported languages: enUS, zhTW, deDE, esES, frFR, itIT, koKR, plPL, esMX, jaJP, ptBR, ruRU, zhCN." />
+                        <TextBlock Classes="bullet" Text="•  Only the language fields listed on an entry are overwritten; other languages and other entries are untouched. Unknown fields are ignored." />
+                    </StackPanel>
+
+                    <TextBlock Classes="sub-title" Text="Example" />
                     <TextBox x:Name="OperationsExampleTextBox"
                              IsReadOnly="True"
                              AcceptsReturn="True"
@@ -75,68 +147,115 @@
                 </StackPanel>
             </Border>
 
+            <!-- Fields -->
             <Border Classes="panel"
                     Padding="20">
-                <StackPanel Spacing="8">
+                <StackPanel Spacing="10">
                     <TextBlock Classes="section-title"
-                               Text="Available Fields" />
-                    <TextBlock Text="file: Required. Must be skills.txt or cubemain.txt." TextWrapping="Wrap" />
-                    <TextBlock Text="rowIdentifier: Required. For skills.txt it must match a row's Skill value. For cubemain.txt it must match a row's Description value." TextWrapping="Wrap" />
-                    <TextBlock Text="column: Required. Must match a real column name on the target file's generated parser model." TextWrapping="Wrap" />
-                    <TextBlock Text="updatedValue: The replacement value, the multiplier when operation is multiplyExisting, or the text appended when operation is append. Required when parameterKey is not used." TextWrapping="Wrap" />
-                    <TextBlock Text="operation: Optional. Leave empty or use replace for direct replacement. Use multiplyExisting to multiply the current numeric value. Use append to wrap the existing value in parentheses and concatenate your entry, e.g. (existingValue)+10*20." TextWrapping="Wrap" />
-                    <TextBlock Text="parameterKey: Optional. References a parameter declared in plugininfo.json." TextWrapping="Wrap" />
+                               Text="4. Available Fields" />
+
+                    <TextBlock Classes="sub-title" Text="Common" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  file (required) — any base-folder .txt except itemstatcost.txt, or any .json under data/local/lng/strings." />
+                    </StackPanel>
+
+                    <TextBlock Classes="sub-title" Text="Excel (.txt) operations" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  rowIdentifier (required) — value from the identifier column, or numeric row ID for files with duplicate identifiers." />
+                        <TextBlock Classes="bullet"
+                                   Text="•  rowIdentifier range — also accepts &quot;start-end&quot; (inclusive, 0-based) to target many rows at once, e.g. &quot;50-100&quot; on automap.txt or &quot;300-400&quot; on skills.txt. Ranges target rows by data-row index on any supported .txt file." />
+                        <TextBlock Classes="bullet"
+                                   TextWrapping="Wrap"
+                                   Text="•  rowIdentifier object — also accepts an object that overrides the default match logic by listing one or more {column: expectedValue} pairs (e.g. {&quot;Name&quot;: &quot;Skeleton&quot;, &quot;hcIdx&quot;: &quot;86&quot;}). The row must satisfy every pair. On files with duplicate identifier values (rowID files) you should list at least two columns; the launcher emits a warning otherwise so the intended row stays uniquely matched." />
+                        <TextBlock Classes="bullet" Text="•  column (required unless 'columns' is provided) — a column name on the target file." />
+                        <TextBlock Classes="bullet" Text="•  columns (optional) — an array of {column, updatedValue, parameterKey, operation} objects to update multiple columns on the same row(s) with a single rowIdentifier. Each entry inherits operation/updatedValue/parameterKey from the parent operation when omitted." />
+                        <TextBlock Classes="bullet" Text="•  operation (optional) — replace (default), multiplyExisting, append, or addRow." />
+                        <TextBlock Classes="bullet" Text="•  updatedValue — the replacement value, the multiplier for multiplyExisting, or the text appended for append." />
+                        <TextBlock Classes="bullet" Text="•  parameterKey (optional) — references a parameter declared in plugininfo.json." />
+                        <TextBlock Classes="muted"
+                                   TextWrapping="Wrap"
+                                   Margin="14,2,0,0"
+                                   Text="append wraps the existing value in parentheses and concatenates your entry, e.g. (existingValue)+10*20." />
+                        <TextBlock Classes="muted"
+                                   TextWrapping="Wrap"
+                                   Margin="14,2,0,0"
+                                   Text="addRow creates a brand new row at the end of the file (omit rowIdentifier) or inserts it at a 0-based index (rowIdentifier: \&quot;5\&quot;). Provide the new column values via 'columns' (preferred) or 'column'/'updatedValue'. Columns you do not list keep their default value." />
+                    </StackPanel>
+
+                    <TextBlock Classes="sub-title" Text="String (.json) operations" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  Key (required) — matches the D2R entry's Key." />
+                        <TextBlock Classes="bullet" Text="•  Any of the 13 language codes alongside Key with the replacement string. Only the listed language fields on the matched entry are overwritten." />
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
+            <!-- Parameter tokens -->
             <Border Classes="panel"
                     Padding="20">
                 <StackPanel Spacing="8">
                     <TextBlock Classes="section-title"
-                               Text="Parameter Tokens" />
-                    <TextBlock Text="updatedValue also supports inline parameter tokens in the form {{parameter:key}}." TextWrapping="Wrap" />
+                               Text="5. Parameter Tokens" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  updatedValue supports inline tokens of the form {{parameter:key}}." />
+                        <TextBlock Classes="bullet" Text="•  Example: set updatedValue to {{parameter:damageMultiplier}} to resolve the value from plugininfo.json at runtime." />
+                        <TextBlock Classes="bullet" Text="•  Tokens are not resolved inside string JSON language values — provide the final replacement text directly there." />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Validation -->
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="8">
+                    <TextBlock Classes="section-title"
+                               Text="6. Validation Rules" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  File paths must be relative and stay inside the plugin folder; absolute or traversing paths are rejected." />
+                        <TextBlock Classes="bullet" Text="•  plugininfo.json must list files that actually exist in the archive." />
+                        <TextBlock Classes="bullet" Text="•  modVersion is required and must be in #.#.# format (e.g. 3.0.7) or the plugin is rejected." />
+                        <TextBlock Classes="bullet" Text="•  multiplyExisting only works on numeric columns and requires either parameterKey or updatedValue." />
+                        <TextBlock Classes="bullet" Text="•  append works on any column type and requires either parameterKey or updatedValue." />
+                        <TextBlock Classes="bullet" Text="•  addRow rowIdentifier must be empty (append) or a numeric 0-based index in the range 0..rowCount; non-numeric identifiers are rejected." />
+                        <TextBlock Classes="bullet" Text="•  When using 'columns', each entry must reference a known target column; per-column parameterKey/updatedValue overrides the parent operation's values." />
+                        <TextBlock Classes="bullet" Text="•  Unknown parameters and unknown target columns are reported as plugin errors." />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Sharing -->
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="10">
+                    <TextBlock Classes="section-title"
+                               Text="7. Sharing on GitHub Discussions" />
+                    <TextBlock Classes="lead"
+                               Text="The launcher's User Plugins page scrapes the Plugins discussion category on GitHub. Your post body must include these fields:" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  Title: Your Plugin Name — shown as the plugin title." />
+                        <TextBlock Classes="bullet" Text="•  Desc: or Description: — short summary shown under the title." />
+                        <TextBlock Classes="bullet" Text="•  Mod:, ModVer: or ModVersion: followed by a version in #.#.# format — shown beside the title. Posts without a valid mod version are skipped." />
+                        <TextBlock Classes="bullet" Text="•  Attach a .zip of your plugin to the post. Posts without a .zip attachment are skipped." />
+                    </StackPanel>
                     <TextBlock Classes="muted"
-                               Text="Example: set updatedValue to {{parameter:damageMultiplier}} if you want the value resolved from plugininfo.json at runtime." TextWrapping="Wrap" />
+                               TextWrapping="Wrap"
+                               Text="The .zip must still contain a valid plugininfo.json with all required fields (name, version, modVersion, files). The launcher validates the archive on install." />
                 </StackPanel>
             </Border>
 
+            <!-- Limits -->
             <Border Classes="panel"
                     Padding="20">
                 <StackPanel Spacing="8">
                     <TextBlock Classes="section-title"
-                               Text="Validation Rules" />
-                    <TextBlock Text="The launcher rejects plugin file paths that are absolute or that traverse outside the plugin folder." TextWrapping="Wrap" />
-                    <TextBlock Text="plugininfo.json must list files that actually exist in the archive." TextWrapping="Wrap" />
-                    <TextBlock Text="modVersion is required and must be in #.#.# format (e.g. 3.0.7) or the plugin will be rejected." TextWrapping="Wrap" />
-                    <TextBlock Text="multiplyExisting only works on numeric columns and requires either parameterKey or updatedValue." TextWrapping="Wrap" />
-                    <TextBlock Text="append requires either parameterKey or updatedValue and works on any column type." TextWrapping="Wrap" />
-                    <TextBlock Text="Unknown parameters and unknown target columns are reported as plugin errors." TextWrapping="Wrap" />
-                </StackPanel>
-            </Border>
-
-            <Border Classes="panel"
-                    Padding="20">
-                <StackPanel Spacing="8">
-                    <TextBlock Classes="section-title"
-                               Text="Sharing on GitHub Discussions" />
-                    <TextBlock Text="To share your plugin through the launcher's User Plugins page, create a post in the Plugins discussion category on GitHub. The launcher scrapes discussion posts and requires specific fields in the post body." TextWrapping="Wrap" />
-                    <TextBlock Text="Title: Your Plugin Name — displayed as the plugin title in the launcher." TextWrapping="Wrap" />
-                    <TextBlock Text="Desc: or Description: A short summary — displayed under the title." TextWrapping="Wrap" />
-                    <TextBlock Text="Mod: or ModVer: or ModVersion: followed by a version in #.#.# format — displayed next to the title. Posts without a valid mod version are not loaded." TextWrapping="Wrap" />
-                    <TextBlock Text="Attach a .zip file to the post containing your plugin. Posts without a .zip attachment are not loaded." TextWrapping="Wrap" />
-                    <TextBlock Classes="muted"
-                               Text="The .zip must still contain a valid plugininfo.json with all required fields (name, version, modVersion, files). The launcher validates the archive on install." TextWrapping="Wrap" />
-                </StackPanel>
-            </Border>
-
-            <Border Classes="panel"
-                    Padding="20">
-                <StackPanel Spacing="8">
-                    <TextBlock Classes="section-title"
-                               Text="Current Limits" />
-                    <TextBlock Text="Only skills.txt and cubemain.txt are supported today." TextWrapping="Wrap" />
-                    <TextBlock Text="replace, multiplyExisting, and append are the supported operations." TextWrapping="Wrap" />
-                    <TextBlock Text="Values are written through the generated parser types, so the column name and value type still need to be valid." TextWrapping="Wrap" />
+                               Text="8. Current Limits" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  All base-folder .txt files are supported except itemstatcost.txt." />
+                        <TextBlock Classes="bullet" Text="•  Matching is by unique identifier column, or by numeric row ID for files with duplicates." />
+                        <TextBlock Classes="bullet" Text="•  Supported operations: replace, multiplyExisting, append, addRow." />
+                        <TextBlock Classes="bullet" Text="•  A single operation can update multiple columns on the matched row(s) via the 'columns' array." />
+                        <TextBlock Classes="bullet" Text="•  Most files use typed parsers from the D2RReimaginedTools library for column validation and data integrity." />
+                    </StackPanel>
                 </StackPanel>
             </Border>
         </StackPanel>

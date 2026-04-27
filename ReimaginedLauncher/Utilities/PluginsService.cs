@@ -10,6 +10,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Text.RegularExpressions;
+using D2RReimaginedTools.JsonFileParsers;
 using D2RReimaginedTools.Models;
 using D2RReimaginedTools.TextFileParsers;
 using ReimaginedLauncher.Generators;
@@ -22,13 +23,28 @@ public static class PluginsService
     private const string BundledPluginsDirectoryName = "Assets/Plugins";
     private const string PluginInfoFileName = "plugininfo.json";
     private const string GeneratedPluginsFolderName = "plugins";
-    private const string SkillsFileName = "skills.txt";
-    private const string CubeMainFileName = "cubemain.txt";
-    private const string SkillsRowIdentifierPropertyName = "Skill";
-    private const string CubeMainRowIdentifierPropertyName = "Description";
+    private const string StringsDirectoryRelativePath = "local/lng/strings";
+    private const string PluginAssetsDirectoryName = "assets";
+    private const string PluginAssetWarningMessage =
+        "This plugin directly copies an asset into the mod without reading the mods data, it may cause problems if it is not setup correctly.";
+
+    // The 13 language columns that D2R ships in its string JSON files. Strings-plugin entries may
+    // only target these keys; any other property on a plugin entry is ignored.
+    private static readonly HashSet<string> KnownStringLanguageColumns = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "enUS", "zhTW", "deDE", "esES", "frFR", "itIT", "koKR", "plPL", "esMX", "jaJP", "ptBR", "ruRU", "zhCN"
+    };
     private static readonly JsonSerializerOptions JsonOptions = SerializerOptions.PropertyNameCaseInsensitive;
     private static readonly Regex ParameterTokenRegex = new(@"\{\{\s*parameter:([a-zA-Z0-9_\-]+)\s*\}\}", RegexOptions.Compiled);
     private static readonly Regex ModVersionRegex = new(@"^\d+\.\d+\.\d+$", RegexOptions.Compiled);
+    // Matches a numeric row-index range in the form "start-end" (inclusive), e.g. "50-100".
+    // Whitespace around the numbers and the dash is allowed so plugins can be formatted loosely.
+    // Accepts common Unicode dash variants (hyphen-minus, non-breaking hyphen, figure dash,
+    // en dash, em dash, horizontal bar, minus sign) because some editors auto-replace "-".
+    private static readonly Regex RowRangeRegex = new(@"^\s*(\d+)\s*[-\u2010-\u2015\u2212]\s*(\d+)\s*$", RegexOptions.Compiled);
+
+    private static readonly Dictionary<string, FileParserRegistration> ParserRegistry =
+        BuildParserRegistry();
 
     public static string PluginsDirectoryPath => Path.Combine(SettingsManager.AppDirectoryPath, PluginsDirectoryName);
 
@@ -159,7 +175,8 @@ public static class PluginsService
                 Order = index + 1,
                 Parameters = pluginState.Parameters,
                 Files = pluginState.Files,
-                Errors = pluginState.Errors
+                Errors = pluginState.Errors,
+                Warnings = pluginState.Warnings
             });
         }
 
@@ -382,6 +399,13 @@ public static class PluginsService
         var registration = GetRegistration(pluginId);
         registration.IsEnabled = isEnabled;
         await SettingsManager.SaveAsync(MainWindow.Settings);
+
+        if (!isEnabled)
+        {
+            // Restore any mod files this plugin replaced via asset operations
+            // so disabling truly reverts its on-disk effects.
+            await PluginAssetBackupService.RestoreForPluginAsync(pluginId);
+        }
     }
 
     public static async Task MovePluginAsync(string pluginId, int direction)
@@ -412,6 +436,9 @@ public static class PluginsService
         MainWindow.Settings.CurrentProfile.Plugins.Remove(registration);
         await SettingsManager.SaveAsync(MainWindow.Settings);
 
+        // Restore any replaced mod files before the plugin's metadata is gone.
+        await PluginAssetBackupService.RestoreForPluginAsync(pluginId);
+
         var pluginDirectory = GetPluginDirectory(registration);
         if (Directory.Exists(pluginDirectory))
         {
@@ -421,17 +448,35 @@ public static class PluginsService
 
     public static async Task<PluginEditorDocument> LoadEditorDocumentAsync(string pluginId, string relativePath)
     {
-        var pluginState = await LoadPluginStateAsync(GetRegistration(pluginId));
+        var registration = GetRegistration(pluginId);
         var absolutePath = GetPluginFilePath(pluginId, relativePath);
         if (!File.Exists(absolutePath))
         {
             throw new FileNotFoundException("The selected plugin JSON file could not be found.", relativePath);
         }
 
+        // Avoid a full LoadPluginStateAsync (which validates every file in the
+        // plugin); the editor only needs the display name.
+        var pluginInfoPath = Path.Combine(GetPluginDirectory(registration), PluginInfoFileName);
+        var pluginName = registration.FolderName;
+        if (File.Exists(pluginInfoPath))
+        {
+            try
+            {
+                var pluginInfo = await LoadPluginInfoAsync(pluginInfoPath);
+                pluginName = pluginInfo.Name;
+            }
+            catch (Exception ex)
+            {
+                LaunchDiagnostics.LogException(
+                    $"Failed to read plugin name for '{registration.FolderName}'", ex);
+            }
+        }
+
         return new PluginEditorDocument
         {
             PluginId = pluginId,
-            PluginName = pluginState.Name,
+            PluginName = pluginName,
             RelativePath = relativePath,
             Content = await File.ReadAllTextAsync(absolutePath)
         };
@@ -473,6 +518,10 @@ public static class PluginsService
     {
         MainWindow.Settings.CurrentProfile.Plugins ??= [];
 
+        // Notify the backup service that a fresh apply pass is starting so it
+        // can re-snapshot any targets the launcher regenerated since last run.
+        await PluginAssetBackupService.BeginApplyPassAsync();
+
         foreach (var registration in MainWindow.Settings.CurrentProfile.Plugins.Where(plugin => plugin.IsEnabled))
         {
             var pluginState = await LoadPluginStateAsync(registration);
@@ -484,18 +533,32 @@ public static class PluginsService
                 continue;
             }
 
+            foreach (var warning in pluginState.Warnings)
+            {
+                ReportProgress(progress, $"Plugin '{pluginState.Name}' warning: {warning}");
+                Notifications.SendNotification($"Plugin '{pluginState.Name}': {warning}", "Warning");
+            }
+
             ReportProgress(progress, $"Applying plugin {pluginState.Name}...");
 
             try
             {
+                // Build the parameter dictionary once per plugin instead of
+                // per file; the values are constant for the entire apply pass.
+                var parameters = pluginState.Parameters.ToDictionary(
+                    parameter => parameter.Key,
+                    parameter => parameter.Value,
+                    StringComparer.OrdinalIgnoreCase);
+
                 foreach (var pluginFile in pluginState.Files)
                 {
                     var operations = await LoadPluginOperationsAsync(GetPluginFilePath(registration.Id, pluginFile.RelativePath));
-                    var parameters = pluginState.Parameters.ToDictionary(
-                        parameter => parameter.Key,
-                        parameter => parameter.Value,
-                        StringComparer.OrdinalIgnoreCase);
                     await ApplyOperationsAsync(excelDirectory, operations, parameters);
+                }
+
+                if (pluginState.Assets.Count > 0)
+                {
+                    await ApplyPluginAssetsAsync(excelDirectory, registration.Id, pluginState, progress);
                 }
             }
             catch (Exception ex)
@@ -506,9 +569,77 @@ public static class PluginsService
         }
     }
 
+    private static async Task ApplyPluginAssetsAsync(string excelDirectory, string pluginId, PluginState pluginState, IProgress<string>? progress)
+    {
+        var modRoot = ResolveModRootDirectory(excelDirectory);
+        if (string.IsNullOrWhiteSpace(modRoot))
+        {
+            ReportProgress(progress, $"Skipped assets for plugin '{pluginState.Name}': mod root could not be resolved.");
+            return;
+        }
+
+        ReportProgress(progress, $"Applying plugin assets for {pluginState.Name}...");
+
+        // Resolve the mod root once; every asset is validated against it.
+        var modRootFull = Path.GetFullPath(modRoot);
+
+        foreach (var asset in pluginState.Assets)
+        {
+            try
+            {
+                var destinationPath = Path.GetFullPath(Path.Combine(modRootFull, asset.TargetRelativePath));
+
+                // Use Path.GetRelativePath so we can detect both `..` traversal
+                // and sibling-prefix attacks (e.g. "<modRoot>-evil\foo").
+                var relative = Path.GetRelativePath(modRootFull, destinationPath);
+                if (string.IsNullOrEmpty(relative) ||
+                    relative.StartsWith("..", StringComparison.Ordinal) ||
+                    Path.IsPathRooted(relative))
+                {
+                    throw new InvalidDataException(
+                        $"Asset target '{asset.TargetRelativePath}' resolves outside the mod folder.");
+                }
+
+                // Capture the pre-plugin original (if any) before we overwrite it,
+                // so the file can be restored when the plugin is disabled or deleted.
+                await PluginAssetBackupService.RegisterReplacementAsync(pluginId, destinationPath);
+                await FileCopyHelper.CopyFileAsync(asset.SourceAbsolutePath, destinationPath);
+
+                ReportProgress(progress, $"Copied asset to {asset.TargetRelativePath}.");
+            }
+            catch (Exception ex)
+            {
+                LaunchDiagnostics.LogException(
+                    $"Failed to apply asset '{asset.TargetRelativePath}' for plugin '{pluginState.Name}'", ex);
+                Notifications.SendNotification(
+                    $"Plugin '{pluginState.Name}': failed to apply asset '{asset.TargetRelativePath}': {ex.Message}",
+                    "Warning");
+                ReportProgress(progress, $"Asset '{asset.TargetRelativePath}' failed: {ex.Message}");
+            }
+        }
+    }
+
+    private static string? ResolveModRootDirectory(string excelDirectory)
+    {
+        // excelDirectory is expected to be "<modRoot>/data/global/excel" (or a base/ variant beneath it).
+        // Walk up until we find the parent of a "data" segment to get the mod root.
+        var current = new DirectoryInfo(excelDirectory);
+        while (current is not null)
+        {
+            if (string.Equals(current.Name, "data", StringComparison.OrdinalIgnoreCase) && current.Parent is not null)
+            {
+                return current.Parent.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        return null;
+    }
+
     public static string GetSupportedTargetsSummary()
     {
-        return "Supported now: skills.txt (matched on Skill) and cubemain.txt (matched on Description). Multiply-existing and append operations can reference parameters declared in plugininfo.json.";
+        return "All .txt files in the base excel folder are supported except itemstatcost.txt. Most files match rows by a unique column; files with duplicate values in their identifier column use a numeric row ID (0-based data row index) instead. Multiply-existing and append operations can reference parameters declared in plugininfo.json. String JSON files from data/local/lng/strings (e.g. item-runes.json) are also supported using the same flat d2rr-style layout: each entry lists the target file, the D2R Key, and one or more language fields (enUS, zhTW, deDE, esES, frFR, itIT, koKR, plPL, esMX, jaJP, ptBR, ruRU, zhCN); only the listed languages are replaced and any other languages on that entry are left untouched.";
     }
 
     private static async Task ApplyOperationsAsync(
@@ -516,27 +647,116 @@ public static class PluginsService
         IReadOnlyList<PluginJsonOperation> operations,
         IReadOnlyDictionary<string, string> parameters)
     {
-        await ApplyOperationsForTargetAsync<Skills>(
-            excelDirectory,
-            operations,
-            parameters,
-            SkillsFileName,
-            SkillsRowIdentifierPropertyName,
-            static entry => entry.Skill,
-            static filePath => SkillsParser.GetEntries(filePath),
-            static (updatedEntries, filePath, outputDirectory, cancellationToken) =>
-                SkillsParser.SaveEntries(updatedEntries, filePath, outputDirectory, cancellationToken));
+        var fileNames = operations
+            .Where(operation => !string.IsNullOrWhiteSpace(operation.File) && IsSupportedTargetFile(operation.File))
+            .Select(operation => operation.File!)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
 
-        await ApplyOperationsForTargetAsync<CubeMain>(
-            excelDirectory,
-            operations,
-            parameters,
-            CubeMainFileName,
-            CubeMainRowIdentifierPropertyName,
-            static entry => entry.Description,
-            static filePath => CubeMainParser.GetEntries(filePath),
-            static (updatedEntries, filePath, outputDirectory, cancellationToken) =>
-                CubeMainParser.SaveEntries(updatedEntries, filePath, outputDirectory, cancellationToken));
+        string? resolvedStringsDirectory = null;
+
+        foreach (var fileName in fileNames)
+        {
+            if (ParserRegistry.TryGetValue(fileName, out var registration))
+            {
+                await registration.ApplyAsync(excelDirectory, operations, parameters);
+                continue;
+            }
+
+            if (IsStringsTargetFile(fileName))
+            {
+                resolvedStringsDirectory ??= ResolveStringsDirectory(excelDirectory)
+                    ?? throw new DirectoryNotFoundException(
+                        $"Could not resolve the strings directory ({StringsDirectoryRelativePath}) relative to '{excelDirectory}'.");
+
+                await ApplyStringsOperationsForTargetAsync(resolvedStringsDirectory, operations, fileName);
+            }
+        }
+    }
+
+    private static async Task ApplyStringsOperationsForTargetAsync(
+        string stringsDirectory,
+        IReadOnlyList<PluginJsonOperation> operations,
+        string fileName)
+    {
+        var targetOperations = operations
+            .Where(operation => string.Equals(operation.File, fileName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (targetOperations.Count == 0)
+        {
+            return;
+        }
+
+        var filePath = Path.Combine(stringsDirectory, fileName);
+        if (!File.Exists(filePath))
+        {
+            throw new FileNotFoundException($"{fileName} was not found in the target strings directory: {stringsDirectory}");
+        }
+
+        var parser = new TranslationFileParser(filePath);
+
+        foreach (var operation in targetOperations)
+        {
+            if (string.IsNullOrWhiteSpace(operation.Key))
+            {
+                throw new InvalidDataException($"A {fileName} entry is missing its Key.");
+            }
+
+            var languageValues = operation.LanguageValues;
+            if (languageValues == null || languageValues.Count == 0)
+            {
+                throw new InvalidDataException(
+                    $"The {fileName} entry for Key '{operation.Key}' does not list any language fields to replace.");
+            }
+
+            var matchedAny = false;
+            foreach (var pair in languageValues)
+            {
+                var matched = await parser.ReplaceLanguageValueAsync(
+                    operation.Key!,
+                    pair.Key,
+                    pair.Value);
+
+                matchedAny |= matched;
+            }
+
+            if (!matchedAny)
+            {
+                throw new InvalidDataException(
+                    $"Could not find entry with Key '{operation.Key}' in {fileName}.");
+            }
+        }
+    }
+
+    private static bool IsStringsTargetFile(string? fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return false;
+        }
+
+        return fileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? ResolveStringsDirectory(string excelDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(excelDirectory))
+        {
+            return null;
+        }
+
+        var current = new DirectoryInfo(excelDirectory);
+        while (current != null && !string.Equals(current.Name, "data", StringComparison.OrdinalIgnoreCase))
+        {
+            current = current.Parent;
+        }
+
+        if (current == null)
+        {
+            return null;
+        }
+
+        return Path.Combine(current.FullName, "local", "lng", "strings");
     }
 
     private static async Task ApplyOperationsForTargetAsync<TEntry>(
@@ -547,8 +767,10 @@ public static class PluginsService
         string rowIdentifierPropertyName,
         Func<TEntry, string?> rowIdentifierSelector,
         Func<string, Task<IList<TEntry>>> loadEntriesAsync,
-        Func<IList<TEntry>, string, string, CancellationToken, Task<FileInfo>> saveEntriesAsync)
-        where TEntry : class
+        Func<IList<TEntry>, string, string, CancellationToken, Task<FileInfo>> saveEntriesAsync,
+        Func<string, PropertyInfo?> resolveColumn,
+        bool usesRowId = false)
+        where TEntry : class, new()
     {
         var targetOperations = operations
             .Where(operation => string.Equals(operation.File, fileName, StringComparison.OrdinalIgnoreCase))
@@ -573,42 +795,275 @@ public static class PluginsService
 
         foreach (var operation in targetOperations)
         {
-            var matchingIndices = Enumerable.Range(0, entries.Count)
-                .Where(i => string.Equals(rowIdentifierSelector(entries[i]), operation.RowIdentifier, StringComparison.OrdinalIgnoreCase))
-                .ToList();
+            var assignments = GetColumnAssignments(operation);
 
-            if (matchingIndices.Count == 0)
+            if (string.Equals(operation.Operation, "addRow", StringComparison.OrdinalIgnoreCase))
+            {
+                if (assignments.Count == 0)
+                {
+                    throw new InvalidDataException(
+                        $"addRow operation for {fileName} must specify at least one column (use 'columns' array or 'column'/'updatedValue').");
+                }
+
+                var newEntry = new TEntry();
+                // For addRow, each column assignment is materialized into the new row via the
+                // standard value-resolution pipeline. The parent's Operation ("addRow") is not a
+                // value-producing operation, so we strip it before building per-column ops; this
+                // lets per-assignment Operation overrides win and otherwise falls back to "replace".
+                var addRowParent = operation with { Operation = null };
+                foreach (var assignment in assignments)
+                {
+                    var perColumnOp = BuildPerColumnOperation(addRowParent, assignment, defaultOperation: "replace");
+                    newEntry = UpdateRecord(
+                        newEntry,
+                        perColumnOp.Column ?? string.Empty,
+                        ResolveOperationValue(newEntry, perColumnOp, parameters, fileName, resolveColumn),
+                        fileName,
+                        resolveColumn,
+                        operation.RowIdentifier);
+                }
+
+                int insertIndex;
+                if (string.IsNullOrWhiteSpace(operation.RowIdentifier))
+                {
+                    insertIndex = entries.Count;
+                }
+                else if (int.TryParse(operation.RowIdentifier, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedIndex))
+                {
+                    if (parsedIndex < 0 || parsedIndex > entries.Count)
+                    {
+                        throw new InvalidDataException(
+                            $"addRow rowIdentifier '{operation.RowIdentifier}' is out of bounds for {fileName}. Valid range is 0 to {entries.Count} (inclusive, where {entries.Count} appends to the end).");
+                    }
+
+                    insertIndex = parsedIndex;
+                }
+                else
+                {
+                    throw new InvalidDataException(
+                        $"addRow rowIdentifier '{operation.RowIdentifier}' must be a numeric 0-based index or empty (to append).");
+                }
+
+                if (insertIndex == entries.Count)
+                {
+                    entries.Add(newEntry);
+                }
+                else
+                {
+                    entries.Insert(insertIndex, newEntry);
+                }
+
+                continue;
+            }
+
+            List<int> matchingIndices;
+
+            if (operation.RowIdentifiers is { Count: > 0 } identifierMap)
+            {
+                // Multi-column identifier override: a row matches only when every listed
+                // column equals the supplied value (case-insensitive). This bypasses the
+                // file's default identifier column and any usesRowId numeric requirement.
+                matchingIndices = Enumerable.Range(0, entries.Count)
+                    .Where(i => MatchesAllRowIdentifiers(entries[i], identifierMap, resolveColumn))
+                    .ToList();
+
+                if (matchingIndices.Count == 0)
+                {
+                    var description = string.Join(", ", identifierMap.Select(p => $"{p.Key}='{p.Value}'"));
+                    throw new InvalidDataException(
+                        $"Could not find row in {fileName} matching identifiers: {description}.");
+                }
+            }
+            else if (TryParseRowRange(operation.RowIdentifier, out var rangeStart, out var rangeEnd))
+            {
+                if (rangeStart > rangeEnd)
+                {
+                    (rangeStart, rangeEnd) = (rangeEnd, rangeStart);
+                }
+
+                if (rangeStart < 0 || rangeEnd >= entries.Count)
+                {
+                    throw new InvalidDataException(
+                        $"Row range '{operation.RowIdentifier}' is out of bounds for {fileName}. Valid range is 0 to {entries.Count - 1}.");
+                }
+
+                matchingIndices = Enumerable.Range(rangeStart, rangeEnd - rangeStart + 1).ToList();
+            }
+            else if (usesRowId)
+            {
+                if (!int.TryParse(operation.RowIdentifier, out var rowIndex) || rowIndex < 0 || rowIndex >= entries.Count)
+                {
+                    throw new InvalidDataException(
+                        $"Row ID '{operation.RowIdentifier}' is not a valid index for {fileName}. Valid range is 0 to {entries.Count - 1}.");
+                }
+
+                matchingIndices = [rowIndex];
+            }
+            else
+            {
+                matchingIndices = Enumerable.Range(0, entries.Count)
+                    .Where(i => string.Equals(rowIdentifierSelector(entries[i]), operation.RowIdentifier, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                if (matchingIndices.Count == 0)
+                {
+                    throw new InvalidDataException(
+                        $"Could not find row '{operation.RowIdentifier}' in {fileName} using the {rowIdentifierPropertyName} column.");
+                }
+            }
+
+            if (assignments.Count == 0)
             {
                 throw new InvalidDataException(
-                    $"Could not find row '{operation.RowIdentifier}' in {fileName} using the {rowIdentifierPropertyName} column.");
+                    $"Operation for {fileName} (row '{operation.RowIdentifier}') has no column to update. Provide 'column' or a non-empty 'columns' array.");
             }
 
             foreach (var entryIndex in matchingIndices)
             {
-                entries[entryIndex] = UpdateRecord(
-                    entries[entryIndex],
-                    operation.Column ?? string.Empty,
-                    ResolveOperationValue(entries[entryIndex], operation, parameters, fileName));
+                foreach (var assignment in assignments)
+                {
+                    var perColumnOp = BuildPerColumnOperation(operation, assignment, defaultOperation: operation.Operation);
+                    entries[entryIndex] = UpdateRecord(
+                        entries[entryIndex],
+                        perColumnOp.Column ?? string.Empty,
+                        ResolveOperationValue(entries[entryIndex], perColumnOp, parameters, fileName, resolveColumn),
+                        fileName,
+                        resolveColumn,
+                        operation.RowIdentifier);
+                }
             }
         }
 
         await SaveGeneratedEntriesAsync(entries, filePath, saveEntriesAsync);
     }
 
-    private static TEntry UpdateRecord<TEntry>(TEntry entry, string column, string? updatedValue)
+    // Returns the effective list of column assignments for an operation. When a 'columns' array is
+    // provided it is used as-is; otherwise the operation's top-level column/updatedValue/parameterKey
+    // become a single implicit assignment. The list will be empty when neither is supplied.
+    private static IReadOnlyList<PluginJsonColumnAssignment> GetColumnAssignments(PluginJsonOperation operation)
+    {
+        if (operation.Columns is { Count: > 0 } columns)
+        {
+            return columns;
+        }
+
+        if (!string.IsNullOrWhiteSpace(operation.Column))
+        {
+            return [new PluginJsonColumnAssignment(operation.Column, operation.UpdatedValue, operation.ParameterKey, operation.Operation)];
+        }
+
+        return Array.Empty<PluginJsonColumnAssignment>();
+    }
+
+    // Produces an effective single-column PluginJsonOperation by overlaying a column assignment on
+    // top of its parent operation, so the existing ResolveOperationValue/UpdateRecord helpers can be
+    // reused unchanged for multi-column and addRow execution paths.
+    private static PluginJsonOperation BuildPerColumnOperation(
+        PluginJsonOperation parent,
+        PluginJsonColumnAssignment assignment,
+        string? defaultOperation)
+    {
+        var operationName = !string.IsNullOrWhiteSpace(assignment.Operation)
+            ? assignment.Operation
+            : !string.IsNullOrWhiteSpace(parent.Operation) ? parent.Operation : defaultOperation;
+
+        return parent with
+        {
+            Column = assignment.Column,
+            UpdatedValue = assignment.UpdatedValue ?? parent.UpdatedValue,
+            ParameterKey = assignment.ParameterKey ?? parent.ParameterKey,
+            Operation = operationName,
+            Columns = null
+        };
+    }
+
+    // Returns true when every key/value pair in the supplied identifier map matches the entry's
+    // corresponding column (case-insensitive). Unknown columns or missing values fail the match
+    // so authors get a clear "row not found" error rather than a false positive.
+    private static bool MatchesAllRowIdentifiers<TEntry>(
+        TEntry entry,
+        IReadOnlyDictionary<string, string> identifiers,
+        Func<string, PropertyInfo?> resolveColumn)
+    {
+        foreach (var pair in identifiers)
+        {
+            var property = resolveColumn(pair.Key);
+            if (property == null)
+            {
+                return false;
+            }
+
+            var actual = property.GetValue(entry);
+            var actualText = actual switch
+            {
+                null => string.Empty,
+                IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
+                _ => actual.ToString() ?? string.Empty
+            };
+
+            if (!string.Equals(actualText, pair.Value, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // Parses a plugin rowIdentifier of the form "start-end" (e.g. "50-100") into inclusive numeric
+    // row-index bounds. Returns false when the identifier is null/empty or not a range, allowing the
+    // caller to fall back to exact row-ID or identifier-column matching.
+    private static bool TryParseRowRange(string? rowIdentifier, out int start, out int end)
+    {
+        start = 0;
+        end = 0;
+
+        if (string.IsNullOrWhiteSpace(rowIdentifier))
+        {
+            return false;
+        }
+
+        var match = RowRangeRegex.Match(rowIdentifier);
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        return int.TryParse(match.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out start)
+               && int.TryParse(match.Groups[2].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out end);
+    }
+
+    private static TEntry UpdateRecord<TEntry>(
+        TEntry entry,
+        string column,
+        string? updatedValue,
+        string fileName,
+        Func<string, PropertyInfo?>? resolveColumn = null,
+        string? rowIdentifier = null)
         where TEntry : class
     {
-        var property = typeof(TEntry).GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .FirstOrDefault(candidate => candidate.Name.Equals(column, StringComparison.OrdinalIgnoreCase));
+        var property = resolveColumn?.Invoke(column)
+            ?? typeof(TEntry).GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .FirstOrDefault(candidate => candidate.Name.Equals(column, StringComparison.OrdinalIgnoreCase));
 
         if (property == null)
         {
-            throw new InvalidDataException($"The column '{column}' is not supported for {GetDisplayFileName<TEntry>()}.");
+            throw new InvalidDataException(
+                $"The column '{column}' is not supported for {fileName} (row '{rowIdentifier ?? "<unknown>"}', attempted value '{updatedValue ?? string.Empty}').");
         }
 
         var clonedEntry = CloneEntry(entry);
-        var convertedValue = ConvertValue(updatedValue, property.PropertyType, column);
-        property.SetValue(clonedEntry, convertedValue);
+        try
+        {
+            var convertedValue = ConvertValue(updatedValue, property.PropertyType, column);
+            property.SetValue(clonedEntry, convertedValue);
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new InvalidDataException(
+                $"{ex.Message} (file '{fileName}', row '{rowIdentifier ?? "<unknown>"}', column '{column}', attempted value '{updatedValue ?? string.Empty}')",
+                ex);
+        }
         return clonedEntry;
     }
 
@@ -616,7 +1071,8 @@ public static class PluginsService
         TEntry entry,
         PluginJsonOperation operation,
         IReadOnlyDictionary<string, string> parameters,
-        string fileName)
+        string fileName,
+        Func<string, PropertyInfo?>? resolveColumn = null)
         where TEntry : class
     {
         var resolvedUpdatedValue = ResolveParameterTokens(operation.UpdatedValue, parameters);
@@ -637,26 +1093,28 @@ public static class PluginsService
         if (operationType.Equals("multiplyExisting", StringComparison.OrdinalIgnoreCase))
         {
             var column = operation.Column ?? string.Empty;
-            var property = typeof(TEntry).GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                .FirstOrDefault(candidate => candidate.Name.Equals(column, StringComparison.OrdinalIgnoreCase));
+            var property = resolveColumn?.Invoke(column)
+                ?? typeof(TEntry).GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(candidate => candidate.Name.Equals(column, StringComparison.OrdinalIgnoreCase));
 
             if (property == null)
             {
-                throw new InvalidDataException($"The column '{column}' is not supported for {fileName}.");
+                throw new InvalidDataException(
+                    $"The column '{column}' is not supported for {fileName} (row '{operation.RowIdentifier ?? "<unknown>"}').");
             }
 
             var currentValue = property.GetValue(entry)?.ToString();
             if (!decimal.TryParse(currentValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var currentNumber))
             {
                 throw new InvalidDataException(
-                    $"The existing value '{currentValue}' in column '{column}' is not numeric and cannot be multiplied.");
+                    $"The existing value '{currentValue}' in column '{column}' is not numeric and cannot be multiplied (file '{fileName}', row '{operation.RowIdentifier ?? "<unknown>"}').");
             }
 
             var multiplierText = ResolveMultiplierValue(operation, parameters, resolvedUpdatedValue);
             if (!decimal.TryParse(multiplierText, NumberStyles.Float, CultureInfo.InvariantCulture, out var multiplier))
             {
                 throw new InvalidDataException(
-                    $"The multiplier value '{multiplierText}' is not a valid decimal number.");
+                    $"The multiplier value '{multiplierText}' is not a valid decimal number (file '{fileName}', row '{operation.RowIdentifier ?? "<unknown>"}', column '{column}').");
             }
 
             return FormatDecimalValue(currentNumber * multiplier);
@@ -665,12 +1123,14 @@ public static class PluginsService
         if (operationType.Equals("append", StringComparison.OrdinalIgnoreCase))
         {
             var column = operation.Column ?? string.Empty;
-            var property = typeof(TEntry).GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                .FirstOrDefault(candidate => candidate.Name.Equals(column, StringComparison.OrdinalIgnoreCase));
+            var property = resolveColumn?.Invoke(column)
+                ?? typeof(TEntry).GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(candidate => candidate.Name.Equals(column, StringComparison.OrdinalIgnoreCase));
 
             if (property == null)
             {
-                throw new InvalidDataException($"The column '{column}' is not supported for {fileName}.");
+                throw new InvalidDataException(
+                    $"The column '{column}' is not supported for {fileName} (row '{operation.RowIdentifier ?? "<unknown>"}').");
             }
 
             var currentValue = property.GetValue(entry)?.ToString() ?? string.Empty;
@@ -683,7 +1143,7 @@ public static class PluginsService
             return $"({currentValue}){appendText}";
         }
 
-        throw new InvalidDataException($"Unsupported plugin operation '{operationType}'.");
+        throw new InvalidDataException($"Unsupported plugin operation '{operationType}' (file '{fileName}', row '{operation.RowIdentifier ?? "<unknown>"}', column '{operation.Column ?? string.Empty}').");
     }
 
     private static string ResolveMultiplierValue(
@@ -747,19 +1207,32 @@ public static class PluginsService
         return (TEntry)cloneMethod.Invoke(entry, null)!;
     }
 
-    private static string GetDisplayFileName<TEntry>()
+    /// <summary>
+    /// Normalizes a user-supplied value for an integer-typed target column. Game .txt files do not
+    /// accept decimals, so any fractional portion is truncated toward negative infinity (floor),
+    /// mirroring the way the game itself handles such values at runtime.
+    /// </summary>
+    private static string? FloorIntegerInput(string? value)
     {
-        if (typeof(TEntry) == typeof(Skills))
+        if (string.IsNullOrWhiteSpace(value))
         {
-            return SkillsFileName;
+            return value;
         }
 
-        if (typeof(TEntry) == typeof(CubeMain))
+        var trimmed = value.Trim();
+
+        if (long.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out _) ||
+            ulong.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
         {
-            return CubeMainFileName;
+            return trimmed;
         }
 
-        return typeof(TEntry).Name;
+        if (decimal.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture, out var asDecimal))
+        {
+            return decimal.Floor(asDecimal).ToString(CultureInfo.InvariantCulture);
+        }
+
+        return value;
     }
 
     private static object? ConvertValue(string? value, Type targetType, string column)
@@ -782,12 +1255,120 @@ public static class PluginsService
 
         if (targetType == typeof(int))
         {
-            if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedInt))
+            var normalized = FloorIntegerInput(value);
+            if (int.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedInt))
             {
                 return parsedInt;
             }
 
             throw new InvalidDataException($"The value '{value}' is not a valid integer for column '{column}'.");
+        }
+
+        if (targetType == typeof(uint))
+        {
+            var normalized = FloorIntegerInput(value);
+            if (uint.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedUInt))
+            {
+                return parsedUInt;
+            }
+
+            throw new InvalidDataException($"The value '{value}' is not a valid unsigned integer for column '{column}'.");
+        }
+
+        if (targetType == typeof(long))
+        {
+            var normalized = FloorIntegerInput(value);
+            if (long.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedLong))
+            {
+                return parsedLong;
+            }
+
+            throw new InvalidDataException($"The value '{value}' is not a valid long for column '{column}'.");
+        }
+
+        if (targetType == typeof(ulong))
+        {
+            var normalized = FloorIntegerInput(value);
+            if (ulong.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedULong))
+            {
+                return parsedULong;
+            }
+
+            throw new InvalidDataException($"The value '{value}' is not a valid unsigned long for column '{column}'.");
+        }
+
+        if (targetType == typeof(short))
+        {
+            var normalized = FloorIntegerInput(value);
+            if (short.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedShort))
+            {
+                return parsedShort;
+            }
+
+            throw new InvalidDataException($"The value '{value}' is not a valid short for column '{column}'.");
+        }
+
+        if (targetType == typeof(ushort))
+        {
+            var normalized = FloorIntegerInput(value);
+            if (ushort.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedUShort))
+            {
+                return parsedUShort;
+            }
+
+            throw new InvalidDataException($"The value '{value}' is not a valid unsigned short for column '{column}'.");
+        }
+
+        if (targetType == typeof(byte))
+        {
+            var normalized = FloorIntegerInput(value);
+            if (byte.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedByte))
+            {
+                return parsedByte;
+            }
+
+            throw new InvalidDataException($"The value '{value}' is not a valid byte for column '{column}'.");
+        }
+
+        if (targetType == typeof(sbyte))
+        {
+            var normalized = FloorIntegerInput(value);
+            if (sbyte.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedSByte))
+            {
+                return parsedSByte;
+            }
+
+            throw new InvalidDataException($"The value '{value}' is not a valid signed byte for column '{column}'.");
+        }
+
+        if (targetType == typeof(double))
+        {
+            if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedDouble))
+            {
+                return parsedDouble;
+            }
+
+            throw new InvalidDataException($"The value '{value}' is not a valid number for column '{column}'.");
+        }
+
+        if (targetType == typeof(float))
+        {
+            if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedFloat))
+            {
+                return parsedFloat;
+            }
+
+            throw new InvalidDataException($"The value '{value}' is not a valid number for column '{column}'.");
+        }
+
+        if (targetType == typeof(decimal))
+        {
+            if (decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedDecimal))
+            {
+                return parsedDecimal;
+            }
+
+            throw new InvalidDataException($"The value '{value}' is not a valid decimal for column '{column}'.");
         }
 
         if (targetType == typeof(bool))
@@ -818,8 +1399,10 @@ public static class PluginsService
     {
         var pluginDirectory = GetPluginDirectory(registration);
         var errors = new List<string>();
+        var warnings = new List<string>();
         var files = new List<PluginCatalogFileItem>();
         var parameters = new List<PluginParameterItem>();
+        var assets = new List<PluginAssetCopy>();
         var name = registration.FolderName;
         var version = "Unknown";
         var modVersion = string.Empty;
@@ -829,14 +1412,14 @@ public static class PluginsService
         if (!Directory.Exists(pluginDirectory))
         {
             errors.Add("Imported plugin files are missing from disk.");
-            return new PluginState(name, version, modVersion, author, description, parameters, files, errors);
+            return new PluginState(name, version, modVersion, author, description, parameters, files, assets, errors, warnings);
         }
 
         var pluginInfoPath = Path.Combine(pluginDirectory, PluginInfoFileName);
         if (!File.Exists(pluginInfoPath))
         {
             errors.Add("plugininfo.json is missing.");
-            return new PluginState(name, version, modVersion, author, description, parameters, files, errors);
+            return new PluginState(name, version, modVersion, author, description, parameters, files, assets, errors, warnings);
         }
 
         try
@@ -857,10 +1440,10 @@ public static class PluginsService
                 Value = string.IsNullOrWhiteSpace(parameter.Value) ? parameter.DefaultValue : parameter.Value
             }).ToList();
 
-            if (pluginInfo.Files.Count == 0)
+            if (pluginInfo.Files.Count == 0 && pluginInfo.Assets.Count == 0)
             {
-                errors.Add("plugininfo.json does not list any plugin JSON files.");
-                return new PluginState(name, version, modVersion, author, description, parameters, files, errors);
+                errors.Add("plugininfo.json does not list any plugin JSON files or assets.");
+                return new PluginState(name, version, modVersion, author, description, parameters, files, assets, errors, warnings);
             }
 
             foreach (var relativePath in pluginInfo.Files)
@@ -883,12 +1466,37 @@ public static class PluginsService
                 try
                 {
                     var operations = await LoadPluginOperationsAsync(absolutePath);
-                    ValidateOperations(operations, normalizedRelativePath, parameters, errors);
+                    ValidateOperations(operations, normalizedRelativePath, parameters, errors, warnings);
                 }
                 catch (Exception ex)
                 {
                     errors.Add(FormatJsonError(normalizedRelativePath, ex));
                 }
+            }
+
+            foreach (var asset in pluginInfo.Assets)
+            {
+                if (string.IsNullOrWhiteSpace(asset.Source) || string.IsNullOrWhiteSpace(asset.Target))
+                {
+                    errors.Add("plugininfo.json contains an asset entry with an empty source or target.");
+                    continue;
+                }
+
+                var normalizedSource = NormalizeRelativePath(asset.Source);
+                var sourceAbsolutePath = Path.Combine(pluginDirectory, normalizedSource);
+                if (!File.Exists(sourceAbsolutePath))
+                {
+                    errors.Add($"Referenced asset '{normalizedSource}' was not found.");
+                    continue;
+                }
+
+                var normalizedTarget = NormalizeRelativePath(asset.Target);
+                assets.Add(new PluginAssetCopy(sourceAbsolutePath, normalizedTarget));
+            }
+
+            if (assets.Count > 0)
+            {
+                warnings.Add(PluginAssetWarningMessage);
             }
         }
         catch (Exception ex)
@@ -896,14 +1504,15 @@ public static class PluginsService
             errors.Add(FormatJsonError("plugininfo.json", ex));
         }
 
-        return new PluginState(name, version, modVersion, author, description, parameters, files, errors);
+        return new PluginState(name, version, modVersion, author, description, parameters, files, assets, errors, warnings);
     }
 
     private static void ValidateOperations(
         IReadOnlyList<PluginJsonOperation> operations,
         string pluginFileName,
         IReadOnlyList<PluginParameterItem> parameters,
-        List<string> errors)
+        List<string> errors,
+        List<string> warnings)
     {
         if (operations.Count == 0)
         {
@@ -923,36 +1532,125 @@ public static class PluginsService
             if (supportedTarget == null)
             {
                 errors.Add(
-                    $"'{pluginFileName}' targets unsupported file '{operation.File}'. Only {SkillsFileName} and {CubeMainFileName} are supported right now.");
+                    $"'{pluginFileName}' targets unsupported file '{operation.File}'. All .txt files except itemstatcost.txt are supported, and any .json file under data/local/lng/strings is supported.");
                 continue;
             }
 
-            if (string.IsNullOrWhiteSpace(operation.RowIdentifier))
+            if (supportedTarget.IsStringsTarget)
+            {
+                if (string.IsNullOrWhiteSpace(operation.Key))
+                {
+                    errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} entry with no Key.");
+                }
+
+                if (operation.LanguageValues == null || operation.LanguageValues.Count == 0)
+                {
+                    var known = string.Join(", ", KnownStringLanguageColumns);
+                    errors.Add(
+                        $"'{pluginFileName}' contains a {supportedTarget.FileName} entry for Key '{operation.Key}' with no language fields to replace. Add one or more of: {known}.");
+                }
+
+                continue;
+            }
+
+            var isAddRow = !string.IsNullOrWhiteSpace(operation.Operation)
+                           && operation.Operation.Equals("addRow", StringComparison.OrdinalIgnoreCase);
+
+            if (isAddRow)
+            {
+                if (!string.IsNullOrWhiteSpace(operation.RowIdentifier)
+                    && !int.TryParse(operation.RowIdentifier, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+                {
+                    errors.Add($"'{pluginFileName}' contains an addRow operation for {supportedTarget.FileName} with non-numeric rowIdentifier '{operation.RowIdentifier}'. Use a 0-based row index, or omit it to append at the end.");
+                }
+            }
+            else if (operation.RowIdentifiers is { Count: > 0 } identifierMap)
+            {
+                // Multi-column rowIdentifier override is allowed; validate the listed columns and
+                // warn the author when the override does not narrow the match enough on rowID files.
+                foreach (var pair in identifierMap)
+                {
+                    var columnExists = supportedTarget.EntryType
+                        .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                        .Any(property => property.Name.Equals(pair.Key, StringComparison.OrdinalIgnoreCase));
+
+                    if (!columnExists && supportedTarget.ResolveColumn != null)
+                    {
+                        columnExists = supportedTarget.ResolveColumn(pair.Key) != null;
+                    }
+
+                    if (!columnExists)
+                    {
+                        errors.Add($"'{pluginFileName}' references unknown {supportedTarget.FileName} rowIdentifier column '{pair.Key}'.");
+                    }
+                }
+
+                if (supportedTarget.UsesRowId && identifierMap.Count < 2)
+                {
+                    warnings.Add(
+                        $"'{pluginFileName}' targets {supportedTarget.FileName}, which contains duplicate identifier values. " +
+                        $"The rowIdentifier override only lists {identifierMap.Count} column(s); add at least two so the intended row is uniquely matched.");
+                }
+            }
+            else if (string.IsNullOrWhiteSpace(operation.RowIdentifier))
             {
                 errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} operation with no rowIdentifier.");
             }
-
-            if (string.IsNullOrWhiteSpace(operation.Column))
+            else if (supportedTarget.UsesRowId
+                     && !int.TryParse(operation.RowIdentifier, out _)
+                     && !TryParseRowRange(operation.RowIdentifier, out _, out _))
             {
-                errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} operation with no column.");
+                errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} operation with non-numeric rowIdentifier '{operation.RowIdentifier}'. This file uses numeric row IDs (e.g. \"5\" or a range like \"50-100\").");
+            }
+
+            var assignments = GetColumnAssignments(operation);
+            if (assignments.Count == 0)
+            {
+                errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} operation with no column. Provide a 'column' field or a non-empty 'columns' array.");
                 continue;
             }
 
-            var propertyExists = supportedTarget.EntryType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                .Any(property => property.Name.Equals(operation.Column, StringComparison.OrdinalIgnoreCase));
-
-            if (!propertyExists)
+            foreach (var assignment in assignments)
             {
-                errors.Add($"'{pluginFileName}' references unknown {supportedTarget.FileName} column '{operation.Column}'.");
-            }
+                if (string.IsNullOrWhiteSpace(assignment.Column))
+                {
+                    errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} operation with a 'columns' entry that is missing its column name.");
+                    continue;
+                }
 
-            if (!string.IsNullOrWhiteSpace(operation.Operation) &&
-                (operation.Operation.Equals("multiplyExisting", StringComparison.OrdinalIgnoreCase) ||
-                 operation.Operation.Equals("append", StringComparison.OrdinalIgnoreCase)) &&
-                string.IsNullOrWhiteSpace(operation.ParameterKey) &&
-                string.IsNullOrWhiteSpace(operation.UpdatedValue))
-            {
-                errors.Add($"'{pluginFileName}' contains a {operation.Operation} operation without parameterKey or updatedValue.");
+                var propertyExists = supportedTarget.EntryType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .Any(property => property.Name.Equals(assignment.Column, StringComparison.OrdinalIgnoreCase));
+
+                if (!propertyExists && supportedTarget.ResolveColumn != null)
+                {
+                    propertyExists = supportedTarget.ResolveColumn(assignment.Column!) != null;
+                }
+
+                if (!propertyExists)
+                {
+                    errors.Add($"'{pluginFileName}' references unknown {supportedTarget.FileName} column '{assignment.Column}'.");
+                }
+
+                var effectiveOperation = !string.IsNullOrWhiteSpace(assignment.Operation)
+                    ? assignment.Operation
+                    : operation.Operation;
+
+                if (!string.IsNullOrWhiteSpace(effectiveOperation) &&
+                    (effectiveOperation.Equals("multiplyExisting", StringComparison.OrdinalIgnoreCase) ||
+                     effectiveOperation.Equals("append", StringComparison.OrdinalIgnoreCase)) &&
+                    string.IsNullOrWhiteSpace(assignment.ParameterKey) &&
+                    string.IsNullOrWhiteSpace(assignment.UpdatedValue) &&
+                    string.IsNullOrWhiteSpace(operation.ParameterKey) &&
+                    string.IsNullOrWhiteSpace(operation.UpdatedValue))
+                {
+                    errors.Add($"'{pluginFileName}' contains a {effectiveOperation} operation on column '{assignment.Column}' without parameterKey or updatedValue.");
+                }
+
+                if (!string.IsNullOrWhiteSpace(assignment.ParameterKey) &&
+                    parameters.All(parameter => !parameter.Key.Equals(assignment.ParameterKey, StringComparison.OrdinalIgnoreCase)))
+                {
+                    errors.Add($"'{pluginFileName}' references unknown parameter '{assignment.ParameterKey}'.");
+                }
             }
 
             if (!string.IsNullOrWhiteSpace(operation.ParameterKey) &&
@@ -963,16 +1661,37 @@ public static class PluginsService
         }
     }
 
-    private static SupportedPluginTarget? GetSupportedTarget(string? fileName)
+    private static bool IsSupportedTargetFile(string? fileName)
     {
-        if (string.Equals(fileName, SkillsFileName, StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(fileName))
         {
-            return new SupportedPluginTarget(SkillsFileName, typeof(Skills), SkillsRowIdentifierPropertyName);
+            return false;
         }
 
-        if (string.Equals(fileName, CubeMainFileName, StringComparison.OrdinalIgnoreCase))
+        return ParserRegistry.ContainsKey(fileName) || IsStringsTargetFile(fileName);
+    }
+
+    private static SupportedPluginTarget? GetSupportedTarget(string? fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
         {
-            return new SupportedPluginTarget(CubeMainFileName, typeof(CubeMain), CubeMainRowIdentifierPropertyName);
+            return null;
+        }
+
+        if (ParserRegistry.TryGetValue(fileName, out var registration))
+        {
+            return new SupportedPluginTarget(
+                fileName,
+                registration.EntryType,
+                registration.RowIdentifierPropertyName,
+                registration.UsesRowId,
+                registration.ResolveColumn,
+                IsStringsTarget: false);
+        }
+
+        if (IsStringsTargetFile(fileName))
+        {
+            return new SupportedPluginTarget(fileName, typeof(object), "Key", UsesRowId: false, IsStringsTarget: true);
         }
 
         return null;
@@ -995,7 +1714,8 @@ public static class PluginsService
             Author = pluginInfo.Author,
             Description = pluginInfo.Description,
             Files = pluginInfo.Files ?? [],
-            Parameters = pluginInfo.Parameters ?? []
+            Parameters = pluginInfo.Parameters ?? [],
+            Assets = pluginInfo.Assets ?? []
         };
     }
 
@@ -1027,9 +1747,9 @@ public static class PluginsService
             throw new InvalidDataException("plugininfo.json modVersion must be in #.#.# format (e.g. 1.0.0).");
         }
 
-        if (pluginInfo.Files.Count == 0)
+        if (pluginInfo.Files.Count == 0 && pluginInfo.Assets.Count == 0)
         {
-            throw new InvalidDataException("plugininfo.json must include at least one plugin JSON file.");
+            throw new InvalidDataException("plugininfo.json must include at least one plugin JSON file or asset.");
         }
 
         foreach (var parameter in pluginInfo.Parameters)
@@ -1065,6 +1785,41 @@ public static class PluginsService
                     $"The plugin JSON file '{normalizedRelativePath}' listed in plugininfo.json was not found.");
             }
         }
+
+        foreach (var asset in pluginInfo.Assets)
+        {
+            if (string.IsNullOrWhiteSpace(asset.Source))
+            {
+                throw new InvalidDataException("plugininfo.json contains an asset entry with no source.");
+            }
+
+            if (string.IsNullOrWhiteSpace(asset.Target))
+            {
+                throw new InvalidDataException("plugininfo.json contains an asset entry with no target.");
+            }
+
+            var normalizedSource = NormalizeRelativePath(asset.Source);
+            if (!normalizedSource.StartsWith(PluginAssetsDirectoryName + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                && !normalizedSource.StartsWith(PluginAssetsDirectoryName + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException(
+                    $"Asset source '{asset.Source}' must live under the '{PluginAssetsDirectoryName}/' folder inside the plugin.");
+            }
+
+            var sourceAbsolutePath = Path.Combine(pluginRootDirectory, normalizedSource);
+            if (!File.Exists(sourceAbsolutePath))
+            {
+                throw new FileNotFoundException(
+                    $"The asset '{normalizedSource}' listed in plugininfo.json was not found.");
+            }
+
+            var normalizedTarget = NormalizeRelativePath(asset.Target);
+            if (Path.IsPathRooted(normalizedTarget) || normalizedTarget.Split(Path.DirectorySeparatorChar).Contains(".."))
+            {
+                throw new InvalidDataException(
+                    $"Asset target '{asset.Target}' must be a relative path inside the mod folder.");
+            }
+        }
     }
 
     private static async Task<IReadOnlyList<PluginJsonOperation>> LoadPluginOperationsAsync(string pluginFilePath)
@@ -1086,35 +1841,210 @@ public static class PluginsService
 
     private static IReadOnlyList<PluginJsonOperation> DeserializeSingleOperation(string json)
     {
-        var operation = JsonSerializer.Deserialize<PluginJsonOperation>(json, JsonOptions);
+        using var document = JsonDocument.Parse(json);
+        return [NormalizeOperation(DeserializeOperationElement(document.RootElement))];
+    }
+
+    private static IReadOnlyList<PluginJsonOperation> DeserializeOperationArray(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        var operations = new List<PluginJsonOperation>(document.RootElement.GetArrayLength());
+        foreach (var element in document.RootElement.EnumerateArray())
+        {
+            if (element.ValueKind != JsonValueKind.Object)
+            {
+                throw new InvalidDataException("Plugin JSON array entries must be objects.");
+            }
+
+            operations.Add(NormalizeOperation(DeserializeOperationElement(element)));
+        }
+
+        return operations;
+    }
+
+    private static PluginJsonOperation DeserializeOperationElement(JsonElement element)
+    {
+        // Excel (.txt) targets use the standard {file, rowIdentifier, column, operation, ...} schema.
+        // Strings (.json) targets use a flat d2rr-style layout: {file, Key, enUS, zhTW, ...}
+        // where every known language field present on the object is applied as a direct replacement.
+        var file = element.TryGetProperty("file", out var fileProperty) && fileProperty.ValueKind == JsonValueKind.String
+            ? fileProperty.GetString()
+            : null;
+
+        if (IsStringsTargetFile(file))
+        {
+            string? key = null;
+            if (element.TryGetProperty("Key", out var keyProperty) && keyProperty.ValueKind == JsonValueKind.String)
+            {
+                key = keyProperty.GetString();
+            }
+            else if (element.TryGetProperty("key", out var keyPropertyLower) && keyPropertyLower.ValueKind == JsonValueKind.String)
+            {
+                key = keyPropertyLower.GetString();
+            }
+
+            var languageValues = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var property in element.EnumerateObject())
+            {
+                if (property.NameEquals("file") || property.NameEquals("Key") || property.NameEquals("key") || property.NameEquals("id"))
+                {
+                    continue;
+                }
+
+                if (property.Value.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                if (!KnownStringLanguageColumns.Contains(property.Name))
+                {
+                    // Ignore unknown fields per the flat d2rr-style schema (e.g. extra metadata).
+                    continue;
+                }
+
+                languageValues[property.Name] = property.Value.GetString() ?? string.Empty;
+            }
+
+            return new PluginJsonOperation(
+                File: file,
+                RowIdentifier: null,
+                Column: null,
+                Operation: null,
+                ParameterKey: null,
+                UpdatedValue: null,
+                Key: key,
+                LanguageValues: languageValues);
+        }
+
+        // Allow rowIdentifier to be either a string (legacy/default behavior) or an object that
+        // declares one or more identifier columns ({"key1":"col1","key2":"col2"}). A dedicated
+        // "rowIdentifiers" property is also accepted as a plural alias. When the property is an
+        // object we strip it from the element before deserialization so the standard string-typed
+        // RowIdentifier remains valid, then re-attach the parsed dictionary.
+        var rowIdentifiers = TryReadRowIdentifierMap(element, "rowIdentifier")
+                             ?? TryReadRowIdentifierMap(element, "rowIdentifiers");
+
+        string elementJson;
+        if (rowIdentifiers != null)
+        {
+            using var buffer = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(buffer))
+            {
+                writer.WriteStartObject();
+                foreach (var property in element.EnumerateObject())
+                {
+                    if (property.NameEquals("rowIdentifier") || property.NameEquals("rowIdentifiers"))
+                    {
+                        continue;
+                    }
+
+                    property.WriteTo(writer);
+                }
+                writer.WriteEndObject();
+            }
+
+            elementJson = Encoding.UTF8.GetString(buffer.ToArray());
+        }
+        else
+        {
+            elementJson = element.GetRawText();
+        }
+
+        var operation = JsonSerializer.Deserialize<PluginJsonOperation>(elementJson, JsonOptions);
         if (operation == null)
         {
             throw new InvalidDataException("Plugin JSON could not be parsed.");
         }
 
-        return [NormalizeOperation(operation)];
-    }
-
-    private static IReadOnlyList<PluginJsonOperation> DeserializeOperationArray(string json)
-    {
-        var operations = JsonSerializer.Deserialize<List<PluginJsonOperation>>(json, JsonOptions);
-        if (operations == null)
+        if (rowIdentifiers != null)
         {
-            throw new InvalidDataException("Plugin JSON array could not be parsed.");
+            operation = operation with { RowIdentifiers = rowIdentifiers };
         }
 
-        return operations.Select(NormalizeOperation).ToList();
+        return operation;
+    }
+
+    // Reads an object-shaped rowIdentifier override into a column-name -> expected-value dictionary.
+    // Returns null when the property is missing or not an object so callers can fall back to the
+    // legacy string-typed rowIdentifier path.
+    private static IReadOnlyDictionary<string, string>? TryReadRowIdentifierMap(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in property.EnumerateObject())
+        {
+            string? value = entry.Value.ValueKind switch
+            {
+                JsonValueKind.String => entry.Value.GetString(),
+                JsonValueKind.Number => entry.Value.ToString(),
+                JsonValueKind.True => "true",
+                JsonValueKind.False => "false",
+                _ => null
+            };
+
+            if (value == null)
+            {
+                continue;
+            }
+
+            dict[entry.Name] = value;
+        }
+
+        return dict;
     }
 
     private static PluginJsonOperation NormalizeOperation(PluginJsonOperation operation)
     {
+        IReadOnlyList<PluginJsonColumnAssignment>? normalizedColumns = null;
+        if (operation.Columns is { Count: > 0 } columns)
+        {
+            var list = new List<PluginJsonColumnAssignment>(columns.Count);
+            foreach (var column in columns)
+            {
+                list.Add(new PluginJsonColumnAssignment(
+                    Column: column.Column?.Trim() ?? string.Empty,
+                    UpdatedValue: column.UpdatedValue,
+                    ParameterKey: column.ParameterKey?.Trim(),
+                    Operation: column.Operation?.Trim()));
+            }
+            normalizedColumns = list;
+        }
+
+        IReadOnlyDictionary<string, string>? normalizedRowIdentifiers = null;
+        if (operation.RowIdentifiers is { Count: > 0 } rowIdentifiers)
+        {
+            var dict = new Dictionary<string, string>(rowIdentifiers.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var pair in rowIdentifiers)
+            {
+                var key = pair.Key?.Trim();
+                if (string.IsNullOrEmpty(key))
+                {
+                    continue;
+                }
+
+                dict[key] = pair.Value?.Trim() ?? string.Empty;
+            }
+
+            if (dict.Count > 0)
+            {
+                normalizedRowIdentifiers = dict;
+            }
+        }
+
         return operation with
         {
             File = NormalizeRelativePath(operation.File ?? string.Empty),
             RowIdentifier = operation.RowIdentifier?.Trim() ?? string.Empty,
             Column = operation.Column?.Trim() ?? string.Empty,
             Operation = operation.Operation?.Trim(),
-            ParameterKey = operation.ParameterKey?.Trim()
+            ParameterKey = operation.ParameterKey?.Trim(),
+            Key = operation.Key?.Trim(),
+            Columns = normalizedColumns,
+            RowIdentifiers = normalizedRowIdentifiers
         };
     }
 
@@ -1317,9 +2247,188 @@ public static class PluginsService
         string Description,
         IReadOnlyList<PluginParameterItem> Parameters,
         IReadOnlyList<PluginCatalogFileItem> Files,
-        IReadOnlyList<string> Errors);
+        IReadOnlyList<PluginAssetCopy> Assets,
+        IReadOnlyList<string> Errors,
+        IReadOnlyList<string> Warnings);
 
-    private sealed record SupportedPluginTarget(string FileName, Type EntryType, string RowIdentifierPropertyName);
+    private sealed record PluginAssetCopy(string SourceAbsolutePath, string TargetRelativePath);
+
+    private sealed record SupportedPluginTarget(
+        string FileName,
+        Type EntryType,
+        string RowIdentifierPropertyName,
+        bool UsesRowId,
+        Func<string, PropertyInfo?>? ResolveColumn = null,
+        bool IsStringsTarget = false);
+
+    private sealed record FileParserRegistration(
+        Type EntryType,
+        string RowIdentifierPropertyName,
+        bool UsesRowId,
+        Func<string, IReadOnlyList<PluginJsonOperation>, IReadOnlyDictionary<string, string>, Task> ApplyAsync,
+        Func<string, PropertyInfo?> ResolveColumn);
+
+    private static FileParserRegistration CreateRegistration<TEntry, TParser>(
+        string fileName,
+        string rowIdentifierPropertyName,
+        Func<TEntry, string?> rowIdentifierSelector,
+        bool usesRowId = false)
+        where TEntry : class, new()
+        where TParser : HeaderMappedTextFileParser<TEntry, TParser>, new()
+    {
+        var resolver = BuildColumnResolver<TEntry, TParser>();
+        return new FileParserRegistration(
+            typeof(TEntry),
+            rowIdentifierPropertyName,
+            usesRowId,
+            (excelDirectory, operations, parameters) =>
+                ApplyOperationsForTargetAsync(
+                    excelDirectory, operations, parameters, fileName,
+                    rowIdentifierPropertyName, rowIdentifierSelector,
+                    path => HeaderMappedTextFileParser<TEntry, TParser>.GetEntries(path),
+                    (entries, source, output, token) =>
+                        HeaderMappedTextFileParser<TEntry, TParser>.SaveEntriesPreservingUnchanged(entries, source, output, token),
+                    resolver,
+                    usesRowId),
+            resolver);
+    }
+
+    /// <summary>
+    /// Builds a column-name resolver for the given parser type by reflecting its protected
+    /// <c>PropertyColumnAliases</c> member. Mirrors the lookup logic of
+    /// <c>HeaderMappedTextFileParser.GetOrBuildPropertyMap</c> so that raw D2R column headers
+    /// (e.g. <c>dsc2calca1</c>) resolve to the corresponding <see cref="PropertyInfo"/>
+    /// (e.g. <c>Dsc2CalculationA1</c>) without requiring library-side API additions.
+    /// </summary>
+    private static Func<string, PropertyInfo?> BuildColumnResolver<TEntry, TParser>()
+        where TEntry : class
+        where TParser : HeaderMappedTextFileParser<TEntry, TParser>, new()
+    {
+        var map = new Dictionary<string, PropertyInfo>(StringComparer.OrdinalIgnoreCase);
+
+        IReadOnlyDictionary<string, string[]> aliases =
+            new Dictionary<string, string[]>(StringComparer.Ordinal);
+        var aliasesProperty = typeof(TParser).GetProperty(
+            "PropertyColumnAliases",
+            BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+        if (aliasesProperty is not null)
+        {
+            try
+            {
+                var instance = new TParser();
+                if (aliasesProperty.GetValue(instance) is IReadOnlyDictionary<string, string[]> value)
+                {
+                    aliases = value;
+                }
+            }
+            catch
+            {
+                // Fall back to property-name-only resolution.
+            }
+        }
+
+        var properties = typeof(TEntry)
+            .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+            .Where(p => p.CanRead && p.CanWrite && p.GetIndexParameters().Length == 0);
+
+        foreach (var property in properties)
+        {
+            map.TryAdd(NormalizePluginColumnName(property.Name), property);
+            if (aliases.TryGetValue(property.Name, out var propertyAliases))
+            {
+                foreach (var alias in propertyAliases)
+                {
+                    map.TryAdd(NormalizePluginColumnName(alias), property);
+                }
+            }
+        }
+
+        return column => string.IsNullOrWhiteSpace(column)
+            ? null
+            : map.TryGetValue(NormalizePluginColumnName(column), out var property) ? property : null;
+    }
+
+    private static string NormalizePluginColumnName(string name)
+    {
+        return new string(name
+            .Trim()
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToLowerInvariant)
+            .ToArray());
+    }
+
+    private static Dictionary<string, FileParserRegistration> BuildParserRegistry()
+    {
+        var registry = new Dictionary<string, FileParserRegistration>(StringComparer.OrdinalIgnoreCase);
+
+        void Register<TEntry, TParser>(
+            string fileName,
+            string rowIdentifierPropertyName,
+            Func<TEntry, string?> rowIdentifierSelector,
+            bool usesRowId = false)
+            where TEntry : class, new()
+            where TParser : HeaderMappedTextFileParser<TEntry, TParser>, new()
+        {
+            registry[fileName] = CreateRegistration<TEntry, TParser>(
+                fileName, rowIdentifierPropertyName, rowIdentifierSelector, usesRowId);
+        }
+
+        Register<Armor, ArmorParser>("armor.txt", "Code", static e => e.Code);
+        Register<AutoMagic, AutoMagicParser>("automagic.txt", "Name", static e => e.Name);
+        Register<CharStats, CharStatsParser>("charstats.txt", "Class", static e => e.Class);
+        Register<CubeMain, CubeMainParser>("cubemain.txt", "RowId", static e => e.Description, usesRowId: true);
+        Register<CubeModifierType, CubeModifierTypeParser>("cubemod.txt", "CubeModifierTypeName", static e => e.CubeModifierTypeName);
+        Register<DifficultyLevel, DifficultyLevelParser>("difficultylevels.txt", "Name", static e => e.Name);
+        Register<Experience, ExperienceParser>("experience.txt", "Level", static e => e.Level);
+        Register<Gamble, GambleParser>("gamble.txt", "Name", static e => e.Name);
+        Register<Gem, GemParser>("gems.txt", "Name", static e => e.Name);
+        Register<Hirelings, HirelingParser>("hireling.txt", "RowId", static e => e.Hireling, usesRowId: true);
+        Register<Inventory, InventoryParser>("inventory.txt", "Class", static e => e.Class);
+        Register<ItemType, ItemTypeParser>("itemtypes.txt", "Code", static e => e.Code);
+        Register<LvlMaze, LvlMazeParser>("lvlmaze.txt", "RowId", static e => e.Name, usesRowId: true);
+        Register<LevelsPreset, LvlPrestParser>("lvlprest.txt", "RowId", static e => e.Name, usesRowId: true);
+        Register<LvlWarp, LvlWarpParser>("lvlwarp.txt", "Name", static e => e.Name);
+        Register<MagicPrefix, MagicPrefixParser>("magicprefix.txt", "RowId", static e => e.Name, usesRowId: true);
+        Register<MagicSuffix, MagicSuffixParser>("magicsuffix.txt", "RowId", static e => e.Name, usesRowId: true);
+        Register<Misc, MiscParser>("misc.txt", "Code", static e => e.Code);
+        Register<Missiles, MissilesParser>("missiles.txt", "MissileName", static e => e.MissileName);
+        Register<MonEquip, MonEquipParser>("monequip.txt", "RowId", static e => e.Monster, usesRowId: true);
+        Register<MonPreset, MonPresetParser>("monpreset.txt", "RowId", static e => e.Act?.ToString(), usesRowId: true);
+        Register<MonProp, MonPropParser>("monprop.txt", "Id", static e => e.Id);
+        Register<MonStat, MonStatsParser>("monstats.txt", "Id", static e => e.Id);
+        Register<MonStats2, MonStats2Parser>("monstats2.txt", "Id", static e => e.Id);
+        Register<MonType, MonTypeParser>("montype.txt", "Type", static e => e.Type);
+        Register<MonUMod, MonUModParser>("monumod.txt", "UniqueModId", static e => e.UniqueModId);
+        Register<Npc, NpcParser>("npc.txt", "NpcName", static e => e.NpcName);
+        Register<PetType, PetTypeParser>("pettype.txt", "PetTypeId", static e => e.PetTypeId);
+        Register<Property, PropertiesParser>("properties.txt", "Code", static e => e.Code);
+        Register<PropertyGroup, PropertyGroupParser>("propertygroups.txt", "Code", static e => e.Code);
+        Register<RuneWord, RunesParser>("runes.txt", "Name", static e => e.Name);
+        Register<SetItem, SetItemParser>("setitems.txt", "Index", static e => e.Index);
+        Register<Sets, SetsParser>("sets.txt", "Index", static e => e.Index);
+        Register<Shrines, ShrinesParser>("shrines.txt", "Name", static e => e.Name);
+        Register<SkillCalc, SkillCalcParser>("skillcalc.txt", "Code", static e => e.Code);
+        Register<SkillDesc, SkillDescParser>("skilldesc.txt", "SkillName", static e => e.SkillName);
+        Register<Skills, SkillsParser>("skills.txt", "Skill", static e => e.Skill);
+        Register<Sounds, SoundsParser>("sounds.txt", "Sound", static e => e.Sound);
+        Register<States, StatesParser>("states.txt", "StateId", static e => e.StateId);
+        Register<StorePage, StorePageParser>("storepage.txt", "StorePageName", static e => e.StorePageName);
+        Register<SuperUnique, SuperUniquesParser>("superuniques.txt", "Superunique", static e => e.Superunique);
+        Register<TreasureClass, TreasureClassParser>("treasureclassex.txt", "TreasureClassName", static e => e.TreasureClassName);
+        Register<UniqueItem, UniqueItemsParser>("uniqueitems.txt", "Index", static e => e.Index);
+        Register<Weapon, WeaponParser>("weapons.txt", "Code", static e => e.Code);
+        Register<ActInfo, ActInfoParser>("actinfo.txt", "Act", static e => e.Act?.ToString());
+        Register<Automap, AutomapParser>("automap.txt", "RowId", static e => e.LevelName, usesRowId: true);
+        Register<ItemUiCategory, ItemUiCategoryParser>("itemuicategories.txt", "Name", static e => e.Name);
+        Register<LevelGroup, LevelGroupParser>("levelgroups.txt", "LevelGroupId", static e => e.LevelGroupId?.ToString());
+        Register<Level, LevelParser>("levels.txt", "Name", static e => e.Name);
+        Register<MonLvl, MonLvlParser>("monlvl.txt", "Level", static e => e.Level?.ToString());
+        Register<MonPet, MonPetParser>("monpet.txt", "Monster", static e => e.Monster);
+        Register<GameObject, ObjectsParser>("objects.txt", "RowId", static e => e.Name, usesRowId: true);
+        Register<Overlay, OverlayParser>("overlay.txt", "OverlayName", static e => e.OverlayName);
+
+        return registry;
+    }
 
     private sealed class PluginInfo
     {
@@ -1330,6 +2439,13 @@ public static class PluginsService
         public string? Description { get; set; }
         public List<string> Files { get; set; } = [];
         public List<PluginParameterDefinition> Parameters { get; set; } = [];
+        public List<PluginAssetDefinition> Assets { get; set; } = [];
+    }
+
+    private sealed class PluginAssetDefinition
+    {
+        public string Source { get; set; } = string.Empty;
+        public string Target { get; set; } = string.Empty;
     }
 
     private sealed class PluginParameterDefinition
@@ -1347,5 +2463,24 @@ public static class PluginsService
         string? Column,
         string? Operation,
         string? ParameterKey,
-        string? UpdatedValue);
+        string? UpdatedValue,
+        string? Key = null,
+        IReadOnlyDictionary<string, string>? LanguageValues = null,
+        IReadOnlyList<PluginJsonColumnAssignment>? Columns = null,
+        // Optional override of the default rowIdentifier matching: when present, a row is considered
+        // a match only when every key/value pair (column-name -> expected-value) matches the entry's
+        // corresponding column. Authors can supply this either as an object literal under the
+        // "rowIdentifier" property (e.g. {"key1":"col1","key2":"col2"}) or via a dedicated
+        // "rowIdentifiers" property.
+        IReadOnlyDictionary<string, string>? RowIdentifiers = null);
+
+    // Per-column assignment used either for multi-column updates that share a single rowIdentifier,
+    // or to specify the column/value pairs of a new row produced by the addRow operation.
+    // When a per-column field is null/empty, the parent operation's matching field is used as the
+    // fallback (Operation defaults to the parent's Operation, "replace" semantics for addRow).
+    private sealed record PluginJsonColumnAssignment(
+        string? Column,
+        string? UpdatedValue = null,
+        string? ParameterKey = null,
+        string? Operation = null);
 }

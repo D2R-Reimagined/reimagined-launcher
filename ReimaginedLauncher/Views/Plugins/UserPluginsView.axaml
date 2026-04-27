@@ -19,7 +19,7 @@
                     Padding="20">
                 <Grid ColumnDefinitions="*,Auto,Auto"
                       ColumnSpacing="12"
-                      RowDefinitions="Auto,Auto,Auto"
+                      RowDefinitions="Auto,Auto,Auto,Auto"
                       RowSpacing="12">
                     <StackPanel Grid.Row="0"
                                 Grid.Column="0"
@@ -47,8 +47,33 @@
                             Click="OnSubmitPluginClicked"
                             HorizontalAlignment="Right" />
 
+                    <Grid Grid.Row="1"
+                          Grid.ColumnSpan="3"
+                          ColumnDefinitions="*,Auto"
+                          ColumnSpacing="12">
+                        <TextBox x:Name="SearchTextBox"
+                                 Grid.Column="0"
+                                 PlaceholderText="Search by title or description..."
+                                 TextChanged="OnSearchTextChanged" />
+                        <StackPanel Grid.Column="1"
+                                    Orientation="Horizontal"
+                                    Spacing="6"
+                                    VerticalAlignment="Center">
+                            <TextBlock Classes="muted"
+                                       VerticalAlignment="Center"
+                                       Text="Sort by:" />
+                            <ComboBox x:Name="SortComboBox"
+                                      MinWidth="160"
+                                      SelectedIndex="0"
+                                      SelectionChanged="OnSortChanged">
+                                <ComboBoxItem Content="Last Updated" />
+                                <ComboBoxItem Content="Date Created" />
+                            </ComboBox>
+                        </StackPanel>
+                    </Grid>
+
                     <Border x:Name="LoadingBanner"
-                            Grid.Row="1"
+                            Grid.Row="2"
                             Grid.ColumnSpan="3"
                             Classes="panel"
                             Padding="16"
@@ -62,7 +87,7 @@
                     </Border>
 
                     <StackPanel x:Name="EmptyStatePanel"
-                                Grid.Row="2"
+                                Grid.Row="3"
                                 Grid.ColumnSpan="3"
                                 Spacing="4"
                                 IsVisible="False">
@@ -73,7 +98,7 @@
                     </StackPanel>
 
                     <ItemsControl x:Name="UserPluginsItemsControl"
-                                  Grid.Row="2"
+                                  Grid.Row="3"
                                   Grid.ColumnSpan="3">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="models:UserPluginEntry">

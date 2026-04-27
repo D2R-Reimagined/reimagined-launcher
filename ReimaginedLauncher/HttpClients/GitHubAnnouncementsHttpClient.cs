@@ -3,29 +3,28 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using ReimaginedLauncher.HttpClients.Models;
+using ReimaginedLauncher.Utilities;
 
 namespace ReimaginedLauncher.HttpClients;
 
 public class GitHubAnnouncementsHttpClient
 {
-    private const string RepositoryPath = "/D2R-Reimagined/reimagined-launcher";
-    private const string BaseUrl = "https://github.com";
-    private const string AnnouncementsUrl = $"{BaseUrl}{RepositoryPath}/discussions/categories/announcements";
-    private static readonly Regex DiscussionRegex = new(
-        "<a[^>]+href=\"(?<href>/D2R-Reimagined/reimagined-launcher/discussions/(?<number>\\d+))\"[^>]*class=\"[^\"]*markdown-title[^\"]*\"[^>]*>(?<title>.*?)</a>\\s*</h3>\\s*<div class=\"text-small color-fg-muted mt-1\">\\s*<a[^>]+href=\"/(?<authorPath>[^\"]+)\"[^>]*>(?<author>.*?)</a>\\s*announced\\s*<relative-time datetime=\"(?<published>[^\"]+)\"",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
-    private static readonly Regex DescriptionRegex = new(
-        "<meta property=\"og:description\" content=\"(?<description>[^\"]*)\"",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    private static readonly Regex BodyRegex = new(
-        "<td\\s+class=\"[^\"]*comment-body markdown-body js-comment-body[^\"]*\"[^>]*>(?<body>.*?)</td>",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+    private const string AnnouncementsUrl = ProxyEndpoints.Announcements;
+
     private static readonly Regex BlockRegex = new(
         "<(?<tag>h[1-6]|p|li)[^>]*>(?<content>.*?)</(?<endtag>h[1-6]|p|li)>",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+    // Serialize concurrent callers so the static fallback cache is mutated
+    // and read under a single lock (mirrors GitHubDiscussionPluginsHttpClient).
+    private static readonly SemaphoreSlim FetchLock = new(1, 1);
+    private static IReadOnlyList<GitHubAnnouncement>? _lastKnownGood;
 
     private readonly HttpClient _httpClient;
 
@@ -37,133 +36,75 @@ public class GitHubAnnouncementsHttpClient
 
     public async Task<IReadOnlyList<GitHubAnnouncement>> GetAnnouncementsAsync()
     {
+        await FetchLock.WaitAsync();
         try
         {
-            var html = await _httpClient.GetStringAsync(AnnouncementsUrl);
-            var announcements = new List<GitHubAnnouncement>();
-            var seenDiscussionNumbers = new HashSet<int>();
+            using var response = await ProxyHttpHelper.GetWithRateLimitAsync(_httpClient, AnnouncementsUrl);
+            response.EnsureSuccessStatusCode();
 
-            foreach (Match match in DiscussionRegex.Matches(html))
-            {
-                if (!int.TryParse(match.Groups["number"].Value, out var discussionNumber) ||
-                    !seenDiscussionNumbers.Add(discussionNumber))
-                {
-                    continue;
-                }
+            var payload = await response.Content.ReadFromJsonAsync<ProxyAnnouncement[]>() ?? [];
 
-                if (!DateTimeOffset.TryParse(match.Groups["published"].Value, out var publishedAt))
-                {
-                    publishedAt = DateTimeOffset.MinValue;
-                }
-
-                announcements.Add(new GitHubAnnouncement
-                {
-                    Number = discussionNumber,
-                    Title = DecodeText(match.Groups["title"].Value),
-                    Author = DecodeText(match.Groups["author"].Value),
-                    PublishedAt = publishedAt,
-                    Url = $"{BaseUrl}{match.Groups["href"].Value}"
-                });
-            }
-
-            announcements = announcements
+            var announcements = payload
+                .Select(ToAnnouncement)
                 .OrderByDescending(announcement => announcement.Number)
                 .ToList();
 
-            foreach (var announcement in announcements)
-            {
-                var blocks = await GetAnnouncementBlocksAsync(announcement.Url, announcement.Title);
-                announcement.Blocks = blocks;
-                announcement.BodyText = string.Join(Environment.NewLine, blocks.Select(block => block.Text));
-                announcement.Summary = announcement.BodyText;
-                announcement.PreviewBlocks = BuildPreviewBlocks(blocks, out var hasExpandableContent);
-                announcement.PreviewText = string.Join(Environment.NewLine, announcement.PreviewBlocks.Select(block => block.Text));
-                announcement.HasExpandableContent = hasExpandableContent;
-            }
-
+            _lastKnownGood = announcements;
             return announcements;
         }
-        catch
+        catch (Exception ex)
         {
-            return [];
+            // Fall back to the last good copy so a single transient outage
+            // doesn't blank the announcements panel.
+            LaunchDiagnostics.LogException("Failed to fetch announcements from proxy", ex);
+            return _lastKnownGood ?? [];
+        }
+        finally
+        {
+            FetchLock.Release();
         }
     }
 
-    private async Task<IReadOnlyList<GitHubAnnouncementBlock>> GetAnnouncementBlocksAsync(string url, string title)
+    private static GitHubAnnouncement ToAnnouncement(ProxyAnnouncement source)
     {
-        try
+        var title = DecodeText(source.Title ?? string.Empty);
+        var blocks = ParseBlocks(source.BodyHtml ?? string.Empty);
+        if (blocks.Count > 0 && string.Equals(blocks[0].Text, title, StringComparison.OrdinalIgnoreCase))
         {
-            var html = await _httpClient.GetStringAsync(url);
-            var match = BodyRegex.Match(html);
-            if (!match.Success)
-            {
-                return
-                [
-                    new GitHubAnnouncementBlock
-                    {
-                        Kind = "paragraph",
-                        Text = await GetAnnouncementSummaryAsync(url, title)
-                    }
-                ];
-            }
-
-            var blocks = ParseBlocks(match.Groups["body"].Value);
-            if (blocks.Count > 0 && string.Equals(blocks[0].Text, title, StringComparison.OrdinalIgnoreCase))
-            {
-                blocks.RemoveAt(0);
-            }
-
-            if (blocks.Count == 0)
-            {
-                return
-                [
-                    new GitHubAnnouncementBlock
-                    {
-                        Kind = "paragraph",
-                        Text = await GetAnnouncementSummaryAsync(url, title)
-                    }
-                ];
-            }
-
-            return blocks;
+            blocks.RemoveAt(0);
         }
-        catch
-        {
-            return
+
+        var effectiveBlocks = blocks.Count > 0
+            ? (IReadOnlyList<GitHubAnnouncementBlock>)blocks
+            :
             [
                 new GitHubAnnouncementBlock
                 {
                     Kind = "paragraph",
-                    Text = await GetAnnouncementSummaryAsync(url, title)
+                    Text = !string.IsNullOrWhiteSpace(source.BodyText)
+                        ? source.BodyText!.Trim()
+                        : "Open the discussion on GitHub to read the full announcement."
                 }
             ];
-        }
-    }
 
-    private async Task<string> GetAnnouncementSummaryAsync(string url, string title)
-    {
-        try
+        var bodyText = string.Join(Environment.NewLine, effectiveBlocks.Select(block => block.Text));
+        var previewBlocks = BuildPreviewBlocks(effectiveBlocks, out var hasExpandableContent);
+        var previewText = string.Join(Environment.NewLine, previewBlocks.Select(block => block.Text));
+
+        return new GitHubAnnouncement
         {
-            var html = await _httpClient.GetStringAsync(url);
-            var match = DescriptionRegex.Match(html);
-            if (!match.Success)
-            {
-                return "Open the discussion on GitHub to read the full announcement.";
-            }
-
-            var summary = DecodeText(match.Groups["description"].Value);
-            if (string.IsNullOrWhiteSpace(summary) ||
-                string.Equals(summary, title, StringComparison.OrdinalIgnoreCase))
-            {
-                return "Open the discussion on GitHub to read the full announcement.";
-            }
-
-            return summary;
-        }
-        catch
-        {
-            return "Open the discussion on GitHub to read the full announcement.";
-        }
+            Number = source.Number,
+            Title = title,
+            Author = DecodeText(source.Author ?? string.Empty),
+            PublishedAt = source.PublishedAt ?? DateTimeOffset.MinValue,
+            Url = source.Url ?? string.Empty,
+            Blocks = effectiveBlocks,
+            BodyText = bodyText,
+            Summary = bodyText,
+            PreviewBlocks = previewBlocks,
+            PreviewText = previewText,
+            HasExpandableContent = hasExpandableContent
+        };
     }
 
     private static List<GitHubAnnouncementBlock> ParseBlocks(string bodyHtml)
@@ -239,5 +180,29 @@ public class GitHubAnnouncementsHttpClient
     private static string StripTags(string value)
     {
         return Regex.Replace(value, "<.*?>", string.Empty);
+    }
+
+    private sealed class ProxyAnnouncement
+    {
+        [JsonPropertyName("number")]
+        public int Number { get; set; }
+
+        [JsonPropertyName("title")]
+        public string? Title { get; set; }
+
+        [JsonPropertyName("author")]
+        public string? Author { get; set; }
+
+        [JsonPropertyName("publishedAt")]
+        public DateTimeOffset? PublishedAt { get; set; }
+
+        [JsonPropertyName("url")]
+        public string? Url { get; set; }
+
+        [JsonPropertyName("bodyHtml")]
+        public string? BodyHtml { get; set; }
+
+        [JsonPropertyName("bodyText")]
+        public string? BodyText { get; set; }
     }
 }
