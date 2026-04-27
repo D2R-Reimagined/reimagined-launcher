@@ -68,7 +68,6 @@
                                       SelectionChanged="OnSortChanged">
                                 <ComboBoxItem Content="Date Created" />
                                 <ComboBoxItem Content="Last Updated" />
-                                <ComboBoxItem Content="Last Activity" />
                             </ComboBox>
                         </StackPanel>
                     </Grid>
