@@ -47,11 +47,31 @@
                             Click="OnSubmitPluginClicked"
                             HorizontalAlignment="Right" />
 
-                    <TextBox x:Name="SearchTextBox"
-                             Grid.Row="1"
-                             Grid.ColumnSpan="3"
-                             PlaceholderText="Search by title or description..."
-                             TextChanged="OnSearchTextChanged" />
+                    <Grid Grid.Row="1"
+                          Grid.ColumnSpan="3"
+                          ColumnDefinitions="*,Auto"
+                          ColumnSpacing="12">
+                        <TextBox x:Name="SearchTextBox"
+                                 Grid.Column="0"
+                                 PlaceholderText="Search by title or description..."
+                                 TextChanged="OnSearchTextChanged" />
+                        <StackPanel Grid.Column="1"
+                                    Orientation="Horizontal"
+                                    Spacing="6"
+                                    VerticalAlignment="Center">
+                            <TextBlock Classes="muted"
+                                       VerticalAlignment="Center"
+                                       Text="Sort by:" />
+                            <ComboBox x:Name="SortComboBox"
+                                      MinWidth="160"
+                                      SelectedIndex="0"
+                                      SelectionChanged="OnSortChanged">
+                                <ComboBoxItem Content="Date Created" />
+                                <ComboBoxItem Content="Last Updated" />
+                                <ComboBoxItem Content="Last Activity" />
+                            </ComboBox>
+                        </StackPanel>
+                    </Grid>
 
                     <Border x:Name="LoadingBanner"
                             Grid.Row="2"

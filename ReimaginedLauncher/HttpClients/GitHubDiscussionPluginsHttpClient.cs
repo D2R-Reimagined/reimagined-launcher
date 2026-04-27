@@ -118,7 +118,10 @@ public class GitHubDiscussionPluginsHttpClient
                 Description = entry.Description!.Trim(),
                 ModVersion = entry.ModVersion!.Trim(),
                 ZipUrl = entry.ZipUrl!,
-                DiscussionUrl = entry.DiscussionUrl!
+                DiscussionUrl = entry.DiscussionUrl!,
+                PublishedAt = entry.PublishedAt,
+                UpdatedAt = entry.UpdatedAt,
+                LastActivityAt = entry.LastActivityAt
             });
         }
 
@@ -141,5 +144,14 @@ public class GitHubDiscussionPluginsHttpClient
 
         [JsonPropertyName("discussionUrl")]
         public string? DiscussionUrl { get; set; }
+
+        [JsonPropertyName("publishedAt")]
+        public DateTimeOffset? PublishedAt { get; set; }
+
+        [JsonPropertyName("updatedAt")]
+        public DateTimeOffset? UpdatedAt { get; set; }
+
+        [JsonPropertyName("lastActivityAt")]
+        public DateTimeOffset? LastActivityAt { get; set; }
     }
 }

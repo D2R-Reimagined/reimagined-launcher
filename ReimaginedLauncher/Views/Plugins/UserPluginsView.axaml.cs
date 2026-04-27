@@ -72,8 +72,43 @@ public partial class UserPluginsView : UserControl
         ApplySearchFilter();
     }
 
+    private void OnSortChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        ApplySearchFilter();
+    }
+
+    private IReadOnlyList<UserPluginEntry> ApplySort(IReadOnlyList<UserPluginEntry> source)
+    {
+        // Index 0 = Date Created (default), 1 = Last Updated, 2 = Last Activity.
+        // For unknown timestamps fall back to PublishedAt so plugins without
+        // the new fields still show up in a stable, sensible order.
+        var index = SortComboBox?.SelectedIndex ?? 0;
+        return index switch
+        {
+            1 => source
+                .OrderByDescending(p => p.UpdatedAt ?? p.PublishedAt ?? DateTimeOffset.MinValue)
+                .ToList(),
+            2 => source
+                .OrderByDescending(p => p.LastActivityAt ?? p.UpdatedAt ?? p.PublishedAt ?? DateTimeOffset.MinValue)
+                .ToList(),
+            _ => source
+                .OrderByDescending(p => p.PublishedAt ?? DateTimeOffset.MinValue)
+                .ToList()
+        };
+    }
+
     private void ApplySearchFilter()
     {
+        // The ComboBox's SelectionChanged fires during XAML EndInit (because of
+        // SelectedIndex="0"), which runs before later named controls in the
+        // tree are assigned. Bail out until the view is fully initialized.
+        if (UserPluginsItemsControl is null ||
+            EmptyStatePanel is null ||
+            UserPluginsSummaryTextBlock is null)
+        {
+            return;
+        }
+
         var query = SearchTextBox?.Text?.Trim() ?? string.Empty;
         IReadOnlyList<UserPluginEntry> filtered = _allPlugins;
         if (query.Length > 0)
@@ -83,6 +118,8 @@ public partial class UserPluginsView : UserControl
                 (plugin.Description?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false))
                 .ToList();
         }
+
+        filtered = ApplySort(filtered);
 
         UserPluginsItemsControl.ItemsSource = filtered;
         EmptyStatePanel.IsVisible = filtered.Count == 0;
