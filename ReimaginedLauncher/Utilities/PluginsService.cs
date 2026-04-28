@@ -24,6 +24,10 @@ public static class PluginsService
     private const string PluginInfoFileName = "plugininfo.json";
     private const string GeneratedPluginsFolderName = "plugins";
     private const string StringsDirectoryRelativePath = "local/lng/strings";
+    private const string MissilesTargetFileName = "missiles.json";
+    // missiles.json lives outside the excel directory, alongside the strings folder under the mod
+    // root (e.g. <mod>/data/hd/missiles/missiles.json). Resolved relative to the mod data root.
+    private const string MissilesRelativePath = "hd/missiles/missiles.json";
     private const string PluginAssetsDirectoryName = "assets";
     private const string PluginAssetWarningMessage =
         "This plugin directly copies an asset into the mod without reading the mods data, it may cause problems if it is not setup correctly.";
@@ -639,7 +643,7 @@ public static class PluginsService
 
     public static string GetSupportedTargetsSummary()
     {
-        return "All .txt files in the base excel folder are supported except itemstatcost.txt. Most files match rows by a unique column; files with duplicate values in their identifier column use a numeric row ID (0-based data row index) instead. Multiply-existing and append operations can reference parameters declared in plugininfo.json. String JSON files from data/local/lng/strings (e.g. item-runes.json) are also supported using the same flat d2rr-style layout: each entry lists the target file, the D2R Key, and one or more language fields (enUS, zhTW, deDE, esES, frFR, itIT, koKR, plPL, esMX, jaJP, ptBR, ruRU, zhCN); only the listed languages are replaced and any other languages on that entry are left untouched.";
+        return "All .txt files in the base excel folder are supported except itemstatcost.txt. Most files match rows by a unique column; files with duplicate values in their identifier column use a numeric row ID (0-based data row index) instead. Multiply-existing and append operations can reference parameters declared in plugininfo.json. String JSON files from data/local/lng/strings (e.g. item-runes.json) are also supported using the same flat d2rr-style layout: each entry lists the target file, the D2R Key, and one or more language fields (enUS, zhTW, deDE, esES, frFR, itIT, koKR, plPL, esMX, jaJP, ptBR, ruRU, zhCN); only the listed languages are replaced and any other languages on that entry are left untouched. The missiles.json file at data/hd/missiles/missiles.json is also supported: each entry lists the target file, a Key, and an updatedValue (or parameterKey) to write; addRow appends a new key/value pair while preserving the existing JSON formatting.";
     }
 
     private static async Task ApplyOperationsAsync(
@@ -662,6 +666,16 @@ public static class PluginsService
                 continue;
             }
 
+            if (IsMissilesTargetFile(fileName))
+            {
+                var missilesFilePath = ResolveMissilesFilePath(excelDirectory)
+                    ?? throw new FileNotFoundException(
+                        $"Could not resolve {MissilesTargetFileName} ({MissilesRelativePath}) relative to '{excelDirectory}'.");
+
+                await ApplyMissilesOperationsAsync(missilesFilePath, operations, parameters);
+                continue;
+            }
+
             if (IsStringsTargetFile(fileName))
             {
                 resolvedStringsDirectory ??= ResolveStringsDirectory(excelDirectory)
@@ -671,6 +685,116 @@ public static class PluginsService
                 await ApplyStringsOperationsForTargetAsync(resolvedStringsDirectory, operations, fileName);
             }
         }
+    }
+
+    // Replace-by-key and addRow dispatcher for missiles.json. The file is a single JSON object
+    // mapping a missile key to a string asset; edits go through MissilesFileParser so the original
+    // property order and surrounding entries are preserved on disk.
+    private static async Task ApplyMissilesOperationsAsync(
+        string missilesFilePath,
+        IReadOnlyList<PluginJsonOperation> operations,
+        IReadOnlyDictionary<string, string> parameters)
+    {
+        var targetOperations = operations
+            .Where(operation => IsMissilesTargetFile(operation.File))
+            .ToList();
+
+        if (targetOperations.Count == 0)
+        {
+            return;
+        }
+
+        if (!File.Exists(missilesFilePath))
+        {
+            throw new FileNotFoundException($"{MissilesTargetFileName} was not found at: {missilesFilePath}");
+        }
+
+        var parser = new MissilesFileParser(missilesFilePath);
+
+        foreach (var operation in targetOperations)
+        {
+            if (string.IsNullOrWhiteSpace(operation.Key))
+            {
+                throw new InvalidDataException($"A {MissilesTargetFileName} entry is missing its Key.");
+            }
+
+            var resolvedValue = ResolveMissileValue(operation, parameters);
+            var isAddRow = !string.IsNullOrWhiteSpace(operation.Operation)
+                           && operation.Operation.Equals("addRow", StringComparison.OrdinalIgnoreCase);
+
+            if (isAddRow)
+            {
+                await parser.AddMissileAsync(operation.Key!, resolvedValue);
+                continue;
+            }
+
+            var matched = await parser.ReplaceMissileValueAsync(operation.Key!, resolvedValue);
+            if (!matched)
+            {
+                throw new InvalidDataException(
+                    $"Could not find entry with Key '{operation.Key}' in {MissilesTargetFileName}.");
+            }
+        }
+    }
+
+    // Picks the value to write for a missiles operation: prefer an explicit updatedValue, otherwise
+    // resolve a parameterKey against the plugin's parameters. Both forms support {{parameter:key}}
+    // tokens so missile values can be parameterized.
+    private static string ResolveMissileValue(
+        PluginJsonOperation operation,
+        IReadOnlyDictionary<string, string> parameters)
+    {
+        string? rawValue = null;
+        if (!string.IsNullOrEmpty(operation.UpdatedValue))
+        {
+            rawValue = operation.UpdatedValue;
+        }
+        else if (!string.IsNullOrWhiteSpace(operation.ParameterKey)
+                 && parameters.TryGetValue(operation.ParameterKey, out var parameterValue))
+        {
+            rawValue = parameterValue;
+        }
+
+        if (string.IsNullOrEmpty(rawValue))
+        {
+            throw new InvalidDataException(
+                $"The {MissilesTargetFileName} entry for Key '{operation.Key}' does not provide a value (set 'updatedValue' or a 'parameterKey').");
+        }
+
+        return ParameterTokenRegex.Replace(rawValue, match =>
+        {
+            var parameterKey = match.Groups[1].Value;
+            return parameters.TryGetValue(parameterKey, out var resolved) ? resolved : match.Value;
+        });
+    }
+
+    private static bool IsMissilesTargetFile(string? fileName)
+    {
+        return !string.IsNullOrWhiteSpace(fileName)
+               && string.Equals(fileName, MissilesTargetFileName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Resolves <modRoot>/data/hd/missiles/missiles.json from the excel directory by walking up to
+    // the parent 'data' folder (mirroring ResolveStringsDirectory) and joining the missiles path.
+    private static string? ResolveMissilesFilePath(string excelDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(excelDirectory))
+        {
+            return null;
+        }
+
+        var current = new DirectoryInfo(excelDirectory);
+        while (current != null && !string.Equals(current.Name, "data", StringComparison.OrdinalIgnoreCase))
+        {
+            current = current.Parent;
+        }
+
+        if (current == null)
+        {
+            return null;
+        }
+
+        return Path.Combine(current.FullName, "hd", "missiles", MissilesTargetFileName);
     }
 
     private static async Task ApplyStringsOperationsForTargetAsync(
@@ -731,6 +855,13 @@ public static class PluginsService
     private static bool IsStringsTargetFile(string? fileName)
     {
         if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return false;
+        }
+
+        // missiles.json lives under data/hd/missiles and uses its own JSON layout; route it to the
+        // dedicated missiles dispatcher instead of treating it as a strings translation file.
+        if (IsMissilesTargetFile(fileName))
         {
             return false;
         }
@@ -1553,6 +1684,39 @@ public static class PluginsService
                 continue;
             }
 
+            if (supportedTarget.IsMissilesTarget)
+            {
+                // missiles.json takes a flat {file, key, updatedValue|parameterKey, [operation]}
+                // shape: replace by Key (default) or addRow to append a new key/value pair.
+                if (string.IsNullOrWhiteSpace(operation.Key))
+                {
+                    errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} entry with no Key.");
+                }
+
+                if (string.IsNullOrEmpty(operation.UpdatedValue)
+                    && string.IsNullOrWhiteSpace(operation.ParameterKey))
+                {
+                    errors.Add(
+                        $"'{pluginFileName}' contains a {supportedTarget.FileName} entry for Key '{operation.Key}' without a value. Set 'updatedValue' or 'parameterKey'.");
+                }
+
+                if (!string.IsNullOrWhiteSpace(operation.Operation)
+                    && !operation.Operation.Equals("addRow", StringComparison.OrdinalIgnoreCase)
+                    && !operation.Operation.Equals("replace", StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Add(
+                        $"'{pluginFileName}' contains a {supportedTarget.FileName} entry with unsupported operation '{operation.Operation}'. Use 'replace' (default) or 'addRow'.");
+                }
+
+                if (!string.IsNullOrWhiteSpace(operation.ParameterKey) &&
+                    parameters.All(parameter => !parameter.Key.Equals(operation.ParameterKey, StringComparison.OrdinalIgnoreCase)))
+                {
+                    errors.Add($"'{pluginFileName}' references unknown parameter '{operation.ParameterKey}'.");
+                }
+
+                continue;
+            }
+
             var isAddRow = !string.IsNullOrWhiteSpace(operation.Operation)
                            && operation.Operation.Equals("addRow", StringComparison.OrdinalIgnoreCase);
 
@@ -1668,7 +1832,9 @@ public static class PluginsService
             return false;
         }
 
-        return ParserRegistry.ContainsKey(fileName) || IsStringsTargetFile(fileName);
+        return ParserRegistry.ContainsKey(fileName)
+               || IsStringsTargetFile(fileName)
+               || IsMissilesTargetFile(fileName);
     }
 
     private static SupportedPluginTarget? GetSupportedTarget(string? fileName)
@@ -1687,6 +1853,17 @@ public static class PluginsService
                 registration.UsesRowId,
                 registration.ResolveColumn,
                 IsStringsTarget: false);
+        }
+
+        if (IsMissilesTargetFile(fileName))
+        {
+            return new SupportedPluginTarget(
+                fileName,
+                typeof(object),
+                "Key",
+                UsesRowId: false,
+                IsStringsTarget: false,
+                IsMissilesTarget: true);
         }
 
         if (IsStringsTargetFile(fileName))
@@ -2259,7 +2436,8 @@ public static class PluginsService
         string RowIdentifierPropertyName,
         bool UsesRowId,
         Func<string, PropertyInfo?>? ResolveColumn = null,
-        bool IsStringsTarget = false);
+        bool IsStringsTarget = false,
+        bool IsMissilesTarget = false);
 
     private sealed record FileParserRegistration(
         Type EntryType,

@@ -50,6 +50,7 @@
                         <TextBlock Classes="bullet" Text="•  Manifest: plugininfo.json (name, version, modVersion, files)." />
                         <TextBlock Classes="bullet" Text="•  Excel edits: any base-folder .txt file except itemstatcost.txt." />
                         <TextBlock Classes="bullet" Text="•  String edits: .json files under data/local/lng/strings." />
+                        <TextBlock Classes="bullet" Text="•  Missiles edits: data/hd/missiles/missiles.json (replace existing keys or addRow new ones)." />
                     </StackPanel>
                     <TextBlock Classes="muted"
                                TextWrapping="Wrap"
@@ -138,6 +139,14 @@
                         <TextBlock Classes="bullet" Text="•  Only the language fields listed on an entry are overwritten; other languages and other entries are untouched. Unknown fields are ignored." />
                     </StackPanel>
 
+                    <TextBlock Classes="sub-title" Text="Missiles (missiles.json) target" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  Used for the single missiles.json file at data/hd/missiles/missiles.json (resolved automatically from the mod data root)." />
+                        <TextBlock Classes="bullet" Text="•  Flat layout: file, Key, and a value supplied via updatedValue or parameterKey. No rowIdentifier or column fields." />
+                        <TextBlock Classes="bullet" Text="•  operation defaults to replace (the Key must already exist). Use addRow to append a brand-new key/value pair while preserving existing JSON formatting." />
+                        <TextBlock Classes="bullet" Text="•  updatedValue supports {{parameter:key}} tokens just like excel operations." />
+                    </StackPanel>
+
                     <TextBlock Classes="sub-title" Text="Example" />
                     <TextBox x:Name="OperationsExampleTextBox"
                              IsReadOnly="True"
@@ -156,7 +165,7 @@
 
                     <TextBlock Classes="sub-title" Text="Common" />
                     <StackPanel Spacing="2">
-                        <TextBlock Classes="bullet" Text="•  file (required) — any base-folder .txt except itemstatcost.txt, or any .json under data/local/lng/strings." />
+                        <TextBlock Classes="bullet" Text="•  file (required) — any base-folder .txt except itemstatcost.txt, any .json under data/local/lng/strings, or missiles.json." />
                     </StackPanel>
 
                     <TextBlock Classes="sub-title" Text="Excel (.txt) operations" />
@@ -186,6 +195,13 @@
                     <StackPanel Spacing="2">
                         <TextBlock Classes="bullet" Text="•  Key (required) — matches the D2R entry's Key." />
                         <TextBlock Classes="bullet" Text="•  Any of the 13 language codes alongside Key with the replacement string. Only the listed language fields on the matched entry are overwritten." />
+                    </StackPanel>
+
+                    <TextBlock Classes="sub-title" Text="Missiles (missiles.json) operations" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  Key (required) — the missile key inside missiles.json to update or add." />
+                        <TextBlock Classes="bullet" Text="•  updatedValue or parameterKey (required) — the value to write for the key. Both forms expand {{parameter:key}} tokens." />
+                        <TextBlock Classes="bullet" Text="•  operation (optional) — replace (default) requires the key to already exist; addRow appends a new key/value pair while preserving existing JSON formatting. No other operations are accepted." />
                     </StackPanel>
                 </StackPanel>
             </Border>
@@ -219,6 +235,7 @@
                         <TextBlock Classes="bullet" Text="•  addRow rowIdentifier must be empty (append) or a numeric 0-based index in the range 0..rowCount; non-numeric identifiers are rejected." />
                         <TextBlock Classes="bullet" Text="•  When using 'columns', each entry must reference a known target column; per-column parameterKey/updatedValue overrides the parent operation's values." />
                         <TextBlock Classes="bullet" Text="•  Unknown parameters and unknown target columns are reported as plugin errors." />
+                        <TextBlock Classes="bullet" Text="•  missiles.json entries must include a Key and either updatedValue or parameterKey, and only support the replace (default) and addRow operations." />
                     </StackPanel>
                 </StackPanel>
             </Border>
@@ -255,6 +272,7 @@
                         <TextBlock Classes="bullet" Text="•  Supported operations: replace, multiplyExisting, append, addRow." />
                         <TextBlock Classes="bullet" Text="•  A single operation can update multiple columns on the matched row(s) via the 'columns' array." />
                         <TextBlock Classes="bullet" Text="•  Most files use typed parsers from the D2RReimaginedTools library for column validation and data integrity." />
+                        <TextBlock Classes="bullet" Text="•  In addition to excel and strings files, the launcher supports edits to data/hd/missiles/missiles.json via replace (default) and addRow." />
                     </StackPanel>
                 </StackPanel>
             </Border>

@@ -138,6 +138,17 @@ public partial class PluginAuthoringGuideView : UserControl
                                                    { "column": "NumInputs", "updatedValue": "2" },
                                                    { "column": "Output", "updatedValue": "ssp" }
                                                  ]
+                                               },
+                                               {
+                                                 "file": "missiles.json",
+                                                 "Key": "FireBolt",
+                                                 "updatedValue": "data/hd/missiles/firebolt/firebolt.json"
+                                               },
+                                               {
+                                                 "file": "missiles.json",
+                                                 "Key": "MyNewMissile",
+                                                 "operation": "addRow",
+                                                 "parameterKey": "myMissileAssetPath"
                                                }
                                              ]
                                              """;
