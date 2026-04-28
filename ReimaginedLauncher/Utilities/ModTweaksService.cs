@@ -147,9 +147,6 @@ public static class ModTweaksService
                 await ValidateExcelFilesAsync(sourceExcelDirectory);
                 await CopyDirectoryAsync(sourceExcelDirectory, targetExcelDirectory, overwrite: true);
                 await ApplyTweaksAsync(targetExcelDirectory, progress);
-                ReportProgress(progress, $"Applying plugins in {targetLabel}...");
-                LaunchDiagnostics.Log($"Applying plugins in {targetExcelDirectory}.");
-                await PluginsService.ApplyEnabledPluginsAsync(targetExcelDirectory, progress);
             }
 
             ReportProgress(progress, "Restoring missiles.json...");
@@ -192,6 +189,18 @@ public static class ModTweaksService
             ReportProgress(progress, "Applying vignette tweaks...");
             LaunchDiagnostics.Log("Applying vignette tweaks.");
             await ApplyVignetteTweakAsync(profile.RemoveVignette);
+
+            // Apply enabled plugins last so their edits to non-excel JSON targets
+            // (missiles.json, layouts_profilehd.json, armor JSONs, desecratedzones.json,
+            // vis files) are not clobbered by the Restore*/Apply*Tweaks* steps above.
+            foreach (var targetExcelDirectory in excelDirectories)
+            {
+                var targetLabel = Path.GetFileName(targetExcelDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                ReportProgress(progress, $"Applying plugins in {targetLabel}...");
+                LaunchDiagnostics.Log($"Applying plugins in {targetExcelDirectory}.");
+                await PluginsService.ApplyEnabledPluginsAsync(targetExcelDirectory, progress);
+            }
+
             LaunchDiagnostics.Log("Mod tweak preparation succeeded.");
 
             return true;
