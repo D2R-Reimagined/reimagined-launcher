@@ -95,7 +95,10 @@
                             Spacing="10">
                     <TextBlock x:Name="LauncherVersionTextBlock"
                                Classes="muted"
-                               HorizontalAlignment="Center" />
+                               HorizontalAlignment="Center"
+                               Cursor="Hand"
+                               ToolTip.Tip="Click to check for a launcher update"
+                               PointerPressed="OnLauncherVersionClicked" />
                     <Grid ColumnDefinitions="*,*"
                           RowDefinitions="*,*"
                           ColumnSpacing="8"

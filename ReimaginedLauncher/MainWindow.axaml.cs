@@ -74,7 +74,11 @@ public partial class MainWindow : Window
     private TrayIcon? _trayIcon;
     private bool _isExiting;
     private readonly DispatcherTimer _saveWindowStateTimer;
+    private DispatcherTimer? _launcherUpdateCheckTimer;
     private bool _isRestoringWindowState;
+    // Hourly auto-poll cadence for launcher update checks. The same check is also runnable on
+    // demand by clicking the "Launcher v#.#.#" label in the navigation panel.
+    private static readonly TimeSpan LauncherUpdateCheckInterval = TimeSpan.FromHours(1);
 
     public MainWindow()
     {
@@ -191,6 +195,7 @@ public partial class MainWindow : Window
 
         await RefreshUpdateStateAsync();
         _ = LauncherUpdateService.CheckForUpdatesAsync();
+        StartLauncherUpdateCheckTimer();
 
         // Subscribe to UserViewModel.User property changed to trigger check when user logs in
         UserViewModel.PropertyChanged -= UserViewModelOnPropertyChanged;
@@ -1119,6 +1124,37 @@ public partial class MainWindow : Window
     private void OnLauncherRestartClicked(object? sender, RoutedEventArgs e)
     {
         LauncherUpdateService.ApplyUpdateAndRestart();
+    }
+
+    // Starts (or restarts) the hourly background check that pings the launcher update endpoint
+    // even when the user never leaves the launcher open across sessions. Idempotent: re-entry
+    // simply replaces the previous timer instance.
+    private void StartLauncherUpdateCheckTimer()
+    {
+        _launcherUpdateCheckTimer?.Stop();
+        _launcherUpdateCheckTimer = new DispatcherTimer { Interval = LauncherUpdateCheckInterval };
+        _launcherUpdateCheckTimer.Tick += (_, _) => _ = LauncherUpdateService.CheckForUpdatesAsync();
+        _launcherUpdateCheckTimer.Start();
+    }
+
+    // Click handler for the "Launcher v#.#.#" label: lets the user trigger an immediate update
+    // check on demand without waiting for the hourly poll. We surface a brief notification so the
+    // click feels acknowledged regardless of whether an update is available.
+    private async void OnLauncherVersionClicked(object? sender, Avalonia.Input.PointerPressedEventArgs e)
+    {
+        try
+        {
+            Notifications.SendNotification("Checking for launcher updates...", "Launcher");
+            await LauncherUpdateService.CheckForUpdatesAsync();
+            if (!LauncherUpdateService.IsUpdateAvailable && !LauncherUpdateService.IsUpdateDownloaded)
+            {
+                Notifications.SendNotification($"Launcher v{LauncherVersion} is up to date.", "Launcher");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notifications.SendNotification($"Update check failed: {ex.Message}", "Error");
+        }
     }
 
 

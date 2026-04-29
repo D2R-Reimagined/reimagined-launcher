@@ -928,6 +928,127 @@ public static class PluginsService
         {
             var assignments = GetColumnAssignments(operation);
 
+            if (string.Equals(operation.Operation, "cloneRow", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrWhiteSpace(operation.SourceRowIdentifier))
+                {
+                    throw new InvalidDataException(
+                        $"cloneRow operation for {fileName} must specify 'sourceRowIdentifier' (numeric index or matching value of the default rowIdentifier column).");
+                }
+
+                var sourceIndex = ResolveSingleRowIndex(
+                    entries, operation.SourceRowIdentifier!, rowIdentifierSelector, fileName, "sourceRowIdentifier");
+                var clonedEntry = CloneEntry(entries[sourceIndex]);
+
+                var isReplaceMode = !string.IsNullOrWhiteSpace(operation.Mode)
+                                    && operation.Mode.Equals("replace", StringComparison.OrdinalIgnoreCase);
+
+                int targetIndex;
+                if (isReplaceMode)
+                {
+                    if (string.IsNullOrWhiteSpace(operation.RowIdentifier))
+                    {
+                        throw new InvalidDataException(
+                            $"cloneRow (mode='replace') for {fileName} must specify 'rowIdentifier' for the row to overwrite.");
+                    }
+
+                    targetIndex = ResolveSingleRowIndex(
+                        entries, operation.RowIdentifier!, rowIdentifierSelector, fileName, "rowIdentifier");
+                    entries[targetIndex] = clonedEntry;
+                }
+                else
+                {
+                    // "add" mode (default): always appends the cloned row to the end of the file.
+                    // Insertion at a specific index is not supported; rowIdentifier must be omitted.
+                    if (!string.IsNullOrWhiteSpace(operation.RowIdentifier))
+                    {
+                        throw new InvalidDataException(
+                            $"cloneRow (mode='add') for {fileName} does not support insertion at a specific index; omit 'rowIdentifier' so the cloned row is appended to the end. Use mode='replace' with 'rowIdentifier' to overwrite an existing row instead.");
+                    }
+
+                    entries.Add(clonedEntry);
+                    targetIndex = entries.Count - 1;
+                }
+
+                // Apply column overrides on top of the cloned row, mirroring addRow's per-column
+                // pipeline so authors get the standard replace/append/multiplyExisting operators.
+                var cloneParent = operation with { Operation = null };
+                foreach (var assignment in assignments)
+                {
+                    var perColumnOp = BuildPerColumnOperation(cloneParent, assignment, defaultOperation: "replace");
+                    entries[targetIndex] = UpdateRecord(
+                        entries[targetIndex],
+                        perColumnOp.Column ?? string.Empty,
+                        ResolveOperationValue(entries[targetIndex], perColumnOp, parameters, fileName, resolveColumn),
+                        fileName,
+                        resolveColumn,
+                        operation.RowIdentifier);
+                }
+
+                continue;
+            }
+
+            if (string.Equals(operation.Operation, "swapRow", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrWhiteSpace(operation.RowIdentifier))
+                {
+                    throw new InvalidDataException(
+                        $"swapRow operation for {fileName} must specify 'rowIdentifier' for the first row to swap.");
+                }
+
+                if (string.IsNullOrWhiteSpace(operation.SwapRowIdentifier))
+                {
+                    throw new InvalidDataException(
+                        $"swapRow operation for {fileName} must specify 'swapRowIdentifier' for the second row to swap.");
+                }
+
+                var indexA = ResolveSingleRowIndex(
+                    entries, operation.RowIdentifier!, rowIdentifierSelector, fileName, "rowIdentifier");
+                var indexB = ResolveSingleRowIndex(
+                    entries, operation.SwapRowIdentifier!, rowIdentifierSelector, fileName, "swapRowIdentifier");
+
+                if (indexA == indexB)
+                {
+                    throw new InvalidDataException(
+                        $"swapRow operation for {fileName} cannot swap a row with itself ('{operation.RowIdentifier}' resolved to the same row as '{operation.SwapRowIdentifier}').");
+                }
+
+                (entries[indexA], entries[indexB]) = (entries[indexB], entries[indexA]);
+
+                // After the swap, "columns" (the standard assignments) target the row now at indexA
+                // (originally at indexB) and "swapColumns" target the row now at indexB. This makes
+                // the post-swap intent explicit per the row at that final position.
+                var swapParent = operation with { Operation = null };
+                foreach (var assignment in assignments)
+                {
+                    var perColumnOp = BuildPerColumnOperation(swapParent, assignment, defaultOperation: "replace");
+                    entries[indexA] = UpdateRecord(
+                        entries[indexA],
+                        perColumnOp.Column ?? string.Empty,
+                        ResolveOperationValue(entries[indexA], perColumnOp, parameters, fileName, resolveColumn),
+                        fileName,
+                        resolveColumn,
+                        operation.RowIdentifier);
+                }
+
+                if (operation.SwapColumns is { Count: > 0 } swapAssignments)
+                {
+                    foreach (var assignment in swapAssignments)
+                    {
+                        var perColumnOp = BuildPerColumnOperation(swapParent, assignment, defaultOperation: "replace");
+                        entries[indexB] = UpdateRecord(
+                            entries[indexB],
+                            perColumnOp.Column ?? string.Empty,
+                            ResolveOperationValue(entries[indexB], perColumnOp, parameters, fileName, resolveColumn),
+                            fileName,
+                            resolveColumn,
+                            operation.SwapRowIdentifier);
+                    }
+                }
+
+                continue;
+            }
+
             if (string.Equals(operation.Operation, "addRow", StringComparison.OrdinalIgnoreCase))
             {
                 if (assignments.Count == 0)
@@ -1139,6 +1260,54 @@ public static class PluginsService
         }
 
         return true;
+    }
+
+    // Resolves a single-row identifier supplied to cloneRow/swapRow. Accepts either a numeric
+    // 0-based row index, or a value matched (case-insensitive) against the file's default
+    // rowIdentifier column. Throws when zero or multiple rows would match so authors get a clear
+    // error before any in-place mutation runs. The 'fieldName' is used in error messages so authors
+    // can tell which JSON field (e.g. "sourceRowIdentifier", "swapRowIdentifier") is at fault.
+    private static int ResolveSingleRowIndex<TEntry>(
+        IList<TEntry> entries,
+        string identifier,
+        Func<TEntry, string?> rowIdentifierSelector,
+        string fileName,
+        string fieldName)
+    {
+        if (string.IsNullOrWhiteSpace(identifier))
+        {
+            throw new InvalidDataException(
+                $"{fieldName} for {fileName} must not be empty.");
+        }
+
+        if (int.TryParse(identifier, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedIndex))
+        {
+            if (parsedIndex < 0 || parsedIndex >= entries.Count)
+            {
+                throw new InvalidDataException(
+                    $"{fieldName} '{identifier}' is out of bounds for {fileName}. Valid range is 0 to {entries.Count - 1}.");
+            }
+
+            return parsedIndex;
+        }
+
+        var matches = Enumerable.Range(0, entries.Count)
+            .Where(i => string.Equals(rowIdentifierSelector(entries[i]), identifier, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (matches.Count == 0)
+        {
+            throw new InvalidDataException(
+                $"Could not find row '{identifier}' in {fileName} via {fieldName} (use a numeric 0-based index or a value matching the default rowIdentifier column).");
+        }
+
+        if (matches.Count > 1)
+        {
+            throw new InvalidDataException(
+                $"{fieldName} '{identifier}' matches {matches.Count} rows in {fileName}. Use a numeric 0-based index to disambiguate.");
+        }
+
+        return matches[0];
     }
 
     // Parses a plugin rowIdentifier of the form "start-end" (e.g. "50-100") into inclusive numeric
@@ -1717,6 +1886,62 @@ public static class PluginsService
                 continue;
             }
 
+            var isCloneRow = !string.IsNullOrWhiteSpace(operation.Operation)
+                             && operation.Operation.Equals("cloneRow", StringComparison.OrdinalIgnoreCase);
+            var isSwapRow = !string.IsNullOrWhiteSpace(operation.Operation)
+                            && operation.Operation.Equals("swapRow", StringComparison.OrdinalIgnoreCase);
+
+            if (isCloneRow)
+            {
+                if (string.IsNullOrWhiteSpace(operation.SourceRowIdentifier))
+                {
+                    errors.Add($"'{pluginFileName}' contains a cloneRow operation for {supportedTarget.FileName} without 'sourceRowIdentifier'.");
+                }
+
+                var isReplaceMode = !string.IsNullOrWhiteSpace(operation.Mode)
+                                    && operation.Mode.Equals("replace", StringComparison.OrdinalIgnoreCase);
+                var isAddMode = string.IsNullOrWhiteSpace(operation.Mode)
+                                || operation.Mode.Equals("add", StringComparison.OrdinalIgnoreCase);
+
+                if (!isAddMode && !isReplaceMode)
+                {
+                    errors.Add($"'{pluginFileName}' contains a cloneRow operation for {supportedTarget.FileName} with unsupported mode '{operation.Mode}'. Use 'add' (default) or 'replace'.");
+                }
+
+                if (isAddMode && !string.IsNullOrWhiteSpace(operation.RowIdentifier))
+                {
+                    errors.Add($"'{pluginFileName}' contains a cloneRow (mode='add') for {supportedTarget.FileName} with a 'rowIdentifier'. cloneRow does not support insertion at a specific index; omit 'rowIdentifier' so the cloned row is appended to the end, or use mode='replace' to overwrite an existing row.");
+                }
+
+                if (isReplaceMode && string.IsNullOrWhiteSpace(operation.RowIdentifier))
+                {
+                    errors.Add($"'{pluginFileName}' contains a cloneRow (mode='replace') for {supportedTarget.FileName} without 'rowIdentifier' for the row to overwrite.");
+                }
+
+                ValidateColumnAssignments(operation, GetColumnAssignments(operation), supportedTarget, parameters, pluginFileName, errors);
+                continue;
+            }
+
+            if (isSwapRow)
+            {
+                if (string.IsNullOrWhiteSpace(operation.RowIdentifier))
+                {
+                    errors.Add($"'{pluginFileName}' contains a swapRow operation for {supportedTarget.FileName} without 'rowIdentifier'.");
+                }
+
+                if (string.IsNullOrWhiteSpace(operation.SwapRowIdentifier))
+                {
+                    errors.Add($"'{pluginFileName}' contains a swapRow operation for {supportedTarget.FileName} without 'swapRowIdentifier'.");
+                }
+
+                ValidateColumnAssignments(operation, GetColumnAssignments(operation), supportedTarget, parameters, pluginFileName, errors);
+                if (operation.SwapColumns is { Count: > 0 } swapAssignments)
+                {
+                    ValidateColumnAssignments(operation, swapAssignments, supportedTarget, parameters, pluginFileName, errors);
+                }
+                continue;
+            }
+
             var isAddRow = !string.IsNullOrWhiteSpace(operation.Operation)
                            && operation.Operation.Equals("addRow", StringComparison.OrdinalIgnoreCase);
 
@@ -1821,6 +2046,60 @@ public static class PluginsService
                 parameters.All(parameter => !parameter.Key.Equals(operation.ParameterKey, StringComparison.OrdinalIgnoreCase)))
             {
                 errors.Add($"'{pluginFileName}' references unknown parameter '{operation.ParameterKey}'.");
+            }
+        }
+    }
+
+    // Validates a list of column assignments against the target file. Used by cloneRow/swapRow,
+    // which accept optional assignments and therefore must not error when the list is empty.
+    private static void ValidateColumnAssignments(
+        PluginJsonOperation operation,
+        IReadOnlyList<PluginJsonColumnAssignment> assignments,
+        SupportedPluginTarget supportedTarget,
+        IReadOnlyList<PluginParameterItem> parameters,
+        string pluginFileName,
+        List<string> errors)
+    {
+        foreach (var assignment in assignments)
+        {
+            if (string.IsNullOrWhiteSpace(assignment.Column))
+            {
+                errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} operation with a 'columns' entry that is missing its column name.");
+                continue;
+            }
+
+            var propertyExists = supportedTarget.EntryType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .Any(property => property.Name.Equals(assignment.Column, StringComparison.OrdinalIgnoreCase));
+
+            if (!propertyExists && supportedTarget.ResolveColumn != null)
+            {
+                propertyExists = supportedTarget.ResolveColumn(assignment.Column!) != null;
+            }
+
+            if (!propertyExists)
+            {
+                errors.Add($"'{pluginFileName}' references unknown {supportedTarget.FileName} column '{assignment.Column}'.");
+            }
+
+            var effectiveOperation = !string.IsNullOrWhiteSpace(assignment.Operation)
+                ? assignment.Operation
+                : operation.Operation;
+
+            if (!string.IsNullOrWhiteSpace(effectiveOperation) &&
+                (effectiveOperation.Equals("multiplyExisting", StringComparison.OrdinalIgnoreCase) ||
+                 effectiveOperation.Equals("append", StringComparison.OrdinalIgnoreCase)) &&
+                string.IsNullOrWhiteSpace(assignment.ParameterKey) &&
+                string.IsNullOrWhiteSpace(assignment.UpdatedValue) &&
+                string.IsNullOrWhiteSpace(operation.ParameterKey) &&
+                string.IsNullOrWhiteSpace(operation.UpdatedValue))
+            {
+                errors.Add($"'{pluginFileName}' contains a {effectiveOperation} operation on column '{assignment.Column}' without parameterKey or updatedValue.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(assignment.ParameterKey) &&
+                parameters.All(parameter => !parameter.Key.Equals(assignment.ParameterKey, StringComparison.OrdinalIgnoreCase)))
+            {
+                errors.Add($"'{pluginFileName}' references unknown parameter '{assignment.ParameterKey}'.");
             }
         }
     }
@@ -2212,6 +2491,21 @@ public static class PluginsService
             }
         }
 
+        IReadOnlyList<PluginJsonColumnAssignment>? normalizedSwapColumns = null;
+        if (operation.SwapColumns is { Count: > 0 } swapColumns)
+        {
+            var list = new List<PluginJsonColumnAssignment>(swapColumns.Count);
+            foreach (var column in swapColumns)
+            {
+                list.Add(new PluginJsonColumnAssignment(
+                    Column: column.Column?.Trim() ?? string.Empty,
+                    UpdatedValue: column.UpdatedValue,
+                    ParameterKey: column.ParameterKey?.Trim(),
+                    Operation: column.Operation?.Trim()));
+            }
+            normalizedSwapColumns = list;
+        }
+
         return operation with
         {
             File = NormalizeRelativePath(operation.File ?? string.Empty),
@@ -2221,7 +2515,11 @@ public static class PluginsService
             ParameterKey = operation.ParameterKey?.Trim(),
             Key = operation.Key?.Trim(),
             Columns = normalizedColumns,
-            RowIdentifiers = normalizedRowIdentifiers
+            RowIdentifiers = normalizedRowIdentifiers,
+            SourceRowIdentifier = operation.SourceRowIdentifier?.Trim(),
+            Mode = operation.Mode?.Trim(),
+            SwapRowIdentifier = operation.SwapRowIdentifier?.Trim(),
+            SwapColumns = normalizedSwapColumns
         };
     }
 
@@ -2650,7 +2948,22 @@ public static class PluginsService
         // corresponding column. Authors can supply this either as an object literal under the
         // "rowIdentifier" property (e.g. {"key1":"col1","key2":"col2"}) or via a dedicated
         // "rowIdentifiers" property.
-        IReadOnlyDictionary<string, string>? RowIdentifiers = null);
+        IReadOnlyDictionary<string, string>? RowIdentifiers = null,
+        // cloneRow: identifies the row to copy from. Accepts a numeric 0-based index or a value
+        // matched against the file's default rowIdentifier column (case-insensitive).
+        string? SourceRowIdentifier = null,
+        // cloneRow: "add" (default) appends the cloned row to the end of the file (rowIdentifier
+        // must be omitted; insertion at a specific index is not supported). "replace" overwrites
+        // the row whose identifier (numeric index or default rowIdentifier column value) matches
+        // rowIdentifier.
+        string? Mode = null,
+        // swapRow: identifies the second row to exchange with the row referenced by rowIdentifier.
+        // Accepts a numeric 0-based index or a default rowIdentifier column value.
+        string? SwapRowIdentifier = null,
+        // swapRow: optional column overrides applied to the row at SwapRowIdentifier *after* the
+        // swap (the row originally at rowIdentifier). The standard "columns"/"column" assignments
+        // apply post-swap to the row at rowIdentifier (originally at SwapRowIdentifier).
+        IReadOnlyList<PluginJsonColumnAssignment>? SwapColumns = null);
 
     // Per-column assignment used either for multi-column updates that share a single rowIdentifier,
     // or to specify the column/value pairs of a new row produced by the addRow operation.
