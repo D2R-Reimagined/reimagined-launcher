@@ -168,32 +168,79 @@
                                                     Padding="12"
                                                     Classes="panel"
                                                     IsVisible="{Binding IsParametersExpanded}">
-                                                <ItemsControl ItemsSource="{Binding Parameters}">
+                                                <!-- Outer ItemsControl renders parameter groups (display-only). When no parameter
+                                                     declares a group, ParameterGroups returns a single bucket with HasHeading=false,
+                                                     so the inner ItemsControl renders identically to the legacy flat layout. -->
+                                                <ItemsControl ItemsSource="{Binding ParameterGroups}">
                                                     <ItemsControl.ItemTemplate>
-                                                        <DataTemplate x:DataType="plugins:PluginParameterItem">
-                                                            <StackPanel Spacing="8"
-                                                                        Margin="0,0,0,10">
-                                                                <StackPanel Spacing="2">
-                                                                    <TextBlock Text="{Binding DisplayName}"
-                                                                               FontWeight="SemiBold" />
-                                                                    <TextBlock Classes="muted"
-                                                                               Text="{Binding Description}"
-                                                                               TextWrapping="Wrap" />
+                                                        <DataTemplate x:DataType="plugins:PluginParameterGroup">
+                                                            <StackPanel Spacing="6"
+                                                                        Margin="0,0,0,4">
+                                                                <TextBlock Text="{Binding Title}"
+                                                                           FontWeight="SemiBold"
+                                                                           FontSize="13"
+                                                                           Margin="0,4,0,2"
+                                                                           IsVisible="{Binding HasHeading}" />
+                                                                <ItemsControl ItemsSource="{Binding Parameters}">
+                                                                    <ItemsControl.ItemTemplate>
+                                                                        <DataTemplate x:DataType="plugins:PluginParameterItem">
+                                                                            <StackPanel Margin="0,0,0,8">
+                                                                <!-- Text parameter layout: title/description on top, full-width TextBox + Default badge below. -->
+                                                                <StackPanel Spacing="6"
+                                                                            IsVisible="{Binding IsTextParameter}">
+                                                                    <StackPanel Spacing="2">
+                                                                        <TextBlock Text="{Binding DisplayName}"
+                                                                                   FontWeight="SemiBold" />
+                                                                        <TextBlock Classes="muted"
+                                                                                   Text="{Binding Description}"
+                                                                                   TextWrapping="Wrap" />
+                                                                    </StackPanel>
+                                                                    <Grid ColumnDefinitions="*,Auto"
+                                                                          ColumnSpacing="12">
+                                                                        <TextBox Grid.Column="0"
+                                                                             Text="{Binding Value, Mode=OneWay}"
+                                                                             HorizontalAlignment="Stretch"
+                                                                             VerticalAlignment="Center"
+                                                                             LostFocus="OnParameterValueChanged" />
+                                                                        <TextBlock Grid.Column="1"
+                                                                                   Classes="muted"
+                                                                                   VerticalAlignment="Center"
+                                                                                   Text="{Binding DefaultValue, StringFormat=Default {0}}" />
+                                                                    </Grid>
                                                                 </StackPanel>
 
-                                                                <Grid ColumnDefinitions="*,Auto"
-                                                                      ColumnSpacing="12">
-                                                                    <TextBox Grid.Column="0"
-                                                                         Text="{Binding Value, Mode=OneWay}"
-                                                                         HorizontalAlignment="Stretch"
-                                                                         VerticalAlignment="Center"
-                                                                         LostFocus="OnParameterValueChanged" />
-
-                                                                    <TextBlock Grid.Column="1"
-                                                                               Classes="muted"
-                                                                               VerticalAlignment="Center"
-                                                                               Text="{Binding DefaultValue, StringFormat=Default {0}}" />
-                                                                </Grid>
+                                                                <!-- Checkbox parameter layout: compact toggle row with checkbox left, title/description middle, default badge right. -->
+                                                                <Border IsVisible="{Binding IsCheckboxParameter}"
+                                                                        Padding="8,6"
+                                                                        CornerRadius="4">
+                                                                    <Grid ColumnDefinitions="Auto,*,Auto"
+                                                                          ColumnSpacing="10"
+                                                                          VerticalAlignment="Center">
+                                                                        <CheckBox Grid.Column="0"
+                                                                                  VerticalAlignment="Center"
+                                                                                  IsChecked="{Binding IsChecked, Mode=OneWay}"
+                                                                                  IsCheckedChanged="OnParameterCheckedChanged" />
+                                                                        <StackPanel Grid.Column="1"
+                                                                                    Spacing="2"
+                                                                                    VerticalAlignment="Center">
+                                                                            <TextBlock Text="{Binding DisplayName}"
+                                                                                       FontWeight="SemiBold"
+                                                                                       TextWrapping="Wrap" />
+                                                                            <TextBlock Classes="muted"
+                                                                                       Text="{Binding Description}"
+                                                                                       TextWrapping="Wrap" />
+                                                                        </StackPanel>
+                                                                        <TextBlock Grid.Column="2"
+                                                                                   Classes="muted"
+                                                                                   FontSize="11"
+                                                                                   VerticalAlignment="Center"
+                                                                                   Text="{Binding DefaultValue, StringFormat=Default {0}}" />
+                                                                    </Grid>
+                                                                </Border>
+                                                                            </StackPanel>
+                                                                        </DataTemplate>
+                                                                    </ItemsControl.ItemTemplate>
+                                                                </ItemsControl>
                                                             </StackPanel>
                                                         </DataTemplate>
                                                     </ItemsControl.ItemTemplate>

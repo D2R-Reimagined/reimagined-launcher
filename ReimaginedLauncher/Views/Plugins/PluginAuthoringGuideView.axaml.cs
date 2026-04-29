@@ -153,12 +153,79 @@ public partial class PluginAuthoringGuideView : UserControl
                                              ]
                                              """;
 
+    private const string ConditionsExample = """
+                                             {
+                                               "parameters": [
+                                                 {
+                                                   "key": "damageMultiplier",
+                                                   "name": "Damage Multiplier",
+                                                   "defaultValue": "1.25",
+                                                   "description": "Plain text parameter (no 'type' field is also fine)."
+                                                 },
+                                                 {
+                                                   "key": "enableBaalPortal",
+                                                   "name": "Enable Baal Portal",
+                                                   "type": "checkbox",
+                                                   "defaultValue": "false",
+                                                   "description": "Adds a town portal to Baal."
+                                                 },
+                                                 {
+                                                   "key": "enableTristramPortal",
+                                                   "name": "Enable Tristram Portal",
+                                                   "type": "checkbox",
+                                                   "defaultValue": "false"
+                                                 }
+                                               ],
+                                               "assets": [
+                                                 {
+                                                   "source": "assets/town-baal-only.ds1",
+                                                   "target": "data/global/tiles/act1/town/example.ds1",
+                                                   "condition": {
+                                                     "all": [
+                                                       { "parameterKey": "enableBaalPortal",     "equals": "true"  },
+                                                       { "parameterKey": "enableTristramPortal", "equals": "false" }
+                                                     ]
+                                                   }
+                                                 }
+                                               ]
+                                             }
+
+                                             // operations.json — conditional excel edits
+                                             [
+                                               {
+                                                 "file": "skills.txt",
+                                                 "rowIdentifier": "Bind Demon",
+                                                 "column": "calc1",
+                                                 "operation": "replace",
+                                                 "updatedValue": "100",
+                                                 "condition": {
+                                                   "parameterKey": "bindDemonAlwaysSucceeds",
+                                                   "equals": "true"
+                                                 }
+                                               },
+                                               {
+                                                 "file": "skills.txt",
+                                                 "rowIdentifier": "Bind Demon",
+                                                 "column": "maxlvl",
+                                                 "operation": "replace",
+                                                 "updatedValue": "20",
+                                                 "condition": {
+                                                   "any": [
+                                                     { "parameterKey": "enableExpertMode", "equals": "true" },
+                                                     { "not": { "parameterKey": "enableNoviceMode", "equals": "true" } }
+                                                   ]
+                                                 }
+                                               }
+                                             ]
+                                             """;
+
     public PluginAuthoringGuideView()
     {
         InitializeComponent();
         FolderLayoutTextBox.Text = FolderLayoutExample;
         PluginInfoExampleTextBox.Text = PluginInfoExample;
         OperationsExampleTextBox.Text = OperationsExample;
+        ConditionsExampleTextBox.Text = ConditionsExample;
     }
 
     private void OnBackToPluginsClicked(object? sender, RoutedEventArgs e)

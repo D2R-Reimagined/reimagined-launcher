@@ -291,6 +291,31 @@ public partial class PluginsView : UserControl
         }
     }
 
+    // Persists checkbox-typed plugin parameters as the canonical "true"/"false" string. Uses the
+    // same SaveParameterValueAsync entry point as the text editor so plugin authors only need to
+    // round-trip through one serialization path.
+    private async void OnParameterCheckedChanged(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not CheckBox { DataContext: PluginParameterItem parameter } checkBox)
+        {
+            return;
+        }
+
+        var serialized = checkBox.IsChecked == true ? "true" : "false";
+
+        // Intentionally avoid RefreshPluginsStateAsync() and a success toast here: checkbox-heavy
+        // plugins would otherwise spam notifications and rebuild the catalog on every click,
+        // causing flicker, focus loss, and scroll jumps. Save quietly; only surface failures.
+        try
+        {
+            await PluginsService.SaveParameterValueAsync(parameter.PluginId, parameter.Key, serialized);
+        }
+        catch (Exception ex)
+        {
+            Notifications.SendNotification($"Could not save plugin parameter: {ex.Message}", "Warning");
+        }
+    }
+
     private async void OnSaveJsonClicked(object? sender, RoutedEventArgs e)
     {
         await SaveEditorAsync();

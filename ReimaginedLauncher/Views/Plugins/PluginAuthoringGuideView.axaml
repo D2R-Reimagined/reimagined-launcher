@@ -92,8 +92,8 @@
                     <TextBlock Classes="sub-title" Text="Optional fields" />
                     <StackPanel Spacing="2">
                         <TextBlock Classes="bullet" Text="•  author, description." />
-                        <TextBlock Classes="bullet" Text="•  parameters — each parameter requires key, name, and defaultValue." />
-                        <TextBlock Classes="bullet" Text="•  assets — list of {source, target} entries that copy raw files into the mod folder. Sources must live under the plugin's assets/ folder; targets are paths relative to the mod root (e.g. data/hd/global/sfx/...)." />
+                        <TextBlock Classes="bullet" Text="•  parameters — each parameter requires key, name, and defaultValue. An optional 'type' field selects the editor: missing or 'text' renders as a textbox; 'checkbox' renders as a checkbox and persists 'true'/'false'. An optional 'group' field renders parameters under a section heading on the Plugins page; groups are display-only and never affect parameter lookup, conditions, saving, or apply." />
+                        <TextBlock Classes="bullet" Text="•  assets — list of {source, target} entries that copy raw files into the mod folder. Sources must live under the plugin's assets/ folder; targets are paths relative to the mod root (e.g. data/hd/global/sfx/...). Each entry may declare an optional 'condition' that gates the copy." />
                     </StackPanel>
 
                     <TextBlock Classes="sub-title" Text="Asset copies" />
@@ -232,12 +232,63 @@
                 </StackPanel>
             </Border>
 
+            <!-- Optional types & conditions -->
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="10">
+                    <TextBlock Classes="section-title"
+                               Text="6. Optional Parameter Types &amp; Conditions" />
+                    <TextBlock Classes="lead"
+                               Text="Plugin authors can opt into checkbox-style parameters and gate individual operations or asset copies behind a small declarative JSON condition. Existing plugins without 'type' or 'condition' continue to behave exactly as before." />
+
+                    <TextBlock Classes="sub-title" Text="Parameter types" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  Missing or 'text' — existing behavior. Rendered as a textbox." />
+                        <TextBlock Classes="bullet" Text="•  'checkbox' — rendered as a checkbox/switch. The launcher normalizes the persisted value to 'true' or 'false' (case-insensitive aliases such as 1/0/yes/no/on/off/checked are accepted on read)." />
+                        <TextBlock Classes="bullet" Text="•  Existing parameterKey and {{parameter:key}} substitution behavior is unchanged for both kinds." />
+                    </StackPanel>
+
+                    <TextBlock Classes="sub-title" Text="Parameter groups (display only)" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  Add an optional 'group' string to any parameter to render it under a section heading on the Plugins page." />
+                        <TextBlock Classes="bullet" Text="•  Groups appear in the order they first occur in the parameters array; parameter order within a group is preserved." />
+                        <TextBlock Classes="bullet" Text="•  Missing/empty 'group' means the parameter is ungrouped. If no parameter declares a group, the existing flat layout is used." />
+                        <TextBlock Classes="bullet" Text="•  Grouping is purely visual: it never affects parameterKey lookup, {{parameter:key}} substitution, condition evaluation, saving, or apply." />
+                    </StackPanel>
+
+                    <TextBlock Classes="sub-title" Text="Conditions on operations and assets" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  Any operation entry inside a plugin JSON file or any asset entry in plugininfo.json may include an optional 'condition' object." />
+                        <TextBlock Classes="bullet" Text="•  Missing condition means the operation/asset always applies (existing behavior)." />
+                        <TextBlock Classes="bullet" Text="•  Conditions are pure declarative JSON — no scripts or expressions are executed." />
+                        <TextBlock Classes="bullet" Text="•  Comparisons run against the effective parameter value: parameter.value if present, otherwise parameter.defaultValue. Boolean-like comparisons are case-insensitive." />
+                    </StackPanel>
+
+                    <TextBlock Classes="sub-title" Text="Supported condition shapes" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  { &quot;parameterKey&quot;: &quot;someKey&quot;, &quot;equals&quot;: &quot;true&quot; }" />
+                        <TextBlock Classes="bullet" Text="•  { &quot;parameterKey&quot;: &quot;someKey&quot;, &quot;notEquals&quot;: &quot;true&quot; }" />
+                        <TextBlock Classes="bullet" Text="•  { &quot;all&quot;: [ ...conditions ] } — every nested condition must be true." />
+                        <TextBlock Classes="bullet" Text="•  { &quot;any&quot;: [ ...conditions ] } — at least one nested condition must be true." />
+                        <TextBlock Classes="bullet" Text="•  { &quot;not&quot;: { ...condition } } — inverts the nested condition." />
+                        <TextBlock Classes="bullet" Text="•  Unknown parameterKey or malformed condition shapes produce a clear plugin validation error." />
+                    </StackPanel>
+
+                    <TextBlock Classes="sub-title" Text="Example" />
+                    <TextBox x:Name="ConditionsExampleTextBox"
+                             IsReadOnly="True"
+                             AcceptsReturn="True"
+                             Classes="code-editor"
+                             MinHeight="360" />
+                </StackPanel>
+            </Border>
+
             <!-- Validation -->
             <Border Classes="panel"
                     Padding="20">
                 <StackPanel Spacing="8">
                     <TextBlock Classes="section-title"
-                               Text="6. Validation Rules" />
+                               Text="7. Validation Rules" />
                     <StackPanel Spacing="2">
                         <TextBlock Classes="bullet" Text="•  File paths must be relative and stay inside the plugin folder; absolute or traversing paths are rejected." />
                         <TextBlock Classes="bullet" Text="•  plugininfo.json must list files that actually exist in the archive." />
@@ -259,7 +310,7 @@
                     Padding="20">
                 <StackPanel Spacing="10">
                     <TextBlock Classes="section-title"
-                               Text="7. Sharing on GitHub Discussions" />
+                               Text="8. Sharing on GitHub Discussions" />
                     <TextBlock Classes="lead"
                                Text="The launcher's User Plugins page scrapes the Plugins discussion category on GitHub. Your post body must include these fields:" />
                     <StackPanel Spacing="2">
@@ -279,7 +330,7 @@
                     Padding="20">
                 <StackPanel Spacing="8">
                     <TextBlock Classes="section-title"
-                               Text="8. Current Limits" />
+                               Text="9. Current Limits" />
                     <StackPanel Spacing="2">
                         <TextBlock Classes="bullet" Text="•  All base-folder .txt files are supported except itemstatcost.txt." />
                         <TextBlock Classes="bullet" Text="•  Matching is by unique identifier column, or by numeric row ID for files with duplicates." />

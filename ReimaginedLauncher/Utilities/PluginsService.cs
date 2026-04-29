@@ -7,6 +7,7 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Text.RegularExpressions;
@@ -506,7 +507,12 @@ public static class PluginsService
             throw new InvalidOperationException("The selected plugin parameter could not be found.");
         }
 
-        var normalizedValue = value.Trim();
+        // Checkbox parameters always persist as the canonical "true"/"false" so the saved
+        // plugininfo.json stays consistent regardless of whether the UI sent "true"/"false",
+        // "1"/"0", a localized string, or the empty string when the user uncheck/checks the box.
+        var normalizedValue = string.Equals(parameter.Type, "checkbox", StringComparison.OrdinalIgnoreCase)
+            ? NormalizeCheckboxValue(value)
+            : value.Trim();
         var currentValue = string.IsNullOrWhiteSpace(parameter.Value) ? parameter.DefaultValue : parameter.Value;
         if (string.Equals(currentValue, normalizedValue, StringComparison.Ordinal))
         {
@@ -557,7 +563,30 @@ public static class PluginsService
                 foreach (var pluginFile in pluginState.Files)
                 {
                     var operations = await LoadPluginOperationsAsync(GetPluginFilePath(registration.Id, pluginFile.RelativePath));
-                    await ApplyOperationsAsync(excelDirectory, operations, parameters);
+
+                    // Drop any operation whose declarative condition evaluates to false against the
+                    // plugin's effective parameter values; preserves the original operation order
+                    // for the remaining entries so the apply pipeline behaves identically when no
+                    // conditions are present.
+                    var filtered = new List<PluginJsonOperation>(operations.Count);
+                    foreach (var op in operations)
+                    {
+                        if (op.Condition != null && !EvaluateCondition(op.Condition, parameters))
+                        {
+                            LaunchDiagnostics.Log(
+                                $"Plugin '{pluginState.Name}': skipped conditional operation in '{pluginFile.RelativePath}' targeting '{op.File}'.");
+                            continue;
+                        }
+
+                        filtered.Add(op);
+                    }
+
+                    if (filtered.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    await ApplyOperationsAsync(excelDirectory, filtered, parameters);
                 }
 
                 if (pluginState.Assets.Count > 0)
@@ -587,8 +616,23 @@ public static class PluginsService
         // Resolve the mod root once; every asset is validated against it.
         var modRootFull = Path.GetFullPath(modRoot);
 
+        // Asset conditions are evaluated against the same effective parameter map used by
+        // operations, so authors can drive both excel edits and asset replacements from the same
+        // checkbox(es).
+        var parameterValues = pluginState.Parameters.ToDictionary(
+            parameter => parameter.Key,
+            parameter => parameter.Value,
+            StringComparer.OrdinalIgnoreCase);
+
         foreach (var asset in pluginState.Assets)
         {
+            if (asset.Condition != null && !EvaluateCondition(asset.Condition, parameterValues))
+            {
+                LaunchDiagnostics.Log(
+                    $"Plugin '{pluginState.Name}': skipped conditional asset '{asset.TargetRelativePath}'.");
+                continue;
+            }
+
             try
             {
                 var destinationPath = Path.GetFullPath(Path.Combine(modRootFull, asset.TargetRelativePath));
@@ -1730,14 +1774,28 @@ public static class PluginsService
             modVersion = pluginInfo.ModVersion ?? string.Empty;
             author = pluginInfo.Author ?? string.Empty;
             description = pluginInfo.Description ?? string.Empty;
-            parameters = pluginInfo.Parameters.Select(parameter => new PluginParameterItem
+            parameters = pluginInfo.Parameters.Select(parameter =>
             {
-                PluginId = registration.Id,
-                Key = parameter.Key,
-                DisplayName = parameter.Name,
-                Description = parameter.Description ?? string.Empty,
-                DefaultValue = parameter.DefaultValue,
-                Value = string.IsNullOrWhiteSpace(parameter.Value) ? parameter.DefaultValue : parameter.Value
+                var rawValue = string.IsNullOrWhiteSpace(parameter.Value) ? parameter.DefaultValue : parameter.Value;
+                var normalizedType = parameter.Type ?? string.Empty;
+                // Checkbox parameters always materialize as the canonical "true"/"false" so the UI
+                // and the condition evaluator agree on the effective value, even if the on-disk
+                // value uses one of the lenient boolean forms (1/0/yes/no/on/off/checked).
+                var effectiveValue = string.Equals(normalizedType, "checkbox", StringComparison.OrdinalIgnoreCase)
+                    ? NormalizeCheckboxValue(rawValue)
+                    : rawValue;
+
+                return new PluginParameterItem
+                {
+                    PluginId = registration.Id,
+                    Key = parameter.Key,
+                    DisplayName = parameter.Name,
+                    Description = parameter.Description ?? string.Empty,
+                    DefaultValue = parameter.DefaultValue,
+                    Value = effectiveValue,
+                    Type = normalizedType,
+                    Group = parameter.Group ?? string.Empty
+                };
             }).ToList();
 
             if (pluginInfo.Files.Count == 0 && pluginInfo.Assets.Count == 0)
@@ -1791,7 +1849,17 @@ public static class PluginsService
                 }
 
                 var normalizedTarget = NormalizeRelativePath(asset.Target);
-                assets.Add(new PluginAssetCopy(sourceAbsolutePath, normalizedTarget));
+
+                if (asset.Condition != null)
+                {
+                    ValidateCondition(
+                        asset.Condition,
+                        parameters,
+                        $"plugininfo.json asset '{normalizedTarget}'",
+                        errors);
+                }
+
+                assets.Add(new PluginAssetCopy(sourceAbsolutePath, normalizedTarget, asset.Condition));
             }
 
             if (assets.Count > 0)
@@ -2047,7 +2115,188 @@ public static class PluginsService
             {
                 errors.Add($"'{pluginFileName}' references unknown parameter '{operation.ParameterKey}'.");
             }
+
+            if (operation.Condition != null)
+            {
+                ValidateCondition(
+                    operation.Condition,
+                    parameters,
+                    $"'{pluginFileName}' operation targeting {operation.File}",
+                    errors);
+            }
         }
+    }
+
+    // Validates a declarative plugin condition tree. Each node must use exactly one shape:
+    // a parameterKey leaf with equals/notEquals, or one of the all/any/not combinators. Unknown
+    // parameter keys and malformed shapes are reported as plugin validation errors so authors get
+    // a clear message instead of a silent skip at apply-time.
+    private static void ValidateCondition(
+        PluginJsonCondition condition,
+        IReadOnlyList<PluginParameterItem> parameters,
+        string location,
+        List<string> errors)
+    {
+        var hasParameterKey = !string.IsNullOrWhiteSpace(condition.ParameterKey);
+        var hasAll = condition.All != null;
+        var hasAny = condition.Any != null;
+        var hasNot = condition.Not != null;
+
+        var shapeCount = (hasParameterKey ? 1 : 0) + (hasAll ? 1 : 0) + (hasAny ? 1 : 0) + (hasNot ? 1 : 0);
+        if (shapeCount == 0)
+        {
+            errors.Add($"{location}: condition is empty. Use parameterKey/equals (or notEquals), or all/any/not.");
+            return;
+        }
+
+        if (shapeCount > 1)
+        {
+            errors.Add($"{location}: condition mixes shapes. Use exactly one of parameterKey, all, any, or not per node.");
+            return;
+        }
+
+        if (hasParameterKey)
+        {
+            if (parameters.All(p => !p.Key.Equals(condition.ParameterKey, StringComparison.OrdinalIgnoreCase)))
+            {
+                errors.Add($"{location}: condition references unknown parameter '{condition.ParameterKey}'.");
+            }
+
+            var hasEquals = condition.EqualsValue != null;
+            var hasNotEquals = condition.NotEqualsValue != null;
+            if (!hasEquals && !hasNotEquals)
+            {
+                errors.Add($"{location}: condition for parameter '{condition.ParameterKey}' must specify either 'equals' or 'notEquals'.");
+            }
+            else if (hasEquals && hasNotEquals)
+            {
+                errors.Add($"{location}: condition for parameter '{condition.ParameterKey}' cannot specify both 'equals' and 'notEquals'.");
+            }
+
+            return;
+        }
+
+        if (hasAll)
+        {
+            if (condition.All!.Count == 0)
+            {
+                errors.Add($"{location}: 'all' condition must contain at least one nested condition.");
+                return;
+            }
+
+            foreach (var nested in condition.All)
+            {
+                if (nested == null)
+                {
+                    errors.Add($"{location}: 'all' contains a null condition entry.");
+                    continue;
+                }
+
+                ValidateCondition(nested, parameters, location, errors);
+            }
+
+            return;
+        }
+
+        if (hasAny)
+        {
+            if (condition.Any!.Count == 0)
+            {
+                errors.Add($"{location}: 'any' condition must contain at least one nested condition.");
+                return;
+            }
+
+            foreach (var nested in condition.Any)
+            {
+                if (nested == null)
+                {
+                    errors.Add($"{location}: 'any' contains a null condition entry.");
+                    continue;
+                }
+
+                ValidateCondition(nested, parameters, location, errors);
+            }
+
+            return;
+        }
+
+        // hasNot
+        ValidateCondition(condition.Not!, parameters, location, errors);
+    }
+
+    // Pure-data evaluator: walks the condition tree and reports whether the action should run.
+    // Comparisons are case-insensitive string equality on the effective parameter value (Value
+    // when set, otherwise DefaultValue). Returns true for null/empty-shaped conditions so a
+    // missing condition means "always apply"; missing parameter keys evaluate to false (validation
+    // already surfaces this as an error before apply-time).
+    private static bool EvaluateCondition(
+        PluginJsonCondition? condition,
+        IReadOnlyDictionary<string, string> parameters)
+    {
+        if (condition is null)
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(condition.ParameterKey))
+        {
+            parameters.TryGetValue(condition.ParameterKey!, out var value);
+            value ??= string.Empty;
+
+            if (condition.EqualsValue != null)
+            {
+                return string.Equals(value, condition.EqualsValue, StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (condition.NotEqualsValue != null)
+            {
+                return !string.Equals(value, condition.NotEqualsValue, StringComparison.OrdinalIgnoreCase);
+            }
+
+            return false;
+        }
+
+        if (condition.All != null)
+        {
+            return condition.All.All(c => EvaluateCondition(c, parameters));
+        }
+
+        if (condition.Any != null)
+        {
+            return condition.Any.Any(c => EvaluateCondition(c, parameters));
+        }
+
+        if (condition.Not != null)
+        {
+            return !EvaluateCondition(condition.Not, parameters);
+        }
+
+        // Empty/unknown shape: malformed conditions should already have been caught by validation;
+        // err on the side of "do not apply" to avoid surprising authors with a silent passthrough.
+        return false;
+    }
+
+    // Lenient boolean parser used by checkbox parameters. Accepts the common string forms used in
+    // existing plugininfo.json files (true/false/1/0/yes/no/on/off/checked) so authors who hand-
+    // edit defaults still get a valid normalized value persisted back to disk.
+    private static string NormalizeCheckboxValue(string? rawValue)
+    {
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return "false";
+        }
+
+        var trimmed = rawValue.Trim();
+        if (trimmed.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("1", StringComparison.Ordinal) ||
+            trimmed.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("on", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("checked", StringComparison.OrdinalIgnoreCase))
+        {
+            return "true";
+        }
+
+        return "false";
     }
 
     // Validates a list of column assignments against the target file. Used by cloneRow/swapRow,
@@ -2726,7 +2975,12 @@ public static class PluginsService
         IReadOnlyList<string> Errors,
         IReadOnlyList<string> Warnings);
 
-    private sealed record PluginAssetCopy(string SourceAbsolutePath, string TargetRelativePath);
+    private sealed record PluginAssetCopy(
+        string SourceAbsolutePath,
+        string TargetRelativePath,
+        // Optional declarative condition copied from plugininfo.json. When null, the asset is
+        // always applied. Evaluated against the plugin's effective parameters at apply-time.
+        PluginJsonCondition? Condition = null);
 
     private sealed record SupportedPluginTarget(
         string FileName,
@@ -2922,15 +3176,63 @@ public static class PluginsService
     {
         public string Source { get; set; } = string.Empty;
         public string Target { get; set; } = string.Empty;
+
+        // Optional declarative condition controlling whether the asset is copied during apply.
+        // When omitted (default), the asset is always applied. See PluginJsonCondition for the
+        // supported shapes: {parameterKey, equals|notEquals}, {all:[...]}, {any:[...]}, {not:...}.
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public PluginJsonCondition? Condition { get; set; }
     }
 
     private sealed class PluginParameterDefinition
     {
         public string Key { get; set; } = string.Empty;
         public string Name { get; set; } = string.Empty;
+
+        // Optional parameter type: "text" (default, missing) renders as a textbox; "checkbox"
+        // renders as a checkbox/switch and persists "true"/"false". Other types are reserved.
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Type { get; set; }
+
         public string? Description { get; set; }
+
+        // Optional display-only group label. UI renders parameters that share the same group
+        // under a single heading; missing/null/empty means the parameter is ungrouped. This
+        // metadata never participates in parameterKey lookups, condition evaluation, saving,
+        // or plugin application; preserved across SavePluginInfoAsync round-trips.
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Group { get; set; }
+
         public string DefaultValue { get; set; } = string.Empty;
         public string Value { get; set; } = string.Empty;
+    }
+
+    // Declarative condition used by operations and asset replacements. Pure data; never executed
+    // as code. Exactly one shape per node: a parameterKey leaf with equals/notEquals, or one of
+    // the all/any/not combinators wrapping further conditions.
+    private sealed class PluginJsonCondition
+    {
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ParameterKey { get; set; }
+
+        // C# `Equals` would shadow object.Equals and `equals` is a reserved-style identifier; use
+        // a distinct property name and let JsonPropertyName preserve the public JSON shape.
+        [JsonPropertyName("equals")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? EqualsValue { get; set; }
+
+        [JsonPropertyName("notEquals")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? NotEqualsValue { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<PluginJsonCondition>? All { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<PluginJsonCondition>? Any { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public PluginJsonCondition? Not { get; set; }
     }
 
     private sealed record PluginJsonOperation(
@@ -2963,7 +3265,10 @@ public static class PluginsService
         // swapRow: optional column overrides applied to the row at SwapRowIdentifier *after* the
         // swap (the row originally at rowIdentifier). The standard "columns"/"column" assignments
         // apply post-swap to the row at rowIdentifier (originally at SwapRowIdentifier).
-        IReadOnlyList<PluginJsonColumnAssignment>? SwapColumns = null);
+        IReadOnlyList<PluginJsonColumnAssignment>? SwapColumns = null,
+        // Optional declarative condition controlling whether the operation is applied. When
+        // omitted (default), the operation is always applied. See PluginJsonCondition.
+        PluginJsonCondition? Condition = null);
 
     // Per-column assignment used either for multi-column updates that share a single rowIdentifier,
     // or to specify the column/value pairs of a new row produced by the addRow operation.
