@@ -85,6 +85,9 @@
             <StackPanel Grid.Row="2" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="8">
                 <Button Content="Take Backup Now" Click="OnTakeBackupNowClick"/>
                 <Button Content="Restore Selected" Click="OnRestoreSelectedClick"/>
+                <Button Content="Select Zip"
+                        ToolTip.Tip="Restore from a .zip backup outside the backup folder."
+                        Click="OnRestoreFromZipClick"/>
                 <Button Content="Refresh" Click="OnRefreshClick"/>
             </StackPanel>
 

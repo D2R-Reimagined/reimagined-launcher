@@ -320,6 +320,60 @@ public static class BackupService
         }
     }
 
+    public static async Task<bool> RestoreBackupFromArchiveAsync(string? archivePath)
+    {
+        if (string.IsNullOrWhiteSpace(archivePath) || !File.Exists(archivePath))
+        {
+            Notifications.SendNotification("Select a valid .zip file to restore.", "Warning");
+            return false;
+        }
+
+        if (!string.Equals(Path.GetExtension(archivePath), ".zip", StringComparison.OrdinalIgnoreCase))
+        {
+            Notifications.SendNotification("Backup archive must be a .zip file.", "Warning");
+            return false;
+        }
+
+        var destinationDirectory = GetResolvedSaveDirectory();
+        if (string.IsNullOrWhiteSpace(destinationDirectory))
+        {
+            Notifications.SendNotification("Save directory could not be resolved from modinfo.json.", "Warning");
+            return false;
+        }
+
+        if (!ArchiveContainsSaveFiles(archivePath))
+        {
+            Notifications.SendNotification("Selected zip does not contain any .d2i or .d2s save files.", "Warning");
+            return false;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(destinationDirectory);
+            var errors = await ExtractArchiveAsync(archivePath, destinationDirectory);
+
+            if (errors.Count > 0)
+            {
+                var errorSummary = string.Join(Environment.NewLine, errors.Take(3));
+                if (errors.Count > 3)
+                {
+                    errorSummary += $"{Environment.NewLine}...and {errors.Count - 3} more files failed.";
+                }
+
+                Notifications.SendNotification($"Restored backup with errors:{Environment.NewLine}{errorSummary}", "Warning");
+                return true;
+            }
+
+            Notifications.SendNotification($"Restored backup from: {Path.GetFileName(archivePath)}", "Success");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Notifications.SendNotification($"Restore failed: {ex.Message}", "Warning");
+            return false;
+        }
+    }
+
     public static void EnforceBackupLimit()
     {
         TrimBackups();
@@ -547,6 +601,29 @@ public static class BackupService
 
             return errors;
         });
+    }
+
+    private static bool ArchiveContainsSaveFiles(string archivePath)
+    {
+        try
+        {
+            using var archive = ZipFile.OpenRead(archivePath);
+            return archive.Entries.Any(entry =>
+            {
+                if (string.IsNullOrEmpty(entry.Name))
+                {
+                    return false;
+                }
+
+                var extension = Path.GetExtension(entry.Name);
+                return string.Equals(extension, ".d2i", StringComparison.OrdinalIgnoreCase)
+                       || string.Equals(extension, ".d2s", StringComparison.OrdinalIgnoreCase);
+            });
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static int GetArchiveFileCount(string archivePath)

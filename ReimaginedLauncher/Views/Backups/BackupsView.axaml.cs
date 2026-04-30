@@ -125,6 +125,36 @@ public partial class BackupsView : UserControl
         }
     }
 
+    private async void OnRestoreFromZipClick(object? sender, RoutedEventArgs e)
+    {
+        if (TopLevel.GetTopLevel(this) is not Window window)
+        {
+            return;
+        }
+
+        var zipFileType = new FilePickerFileType("Zip archives")
+        {
+            Patterns = new[] { "*.zip" }
+        };
+
+        var files = await window.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Select Backup Zip",
+            AllowMultiple = false,
+            FileTypeFilter = new[] { zipFileType }
+        });
+
+        if (files.Count <= 0)
+        {
+            return;
+        }
+
+        if (await BackupService.RestoreBackupFromArchiveAsync(files[0].Path.LocalPath))
+        {
+            RefreshBackupState();
+        }
+    }
+
     private void OnRefreshClick(object? sender, RoutedEventArgs e)
     {
         RefreshBackupState();
