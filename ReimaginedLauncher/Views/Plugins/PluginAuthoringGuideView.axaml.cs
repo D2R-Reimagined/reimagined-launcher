@@ -142,13 +142,24 @@ public partial class PluginAuthoringGuideView : UserControl
                                                {
                                                  "file": "missiles.json",
                                                  "Key": "FireBolt",
-                                                 "updatedValue": "data/hd/missiles/firebolt/firebolt.json"
+                                                 "updatedValue": "safe_arrow"
                                                },
                                                {
                                                  "file": "missiles.json",
                                                  "Key": "MyNewMissile",
                                                  "operation": "addRow",
                                                  "parameterKey": "myMissileAssetPath"
+                                               },
+                                               {
+                                                 "file": "monsters.json",
+                                                 "Key": "Skeleton1",
+                                                 "updatedValue": "fallen1"
+                                               },
+                                               {
+                                                 "file": "monsters.json",
+                                                 "Key": "MyNewMonster",
+                                                 "operation": "addRow",
+                                                 "parameterKey": "myMonsterAssetPath"
                                                }
                                              ]
                                              """;

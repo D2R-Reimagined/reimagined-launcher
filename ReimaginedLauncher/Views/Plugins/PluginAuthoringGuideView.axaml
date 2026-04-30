@@ -51,6 +51,7 @@
                         <TextBlock Classes="bullet" Text="•  Excel edits: any base-folder .txt file except itemstatcost.txt." />
                         <TextBlock Classes="bullet" Text="•  String edits: .json files under data/local/lng/strings." />
                         <TextBlock Classes="bullet" Text="•  Missiles edits: data/hd/missiles/missiles.json (replace existing keys or addRow new ones)." />
+                        <TextBlock Classes="bullet" Text="•  Monsters edits: data/hd/character/monsters.json (same flat layout as missiles.json; replace existing keys or addRow new ones)." />
                     </StackPanel>
                     <TextBlock Classes="muted"
                                TextWrapping="Wrap"
@@ -147,6 +148,14 @@
                         <TextBlock Classes="bullet" Text="•  updatedValue supports {{parameter:key}} tokens just like excel operations." />
                     </StackPanel>
 
+                    <TextBlock Classes="sub-title" Text="Monsters (monsters.json) target" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  Used for the single monsters.json file at data/hd/character/monsters.json (resolved automatically from the mod data root)." />
+                        <TextBlock Classes="bullet" Text="•  Shares the missiles.json layout: file, Key, and a value supplied via updatedValue or parameterKey. No rowIdentifier or column fields." />
+                        <TextBlock Classes="bullet" Text="•  operation defaults to replace (the Key must already exist). Use addRow to append a brand-new key/value pair while preserving existing JSON formatting." />
+                        <TextBlock Classes="bullet" Text="•  updatedValue supports {{parameter:key}} tokens just like excel and missiles operations." />
+                    </StackPanel>
+
                     <TextBlock Classes="sub-title" Text="Example" />
                     <TextBox x:Name="OperationsExampleTextBox"
                              IsReadOnly="True"
@@ -165,7 +174,7 @@
 
                     <TextBlock Classes="sub-title" Text="Common" />
                     <StackPanel Spacing="2">
-                        <TextBlock Classes="bullet" Text="•  file (required) — any base-folder .txt except itemstatcost.txt, any .json under data/local/lng/strings, or missiles.json." />
+                        <TextBlock Classes="bullet" Text="•  file (required) — any base-folder .txt except itemstatcost.txt, any .json under data/local/lng/strings, missiles.json, or monsters.json." />
                     </StackPanel>
 
                     <TextBlock Classes="sub-title" Text="Excel (.txt) operations" />
@@ -212,7 +221,14 @@
                     <TextBlock Classes="sub-title" Text="Missiles (missiles.json) operations" />
                     <StackPanel Spacing="2">
                         <TextBlock Classes="bullet" Text="•  Key (required) — the missile key inside missiles.json to update or add." />
-                        <TextBlock Classes="bullet" Text="•  updatedValue or parameterKey (required) — the value to write for the key. Both forms expand {{parameter:key}} tokens." />
+                        <TextBlock Classes="bullet" Text="•  updatedValue or parameterKey (required) — a single missile entry name (e.g. safe_arrow), not a file path. Both forms expand {{parameter:key}} tokens." />
+                        <TextBlock Classes="bullet" Text="•  operation (optional) — replace (default) requires the key to already exist; addRow appends a new key/value pair while preserving existing JSON formatting. No other operations are accepted." />
+                    </StackPanel>
+
+                    <TextBlock Classes="sub-title" Text="Monsters (monsters.json) operations" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  Key (required) — the monster key inside monsters.json to update or add." />
+                        <TextBlock Classes="bullet" Text="•  updatedValue or parameterKey (required) — a single monster entry name (e.g. fallen1), not a file path. Both forms expand {{parameter:key}} tokens." />
                         <TextBlock Classes="bullet" Text="•  operation (optional) — replace (default) requires the key to already exist; addRow appends a new key/value pair while preserving existing JSON formatting. No other operations are accepted." />
                     </StackPanel>
                 </StackPanel>
@@ -250,6 +266,7 @@
                         <TextBlock Classes="bullet" Text="•  When using 'columns', each entry must reference a known target column; per-column parameterKey/updatedValue overrides the parent operation's values." />
                         <TextBlock Classes="bullet" Text="•  Unknown parameters and unknown target columns are reported as plugin errors." />
                         <TextBlock Classes="bullet" Text="•  missiles.json entries must include a Key and either updatedValue or parameterKey, and only support the replace (default) and addRow operations." />
+                        <TextBlock Classes="bullet" Text="•  monsters.json entries follow the same rules as missiles.json: a Key plus updatedValue or parameterKey, with only the replace (default) and addRow operations supported." />
                     </StackPanel>
                 </StackPanel>
             </Border>
@@ -287,6 +304,7 @@
                         <TextBlock Classes="bullet" Text="•  A single operation can update multiple columns on the matched row(s) via the 'columns' array." />
                         <TextBlock Classes="bullet" Text="•  Most files use typed parsers from the D2RReimaginedTools library for column validation and data integrity." />
                         <TextBlock Classes="bullet" Text="•  In addition to excel and strings files, the launcher supports edits to data/hd/missiles/missiles.json via replace (default) and addRow." />
+                        <TextBlock Classes="bullet" Text="•  data/hd/character/monsters.json shares the missiles.json layout and is supported with the same {file, Key, updatedValue|parameterKey, [operation]} shape and addRow semantics." />
                     </StackPanel>
                 </StackPanel>
             </Border>
