@@ -35,6 +35,12 @@ public static class PluginAssetBackupService
     // if multiple plugins claim it.
     private static readonly HashSet<string> RefreshedThisPass = new(StringComparer.OrdinalIgnoreCase);
 
+    // First plugin id to claim each target during the current apply pass.
+    // Subsequent claimants on the same path within the same pass surface a
+    // conflict warning so the user knows which plugin's edits will win
+    // (last-applied wins). Cleared by BeginApplyPassAsync.
+    private static readonly Dictionary<string, string> FirstClaimantThisPass = new(StringComparer.OrdinalIgnoreCase);
+
     public static string BackupRootDirectory =>
         Path.Combine(SettingsManager.AppDirectoryPath, BackupRootDirectoryName);
 
@@ -51,6 +57,7 @@ public static class PluginAssetBackupService
         try
         {
             RefreshedThisPass.Clear();
+            FirstClaimantThisPass.Clear();
         }
         finally
         {
@@ -115,6 +122,27 @@ public static class PluginAssetBackupService
             if (!entry.ClaimingPluginIds.Contains(pluginId, StringComparer.OrdinalIgnoreCase))
             {
                 entry.ClaimingPluginIds.Add(pluginId);
+            }
+
+            // Conflict detection: if another plugin already claimed this exact
+            // target during the same apply pass, log + notify so the user is
+            // aware that the second plugin's bytes will overwrite the first
+            // plugin's bytes (last-applied wins is the existing semantic).
+            if (FirstClaimantThisPass.TryGetValue(normalizedTarget, out var firstClaimant))
+            {
+                if (!string.Equals(firstClaimant, pluginId, StringComparison.OrdinalIgnoreCase))
+                {
+                    var fileName = Path.GetFileName(normalizedTarget);
+                    LaunchDiagnostics.Log(
+                        $"Plugin asset conflict on '{fileName}': plugin '{pluginId}' overrides plugin '{firstClaimant}'.");
+                    Notifications.SendNotification(
+                        $"Plugin conflict: '{fileName}' is claimed by multiple enabled plugins; the last-applied plugin's edits will win.",
+                        "Warning");
+                }
+            }
+            else
+            {
+                FirstClaimantThisPass[normalizedTarget] = pluginId;
             }
 
             SaveManifestUnsafe(manifest);
