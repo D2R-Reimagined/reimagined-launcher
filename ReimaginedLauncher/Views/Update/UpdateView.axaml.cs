@@ -10,6 +10,7 @@ using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using ReimaginedLauncher.Utilities;
+using ReimaginedLauncher.Utilities.Casc;
 
 namespace ReimaginedLauncher.Views.Update;
 
@@ -375,6 +376,24 @@ public partial class UpdateView : UserControl
         }
         else
         {
+            // Snapshot the existing mods/Reimagined payload before we extract
+            // the new zip over it so we can identify files that the new mod
+            // version no longer ships and reconcile them via
+            // CascOrphanRecoveryService below. This replaces the bulk
+            // "rename to Reimagined.backup" approach without losing orphan
+            // cleanup correctness.
+            var modRoot = Path.Combine(installDirectory, "mods", "Reimagined");
+            HashSet<string> oldModPaths;
+            try
+            {
+                oldModPaths = EnumerateModRelativePaths(modRoot);
+            }
+            catch (Exception ex)
+            {
+                LaunchDiagnostics.Log($"Failed to snapshot existing mod payload for orphan recovery: {ex.Message}");
+                oldModPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+
             await ExtractNonD2RmmModAsync(zipPath, installDirectory);
 
             // Invalidate the per-launch "clean" snapshots so they are retaken
@@ -389,6 +408,49 @@ public partial class UpdateView : UserControl
             catch (Exception ex)
             {
                 LaunchDiagnostics.Log($"Failed to invalidate launcher_clean snapshots: {ex.Message}");
+            }
+
+            // Phase 1h orphan recovery: any path the *previous* mod payload
+            // shipped that the new payload no longer does is reconciled
+            // against the CASC fastload manifest. When fastload is not
+            // configured (manifest absent) every removed path falls through
+            // to a best-effort delete, which is the correct CASC-less
+            // behaviour: the game then reads the underlying default from
+            // CASC at runtime. When fastload is configured this same call
+            // either re-extracts the CASC default (preserving the speedup)
+            // or strips ownership tokens for plugin-overlaid paths.
+            try
+            {
+                var newModPaths = EnumerateModRelativePaths(modRoot);
+                var removed = oldModPaths
+                    .Where(p => !newModPaths.Contains(p))
+                    .ToArray();
+
+                if (removed.Length > 0)
+                {
+                    var manifestService = new CascFastloadManifestService(installDirectory);
+                    var extractionService = new CascExtractionService(new NativeCascLib());
+                    var orphanService = new CascOrphanRecoveryService(extractionService, manifestService);
+
+                    // storage: null — fastload extraction here would require an
+                    // open CASC handle plus user opt-in via the upcoming Phase
+                    // 1j UI. Until that lands, the null-storage path is the
+                    // correct default and remains safe for CASC-less installs.
+                    var result = await orphanService.ReconcileRemovedPathsAsync(
+                        removed,
+                        storage: null,
+                        destinationRoot: modRoot);
+
+                    LaunchDiagnostics.Log(
+                        $"Mod orphan recovery: {removed.Length} removed, " +
+                        $"{result.Deleted} deleted, {result.Restored} restored, " +
+                        $"{result.SourceUpdated} source-updated, {result.NotTracked} not-tracked, " +
+                        $"{result.Failed} failed, {result.DirectoriesPruned} dirs pruned.");
+                }
+            }
+            catch (Exception ex)
+            {
+                LaunchDiagnostics.Log($"Mod orphan recovery failed: {ex.Message}");
             }
 
             // Migration courtesy: remove any leftover mods/Reimagined.backup
@@ -477,6 +539,35 @@ public partial class UpdateView : UserControl
     private static Task ExtractNonD2RmmModAsync(string zipPath, string installDirectory)
     {
         return FileCopyHelper.ExtractZipAsync(zipPath, installDirectory);
+    }
+
+    /// <summary>
+    /// Enumerates every file beneath <paramref name="modRoot"/> and returns
+    /// the set of relative paths in CASC-style backslash form (matching the
+    /// fastload manifest's path convention). Returns an empty set when the
+    /// directory does not exist.
+    /// </summary>
+    private static HashSet<string> EnumerateModRelativePaths(string modRoot)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(modRoot) || !Directory.Exists(modRoot))
+        {
+            return set;
+        }
+
+        foreach (var fullPath in Directory.EnumerateFiles(modRoot, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(modRoot, fullPath);
+            // Manifest paths use backslashes regardless of platform; normalise so
+            // diff/lookup against CascFastloadManifest entries is stable.
+            if (Path.DirectorySeparatorChar != '\\')
+            {
+                relative = relative.Replace(Path.DirectorySeparatorChar, '\\');
+            }
+            set.Add(relative);
+        }
+
+        return set;
     }
 
     /// <summary>
