@@ -1,0 +1,89 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="640"
+             x:CompileBindings="False"
+             x:Class="ReimaginedLauncher.Views.CascFastload.CascFastloadView">
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                  VerticalScrollBarVisibility="Auto">
+        <StackPanel Spacing="12">
+            <StackPanel Spacing="4">
+                <TextBlock Classes="view-title" Text="CASC Fastload"/>
+                <TextBlock Classes="muted"
+                           TextWrapping="Wrap"
+                           Text="Extract D2R's CASC archive into the install folder so the game reads plain files instead of decompressing CASC blocks at runtime. After a D2R patch, run Update to apply only the changed files (delta) instead of redoing the full extraction."/>
+            </StackPanel>
+
+            <Border x:Name="UnavailableBanner"
+                    Classes="panel"
+                    Padding="14"
+                    IsVisible="False">
+                <StackPanel Spacing="6">
+                    <TextBlock FontWeight="SemiBold" Text="CASC fastload unavailable"/>
+                    <TextBlock x:Name="UnavailableReasonText"
+                               TextWrapping="Wrap"
+                               Classes="muted"/>
+                </StackPanel>
+            </Border>
+
+            <Border Classes="panel" Padding="14">
+                <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                      ColumnDefinitions="Auto,*"
+                      RowSpacing="6"
+                      ColumnSpacing="12">
+                    <TextBlock Grid.Row="0" Grid.Column="0" FontWeight="SemiBold" Text="Install:"/>
+                    <TextBlock Grid.Row="0" Grid.Column="1" x:Name="InstallPathText" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" FontWeight="SemiBold" Text="CASC build:"/>
+                    <TextBlock Grid.Row="1" Grid.Column="1" x:Name="BuildText"/>
+
+                    <TextBlock Grid.Row="2" Grid.Column="0" FontWeight="SemiBold" Text="Last extraction:"/>
+                    <TextBlock Grid.Row="2" Grid.Column="1" x:Name="LastExtractionText"/>
+
+                    <TextBlock Grid.Row="3" Grid.Column="0" FontWeight="SemiBold" Text="Files tracked:"/>
+                    <TextBlock Grid.Row="3" Grid.Column="1" x:Name="FilesTrackedText"/>
+
+                    <TextBlock Grid.Row="4" Grid.Column="0" FontWeight="SemiBold" Text="Native library:"/>
+                    <TextBlock Grid.Row="4" Grid.Column="1" x:Name="NativeStatusText"/>
+                </Grid>
+            </Border>
+
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button x:Name="ExtractButton"
+                        Content="Extract / Update (Delta)"
+                        ToolTip.Tip="Extract or update from this install's CASC. Only changed files are written when a manifest already exists."
+                        Click="OnExtractClick"/>
+                <Button x:Name="UndoButton"
+                        Content="Undo"
+                        ToolTip.Tip="Remove the launcher's extracted CASC files (mod and plugin overlays are preserved)."
+                        Click="OnUndoClick"/>
+                <Button x:Name="CrossInstallButton"
+                        Content="Cross-Extract from..."
+                        ToolTip.Tip="Use a sibling install (e.g. Battle.net) as the source to extract into this install, fully offline. Requires both installs to be at the same CASC build."
+                        Click="OnCrossInstallClick"/>
+                <Button x:Name="RefreshButton"
+                        Content="Refresh"
+                        Click="OnRefreshClick"/>
+                <Button x:Name="CancelButton"
+                        Content="Cancel"
+                        IsEnabled="False"
+                        Click="OnCancelClick"/>
+            </StackPanel>
+
+            <Border Classes="panel" Padding="14">
+                <StackPanel Spacing="8">
+                    <TextBlock x:Name="StatusText" Text="Idle." FontWeight="SemiBold"/>
+                    <ProgressBar x:Name="ExtractProgressBar"
+                                 Minimum="0" Maximum="100" Value="0"
+                                 Height="14"/>
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <TextBlock Grid.Column="0" x:Name="ProgressDetailText" Classes="muted" Text="" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Grid.Column="1" x:Name="ProgressEtaText" Classes="muted" Text=""/>
+                    </Grid>
+                    <TextBlock x:Name="CurrentFileText" Classes="muted" Text="" TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

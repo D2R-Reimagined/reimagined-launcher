@@ -66,6 +66,10 @@
                                 Click="OnOpenAuthoringGuideClicked" />
                         <Button Content="Refresh"
                                 Click="OnRefreshClicked" />
+                        <Button x:Name="ReapplyPluginsButton"
+                                Content="Reapply Now"
+                                ToolTip.Tip="Re-runs mod tweak preparation: restores clean snapshots and reapplies all enabled plugins in order. Useful after toggling plugins without launching the game."
+                                Click="OnReapplyPluginsClicked" />
                         <Button Classes="accent"
                                 Content="Import Plugin Zip"
                                 Click="OnImportPluginClicked" />

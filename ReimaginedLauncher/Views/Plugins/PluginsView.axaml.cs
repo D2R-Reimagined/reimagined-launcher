@@ -72,6 +72,31 @@ public partial class PluginsView : UserControl
         await RefreshPluginsStateAsync();
     }
 
+    private async void OnReapplyPluginsClicked(object? sender, RoutedEventArgs e)
+    {
+        ReapplyPluginsButton.IsEnabled = false;
+        try
+        {
+            var progress = new Progress<string>(message => LaunchDiagnostics.Log(message));
+            var ok = await ModTweaksService.PrepareForLaunchAsync(progress);
+            Notifications.SendNotification(
+                ok
+                    ? "Mod tweaks reapplied: clean snapshots restored and enabled plugins applied."
+                    : "Reapply finished with errors. Check the launch diagnostics log for details.",
+                ok ? "Success" : "Warning");
+
+            await RefreshPluginsStateAsync();
+        }
+        catch (Exception ex)
+        {
+            Notifications.SendNotification($"Reapply failed: {ex.Message}", "Warning");
+        }
+        finally
+        {
+            ReapplyPluginsButton.IsEnabled = true;
+        }
+    }
+
     private async void OnImportPluginClicked(object? sender, RoutedEventArgs e)
     {
         if (TopLevel.GetTopLevel(this) is not Window window)
