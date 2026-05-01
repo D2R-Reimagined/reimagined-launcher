@@ -54,7 +54,7 @@
                     <TextBlock FontWeight="SemiBold" Text="Scope (optional, debug/test)"/>
                     <TextBlock Classes="muted" TextWrapping="Wrap"
                                Text="Limit Extract / Update to entries whose path starts with one of the prefixes below (semicolon-separated, e.g. data\hd\ui\;data\global\excel\). Leave blank for the full default scope (data\global\ + data\hd\)."/>
-                    <TextBox x:Name="ScopePrefixesTextBox" Watermark="data\hd\ui\"/>
+                    <TextBox x:Name="ScopePrefixesTextBox" PlaceholderText="data\hd\ui\"/>
                 </StackPanel>
             </Border>
 
