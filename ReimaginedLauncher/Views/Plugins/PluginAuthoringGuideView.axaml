@@ -105,6 +105,9 @@
                         <TextBlock Classes="bullet"
                                    TextWrapping="Wrap"
                                    Text="•  Warning: This plugin directly copies an asset into the mod without reading the mods data, it may cause problems if it is not setup correctly." />
+                        <TextBlock Classes="bullet"
+                                   TextWrapping="Wrap"
+                                   Text="•  Animation pair safety net: data/global/animdata.d2 and data/global/exanimdata.d2 are read together by the game, so if your plugin only copies one of the two the launcher automatically copies that same file onto the other path so they stay in sync. Ship both files yourself if you actually want them to differ." />
                     </StackPanel>
 
                     <TextBlock Classes="sub-title" Text="Example" />
@@ -185,6 +188,9 @@
                         <TextBlock Classes="bullet"
                                    TextWrapping="Wrap"
                                    Text="•  rowIdentifier object — also accepts an object that overrides the default match logic by listing one or more {column: expectedValue} pairs (e.g. {&quot;Name&quot;: &quot;Skeleton&quot;, &quot;hcIdx&quot;: &quot;86&quot;}). The row must satisfy every pair. On files with duplicate identifier values (rowID files) you should list at least two columns; the launcher emits a warning otherwise so the intended row stays uniquely matched." />
+                        <TextBlock Classes="bullet"
+                                   TextWrapping="Wrap"
+                                   Text="•  rowIdentifier array (updateRow only) — also accepts an array whose elements are any mix of strings, numbers, ranges, and objects. The launcher matches rows for each element in turn and unions the results, so one operation can update several rows at once. Each string element follows the same rules as a single string rowIdentifier (identifier value, numeric row ID, or &quot;start-end&quot; range). Each object element keeps the multi-column AND check, so {&quot;Class&quot;: &quot;skeleton&quot;, &quot;Level&quot;: &quot;5&quot;} only matches rows where every listed column matches. Duplicate matches are de-duplicated. addRow, cloneRow, and swapRow only target one row at a time and reject the array form." />
                         <TextBlock Classes="bullet" Text="•  column (required unless 'columns' is provided) — a column name on the target file." />
                         <TextBlock Classes="bullet" Text="•  columns (optional) — an array of {column, updatedValue, parameterKey, operation} objects to update multiple columns on the same row(s) with a single rowIdentifier. Each entry inherits operation/updatedValue/parameterKey from the parent operation when omitted." />
                         <TextBlock Classes="bullet" Text="•  operation (optional) — replace (default), multiplyExisting, append, addRow, cloneRow, or swapRow." />
@@ -314,6 +320,9 @@
                         <TextBlock Classes="bullet" Text="•  addRow rowIdentifier must be empty (append) or a numeric 0-based index in the range 0..rowCount; non-numeric identifiers are rejected." />
                         <TextBlock Classes="bullet" Text="•  cloneRow requires sourceRowIdentifier; mode='add' must omit rowIdentifier (the clone is always appended to the end); mode='replace' requires rowIdentifier. The clone is a deep copy of the source row, then 'columns' overrides apply on top." />
                         <TextBlock Classes="bullet" Text="•  swapRow requires both rowIdentifier and swapRowIdentifier and rejects swapping a row with itself; 'columns' apply post-swap to the row at rowIdentifier, 'swapColumns' to the row at swapRowIdentifier." />
+                        <TextBlock Classes="bullet"
+                                   TextWrapping="Wrap"
+                                   Text="•  rowIdentifier array elements are validated like the single-value forms: object elements must list real columns (with the same two-columns-on-rowID-files warning), and string elements on rowID files must be a numeric row ID or a &quot;start-end&quot; range. Empty array elements and arrays attached to addRow / cloneRow / swapRow are rejected." />
                         <TextBlock Classes="bullet" Text="•  When using 'columns', each entry must reference a known target column; per-column parameterKey/updatedValue overrides the parent operation's values." />
                         <TextBlock Classes="bullet" Text="•  Unknown parameters and unknown target columns are reported as plugin errors." />
                         <TextBlock Classes="bullet" Text="•  missiles.json entries must include a Key and either updatedValue or parameterKey, and only support the replace (default) and addRow operations." />
