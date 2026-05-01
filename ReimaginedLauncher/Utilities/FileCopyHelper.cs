@@ -30,13 +30,7 @@ internal static class FileCopyHelper
         }
     }
 
-    /// <summary>
-    /// Extracts every entry from <paramref name="zipPath"/> into
-    /// <paramref name="destinationDirectory"/> using the same atomic-replace
-    /// strategy as <see cref="CopyFileAsync"/>. This is a drop-in replacement
-    /// for <c>ZipFile.ExtractToDirectory(zip, dst, overwriteFiles: true)</c>
-    /// that produces a fresh file id per overwritten entry.
-    /// </summary>
+    /// <summary>Extracts <paramref name="zipPath"/> into <paramref name="destinationDirectory"/> using per-entry atomic replace (fresh file id per overwrite).</summary>
     public static async Task ExtractZipAsync(string zipPath, string destinationDirectory)
     {
         Directory.CreateDirectory(destinationDirectory);
@@ -83,12 +77,7 @@ internal static class FileCopyHelper
     }
 
     /// <summary>
-    /// Writes <paramref name="sourceStream"/> to <paramref name="destinationPath"/>
-    /// atomically via a sibling temp file + <see cref="File.Replace(string, string, string)"/>
-    /// (or <see cref="File.Move(string, string)"/> when no prior file exists).
-    /// Exposed for callers (e.g. CASC extraction) that produce their bytes from
-    /// a stream rather than a source path. Cancellation aborts the copy and
-    /// removes the staging file.
+    /// Atomically writes <paramref name="sourceStream"/> to <paramref name="destinationPath"/> via a sibling temp + <c>File.Replace</c>/<c>Move</c>; cancellation removes the staging file.
     /// </summary>
     internal static async Task WriteStreamAtomicallyAsync(
         Stream sourceStream,

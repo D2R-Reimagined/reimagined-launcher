@@ -592,12 +592,7 @@ public partial class UpdateView : UserControl
         return FileCopyHelper.ExtractZipAsync(zipPath, installDirectory);
     }
 
-    /// <summary>
-    /// Enumerates every file beneath <paramref name="modRoot"/> and returns
-    /// the set of relative paths in CASC-style backslash form (matching the
-    /// fastload manifest's path convention). Returns an empty set when the
-    /// directory does not exist.
-    /// </summary>
+    /// <summary>Returns relative paths under <paramref name="modRoot"/> in CASC-style backslash form.</summary>
     private static HashSet<string> EnumerateModRelativePaths(string modRoot)
     {
         var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -609,8 +604,7 @@ public partial class UpdateView : UserControl
         foreach (var fullPath in Directory.EnumerateFiles(modRoot, "*", SearchOption.AllDirectories))
         {
             var relative = Path.GetRelativePath(modRoot, fullPath);
-            // Manifest paths use backslashes regardless of platform; normalise so
-            // diff/lookup against CascFastloadManifest entries is stable.
+            // Manifest paths use backslashes regardless of platform.
             if (Path.DirectorySeparatorChar != '\\')
             {
                 relative = relative.Replace(Path.DirectorySeparatorChar, '\\');
@@ -629,11 +623,10 @@ public partial class UpdateView : UserControl
             return CascFastloadEntry.SourceTokens.Mod;
         }
 
-        // Tokenise on '+' and rebuild in canonical casc/mod/plugin order to match SourceTokens.
+        // Rebuild in canonical casc/mod/plugin order.
         var parts = source.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var hasCasc = parts.Any(p => p.Equals(CascFastloadEntry.SourceTokens.Casc, StringComparison.OrdinalIgnoreCase));
         var hasPlugin = parts.Any(p => p.Equals(CascFastloadEntry.SourceTokens.Plugin, StringComparison.OrdinalIgnoreCase));
-        // Mod is what we are adding; ignore whether it was already there.
 
         var rebuilt = new List<string>(3);
         if (hasCasc) rebuilt.Add(CascFastloadEntry.SourceTokens.Casc);
@@ -642,11 +635,7 @@ public partial class UpdateView : UserControl
         return string.Join('+', rebuilt);
     }
 
-    /// <summary>
-    /// Refreshes the currently visible UpdateView if one is active in the content area.
-    /// This allows the install operation to update the UI even when the original view
-    /// instance that started the install has been replaced by tab navigation.
-    /// </summary>
+    /// <summary>Refreshes the active UpdateView so installs surface UI updates after tab navigation replaces the original instance.</summary>
     private static void RefreshVisibleUpdateView()
     {
         Dispatcher.UIThread.Post(() =>

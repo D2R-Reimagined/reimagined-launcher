@@ -11,11 +11,7 @@ using ReimaginedLauncher.Generators;
 namespace ReimaginedLauncher.Utilities;
 
 /// <summary>
-/// Tracks original copies of mod files that have been replaced by plugin asset
-/// operations so they can be restored when a plugin is later disabled or
-/// deleted. Backups and the manifest live under the launcher's app data
-/// directory and are keyed by absolute target path so the same plugin can
-/// safely target multiple installations.
+/// Tracks original mod files replaced by plugin asset ops so they can be restored on disable/delete. Backups are keyed by absolute target path under the launcher's app data dir.
 /// </summary>
 public static class PluginAssetBackupService
 {
@@ -40,11 +36,7 @@ public static class PluginAssetBackupService
 
     private static string ManifestPath => Path.Combine(BackupRootDirectory, ManifestFileName);
 
-    /// <summary>
-    /// Resets per-pass snapshot tracking. Should be called once at the start of
-    /// each plugin apply pass so existing backups can be refreshed when the
-    /// launcher regenerates the underlying mod files between launches.
-    /// </summary>
+    /// <summary>Resets per-pass snapshot tracking; call once at the start of each plugin apply pass.</summary>
     public static async Task BeginApplyPassAsync()
     {
         await ServiceLock.WaitAsync().ConfigureAwait(false);
@@ -60,13 +52,7 @@ public static class PluginAssetBackupService
     }
 
     /// <summary>
-    /// Records that <paramref name="pluginId"/> is about to overwrite the file
-    /// at <paramref name="destinationAbsolutePath"/>. The first time a target
-    /// is seen, the existing file (if any) is copied into the backup store so
-    /// it can be restored later. Subsequent calls only register the plugin as
-    /// an additional claimant; once per apply pass the snapshot is also
-    /// validated against the on-disk file's hash and refreshed if the launcher
-    /// has regenerated the original.
+    /// Registers <paramref name="pluginId"/> as a claimant of <paramref name="destinationAbsolutePath"/>; snapshots the original on first sight and refreshes once per apply pass if the on-disk hash changed.
     /// </summary>
     public static async Task RegisterReplacementAsync(string pluginId, string destinationAbsolutePath)
     {
@@ -145,11 +131,7 @@ public static class PluginAssetBackupService
     }
 
     /// <summary>
-    /// Restores every target previously claimed by <paramref name="pluginId"/>.
-    /// Other enabled plugins that still claim the same target keep the backup
-    /// in place; the actual copy back to disk only happens once the last
-    /// claimant releases the target. If a restore fails the entry is preserved
-    /// so the user can retry later.
+    /// Restores targets claimed by <paramref name="pluginId"/>; copy-back only runs after the last claimant releases. Failed restores keep the entry for retry.
     /// </summary>
     public static async Task RestoreForPluginAsync(string pluginId)
     {

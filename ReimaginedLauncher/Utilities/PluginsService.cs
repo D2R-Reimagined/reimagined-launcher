@@ -3520,11 +3520,7 @@ public static class PluginsService
     }
 
     /// <summary>
-    /// Builds a column-name resolver for the given parser type by reflecting its protected
-    /// <c>PropertyColumnAliases</c> member. Mirrors the lookup logic of
-    /// <c>HeaderMappedTextFileParser.GetOrBuildPropertyMap</c> so that raw D2R column headers
-    /// (e.g. <c>dsc2calca1</c>) resolve to the corresponding <see cref="PropertyInfo"/>
-    /// (e.g. <c>Dsc2CalculationA1</c>) without requiring library-side API additions.
+    /// Builds a column-name resolver by reflecting <c>PropertyColumnAliases</c> on <typeparamref name="TParser"/>; mirrors <c>GetOrBuildPropertyMap</c> so raw D2R headers map to their <see cref="PropertyInfo"/>.
     /// </summary>
     private static Func<string, PropertyInfo?> BuildColumnResolver<TEntry, TParser>()
         where TEntry : class

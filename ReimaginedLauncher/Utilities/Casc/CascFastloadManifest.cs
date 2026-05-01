@@ -9,31 +9,20 @@ namespace ReimaginedLauncher.Utilities.Casc;
 /// </summary>
 public sealed class CascFastloadManifest
 {
-    /// <summary>
-    /// Schema version. Bumped on any breaking shape change so older
-    /// launchers can detect (and quarantine) a manifest they cannot read.
-    /// </summary>
+    /// <summary>Schema version; bumped on breaking shape changes so older launchers can quarantine unreadable manifests.</summary>
     public int Schema { get; set; } = CurrentSchema;
 
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
 
     public DateTime LastUpdatedUtc { get; set; }
 
-    /// <summary>
-    /// CASC product code name (e.g. <c>"d2r"</c>) captured at the time of
-    /// the last successful pass. Used together with
-    /// <see cref="BuildNumber"/> as the fast-path "nothing changed since
-    /// last run" check.
-    /// </summary>
+    /// <summary>CASC product code name (e.g. <c>"d2r"</c>) from the last pass; paired with <see cref="BuildNumber"/> for the no-op check.</summary>
     public string? BuildName { get; set; }
 
     /// <summary>CASC build number captured at the last successful pass.</summary>
     public uint BuildNumber { get; set; }
 
-    /// <summary>
-    /// Per-file entries. Path-keyed semantics enforced by
-    /// <see cref="CascFastloadManifestService"/> (no duplicate paths).
-    /// </summary>
+    /// <summary>Per-file entries; path-keyed (no duplicates) per <see cref="CascFastloadManifestService"/>.</summary>
     public List<CascFastloadEntry> Files { get; set; } = new();
 
     /// <summary>Latest schema this build of the launcher knows how to read.</summary>
@@ -46,11 +35,7 @@ public sealed class CascFastloadManifest
 /// </summary>
 public sealed class CascFastloadEntry
 {
-    /// <summary>
-    /// CASC-relative path, e.g. <c>data\global\excel\armor.txt</c>. Stored
-    /// with the casing CascLib reports so cross-platform writers (Linux)
-    /// preserve it byte-for-byte.
-    /// </summary>
+    /// <summary>CASC-relative path, e.g. <c>data\global\excel\armor.txt</c>; preserves CascLib casing for cross-platform stability.</summary>
     public string Path { get; set; } = string.Empty;
 
     /// <summary>Hex-encoded 16-byte CASC CKey of the extracted content.</summary>
@@ -60,31 +45,17 @@ public sealed class CascFastloadEntry
     public long Size { get; set; }
 
     /// <summary>
-    /// Logical source flags describing who currently owns the on-disk
-    /// bytes for this path. Combinations are surfaced in the
-    /// <see cref="CascFastloadEntry.Source"/> string as <c>"casc"</c>,
-    /// <c>"casc+mod"</c>, <c>"casc+plugin"</c>, <c>"mod+plugin"</c>, etc.
-    /// The CASC default is always recorded in
-    /// <see cref="CascCKey"/> when present so we can restore it on
-    /// disable/uninstall (orphan recovery).
+    /// Owner of the on-disk bytes; '+'-joined combinations of <c>casc</c>/<c>mod</c>/<c>plugin</c>. CASC default is preserved in <see cref="CascCKey"/> for orphan recovery.
     /// </summary>
     public string Source { get; set; } = SourceTokens.Casc;
 
-    /// <summary>
-    /// CASC CKey of the underlying default this path was overlaid onto,
-    /// when an overlay is in effect. Null when the path is mod- or
-    /// plugin-only with no CASC counterpart.
-    /// </summary>
+    /// <summary>CKey of the underlying CASC default for an overlaid path; null when the path has no CASC counterpart.</summary>
     public string? CascCKey { get; set; }
 
     /// <summary>Mod version that last wrote this path (<c>"mod"</c> source).</summary>
     public string? ModVersion { get; set; }
 
-    /// <summary>
-    /// Identifiers of every enabled plugin that currently claims this
-    /// path. Used for conflict detection and reconciliation when a
-    /// plugin is disabled or uninstalled.
-    /// </summary>
+    /// <summary>Enabled plugin ids currently claiming this path; drives conflict detection and reconciliation on disable/uninstall.</summary>
     public List<string>? PluginIds { get; set; }
 
     public static class SourceTokens

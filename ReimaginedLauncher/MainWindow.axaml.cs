@@ -216,11 +216,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Manifest-gated startup prompt: opens the local CASC storage, compares
-    /// its current build against the persisted fastload manifest's build, and
-    /// if they differ offers a one-click delta update. Silently does nothing
-    /// when fastload was never enabled, native CascLib is unavailable, or any
-    /// step fails (we never block launcher startup on this).
+    /// Compares the live CASC build against the persisted fastload manifest and offers a one-click delta update on mismatch; silent no-op when fastload is disabled or unavailable.
     /// </summary>
     public async Task PromptCascFastloadUpdateIfMismatchedAsync()
     {
@@ -306,14 +302,7 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>
-    /// Best-effort cleanup of a stale fastload manifest at the legacy
-    /// pre-mod-root path (<c>&lt;install&gt;\data\.reimagined-fastload.json</c>).
-    /// Called only when the canonical manifest is absent — guarantees the
-    /// launcher never observes leftover state that falsely implies a prior
-    /// extraction. Errors are swallowed; this is a UX nicety, not a hard
-    /// requirement.
-    /// </summary>
+    /// <summary>Best-effort delete of the legacy <c>&lt;install&gt;\data\.reimagined-fastload.json</c>; called only when the canonical manifest is absent.</summary>
     private static void TryDeleteLegacyFastloadManifest(string installDirectory)
     {
         try
@@ -330,11 +319,7 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>
-    /// Removes an empty/zero-entry manifest from disk so the launcher's
-    /// observable state matches "never extracted". Called only when the
-    /// manifest exists but contains zero file rows.
-    /// </summary>
+    /// <summary>Removes a zero-entry manifest so observable state matches "never extracted".</summary>
     private static void TryDeleteEmptyFastloadManifest(CascFastloadManifestService manifestService)
     {
         try

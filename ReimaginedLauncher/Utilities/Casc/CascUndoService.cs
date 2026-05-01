@@ -27,21 +27,10 @@ public sealed record CascUndoOptions(
     public static readonly CascUndoOptions Default = new();
 }
 
-/// <summary>
-/// Periodic progress heartbeat emitted while <see cref="CascUndoService.UndoAsync"/>
-/// walks the manifest. <paramref name="EntriesProcessed"/> climbs from 0 to
-/// <paramref name="EntriesTotal"/>; <paramref name="FilesDeleted"/> is the
-/// running count of files actually removed from disk so the UI can show
-/// e.g. "Undoing 12,345 / 148,217 (12,300 deleted)...".
-/// </summary>
+/// <summary>Periodic progress for <see cref="CascUndoService.UndoAsync"/>: entries processed/total and files actually deleted.</summary>
 public sealed record CascUndoProgress(int EntriesProcessed, int EntriesTotal, int FilesDeleted);
 
-/// <summary>
-/// Outcome of an undo pass. <see cref="OverlaysPreserved"/> counts paths
-/// where the on-disk bytes were left intact because a mod or plugin overlay
-/// still owns them; for those entries only the <c>casc</c> token (and the
-/// underlying <c>CascCKey</c>) was stripped from the manifest.
-/// </summary>
+/// <summary>Undo pass result. <see cref="OverlaysPreserved"/> = paths kept on disk because a mod/plugin overlay still owns them (only the <c>casc</c> token is stripped).</summary>
 public sealed record CascUndoResult(
     int FilesDeleted,
     long BytesDeleted,
@@ -74,12 +63,7 @@ public sealed class CascUndoService
     }
 
     /// <summary>
-    /// Removes every CASC-owned file in the manifest from
-    /// <paramref name="destinationRoot"/>, strips CASC ownership from any
-    /// remaining overlays, prunes empty fastload directories, and persists
-    /// the resulting manifest atomically (deleting it entirely when nothing
-    /// is left and <see cref="CascUndoOptions.DeleteManifestWhenEmpty"/> is
-    /// set).
+    /// Removes CASC-owned files under <paramref name="destinationRoot"/>, strips CASC ownership from overlays, prunes empty dirs, and atomically persists (or deletes) the manifest.
     /// </summary>
     public async Task<CascUndoResult> UndoAsync(
         string destinationRoot,

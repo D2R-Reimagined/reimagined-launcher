@@ -101,13 +101,7 @@ public sealed class CascFastloadManifestService
         }
     }
 
-    /// <summary>
-    /// Returns the existing entry for <paramref name="path"/> or
-    /// <c>null</c>. Path comparison is ordinal-ignore-case (CASC paths are
-    /// case-insensitive on the wire and on Windows; Linux preserves
-    /// original casing but we still match insensitively to forgive
-    /// hand-edited manifests).
-    /// </summary>
+    /// <summary>Returns the entry for <paramref name="path"/> or <c>null</c>; case-insensitive comparison.</summary>
     public static CascFastloadEntry? FindEntry(CascFastloadManifest manifest, string path)
     {
         ArgumentNullException.ThrowIfNull(manifest);
@@ -128,11 +122,7 @@ public sealed class CascFastloadManifestService
         return null;
     }
 
-    /// <summary>
-    /// Inserts or replaces an entry by <see cref="CascFastloadEntry.Path"/>.
-    /// Returns <c>true</c> if a new entry was added, <c>false</c> if an
-    /// existing one was replaced.
-    /// </summary>
+    /// <summary>Inserts or replaces by <see cref="CascFastloadEntry.Path"/>; returns <c>true</c> when added, <c>false</c> when replaced.</summary>
     public static bool AddOrUpdate(CascFastloadManifest manifest, CascFastloadEntry entry)
     {
         ArgumentNullException.ThrowIfNull(manifest);
@@ -176,12 +166,7 @@ public sealed class CascFastloadManifestService
         return false;
     }
 
-    /// <summary>
-    /// True when the build recorded in <paramref name="manifest"/> matches
-    /// <paramref name="product"/>. Used as the cheap fast-path in the
-    /// delta extract: equal builds means CKeys are guaranteed identical
-    /// and we only need to verify the on-disk files still exist.
-    /// </summary>
+    /// <summary>True when manifest's build matches <paramref name="product"/>; delta extract fast-path that only re-verifies on-disk presence.</summary>
     public static bool BuildMatches(CascFastloadManifest manifest, CascStorageProduct product)
     {
         ArgumentNullException.ThrowIfNull(manifest);

@@ -91,20 +91,10 @@ internal sealed class SafeCascFindHandle : SafeHandle
     }
 }
 
-/// <summary>
-/// P/Invoke wrapper around the vendored CascLib native binary. The
-/// <see cref="ICascNative"/> implementation degrades gracefully when the
-/// binary is missing or fails to load, which lets the rest of the launcher
-/// build, run, and surface a clear "fastload unavailable" message instead of
-/// throwing on startup.
-/// </summary>
+/// <summary>P/Invoke wrapper around vendored CascLib; degrades gracefully when the binary is missing so the launcher can surface "fastload unavailable" instead of crashing.</summary>
 public sealed class NativeCascLib : ICascNative
 {
-    /// <summary>
-    /// Library import name. The actual file resolved at runtime is
-    /// <c>CascLib.dll</c> on Windows and <c>libcasc.so</c> on Linux thanks to
-    /// the resolver registered in the static constructor.
-    /// </summary>
+    /// <summary>Import name; resolved to <c>CascLib.dll</c> (Windows) or <c>libcasc.so</c> (Linux) by the registered resolver.</summary>
     private const string LibraryName = "CascLib";
 
     private static readonly object ResolverLock = new();
@@ -352,13 +342,7 @@ public sealed class NativeCascLib : ICascNative
         return Encoding.GetEncoding(0).GetString(buffer, 0, end);
     }
 
-    /// <summary>
-    /// Registers a <see cref="NativeLibrary"/> resolver that locates the
-    /// vendored binary under <c>runtimes/&lt;rid&gt;/native/</c> next to the
-    /// application (the layout produced by the project's <c>.csproj</c>),
-    /// then falls back to the application directory and finally the default
-    /// system search path.
-    /// </summary>
+    /// <summary>Registers a resolver that probes <c>runtimes/&lt;rid&gt;/native/</c>, the app dir, then the system search path.</summary>
     private static void EnsureResolver()
     {
         if (s_resolverRegistered) return;

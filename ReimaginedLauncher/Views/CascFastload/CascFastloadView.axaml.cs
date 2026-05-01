@@ -158,13 +158,7 @@ public partial class CascFastloadView : UserControl
         CancelButton.IsEnabled = running;
     }
 
-    /// <summary>
-    /// Returns the validated Battle.net profile's install directory if it
-    /// exists on disk and is distinct from the currently selected profile's
-    /// install directory; otherwise <c>null</c>. Used to gate the
-    /// "Cross-Extract from B.Net" button so it stays disabled when no dual
-    /// install is auto-detected or manually configured by the user.
-    /// </summary>
+    /// <summary>Returns a validated Battle.net install dir distinct from the current profile, or <c>null</c>; gates the cross-extract button.</summary>
     private static string? TryResolveBattleNetSiblingInstall()
     {
         var settings = MainWindow.Settings;

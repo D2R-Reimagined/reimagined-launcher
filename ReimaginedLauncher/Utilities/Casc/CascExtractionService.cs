@@ -18,21 +18,11 @@ public sealed record CascExtractionFilter(
     bool IncludeLocal = true,
     uint LocaleMask = CascLocale.None)
 {
-    /// <summary>
-    /// Default fastload filter: extract <c>data\global\</c>, <c>data\hd\</c>,
-    /// and <c>data\local\</c>. The uninstalled per-language
-    /// <c>locales\&lt;lang&gt;\…</c> TVFS branches are rejected by the
-    /// path-prefix tests regardless.
-    /// </summary>
+    /// <summary>Default fastload filter: <c>data\global\</c>, <c>data\hd\</c>, <c>data\local\</c>.</summary>
     public static readonly CascExtractionFilter Default = new();
 
     /// <summary>
-    /// Optional fast-iteration scope: when non-empty, only entries whose
-    /// path starts with one of these prefixes are accepted (in addition to
-    /// the include-Global/Hd/Local gates). Useful for targeted test runs
-    /// such as <c>data\hd\ui\</c>. Comparison is case-insensitive and
-    /// forward-slashes in supplied prefixes are normalised to backslashes.
-    /// Empty list = no scope restriction (default).
+    /// Optional path-prefix scope (case-insensitive, slashes normalised); empty = no restriction. Combined with the Include* gates.
     /// </summary>
     public IReadOnlyList<string> PathPrefixes { get; init; } = Array.Empty<string>();
 

@@ -158,13 +158,8 @@ public sealed class CascCrossInstallService
     }
 
     /// <summary>
-    /// Performs a build-matched, offline cross-extraction: opens the source
-    /// CASC, plans against the <i>target</i> install's manifest +
-    /// <c>destinationRoot</c>, and extracts from the source storage into the
-    /// target install directory. Throws <see cref="InvalidOperationException"/>
-    /// when the eligibility check fails — callers are expected to surface
-    /// <see cref="CheckEligibility"/>'s verdict to the user before invoking
-    /// this method.
+    /// Build-matched offline cross-extract from source CASC into target install. Throws
+    /// <see cref="InvalidOperationException"/> if eligibility fails; callers must check <see cref="CheckEligibility"/> first.
     /// </summary>
     public async Task<CascDeltaApplyResult> ApplyAsync(
         string sourceInstallDirectory,
