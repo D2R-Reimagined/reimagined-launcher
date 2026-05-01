@@ -375,22 +375,37 @@ public partial class UpdateView : UserControl
         }
         else
         {
-            await Task.Run(() =>
-            {
-                var modDir = Path.Combine(installDirectory, "mods", "Reimagined");
-                if (Directory.Exists(modDir))
-                {
-                    var backupDir = Path.Combine(installDirectory, "mods", "Reimagined.backup");
-                    if (Directory.Exists(backupDir))
-                    {
-                        Directory.Delete(backupDir, recursive: true);
-                    }
-                    CopyDirectory(modDir, backupDir);
-                    Directory.Delete(modDir, recursive: true);
-                }
+            await ExtractNonD2RmmModAsync(zipPath, installDirectory);
 
-                ZipFile.ExtractToDirectory(zipPath, installDirectory, overwriteFiles: true);
-            });
+            // Invalidate the per-launch "clean" snapshots so they are retaken
+            // from the new mod files on the next launch. Previously this was
+            // achieved by renaming mods/Reimagined to mods/Reimagined.backup
+            // (which wiped the snapshots as a side effect); now we do it
+            // explicitly so we can stop creating that 40+ GB sibling tree.
+            try
+            {
+                ModTweaksService.InvalidateCleanSnapshots(installDirectory);
+            }
+            catch (Exception ex)
+            {
+                LaunchDiagnostics.Log($"Failed to invalidate launcher_clean snapshots: {ex.Message}");
+            }
+
+            // Migration courtesy: remove any leftover mods/Reimagined.backup
+            // tree from previous launcher versions so users don't keep
+            // double-disk usage forever.
+            try
+            {
+                var legacyBackupDir = Path.Combine(installDirectory, "mods", "Reimagined.backup");
+                if (Directory.Exists(legacyBackupDir))
+                {
+                    Directory.Delete(legacyBackupDir, recursive: true);
+                }
+            }
+            catch (Exception ex)
+            {
+                LaunchDiagnostics.Log($"Failed to remove legacy mods/Reimagined.backup: {ex.Message}");
+            }
 
             Notifications.SendNotification("Mod installed successfully.", "Success");
         }
@@ -448,6 +463,20 @@ public partial class UpdateView : UserControl
             File.Copy(file, Path.Combine(targetDir, Path.GetFileName(file)), true);
         foreach (var directory in Directory.GetDirectories(sourceDir))
             CopyDirectory(directory, Path.Combine(targetDir, Path.GetFileName(directory)));
+    }
+
+    /// <summary>
+    /// Extracts the non-D2RMM mod archive over the install directory using
+    /// per-file atomic replacement. This replaces the previous behaviour of
+    /// renaming <c>mods/Reimagined</c> to <c>mods/Reimagined.backup</c> and
+    /// re-extracting; that workaround existed because the on-disk
+    /// "*_launcher_clean" snapshots were stale, not because the overwrite
+    /// itself was unreliable. The clean snapshots are now invalidated
+    /// explicitly by <see cref="ModTweaksService.InvalidateCleanSnapshots"/>.
+    /// </summary>
+    private static Task ExtractNonD2RmmModAsync(string zipPath, string installDirectory)
+    {
+        return FileCopyHelper.ExtractZipAsync(zipPath, installDirectory);
     }
 
     /// <summary>
