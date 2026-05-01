@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.IO.Compression;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace ReimaginedLauncher.Utilities;
@@ -87,7 +88,18 @@ internal static class FileCopyHelper
         }
     }
 
-    private static async Task WriteStreamAtomicallyAsync(Stream sourceStream, string destinationPath)
+    /// <summary>
+    /// Writes <paramref name="sourceStream"/> to <paramref name="destinationPath"/>
+    /// atomically via a sibling temp file + <see cref="File.Replace(string, string, string)"/>
+    /// (or <see cref="File.Move(string, string)"/> when no prior file exists).
+    /// Exposed for callers (e.g. CASC extraction) that produce their bytes from
+    /// a stream rather than a source path. Cancellation aborts the copy and
+    /// removes the staging file.
+    /// </summary>
+    internal static async Task WriteStreamAtomicallyAsync(
+        Stream sourceStream,
+        string destinationPath,
+        CancellationToken cancellationToken = default)
     {
         var directory = Path.GetDirectoryName(destinationPath);
         if (!string.IsNullOrWhiteSpace(directory))
@@ -105,8 +117,8 @@ internal static class FileCopyHelper
                              FileAccess.Write,
                              FileShare.None))
             {
-                await sourceStream.CopyToAsync(tempStream).ConfigureAwait(false);
-                await tempStream.FlushAsync().ConfigureAwait(false);
+                await sourceStream.CopyToAsync(tempStream, cancellationToken).ConfigureAwait(false);
+                await tempStream.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
 
             if (File.Exists(destinationPath))
