@@ -141,6 +141,27 @@ public partial class PluginAuthoringGuideView : UserControl
                                                },
                                                {
                                                  "file": "skills.txt",
+                                                 "rowIdentifier": "amazonlightningfury",
+                                                 "column": "reqlevel",
+                                                 "operation": "addExisting",
+                                                 "updatedValue": "5"
+                                               },
+                                               {
+                                                 "file": "skills.txt",
+                                                 "rowIdentifier": "amazonlightningfury",
+                                                 "column": "manacost",
+                                                 "operation": "subtractExisting",
+                                                 "updatedValue": "2"
+                                               },
+                                               {
+                                                 "file": "skills.txt",
+                                                 "rowIdentifier": "amazonlightningfury",
+                                                 "column": "ResultFlags",
+                                                 "operation": "divideExisting",
+                                                 "updatedValue": "2"
+                                               },
+                                               {
+                                                 "file": "skills.txt",
                                                  "operation": "addRow",
                                                  "columns": [
                                                    { "column": "Skill", "updatedValue": "MyNewSkill" },

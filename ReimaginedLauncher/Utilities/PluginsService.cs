@@ -1783,7 +1783,10 @@ public static class PluginsService
             return resolvedUpdatedValue;
         }
 
-        if (operationType.Equals("multiplyExisting", StringComparison.OrdinalIgnoreCase))
+        if (operationType.Equals("multiplyExisting", StringComparison.OrdinalIgnoreCase) ||
+            operationType.Equals("addExisting", StringComparison.OrdinalIgnoreCase) ||
+            operationType.Equals("subtractExisting", StringComparison.OrdinalIgnoreCase) ||
+            operationType.Equals("divideExisting", StringComparison.OrdinalIgnoreCase))
         {
             var column = operation.Column ?? string.Empty;
             var property = resolveColumn?.Invoke(column)
@@ -1800,17 +1803,41 @@ public static class PluginsService
             if (!decimal.TryParse(currentValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var currentNumber))
             {
                 throw new InvalidDataException(
-                    $"The existing value '{currentValue}' in column '{column}' is not numeric and cannot be multiplied (file '{fileName}', row '{operation.RowIdentifier ?? "<unknown>"}').");
+                    $"The existing value '{currentValue}' in column '{column}' is not numeric and cannot be used with {operationType} (file '{fileName}', row '{operation.RowIdentifier ?? "<unknown>"}').");
             }
 
-            var multiplierText = ResolveMultiplierValue(operation, parameters, resolvedUpdatedValue);
-            if (!decimal.TryParse(multiplierText, NumberStyles.Float, CultureInfo.InvariantCulture, out var multiplier))
+            var operandText = ResolveExistingOperandValue(operation, parameters, resolvedUpdatedValue, operationType);
+            if (!decimal.TryParse(operandText, NumberStyles.Float, CultureInfo.InvariantCulture, out var operand))
             {
                 throw new InvalidDataException(
-                    $"The multiplier value '{multiplierText}' is not a valid decimal number (file '{fileName}', row '{operation.RowIdentifier ?? "<unknown>"}', column '{column}').");
+                    $"The {operationType} operand '{operandText}' is not a valid decimal number (file '{fileName}', row '{operation.RowIdentifier ?? "<unknown>"}', column '{column}').");
             }
 
-            return FormatDecimalValue(currentNumber * multiplier);
+            decimal result;
+            if (operationType.Equals("multiplyExisting", StringComparison.OrdinalIgnoreCase))
+            {
+                result = currentNumber * operand;
+            }
+            else if (operationType.Equals("addExisting", StringComparison.OrdinalIgnoreCase))
+            {
+                result = currentNumber + operand;
+            }
+            else if (operationType.Equals("subtractExisting", StringComparison.OrdinalIgnoreCase))
+            {
+                result = currentNumber - operand;
+            }
+            else
+            {
+                if (operand == 0m)
+                {
+                    throw new InvalidDataException(
+                        $"divideExisting cannot divide by zero (file '{fileName}', row '{operation.RowIdentifier ?? "<unknown>"}', column '{column}').");
+                }
+
+                result = currentNumber / operand;
+            }
+
+            return FormatDecimalValue(result);
         }
 
         if (operationType.Equals("append", StringComparison.OrdinalIgnoreCase))
@@ -1839,10 +1866,11 @@ public static class PluginsService
         throw new InvalidDataException($"Unsupported plugin operation '{operationType}' (file '{fileName}', row '{operation.RowIdentifier ?? "<unknown>"}', column '{operation.Column ?? string.Empty}').");
     }
 
-    private static string ResolveMultiplierValue(
+    private static string ResolveExistingOperandValue(
         PluginJsonOperation operation,
         IReadOnlyDictionary<string, string> parameters,
-        string? resolvedUpdatedValue)
+        string? resolvedUpdatedValue,
+        string operationType)
     {
         if (!string.IsNullOrWhiteSpace(operation.ParameterKey))
         {
@@ -1859,7 +1887,7 @@ public static class PluginsService
             return resolvedUpdatedValue;
         }
 
-        throw new InvalidDataException("multiplyExisting operations require either parameterKey or updatedValue.");
+        throw new InvalidDataException($"{operationType} operations require either parameterKey or updatedValue.");
     }
 
     private static string? ResolveParameterTokens(string? value, IReadOnlyDictionary<string, string> parameters)
@@ -2505,6 +2533,9 @@ public static class PluginsService
 
                 if (!string.IsNullOrWhiteSpace(effectiveOperation) &&
                     (effectiveOperation.Equals("multiplyExisting", StringComparison.OrdinalIgnoreCase) ||
+                     effectiveOperation.Equals("addExisting", StringComparison.OrdinalIgnoreCase) ||
+                     effectiveOperation.Equals("subtractExisting", StringComparison.OrdinalIgnoreCase) ||
+                     effectiveOperation.Equals("divideExisting", StringComparison.OrdinalIgnoreCase) ||
                      effectiveOperation.Equals("append", StringComparison.OrdinalIgnoreCase)) &&
                     string.IsNullOrWhiteSpace(assignment.ParameterKey) &&
                     string.IsNullOrWhiteSpace(assignment.UpdatedValue) &&
@@ -2747,6 +2778,9 @@ public static class PluginsService
 
             if (!string.IsNullOrWhiteSpace(effectiveOperation) &&
                 (effectiveOperation.Equals("multiplyExisting", StringComparison.OrdinalIgnoreCase) ||
+                 effectiveOperation.Equals("addExisting", StringComparison.OrdinalIgnoreCase) ||
+                 effectiveOperation.Equals("subtractExisting", StringComparison.OrdinalIgnoreCase) ||
+                 effectiveOperation.Equals("divideExisting", StringComparison.OrdinalIgnoreCase) ||
                  effectiveOperation.Equals("append", StringComparison.OrdinalIgnoreCase)) &&
                 string.IsNullOrWhiteSpace(assignment.ParameterKey) &&
                 string.IsNullOrWhiteSpace(assignment.UpdatedValue) &&
