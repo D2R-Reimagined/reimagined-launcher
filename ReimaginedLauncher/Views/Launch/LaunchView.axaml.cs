@@ -42,12 +42,7 @@ public partial class LaunchView : UserControl
 
         CascFastloadOperationState.Instance.StateChanged += OnCascStateChanged;
 
-        // Re-evaluate disk-side mod detection every time the Launch tab becomes
-        // visible. Other flows (CASC fastload destructive bootstrap, mod
-        // install/update, manual file edits) can change `mods\Reimagined\…`
-        // between visits without this view ever being notified, so we refresh
-        // before reading `MainWindow.IsLocalModDetected` in
-        // `RefreshInstallDirectoryState`.
+        // Re-evaluate disk-side mod detection on every visit; other flows can mutate mods\Reimagined\.
         if (TopLevel.GetTopLevel(this) is MainWindow mwAttach)
         {
             mwAttach.RefreshLocalModState();
@@ -105,10 +100,7 @@ public partial class LaunchView : UserControl
         var settings = MainWindow.Settings;
         var profile = settings.CurrentProfile;
 
-        // While a CASC fastload Extract/Update/Undo/Cross-extract is running,
-        // disable controls that could mutate the install dir or kick off a
-        // mod-tweak/launch pipeline against files CASC is in the middle of
-        // writing.
+        // Disable mutating controls while a CASC fastload op is running.
         var cascBusy = CascFastloadOperationState.Instance.IsRunning;
         InstallationTypeComboBox.IsEnabled = !cascBusy;
         BrowseInstallDirectoryButton.IsEnabled = !cascBusy;

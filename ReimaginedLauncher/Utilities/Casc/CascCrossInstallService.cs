@@ -43,14 +43,7 @@ public enum CascCrossInstallEligibilityReason
     BuildMismatch
 }
 
-/// <summary>
-/// Eligibility verdict for a cross-install extract attempt. When
-/// <see cref="Reason"/> is <see cref="CascCrossInstallEligibilityReason.Eligible"/>
-/// both <see cref="SourceProduct"/> and <see cref="TargetProduct"/> are
-/// populated and identical (same <c>CodeName</c> and <c>BuildNumber</c>).
-/// On <see cref="CascCrossInstallEligibilityReason.BuildMismatch"/> both
-/// descriptors are populated so the UI can show "BN build X vs Steam build Y".
-/// </summary>
+/// <summary>Eligibility verdict for a cross-install extract attempt.</summary>
 public sealed record CascCrossInstallEligibility(
     CascCrossInstallEligibilityReason Reason,
     CascStorageProduct? SourceProduct,
@@ -60,26 +53,7 @@ public sealed record CascCrossInstallEligibility(
     public bool IsEligible => Reason == CascCrossInstallEligibilityReason.Eligible;
 }
 
-/// <summary>
-/// Phase 1f — orchestrates a fully-offline BN↔Steam cross-extraction.
-/// </summary>
-/// <remarks>
-/// <para>
-/// Both Battle.net and Steam ship byte-identical CASC content for any matching
-/// build (same <c>buildName</c> + <c>buildNumber</c> in
-/// <see cref="CascStorageProduct"/>), so when a user has both installs and
-/// they're at the same version we can satisfy the slower install's fastload
-/// extraction by reading from the faster install's local CASC — no internet
-/// required, no online CDN fallback, no risk of a Steam-vs-CDN build skew.
-/// </para>
-/// <para>
-/// On a build mismatch the service refuses with both descriptors so the UI
-/// can prompt the user to update the lagging install via its own client. The
-/// design intentionally does <i>not</i> auto-fall-back to online extraction —
-/// that decision belongs to the user via a separate UI action once they're
-/// aware of the mismatch.
-/// </para>
-/// </remarks>
+/// <summary>Orchestrates a fully-offline BN↔Steam cross-extraction when both installs match build.</summary>
 public sealed class CascCrossInstallService
 {
     private readonly ICascNative _native;
@@ -213,9 +187,7 @@ public sealed class CascCrossInstallService
         using var source = _extraction.OpenLocal(sourceInstallDirectory, localeMask)
             ?? throw new InvalidOperationException("Source CASC storage failed to open after eligibility check.");
 
-        // Fastload bytes belong inside the target install's Reimagined mod
-        // tree so D2R's mod overlay path resolution composes correctly with
-        // mod updates and orphan recovery on the target side.
+        // Fastload bytes go under the target install's Reimagined mod tree.
         var targetModRoot = System.IO.Path.Combine(targetInstallDirectory, "mods", "Reimagined", "Reimagined.mpq");
         System.IO.Directory.CreateDirectory(targetModRoot);
 

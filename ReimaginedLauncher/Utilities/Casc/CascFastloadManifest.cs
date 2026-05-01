@@ -4,19 +4,9 @@ using System.Collections.Generic;
 namespace ReimaginedLauncher.Utilities.Casc;
 
 /// <summary>
-/// Persistent record of every file the launcher has materialised into the
-/// install directory as part of the CASC fastload pipeline. Lives next to
-/// the install (e.g. <c>&lt;install&gt;/data/.reimagined-fastload.json</c>) so
-/// it survives launcher updates and is per-install rather than per-user.
+/// Per-install record of every file the launcher materialised via CASC fastload.
+/// Source of truth for delta extract, undo, orphan recovery, and plugin reconciliation.
 /// </summary>
-/// <remarks>
-/// The manifest is the single source of truth for the delta extract, undo,
-/// orphan recovery, and plugin reconciliation flows planned for Phase 1e+.
-/// It deliberately stores only the small fingerprint each pass needs to make
-/// a decision (CKey + size), never the file contents themselves — that is
-/// what keeps the "reimagined.backup" footprint at tens of MB instead of
-/// the ~40 GB of the extracted tree it tracks.
-/// </remarks>
 public sealed class CascFastloadManifest
 {
     /// <summary>

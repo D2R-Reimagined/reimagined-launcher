@@ -5,15 +5,7 @@ using System.Text.Json;
 namespace ReimaginedLauncher.Utilities.Json;
 
 /// <summary>
-/// Resolves the installed D2R Reimagined mod version from the mod's
-/// <c>modinfo.json</c> file. Previously this lived inside a UI-layout
-/// scraper that parsed <c>characterselectpanelhd.json</c> for a
-/// "D2R Reimagined v..." text node; that approach was fragile (any
-/// upstream layout edit silently broke version detection and left the
-/// CASC fastload manifest stamped with <c>ModVersion: null</c>) so the
-/// canonical source of truth is now <c>modinfo.json</c>'s <c>version</c>
-/// field. The class name is preserved to keep the public surface stable
-/// for existing callers.
+/// Resolves the installed D2R Reimagined mod version from the mod's <c>modinfo.json</c>.
 /// </summary>
 public static class CharacterSelectPanelService
 {
@@ -61,10 +53,7 @@ public static class CharacterSelectPanelService
         }
         catch (Exception)
         {
-            // Malformed modinfo.json is treated as "unknown" rather than
-            // surfacing here — the caller already handles a null return
-            // by displaying "version unknown" / leaving manifest entries
-            // unstamped, which is the correct conservative behaviour.
+            // Treat malformed modinfo.json as "unknown"; callers handle the null return.
         }
 
         return null;

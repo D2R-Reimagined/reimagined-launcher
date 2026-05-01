@@ -20,13 +20,7 @@ public partial class CascFastloadView : UserControl
     private readonly NativeCascLib _native;
     private readonly CascExtractionService _extraction;
 
-    /// <summary>
-    /// Tracks whether the on-disk fastload manifest currently has at least
-    /// one entry. Refreshed by <see cref="RefreshState"/>; used to gate the
-    /// "Update (Delta)" button so users cannot trigger a delta against an
-    /// empty manifest (which would be functionally identical to a fresh
-    /// extract but without the destructive prompt — confusing).
-    /// </summary>
+    // True when the persisted manifest has entries; gates the "Update (Delta)" button.
     private bool _manifestHasEntries;
 
     public CascFastloadView()
@@ -36,9 +30,7 @@ public partial class CascFastloadView : UserControl
         _extraction = new CascExtractionService(_native);
 
         Loaded += OnLoaded;
-        // Subscribe/unsubscribe in attach/detach so navigating away does NOT
-        // cancel an in-flight CASC operation — the singleton state survives,
-        // and re-entering the view re-renders it from the live state.
+        // Attach/detach only — the singleton state survives navigation; an in-flight op is not cancelled.
         AttachedToVisualTree += (_, _) =>
         {
             CascFastloadOperationState.Instance.StateChanged += OnOperationStateChanged;
@@ -56,8 +48,7 @@ public partial class CascFastloadView : UserControl
 
     private void OnOperationStateChanged(object? sender, EventArgs e)
     {
-        // Already on UI thread (singleton marshals before raising), but be
-        // defensive in case future callers raise off-thread.
+        // Singleton marshals to UI thread; defensive re-dispatch in case that ever changes.
         if (Dispatcher.UIThread.CheckAccess())
         {
             RenderOperationState();
@@ -68,10 +59,7 @@ public partial class CascFastloadView : UserControl
         }
     }
 
-    /// <summary>
-    /// Refreshes everything visible: install path / native status / manifest
-    /// summary, plus the live operation panel from the singleton.
-    /// </summary>
+    // Refresh install path / native status / manifest summary / live operation panel.
     public void RefreshState()
     {
         var installDir = MainWindow.Settings?.CurrentProfile?.InstallDirectory;
@@ -161,15 +149,7 @@ public partial class CascFastloadView : UserControl
         ExtractButton.IsEnabled = available;
         UpdateButton.IsEnabled = available && _manifestHasEntries;
         UndoButton.IsEnabled = hasInstall && !running;
-        // Cross-extract is always BN → Steam: pulling the CASC defaults from
-        // the Battle.net install into the Steam install. So:
-        //   * Battle.net profile selected → the source IS the current install,
-        //     cross-extract has nothing to do; keep it disabled.
-        //   * Steam profile selected → only enable when a sibling Battle.net
-        //     install is configured (auto-detected default-path or manually
-        //     added by the user as a validated BattleNet profile).
-        //   * D2RMM profile selected → no game install of its own; keep
-        //     disabled (matches the legacy behaviour gated by hasInstall).
+        // Cross-extract is BN -> Steam only: enabled on Steam profile when a sibling BN install exists.
         CrossInstallButton.IsEnabled =
             available &&
             profile?.Type == InstallationType.Steam &&
@@ -231,14 +211,7 @@ public partial class CascFastloadView : UserControl
         CascFastloadOperationState.Instance.Cancel();
     }
 
-    /// <summary>
-    /// "Extract CASC" handler. Always destructive: prompts the user,
-    /// uninstalls the Reimagined mod (deletes modinfo.json, wipes the
-    /// Reimagined.mpq\data\ tree), then runs a full extraction that
-    /// rebuilds the fastload manifest from scratch. Used both for the
-    /// first-ever bootstrap and as the user-visible escape hatch when
-    /// they want a clean slate without manually deleting the manifest.
-    /// </summary>
+    // "Extract CASC" handler: destructive bootstrap that wipes Reimagined.mpq\data\ then re-extracts.
     private async void OnExtractCascClick(object? sender, RoutedEventArgs e)
     {
         var installDir = MainWindow.Settings?.CurrentProfile?.InstallDirectory;
@@ -254,17 +227,8 @@ public partial class CascFastloadView : UserControl
             return;
         }
 
-        // The destructive bootstrap below recursively deletes the previous
-        // extraction tree under mods\Reimagined\Reimagined.mpq\data\, which
-        // can contain tens of thousands of files on a populated install.
-        // Running it inline on the UI thread froze the launcher for the
-        // duration of the wipe — visible to the user as the window going
-        // unresponsive after the second Extract click. Move it (and the
-        // post-uninstall state refresh) onto the same background pipeline
-        // that drives the extraction itself so the UI stays responsive and
-        // the operation strip reports progress straight away.
-        // Snapshot scope text on the UI thread; the worker body must not
-        // touch any controls.
+        // Run the wipe + re-extract on the background pipeline; snapshot UI text up front because
+        // the worker body must not touch controls.
         var scopeText = ScopePrefixesTextBox?.Text ?? string.Empty;
         await CascFastloadOperationState.Instance.TryRunAsync("Extract / Update", async (ct, progress, setStatus) =>
         {
@@ -275,10 +239,7 @@ public partial class CascFastloadView : UserControl
                 UninstallReimaginedModForFastloadBootstrap(installDir);
             }, ct).ConfigureAwait(false);
 
-            // Refresh the launcher's view of "mod installed?" on the UI
-            // thread so the Launch button is greyed out until the user
-            // runs Install/Update. Marshal explicitly because we're now
-            // running on a thread-pool worker.
+            // Refresh "mod installed?" on the UI thread so the Launch button is greyed out until apply.
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 try
@@ -295,13 +256,7 @@ public partial class CascFastloadView : UserControl
         }).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// "Update (Delta)" handler. Non-destructive: runs the existing
-    /// delta extraction against the current manifest, writing only the
-    /// files whose CASC content has changed since the last run. The
-    /// button is gated on a non-empty manifest so this path never falls
-    /// through to the destructive bootstrap.
-    /// </summary>
+    // "Update (Delta)" handler: non-destructive delta extraction; gated on a non-empty manifest.
     private async void OnUpdateClick(object? sender, RoutedEventArgs e)
     {
         var installDir = MainWindow.Settings?.CurrentProfile?.InstallDirectory;
@@ -313,9 +268,7 @@ public partial class CascFastloadView : UserControl
 
         if (!_manifestHasEntries)
         {
-            // Defensive: the button should already be disabled, but if a
-            // race let the click through, point the user at Extract CASC
-            // instead of silently running a destructive op.
+            // Defensive: button should be disabled; redirect to Extract CASC instead of running destructively.
             Notifications.SendNotification(
                 "No fastload manifest yet. Use Extract CASC for the initial extraction.",
                 "Information");
@@ -392,12 +345,7 @@ public partial class CascFastloadView : UserControl
         return await dialog.ShowDialog<bool>(owner);
     }
 
-    /// <summary>
-    /// Removes the mod's installation marker and pre-existing data tree
-    /// under <c>mods\Reimagined\Reimagined.mpq\</c> so the subsequent CASC
-    /// extract starts from a clean slate. Leaves <c>Reimagined.mpq\</c>
-    /// itself in place because the extractor expects to write into it.
-    /// </summary>
+    // Wipes modinfo.json + Reimagined.mpq\data\ so the next extract starts clean.
     private static void UninstallReimaginedModForFastloadBootstrap(string installDir)
     {
         var mpqRoot = Path.Combine(installDir, "mods", "Reimagined", "Reimagined.mpq");
@@ -415,36 +363,20 @@ public partial class CascFastloadView : UserControl
             LaunchDiagnostics.Log($"CASC Extract bootstrap: wiped '{dataDir}'.");
         }
 
-        // Re-create the mpq + data roots so the extractor has a place to
-        // land files; CascExtractionService.ExtractEntryAsync also creates
-        // sub-directories on demand, but having the roots present keeps
-        // the early heartbeat output cleaner.
+        // Pre-create the data root so the extractor's early heartbeat output stays clean.
         Directory.CreateDirectory(dataDir);
     }
 
-    /// <summary>
-    /// Public entry point so callers outside the view (e.g. the startup
-    /// build-mismatch prompt in <c>MainWindow</c>) can trigger an Extract
-    /// against the active install via the same singleton path.
-    /// </summary>
+    // Public entry point so external callers (e.g. startup build-mismatch prompt) can trigger an Extract.
     public Task StartExtractAsync(string installDir)
     {
-        // Snapshot the optional scope on the UI thread before kicking off
-        // the background op (the op runs off-thread and must not touch
-        // controls). Empty/whitespace = full default scope.
+        // Snapshot scope on the UI thread; the worker must not touch controls. Empty = default scope.
         var scopeText = ScopePrefixesTextBox?.Text ?? string.Empty;
         return CascFastloadOperationState.Instance.TryRunAsync("Extract / Update",
             (ct, progress, setStatus) => RunExtractBodyAsync(installDir, scopeText, ct, progress, setStatus));
     }
 
-    /// <summary>
-    /// Core extract body, factored out of <see cref="StartExtractAsync"/> so
-    /// the destructive "Extract CASC" click handler can run the bootstrap
-    /// uninstall and the extraction inside a single <c>TryRunAsync</c> —
-    /// previously the wipe ran inline on the UI thread and froze the window.
-    /// Must be invoked from a worker thread (via <c>TryRunAsync</c>); does
-    /// not touch any controls directly.
-    /// </summary>
+    // Core extract body; must run on a worker thread (via TryRunAsync) and not touch controls.
     private async Task RunExtractBodyAsync(
         string installDir,
         string scopeText,
@@ -452,12 +384,7 @@ public partial class CascFastloadView : UserControl
         IProgress<CascProgress> progress,
         Action<string> setStatus)
     {
-        // Pass the filter's locale opt-in to CascOpenStorage so CascLib's
-            // TVFS iterator never enters uninstalled-locale branches. With
-            // CascLocale.All (the previous default), CascFindNextFile can
-            // hang for tens of seconds resolving a locale entry whose data
-            // isn't on disk. The default extraction filter opts out of
-            // locale, so the default mask is CascLocale.None.
+        // Pass locale opt-in to CascOpenStorage so the TVFS iterator skips uninstalled-locale branches.
             var prefixes = ParseScopePrefixes(scopeText);
             var filter = prefixes.Count == 0
                 ? CascExtractionFilter.Default
@@ -479,10 +406,7 @@ public partial class CascFastloadView : UserControl
             var product = _extraction.GetProduct(storage);
             LaunchDiagnostics.Log($"CASC StartExtract: product='{product?.CodeName ?? "(null)"}' build={product?.BuildNumber ?? 0}.");
 
-            // Fastload bytes live inside the Reimagined mod tree so D2R's mod
-            // overlay path resolution composes correctly with mod updates,
-            // orphan recovery, and plugin reconciliation. The manifest sits
-            // next to those bytes via CascFastloadManifestService.
+            // Fastload bytes go inside the Reimagined mod tree so D2R's overlay path resolution composes.
             var modRoot = Path.Combine(installDir, "mods", "Reimagined", "Reimagined.mpq");
             Directory.CreateDirectory(modRoot);
             LaunchDiagnostics.Log($"CASC StartExtract: destination root='{modRoot}'.");
@@ -494,8 +418,7 @@ public partial class CascFastloadView : UserControl
             LaunchDiagnostics.Log("CASC StartExtract: planning delta (will index storage).");
             var indexProgress = new Progress<CascIndexProgress>(ip =>
             {
-                // Live heartbeat while walking the TVFS — without this the UI
-                // sits frozen for minutes on the static "Indexing CASC..." line.
+                // Live heartbeat while walking the TVFS so the UI doesn't appear frozen.
                 CascFastloadOperationState.Instance.SetStatus(
                     $"Indexing CASC... {ip.EntriesSeen:N0} entries seen, {ip.EntriesAccepted:N0} matched");
                 CascFastloadOperationState.Instance.SetCurrentFile(ip.CurrentPath);
@@ -544,8 +467,7 @@ public partial class CascFastloadView : UserControl
 
             setStatus("Undoing CASC fastload...");
 
-            // Throttle progress text refresh to ~1 Hz so the UI does not
-            // thrash on the 500-entry heartbeat fired from the worker thread.
+            // Throttle progress text to ~1 Hz to avoid UI thrash on the 500-entry heartbeat.
             var lastUiUpdate = DateTime.MinValue;
             var progressSink = new Progress<CascUndoProgress>(p =>
             {
@@ -575,10 +497,7 @@ public partial class CascFastloadView : UserControl
             return;
         }
 
-        // Source is always the configured Battle.net sibling install. The
-        // button is gated by UpdateButtonStates so this should already be
-        // resolvable, but recheck defensively in case state changed between
-        // the gate and the click.
+        // Defensive recheck of the Battle.net sibling source (already gated by UpdateButtonStates).
         var sourceInstall = TryResolveBattleNetSiblingInstall();
         if (string.IsNullOrWhiteSpace(sourceInstall))
         {
@@ -649,12 +568,7 @@ public partial class CascFastloadView : UserControl
         return $"{name} #{product.BuildNumber}";
     }
 
-    /// <summary>
-    /// Parses the optional scope textbox: semicolon- or newline-separated path
-    /// prefixes. Trims whitespace, normalises forward slashes to backslashes,
-    /// drops empty entries. Returns an empty list when the input is empty
-    /// (= no scope restriction; full default filter applies).
-    /// </summary>
+    // Parses the scope textbox: ';' or newline-separated path prefixes; '/' normalised to '\\'.
     private static IReadOnlyList<string> ParseScopePrefixes(string? text)
     {
         if (string.IsNullOrWhiteSpace(text))

@@ -9,27 +9,9 @@ using System.Threading.Tasks;
 namespace ReimaginedLauncher.Utilities.Casc;
 
 /// <summary>
-/// Filter applied while enumerating a CASC storage. Phase 1 narrows extraction
-/// to the directories that actually accelerate D2R load times
-/// (<c>data\global\</c>, <c>data\hd\</c>, <c>data\local\</c>) and to the
-/// locales the user has opted into.
+/// Filter applied while enumerating a CASC storage; narrows extraction to the directories
+/// that accelerate D2R load times (data\global\, data\hd\, data\local\).
 /// </summary>
-/// <param name="IncludeGlobal">Include entries under <c>data\global\</c>.</param>
-/// <param name="IncludeHd">Include entries under <c>data\hd\</c>.</param>
-/// <param name="IncludeLocal">
-/// Include entries under <c>data\local\</c>. These are the small UI / sound
-/// files that ship as part of the user's installed locale and live in the
-/// canonical <c>data\</c> namespace (not the uninstalled <c>locales\</c>
-/// TVFS namespace, which is always rejected by the path prefix tests).
-/// Defaults to <c>true</c> — only the per-language <c>locales\&lt;lang&gt;\…</c>
-/// branches require explicit opt-in.
-/// </param>
-/// <param name="LocaleMask">
-/// Bitmask of <see cref="CascLocale"/> values to keep. Reserved for the
-/// future per-locale opt-in UI; not currently consulted by <see cref="Accept"/>
-/// (locale gating is path-based, see remarks on the rejected
-/// <c>locales\&lt;lang&gt;\…</c> namespace).
-/// </param>
 public sealed record CascExtractionFilter(
     bool IncludeGlobal = true,
     bool IncludeHd = true,
@@ -81,17 +63,8 @@ public sealed record CascExtractionFilter(
             }
         }
 
-        // Locale gating is path-based, not flag-based: D2R's TVFS reports
-        // non-zero LocaleFlags (typically a bitmask of installed locales)
-        // even for nominally locale-neutral content under data\global\ and
-        // data\hd\, so the prior `entry.LocaleFlags != 0 && (& mask) == 0`
-        // guard rejected every global/hd entry whenever LocaleMask was None
-        // — which is the default fastload filter. We instead trust the
-        // path prefix: locale-specific assets live under data\local\ (and
-        // the locales\<lang>\... TVFS namespace, which is filtered out by
-        // the absent path prefix). The LocaleMask field is retained on the
-        // record for the eventual locale-opt-in UI, but is no longer used
-        // here.
+        // Locale gating is path-based, not flag-based: locale-specific assets live under
+        // data\local\ (and the locales\<lang>\... namespace, filtered out by absent prefix).
         if (IncludeGlobal && PathStartsWith(path, "data\\global\\"))
         {
             return true;
@@ -110,15 +83,7 @@ public sealed record CascExtractionFilter(
         return false;
     }
 
-    /// <summary>
-    /// Strips a leading TVFS namespace prefix (everything up to and including the
-    /// first <c>:</c> that occurs before any backslash). CascLib's TVFS layer
-    /// emits names like <c>data:data\global\excel\armor.txt</c> — we want the
-    /// part after the colon for both filtering and on-disk path mirroring.
-    /// Locale-namespace entries like <c>locales\audio\plpl\data\local\...</c>
-    /// fall through unchanged and are correctly rejected by the prefix tests
-    /// when locale extraction is opted out.
-    /// </summary>
+    /// <summary>Strips a leading TVFS namespace prefix (e.g. "data:data\global\..." → "data\global\...").</summary>
     internal static string StripCascNamespace(string path)
     {
         if (string.IsNullOrEmpty(path))
@@ -189,12 +154,7 @@ public sealed record CascProgress(
     string? CurrentPath,
     TimeSpan Elapsed);
 
-/// <summary>
-/// Heartbeat emitted while walking the CASC TVFS during the indexing
-/// phase. CASC enumeration of D2R yields ~150k entries and can take
-/// minutes — emitting a running count + last-seen path lets the UI
-/// prove it isn't hung.
-/// </summary>
+/// <summary>Heartbeat emitted while walking the CASC TVFS during indexing (~150k entries).</summary>
 /// <param name="EntriesSeen">Total entries observed so far (pre-filter).</param>
 /// <param name="EntriesAccepted">Entries that passed the active filter so far.</param>
 /// <param name="CurrentPath">Most recent CASC path seen by the enumerator.</param>
@@ -206,12 +166,8 @@ public sealed record CascIndexProgress(
     TimeSpan Elapsed);
 
 /// <summary>
-/// Higher-level façade over <see cref="ICascNative"/> that the launcher's
-/// services and UI bind to. Responsibilities at Phase 1c: open a local
-/// storage, surface its product/build info, index a filtered subset of
-/// entries, and atomically extract a single entry to disk. Orchestration
-/// (full-tree extraction, delta, undo, cross-install, orphan recovery) lands
-/// in the subsequent Phase 1 sub-tasks and reuses the primitives defined here.
+/// Façade over <see cref="ICascNative"/>: open a local storage, query product/build,
+/// index filtered entries, and atomically extract a single entry.
 /// </summary>
 public sealed class CascExtractionService
 {
@@ -281,26 +237,14 @@ public sealed class CascExtractionService
         var emitInterval = TimeSpan.FromMilliseconds(100); // ~10 Hz heartbeat
         long seen = 0;
         long lastLogged = 0;
-        // Track last *accepted* path separately from last *seen* path so the
-        // heartbeat (log + UI) only ever surfaces files that passed the
-        // filter — otherwise users see scary `data\local\...` /
-        // `locales\...` strings while indexing walks past entries that are
-        // about to be rejected, and assume locale extraction is happening
-        // when in reality the count of matched entries has already stopped
-        // growing.
+        // Track last *accepted* path separately from last *seen* so the heartbeat
+        // only surfaces files that passed the filter.
         string? lastAcceptedPath = null;
 
         LaunchDiagnostics.Log($"CASC Index: starting (filter: includeGlobal={f.IncludeGlobal}, includeHd={f.IncludeHd}, includeLocal={f.IncludeLocal}, localeMask=0x{f.LocaleMask:X}).");
 
-        // Once we've started seeing accepted entries under `data\...` and then
-        // observe entries whose normalized path no longer begins with `data\`,
-        // CascLib's TVFS walk has crossed into namespaces such as
-        // `locales\<lang>\...` whose payload data isn't installed on disk.
-        // `CascFindNextFile` can stall for tens of seconds trying to resolve
-        // span/encoding info for those entries (the user hit a 44s freeze
-        // around entry 175,817 of `locales\...`). Since CascLib enumerates
-        // alphabetically (`data\` < `locales\`), once we leave `data\` we
-        // will not see any further wanted entries — break out cleanly.
+        // CascLib enumerates alphabetically; once we leave `data\` we won't see further wanted
+        // entries, and `CascFindNextFile` can stall on uninstalled-locale namespaces. Break out.
         bool sawDataNamespace = false;
 
         try
@@ -384,18 +328,9 @@ public sealed class CascExtractionService
     }
 
     /// <summary>
-    /// Extracts a single CASC entry to <paramref name="destinationPath"/> via
-    /// a sibling temp file + atomic <see cref="File.Replace(string, string, string)"/>
-    /// swap (or <see cref="File.Move(string, string)"/> when the destination
-    /// is new). Returns the number of bytes written.
+    /// Extracts a single CASC entry via temp file + atomic replace. Returns bytes written.
+    /// Runs on the thread pool because CascLib's read API is blocking.
     /// </summary>
-    /// <remarks>
-    /// CascLib's read API is blocking, so the extraction itself runs on the
-    /// thread pool. Cancellation is checked before the native call begins;
-    /// once a file is in flight it runs to completion or fails — single-file
-    /// granularity is sufficient for the delta workload because each file is
-    /// small (kilobytes to a few MB).
-    /// </remarks>
     public Task<long> ExtractEntryAsync(
         SafeCascStorageHandle storage,
         CascFileEntry entry,
@@ -439,10 +374,8 @@ public sealed class CascExtractionService
                        FileAccess.Write,
                        FileShare.None))
             {
-                // Prefer the original TVFS-prefixed name (e.g. "data:data\\...")
-                // because CascOpenFile resolves entries by the exact name returned
-                // from CascFindFirstFile/CascFindNextFile. Fall back to the
-                // stripped Path when FullName is not populated.
+                // CascOpenFile requires the exact TVFS-prefixed name from CascFindFirst/Next;
+                // fall back to the stripped Path when FullName is not populated.
                 var openName = string.IsNullOrEmpty(entry.FullName) ? entry.Path : entry.FullName!;
                 bytesWritten = _native.ExtractTo(storage, openName, tempStream, buffer);
                 tempStream.Flush(flushToDisk: true);
@@ -486,14 +419,7 @@ public sealed class CascExtractionService
         return bytesWritten;
     }
 
-    /// <summary>
-    /// Extracts all entries in <paramref name="entries"/> beneath
-    /// <paramref name="destinationRoot"/>, mirroring each entry's CASC path
-    /// into the filesystem (e.g. <c>data\global\excel\armor.txt</c> →
-    /// <c>{destinationRoot}\data\global\excel\armor.txt</c>). Progress is
-    /// reported to <paramref name="progress"/> at most once per
-    /// <paramref name="progressInterval"/>.
-    /// </summary>
+    /// <summary>Extracts all entries beneath <paramref name="destinationRoot"/>, mirroring CASC paths to disk.</summary>
     public async Task ExtractAllAsync(
         SafeCascStorageHandle storage,
         IReadOnlyCollection<CascFileEntry> entries,

@@ -160,11 +160,8 @@ public sealed class NativeCascLib : ICascNative
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
-            // Native call faulted (e.g. AccessViolation surfaced via runtime
-            // wrapping). Surface as a clear IOException so the operation
-            // body's catch records and notifies the user instead of
-            // crashing the launcher. Pure bool=false outcomes still return
-            // null, preserving existing caller semantics.
+            // Surface native faults as IOException so the caller can record/notify
+            // instead of crashing the launcher. bool=false outcomes still return null.
             throw new IOException($"CascOpenStorage threw for '{storagePath}': {ex.Message}", ex);
         }
     }
@@ -240,9 +237,7 @@ public sealed class NativeCascLib : ICascNative
                 }
                 catch
                 {
-                    // Native enumerator raised — abort the walk gracefully so
-                    // the caller can still operate on the entries collected so
-                    // far. The next index pass will retry.
+                    // Abort the walk gracefully; the next index pass will retry.
                     yield break;
                 }
 
@@ -269,12 +264,8 @@ public sealed class NativeCascLib : ICascNative
             string fullName = NullTerminatedAnsi(data.szFileName);
             if (string.IsNullOrEmpty(fullName)) return null;
 
-            // Strip the TVFS namespace prefix (e.g. "data:data\\global\\..." ->
-            // "data\\global\\...") so all downstream consumers (filter, manifest,
-            // disk path mirror, orphan recovery) operate on a single canonical
-            // form. The original prefixed name is retained on FullName because
-            // CascOpenFile (OpenByName) requires the exact name returned by
-            // CascFindFirstFile/CascFindNextFile to resolve TVFS entries.
+            // Canonicalise by stripping the TVFS namespace prefix; FullName retains the
+            // prefixed name because CascOpenFile (OpenByName) requires the exact original.
             string path = CascExtractionFilter.StripCascNamespace(fullName);
             if (string.IsNullOrEmpty(path)) return null;
 
@@ -435,12 +426,7 @@ public sealed class NativeCascLib : ICascNative
         }
     }
 
-    // -----------------------------------------------------------------------
-    // P/Invoke surface. CascLib uses __stdcall (WINAPI) on Windows and the
-    // platform default everywhere else; the runtime selects the correct
-    // calling convention for [DllImport] on x86 only, so on x64 the choice is
-    // ABI-irrelevant. CharSet.Ansi matches the LPCSTR signatures.
-    // -----------------------------------------------------------------------
+    // P/Invoke surface. CharSet.Ansi matches the LPCSTR signatures.
 
     [DllImport(LibraryName, CharSet = CharSet.Ansi, SetLastError = false)]
     [return: MarshalAs(UnmanagedType.Bool)]

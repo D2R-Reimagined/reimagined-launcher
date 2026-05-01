@@ -211,11 +211,7 @@ public partial class MainWindow : Window
             }
         }
 
-        // Best-effort: if the user has previously opted into CASC fastload
-        // (i.e. a fastload manifest exists for this install), check whether
-        // D2R has patched since the last extraction and offer to run a delta
-        // update. Users who never opted in have no manifest and will not be
-        // pestered.
+        // If a fastload manifest exists, check for a build mismatch and offer a delta update.
         _ = PromptCascFastloadUpdateIfMismatchedAsync();
     }
 
@@ -239,11 +235,7 @@ public partial class MainWindow : Window
             var manifestService = new CascFastloadManifestService(installDir);
             if (!manifestService.Exists)
             {
-                // No manifest at the canonical path means no extraction has
-                // been performed (or it was undone). Treat as a fresh slate:
-                // best-effort sweep any stale legacy-location manifest left
-                // behind by earlier development builds so nothing on disk
-                // can falsely imply a prior extraction.
+                // No canonical manifest = fresh slate; sweep stale legacy-location manifests.
                 TryDeleteLegacyFastloadManifest(installDir);
                 return;
             }
@@ -251,9 +243,7 @@ public partial class MainWindow : Window
             var manifest = await manifestService.LoadAsync().ConfigureAwait(false);
             if (manifest.Files.Count == 0)
             {
-                // Manifest file exists but is empty — same fresh-slate
-                // semantics; remove the empty file too so the on-disk state
-                // matches "never extracted".
+                // Empty manifest file = fresh slate; remove it so the on-disk state matches.
                 TryDeleteEmptyFastloadManifest(manifestService);
                 return;
             }
@@ -300,9 +290,7 @@ public partial class MainWindow : Window
 
             await NavigateToCascFastloadViewAsync().ConfigureAwait(false);
 
-            // Hand control to the view's public entry point so the running
-            // operation is owned by CascFastloadOperationState — survives
-            // navigation, supports Cancel from the view, etc.
+            // Delegate to the view's public entry point so the op is owned by CascFastloadOperationState.
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (ContentArea.Content is CascFastloadView fastloadView)
@@ -705,10 +693,7 @@ public partial class MainWindow : Window
                 var modPath = InstallDirectoryValidator.ResolveD2RmmModFolder(profile.InstallDirectory);
                 IsLocalModDetected = modPath != null;
 
-                // modinfo.json is the canonical version source — see
-                // CharacterSelectPanelService for the rationale behind
-                // moving away from the panel-text scrape (see ModVersion
-                // tracking notes in CascFastloadEntry).
+                // modinfo.json is the canonical version source (see CharacterSelectPanelService).
                 var modInfoVersion = CharacterSelectPanelService.GetModVersion(modPath);
                 _localModVersion = !string.IsNullOrWhiteSpace(modInfoVersion)
                     ? modInfoVersion
@@ -724,12 +709,8 @@ public partial class MainWindow : Window
                 var modInfoPath = Path.Combine(modRootDirectory, "modinfo.json");
                 var modInfoPathInMpq = Path.Combine(modRootDirectory, "Reimagined.mpq", "modinfo.json");
 
-                // modinfo.json (resolved via CharacterSelectPanelService) is
-                // now the single source of truth for the installed mod
-                // version. It's also stamped onto every mod-source entry in
-                // the CASC fastload manifest at install/update time so the
-                // launcher can detect stale overlays without re-reading
-                // these files on every startup.
+                // modinfo.json is the single source of truth for the installed mod version;
+                // also stamped onto mod-source manifest entries for stale-overlay detection.
                 var modInfoVersion =
                     CharacterSelectPanelService.GetModVersionFromFile(modInfoPath)
                     ?? CharacterSelectPanelService.GetModVersionFromFile(modInfoPathInMpq);
@@ -737,11 +718,8 @@ public partial class MainWindow : Window
                     ? modInfoVersion
                     : "Unknown";
 
-                // Detection requires an actual modinfo.json — directory existence alone
-                // is not sufficient because the CASC fastload bootstrap deliberately
-                // creates `mods\Reimagined\Reimagined.mpq\data\` while removing modinfo.json
-                // to signal "mod uninstalled, run Install/Update". Relying on Directory.Exists
-                // here would leave the launch button enabled in that bootstrapped state.
+                // Detection requires modinfo.json; directory existence alone is the bootstrapped
+                // "mod uninstalled" state and must not enable the launch button.
                 IsLocalModDetected = File.Exists(modInfoPath) || File.Exists(modInfoPathInMpq);
             }
         }
@@ -1323,9 +1301,7 @@ public partial class MainWindow : Window
         LauncherUpdateService.ApplyUpdateAndRestart();
     }
 
-    // Starts (or restarts) the hourly background check that pings the launcher update endpoint
-    // even when the user never leaves the launcher open across sessions. Idempotent: re-entry
-    // simply replaces the previous timer instance.
+    // Starts/restarts the hourly background launcher-update check; idempotent.
     private void StartLauncherUpdateCheckTimer()
     {
         _launcherUpdateCheckTimer?.Stop();
@@ -1334,9 +1310,7 @@ public partial class MainWindow : Window
         _launcherUpdateCheckTimer.Start();
     }
 
-    // Click handler for the "Launcher v#.#.#" label: lets the user trigger an immediate update
-    // check on demand without waiting for the hourly poll. We surface a brief notification so the
-    // click feels acknowledged regardless of whether an update is available.
+    // "Launcher v#.#.#" click handler: triggers an immediate update check with a brief notification.
     private async void OnLauncherVersionClicked(object? sender, Avalonia.Input.PointerPressedEventArgs e)
     {
         try

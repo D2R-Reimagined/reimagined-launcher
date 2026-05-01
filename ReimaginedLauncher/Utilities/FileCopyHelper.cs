@@ -7,14 +7,8 @@ using System.Threading.Tasks;
 namespace ReimaginedLauncher.Utilities;
 
 /// <summary>
-/// Shared async file-copy helper used by plugin asset application, backup,
-/// and mod install flows. Writes go to a sibling temp file first and are then
-/// swapped into place via <see cref="File.Replace(string, string, string)"/>
-/// (or <see cref="File.Move(string, string, bool)"/> when no prior file exists)
-/// so the destination always receives a brand new file id. This avoids a class
-/// of "looks the same, skip it" failures caused by content-unaware tools that
-/// key on size + mtime (robocopy without /IS, xcopy /D, rsync defaults, cloud
-/// sync placeholders, SMB metadata caching, AV silently dropping writes).
+/// Shared async file-copy helper. Writes go to a sibling temp file then atomic-replace, so the
+/// destination receives a fresh file id (avoids size+mtime skip behavior in sync tools/AV).
 /// </summary>
 internal static class FileCopyHelper
 {
@@ -123,10 +117,7 @@ internal static class FileCopyHelper
 
             if (File.Exists(destinationPath))
             {
-                // File.Replace performs an atomic NTFS rename that swaps both
-                // data and metadata. Downstream sync tools, cloud agents, and
-                // SMB caches see a new file id rather than a same-size/same-
-                // mtime overwrite they might otherwise skip.
+                // Atomic NTFS rename: produces a new file id so size+mtime-keyed tools don't skip.
                 File.Replace(tempPath, destinationPath, destinationBackupFileName: null, ignoreMetadataErrors: true);
             }
             else

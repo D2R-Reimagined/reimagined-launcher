@@ -27,9 +27,7 @@ public partial class UpdateView : UserControl
 
     private void OnCascStateChanged(object? sender, EventArgs e)
     {
-        // Re-evaluate gated install/update buttons whenever a CASC fastload
-        // operation starts or stops so the user can't kick off an install
-        // mid-extraction.
+        // Re-evaluate gated install/update buttons when a CASC fastload op starts/stops.
         RefreshUpdateState();
     }
 
@@ -403,15 +401,8 @@ public partial class UpdateView : UserControl
         }
         else
         {
-            // Snapshot the existing mods/Reimagined/Reimagined.mpq payload
-            // before we extract the new zip over it so we can identify files
-            // that the new mod version no longer ships and reconcile them
-            // via CascOrphanRecoveryService below. The diff root is the
-            // .mpq directory (D2R's actual mod data root with -mod
-            // Reimagined -txt) so the relative paths produced here align
-            // with CASC manifest keys (e.g. "data\global\excel\armor.txt").
-            // This replaces the bulk "rename to Reimagined.backup" approach
-            // without losing orphan cleanup correctness.
+            // Snapshot the .mpq payload pre-extract so removed paths can be reconciled by
+            // CascOrphanRecoveryService. Relative paths align with CASC manifest keys.
             var modRoot = Path.Combine(installDirectory, "mods", "Reimagined", "Reimagined.mpq");
             HashSet<string> oldModPaths;
             try
@@ -426,11 +417,7 @@ public partial class UpdateView : UserControl
 
             await ExtractNonD2RmmModAsync(zipPath, installDirectory);
 
-            // Invalidate the per-launch "clean" snapshots so they are retaken
-            // from the new mod files on the next launch. Previously this was
-            // achieved by renaming mods/Reimagined to mods/Reimagined.backup
-            // (which wiped the snapshots as a side effect); now we do it
-            // explicitly so we can stop creating that 40+ GB sibling tree.
+            // Invalidate per-launch "clean" snapshots so they are retaken from the new mod files.
             try
             {
                 ModTweaksService.InvalidateCleanSnapshots(installDirectory);
@@ -440,15 +427,8 @@ public partial class UpdateView : UserControl
                 LaunchDiagnostics.Log($"Failed to invalidate launcher_clean snapshots: {ex.Message}");
             }
 
-            // Phase 1h orphan recovery: any path the *previous* mod payload
-            // shipped that the new payload no longer does is reconciled
-            // against the CASC fastload manifest. When fastload is not
-            // configured (manifest absent) every removed path falls through
-            // to a best-effort delete, which is the correct CASC-less
-            // behaviour: the game then reads the underlying default from
-            // CASC at runtime. When fastload is configured this same call
-            // either re-extracts the CASC default (preserving the speedup)
-            // or strips ownership tokens for plugin-overlaid paths.
+            // Orphan recovery: paths the previous payload shipped but the new one omits are reconciled
+            // against the CASC fastload manifest (fastload-less installs fall through to best-effort delete).
             HashSet<string> newModPathsForFlip = new(StringComparer.OrdinalIgnoreCase);
             try
             {
@@ -464,10 +444,7 @@ public partial class UpdateView : UserControl
                     var extractionService = new CascExtractionService(new NativeCascLib());
                     var orphanService = new CascOrphanRecoveryService(extractionService, manifestService);
 
-                    // storage: null — fastload extraction here would require an
-                    // open CASC handle plus user opt-in via the upcoming Phase
-                    // 1j UI. Until that lands, the null-storage path is the
-                    // correct default and remains safe for CASC-less installs.
+                    // storage: null — no open CASC handle here; safe default for CASC-less installs.
                     var result = await orphanService.ReconcileRemovedPathsAsync(
                         removed,
                         storage: null,
@@ -485,22 +462,9 @@ public partial class UpdateView : UserControl
                 LaunchDiagnostics.Log($"Mod orphan recovery failed: {ex.Message}");
             }
 
-            // Manifest token-flip: every path the new mod zip wrote that
-            // already has a CASC fastload manifest entry is now an overlay
-            // (mod-authored bytes on top of the CASC default). Flip the
-            // entry's Source token to include "mod" so a future delta
-            // extract won't see the on-disk bytes diverging from the CKey
-            // and helpfully restore the CASC default over the mod's
-            // edits. CascCKey already records the underlying default for
-            // restore-on-removal; we only need to add the ownership flag.
-            //
-            // We also stamp ModVersion on every mod-overlay entry using the
-            // freshly extracted modinfo.json so the launcher can later
-            // detect stale overlays (e.g. when a user reinstalls or rolls
-            // back the mod) without re-reading every modinfo.json on
-            // startup. Previously this field was left null, which is what
-            // produced "ModVersion": null entries in the manifest even on
-            // freshly installed casc+mod paths.
+            // Token-flip: paths the new mod zip wrote get "mod" added to their Source so a future delta
+            // doesn't restore the CASC default over them. Also stamp ModVersion from modinfo.json so
+            // stale overlays can be detected without re-reading every modinfo on startup.
             try
             {
                 if (newModPathsForFlip.Count > 0)
@@ -509,11 +473,7 @@ public partial class UpdateView : UserControl
                     var pre = await manifestService.LoadAsync().ConfigureAwait(false);
                     if (pre.Files.Count > 0)
                     {
-                        // Resolve the version once, from the just-installed
-                        // payload. Null is acceptable here (e.g. modinfo.json
-                        // missing the version field) — we simply skip the
-                        // ModVersion stamp in that case rather than writing
-                        // a placeholder we'd later have to special-case.
+                        // Resolve once from the installed payload; null is acceptable (skip the stamp).
                         var installedVersion = CharacterSelectPanelService.GetModVersion(modRoot);
 
                         var flipped = 0;
@@ -554,9 +514,7 @@ public partial class UpdateView : UserControl
                 LaunchDiagnostics.Log($"CASC manifest token-flip failed: {ex.Message}");
             }
 
-            // Migration courtesy: remove any leftover mods/Reimagined.backup
-            // tree from previous launcher versions so users don't keep
-            // double-disk usage forever.
+            // Migration: remove any leftover mods/Reimagined.backup tree from previous launcher versions.
             try
             {
                 var legacyBackupDir = Path.Combine(installDirectory, "mods", "Reimagined.backup");
@@ -628,15 +586,7 @@ public partial class UpdateView : UserControl
             CopyDirectory(directory, Path.Combine(targetDir, Path.GetFileName(directory)));
     }
 
-    /// <summary>
-    /// Extracts the non-D2RMM mod archive over the install directory using
-    /// per-file atomic replacement. This replaces the previous behaviour of
-    /// renaming <c>mods/Reimagined</c> to <c>mods/Reimagined.backup</c> and
-    /// re-extracting; that workaround existed because the on-disk
-    /// "*_launcher_clean" snapshots were stale, not because the overwrite
-    /// itself was unreliable. The clean snapshots are now invalidated
-    /// explicitly by <see cref="ModTweaksService.InvalidateCleanSnapshots"/>.
-    /// </summary>
+    /// <summary>Extracts the non-D2RMM mod archive over the install directory using per-file atomic replacement.</summary>
     private static Task ExtractNonD2RmmModAsync(string zipPath, string installDirectory)
     {
         return FileCopyHelper.ExtractZipAsync(zipPath, installDirectory);
@@ -671,12 +621,7 @@ public partial class UpdateView : UserControl
         return set;
     }
 
-    /// <summary>
-    /// Returns <paramref name="source"/> with the <c>mod</c> token added if
-    /// not already present. Recognises the canonical
-    /// <see cref="CascFastloadEntry.SourceTokens"/> combinations and falls
-    /// back to a "+"-suffixed concat for any unexpected starting value.
-    /// </summary>
+    /// <summary>Returns <paramref name="source"/> with the <c>mod</c> token added if not already present.</summary>
     private static string AddModToken(string? source)
     {
         if (string.IsNullOrEmpty(source))
@@ -684,9 +629,7 @@ public partial class UpdateView : UserControl
             return CascFastloadEntry.SourceTokens.Mod;
         }
 
-        // Tokenise on '+' so we don't depend on insertion order; rebuild in
-        // the canonical casc/mod/plugin order so output matches SourceTokens
-        // constants exactly.
+        // Tokenise on '+' and rebuild in canonical casc/mod/plugin order to match SourceTokens.
         var parts = source.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var hasCasc = parts.Any(p => p.Equals(CascFastloadEntry.SourceTokens.Casc, StringComparison.OrdinalIgnoreCase));
         var hasPlugin = parts.Any(p => p.Equals(CascFastloadEntry.SourceTokens.Plugin, StringComparison.OrdinalIgnoreCase));

@@ -16,3 +16,4 @@ These instructions apply to the entire repository.
 - `Program.cs` configures dependency injection and Avalonia startup.
 - HTTP client code lives under `ReimaginedLauncher/HttpClients/`.
 - Shared application helpers live under `ReimaginedLauncher/Utilities/`.
+- Match the surrounding comment density. Do not add narrative or rationale comments; put rationale in the commit message or PR description instead. Keep only short comments (at most a couple of lines) that document non-obvious behavior, invariants, or external contracts.

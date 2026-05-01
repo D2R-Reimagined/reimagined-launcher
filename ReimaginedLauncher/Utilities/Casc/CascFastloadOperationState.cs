@@ -6,18 +6,9 @@ using Avalonia.Threading;
 namespace ReimaginedLauncher.Utilities.Casc;
 
 /// <summary>
-/// Process-scoped state for the CASC fastload pipeline. Decouples a long-running
-/// Extract / Update / Undo / Cross-extract operation from any particular
-/// <c>CascFastloadView</c> instance so navigating away from the view does NOT
-/// cancel the work, and navigating back into the view re-renders the live
-/// status (progress %, ETA, current file, last result).
+/// Process-scoped state for the CASC fastload pipeline so a long-running op survives view navigation.
+/// One op at a time; all mutations marshal to the UI thread before raising <see cref="StateChanged"/>.
 /// </summary>
-/// <remarks>
-/// Concurrency model: only one operation runs at a time (enforced by
-/// <see cref="IsRunning"/> + <see cref="_gate"/>). All public mutations marshal
-/// to the UI thread before raising <see cref="StateChanged"/> so subscribers
-/// (the view) can update controls without re-dispatching themselves.
-/// </remarks>
 public sealed class CascFastloadOperationState
 {
     public static CascFastloadOperationState Instance { get; } = new();
@@ -26,16 +17,13 @@ public sealed class CascFastloadOperationState
     private CancellationTokenSource? _cts;
     private bool _running;
 
-    // EWMA throughput (bytes/sec) — reset at the start of each run. Used
-    // for the "current speed" display only; ETA is intentionally derived
-    // from cumulative throughput so it doesn't jitter as file sizes vary.
+    // EWMA throughput (bytes/sec) for the "current speed" display only;
+    // ETA is derived from cumulative throughput to avoid jitter.
     private double _ewmaBytesPerSec;
     private DateTime _lastProgressUtc;
     private long _lastBytesDone;
 
-    // ETA stabilization: refresh the visible ETA text at most once per
-    // second so the user sees a steady value instead of a value that
-    // flashes at the 10 Hz progress emission rate.
+    // Throttle visible ETA refresh to ~1 Hz so it doesn't flash at the 10 Hz progress cadence.
     private DateTime _lastEtaRefreshUtc;
     private string _lastEtaText = string.Empty;
 
@@ -105,12 +93,7 @@ public sealed class CascFastloadOperationState
                 LastResultMessage = StatusMessage;
             }
 
-            // Clear the live progress strip on successful completion so the
-            // UI doesn't keep showing the last in-flight file / partial byte
-            // counts / stale ETA after the operation has finished. The
-            // persistent LastResultMessage continues to reflect the outcome.
-            // Cancel/error paths intentionally leave the last-known progress
-            // state alone so the user can see where things stopped.
+            // Clear the live progress strip on success; cancel/error paths leave it alone.
             CurrentFile = string.Empty;
             ProgressDetail = string.Empty;
             ProgressPercent = 0;
@@ -210,11 +193,8 @@ public sealed class CascFastloadOperationState
         var deltaSec = (nowUtc - _lastProgressUtc).TotalSeconds;
         var deltaBytes = p.BytesDone - _lastBytesDone;
 
-        // EWMA over the inter-callback rate — used only for the "current
-        // speed" readout. Tolerant of jitter; the smoothing factor is low
-        // enough to react to genuine slow-downs but high enough to avoid
-        // per-file thrash. Skip samples with no byte progress (large file
-        // still in flight) so the displayed speed doesn't decay to zero.
+        // EWMA over inter-callback rate; skip samples with no byte progress so the
+        // displayed speed doesn't decay to zero while a large file is still in flight.
         if (_lastProgressUtc != default && deltaSec > 0 && deltaBytes > 0)
         {
             var instant = deltaBytes / deltaSec;
@@ -233,11 +213,7 @@ public sealed class CascFastloadOperationState
         ProgressDetail =
             $"{p.FilesDone:N0} / {p.FilesTotal:N0} files • {FormatBytes(p.BytesDone)} / {FormatBytes(p.BytesTotal)} • {FormatBytes((long)_ewmaBytesPerSec)}/s";
 
-        // ETA: use the cumulative average throughput (bytesDone / elapsed)
-        // — much steadier than an instantaneous rate over varying file
-        // sizes. Only refresh the visible text at most once per second
-        // and only after a brief warm-up so the value doesn't appear and
-        // disappear at the 10 Hz progress cadence.
+        // ETA uses cumulative average throughput, refreshed at most once per second after warm-up.
         ProgressEta = ResolveEtaText(p, nowUtc);
 
         CurrentFile = p.CurrentPath ?? CurrentFile;
@@ -283,9 +259,7 @@ public sealed class CascFastloadOperationState
 
     private void Raise()
     {
-        // Always marshal to the UI thread so subscribers (Avalonia controls)
-        // can update without re-dispatching. The Post is a no-op if no one
-        // is currently subscribed.
+        // Always marshal to the UI thread so subscribers don't have to re-dispatch.
         if (Dispatcher.UIThread.CheckAccess())
         {
             StateChanged?.Invoke(this, EventArgs.Empty);

@@ -52,20 +52,10 @@ public sealed record CascUndoResult(
     TimeSpan Elapsed);
 
 /// <summary>
-/// Phase 1g — manifest-driven removal of every file the launcher previously
-/// extracted from CASC into <paramref name="destinationRoot"/>. Mod and
-/// plugin overlays are preserved (the launcher cannot safely delete bytes
-/// it did not write); for those paths the undo pass merely drops the CASC
-/// contribution from the manifest so a subsequent reconciliation correctly
-/// treats the path as "no CASC default known" rather than "extracted".
+/// Manifest-driven removal of every file the launcher previously extracted from CASC. Mod/plugin
+/// overlays are preserved; for them only the CASC contribution is dropped from the manifest.
+/// Does not consult the live CASC storage so it works even when D2R is uninstalled.
 /// </summary>
-/// <remarks>
-/// The undo pass intentionally does <strong>not</strong> consult the live
-/// CASC storage — undo is meant to work even when the CASC archives are
-/// inaccessible (e.g. user uninstalled D2R or moved the install). Anything
-/// the launcher touched is recorded in the manifest, which is the single
-/// source of truth for rollback.
-/// </remarks>
 public sealed class CascUndoService
 {
     private static readonly string[] FastloadRoots =
@@ -108,12 +98,7 @@ public sealed class CascUndoService
         var manifest = await _manifestService.LoadAsync(cancellationToken).ConfigureAwait(false);
         var total = manifest.Files.Count;
 
-        // The bulk of UndoAsync is synchronous file IO over potentially
-        // 100k+ entries. SemaphoreSlim.WaitAsync inside the manifest service
-        // returns synchronously when uncontended, so without this Task.Run
-        // the entire loop runs on the calling thread (the UI thread when
-        // invoked from a button click) and freezes the launcher until
-        // completion. Run on the thread pool to keep the UI responsive.
+        // Sync file IO over 100k+ entries; run on the thread pool to keep the UI responsive.
         var (filesDeleted, bytesDeleted, overlaysPreserved, entriesDropped, directoriesToCheck, remaining) = await Task.Run(() =>
         {
             var fd = 0;
@@ -298,14 +283,7 @@ public sealed class CascUndoService
         }
     }
 
-    /// <summary>
-    /// Walks each candidate directory upward, deleting empty directories that
-    /// sit beneath one of the fastload roots (<c>data\global|hd|local</c>).
-    /// The fastload root itself is removed if it ends up empty (e.g. after
-    /// a full undo); the loop stops once we'd step outside the fastload
-    /// roots, so the install root and sibling directories the launcher does
-    /// not own are never touched.
-    /// </summary>
+    /// <summary>Deletes empty directories beneath data\global|hd|local; stops at the fastload roots.</summary>
     private static int PruneEmptyDirectories(
         string destinationRoot,
         HashSet<string> directories,

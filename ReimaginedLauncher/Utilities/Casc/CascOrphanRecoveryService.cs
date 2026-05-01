@@ -65,22 +65,10 @@ public sealed record CascOrphanRecoveryResult(
     IReadOnlyList<CascOrphanRecoveryItem> Items);
 
 /// <summary>
-/// Phase 1h — reconciles paths that the active mod payload no longer ships.
-/// For each removed path the service either re-extracts the underlying CASC
-/// default (when one is recorded in the manifest and a live storage handle
-/// is supplied), deletes the stale on-disk bytes, or simply strips the
-/// <c>mod</c> ownership token while leaving a remaining overlay (e.g. a
-/// plugin) intact.
+/// Reconciles paths the active mod payload no longer ships: re-extracts the CASC default,
+/// deletes stale bytes, or strips the <c>mod</c> token while leaving other overlays intact.
+/// Tolerates a null storage handle (falls through to delete + keeps <c>casc</c> token).
 /// </summary>
-/// <remarks>
-/// Intended to be invoked immediately after a mod install/update has applied
-/// new files to <paramref name="destinationRoot"/>: callers compute
-/// <c>removedPaths = oldModPayload \ newModPayload</c> and pass them in. The
-/// service is deliberately tolerant of a null <see cref="SafeCascStorageHandle"/>
-/// — when CASC is unavailable, restorable entries fall through to the delete
-/// path and keep their <c>casc</c> token in the manifest so a later fastload
-/// or delta pass can re-materialise them.
-/// </remarks>
 public sealed class CascOrphanRecoveryService
 {
     private readonly CascExtractionService _extraction;
@@ -214,10 +202,8 @@ public sealed class CascOrphanRecoveryService
                 continue;
             }
 
-            // Either no remaining owners (mod-only entry) or a CASC default
-            // we cannot currently materialise. Delete the stale bytes; drop
-            // the manifest row when nothing is left, otherwise keep a slim
-            // entry so a future fastload pass can re-extract from CASC.
+            // Delete stale bytes; drop the manifest row when no owners remain, otherwise keep a
+            // slim entry so a future fastload pass can re-extract from CASC.
             var deleted = TryDeleteFile(diskPath, out _, out var delError);
             if (deleted)
             {

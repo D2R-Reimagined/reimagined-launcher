@@ -191,9 +191,7 @@ public static class ModTweaksService
             LaunchDiagnostics.Log("Applying vignette tweaks.");
             await ApplyVignetteTweakAsync(profile.RemoveVignette);
 
-            // Apply enabled plugins last so their edits to non-excel JSON targets
-            // (missiles.json, layouts_profilehd.json, armor JSONs, desecratedzones.json,
-            // vis files) are not clobbered by the Restore*/Apply*Tweaks* steps above.
+            // Apply enabled plugins last so their JSON/vis edits are not clobbered by tweaks above.
             foreach (var targetExcelDirectory in excelDirectories)
             {
                 var targetLabel = Path.GetFileName(targetExcelDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
@@ -271,10 +269,7 @@ public static class ModTweaksService
             }
         }
 
-        // File-shaped snapshots and any sidecar metadata. The pattern
-        // intentionally also matches "<name>_launcher_clean.<anything>" so
-        // associated .missing markers and .snapshot.meta sidecars are removed
-        // alongside the snapshots they describe.
+        // File-shaped snapshots + sidecars (.missing markers, .snapshot.meta).
         foreach (var file in EnumerateSafely(() =>
                      Directory.EnumerateFiles(root, "*_launcher_clean*", SearchOption.AllDirectories)))
         {
@@ -319,10 +314,8 @@ public static class ModTweaksService
 
     private static async Task<string> ComputeDirectoryHashAsync(string directory)
     {
-        // Composite hash: SHA-256 over the (relative path + content hash)
-        // pairs of every file in the directory, ordered deterministically.
-        // Excludes the sidecar itself so its presence doesn't perturb the
-        // hash it describes.
+        // Composite SHA-256 over (relative path + content hash) pairs, ordered deterministically.
+        // Excludes the sidecar itself.
         using var sha = SHA256.Create();
         var entries = Directory
             .EnumerateFiles(directory, "*", SearchOption.AllDirectories)

@@ -25,20 +25,14 @@ public static class PluginAssetBackupService
     private static readonly JsonSerializerOptions ReadOptions = SerializerOptions.PropertyNameCaseInsensitive;
     private static readonly JsonSerializerOptions WriteOptions = SerializerOptions.CamelCase;
 
-    // Async-safe single-writer guard. All public mutators serialize through this
-    // semaphore so concurrent register/restore calls cannot race on the
-    // manifest contents or duplicate-snapshot a target.
+    // Single-writer guard: all public mutators serialize through this semaphore.
     private static readonly SemaphoreSlim ServiceLock = new(1, 1);
 
-    // Targets already refreshed during the current apply pass. Cleared by
-    // BeginApplyPassAsync so each launch only re-snapshots a target once even
-    // if multiple plugins claim it.
+    // Targets already refreshed during the current apply pass.
     private static readonly HashSet<string> RefreshedThisPass = new(StringComparer.OrdinalIgnoreCase);
 
-    // First plugin id to claim each target during the current apply pass.
-    // Subsequent claimants on the same path within the same pass surface a
-    // conflict warning so the user knows which plugin's edits will win
-    // (last-applied wins). Cleared by BeginApplyPassAsync.
+    // First plugin id to claim each target during the current apply pass; later claimants
+    // emit a conflict warning (last-applied wins).
     private static readonly Dictionary<string, string> FirstClaimantThisPass = new(StringComparer.OrdinalIgnoreCase);
 
     public static string BackupRootDirectory =>
@@ -124,10 +118,7 @@ public static class PluginAssetBackupService
                 entry.ClaimingPluginIds.Add(pluginId);
             }
 
-            // Conflict detection: if another plugin already claimed this exact
-            // target during the same apply pass, log + notify so the user is
-            // aware that the second plugin's bytes will overwrite the first
-            // plugin's bytes (last-applied wins is the existing semantic).
+            // Conflict detection: warn when more than one plugin claims the same target this pass.
             if (FirstClaimantThisPass.TryGetValue(normalizedTarget, out var firstClaimant))
             {
                 if (!string.Equals(firstClaimant, pluginId, StringComparison.OrdinalIgnoreCase))
@@ -238,9 +229,7 @@ public static class PluginAssetBackupService
                         $"Failed to restore '{Path.GetFileName(entry.TargetAbsolutePath)}': {ex.Message}",
                         "Warning");
 
-                    // Leave the plugin id on the entry so a future
-                    // SetEnabled(false)/Delete invocation can retry the restore
-                    // instead of orphaning the backup permanently.
+                    // Leave the plugin id so a future disable/delete can retry the restore.
                 }
             }
 
@@ -365,9 +354,7 @@ public static class PluginAssetBackupService
         Directory.CreateDirectory(BackupRootDirectory);
         var json = JsonSerializer.Serialize(manifest, WriteOptions);
 
-        // Write atomically so an interrupted save can never leave a truncated
-        // manifest behind (which LoadManifestUnsafe would otherwise quietly
-        // treat as "no backups exist").
+        // Write atomically: an interrupted save must not leave a truncated manifest behind.
         var tempPath = ManifestPath + ".tmp";
         File.WriteAllText(tempPath, json);
         File.Move(tempPath, ManifestPath, overwrite: true);

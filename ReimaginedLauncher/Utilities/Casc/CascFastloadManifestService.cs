@@ -9,19 +9,9 @@ using ReimaginedLauncher.Generators;
 namespace ReimaginedLauncher.Utilities.Casc;
 
 /// <summary>
-/// Atomic, per-install reader/writer for <see cref="CascFastloadManifest"/>.
+/// Atomic, per-install reader/writer for <see cref="CascFastloadManifest"/>. The manifest lives
+/// inside Reimagined.mpq/data/ so it sits next to the bytes it tracks; corrupt files are quarantined.
 /// </summary>
-/// <remarks>
-/// The manifest path lives inside the Reimagined mod's <c>.mpq</c>
-/// directory (<c>&lt;install&gt;/mods/Reimagined/Reimagined.mpq/data/.reimagined-fastload.json</c>)
-/// so it sits next to the bytes it tracks. D2R's <c>-mod Reimagined -txt</c>
-/// flag loads from <c>mods/Reimagined/Reimagined.mpq/data/...</c>; CASC
-/// fastload extracts into the same tree so the game actually reads the
-/// loose files and mod-update orphan recovery composes correctly. A
-/// failed or corrupt manifest is quarantined to a sibling
-/// <c>.bad-&lt;timestamp&gt;.json</c> and replaced with an empty one,
-/// mirroring the pattern in <c>PluginAssetBackupService</c>.
-/// </remarks>
 public sealed class CascFastloadManifestService
 {
     public const string ManifestRelativePath = "mods\\Reimagined\\Reimagined.mpq\\data\\.reimagined-fastload.json";

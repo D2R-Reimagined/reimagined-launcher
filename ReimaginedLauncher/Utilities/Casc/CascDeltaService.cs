@@ -32,12 +32,7 @@ public enum CascDeltaReason
     Removed
 }
 
-/// <summary>
-/// One row of the delta plan. <see cref="Entry"/> is non-null for
-/// add/update/restore (it is the live CASC entry to extract); for
-/// <see cref="CascDeltaReason.Removed"/> only <see cref="ManifestEntry"/> is
-/// populated (the CASC entry no longer exists).
-/// </summary>
+/// <summary>One row of the delta plan; Entry is null only for Removed rows.</summary>
 public sealed record CascDeltaItem(
     string Path,
     CascDeltaReason Reason,
@@ -71,11 +66,7 @@ public sealed class CascDeltaPlan
         Added.Concat(Updated).Concat(Restored).Sum(i => (long)(i.Entry?.FileSize ?? 0));
 }
 
-/// <summary>
-/// Outcome of <see cref="CascDeltaService.ApplyAsync"/>: what was actually
-/// written / removed during the pass. Useful for telemetry and the UI
-/// "Last update: X added, Y changed, Z removed" status row.
-/// </summary>
+/// <summary>Outcome of an ApplyAsync pass.</summary>
 public sealed record CascDeltaApplyResult(
     int Added,
     int Updated,
@@ -85,17 +76,9 @@ public sealed record CascDeltaApplyResult(
     TimeSpan Elapsed);
 
 /// <summary>
-/// Phase 1e — orchestrates the CKey-diff between a live CASC storage and the
-/// persistent <see cref="CascFastloadManifest"/>, then applies the minimal
-/// extract/delete set required to bring the install up to date.
+/// CKey-diffs a live CASC storage against the persisted manifest and applies the minimal
+/// extract/delete set. Also handles first-run (empty manifest → every entry is Added).
 /// </summary>
-/// <remarks>
-/// This is the core "without redoing extraction" win the issue asks for: a
-/// typical D2R patch touches a tiny fraction of the ~150k tracked files, so a
-/// delta apply is seconds-to-minutes rather than the 5–50 minute initial
-/// extraction. The same algorithm covers the first-run case (an empty
-/// manifest → every kept entry shows up as <see cref="CascDeltaReason.Added"/>).
-/// </remarks>
 public sealed class CascDeltaService
 {
     private readonly CascExtractionService _extraction;
@@ -213,13 +196,7 @@ public sealed class CascDeltaService
         return Plan(entries, manifest, destinationRoot, cancellationToken);
     }
 
-    /// <summary>
-    /// Applies <paramref name="plan"/>: extracts every Added/Updated/Restored
-    /// entry under <paramref name="destinationRoot"/>, removes orphaned files
-    /// (only when their manifest entry is CASC-only — overlays are left
-    /// alone so plugin / mod content survives a CASC patch), and persists the
-    /// updated manifest.
-    /// </summary>
+    /// <summary>Extracts Added/Updated/Restored entries, removes CASC-only orphans, and persists the manifest.</summary>
     public async Task<CascDeltaApplyResult> ApplyAsync(
         SafeCascStorageHandle storage,
         CascDeltaPlan plan,
@@ -256,9 +233,7 @@ public sealed class CascDeltaService
             bytesWritten = entries.Sum(e => (long)e.FileSize);
         }
 
-        // Apply removals: only delete files whose manifest entry is CASC-only.
-        // Anything overlaid by a mod or plugin keeps the on-disk overlay
-        // (orphan recovery / plugin reconciliation handle those separately).
+        // Only delete files whose manifest entry is CASC-only; mod/plugin overlays are left alone.
         var removedApplied = 0;
         foreach (var removal in plan.Removed)
         {
@@ -293,12 +268,8 @@ public sealed class CascDeltaService
             }
         }
 
-        // Persist the updated manifest atomically.
-        // NOTE: with ~150k entries the previous per-entry AddOrUpdate/Remove
-        // (linear scan over manifest.Files) was O(N^2) and could take several
-        // minutes after extraction completed, leaving the UI parked at 100%.
-        // We now build a single dict keyed by path, mutate in place, and
-        // rebuild manifest.Files once.
+        // Persist the updated manifest atomically. Build a path-keyed dict, mutate in place, then
+        // rebuild manifest.Files once to keep the per-entry update O(1) at ~150k entries.
         LaunchDiagnostics.Log($"CASC ApplyAsync: persisting manifest ({extractItems.Count:N0} extract entries, {plan.Removed.Count:N0} removals)...");
         try { setStatus?.Invoke($"Persisting manifest ({extractItems.Count:N0} entries)..."); } catch { /* status sink errors are non-fatal */ }
         var persistSw = System.Diagnostics.Stopwatch.StartNew();
@@ -321,9 +292,7 @@ public sealed class CascDeltaService
                 {
                     existing.CKey = ckeyHex;
                     existing.Size = (long)entry.FileSize;
-                    // Refresh the underlying CASC fingerprint so future orphan
-                    // recoveries can target the right CKey even if the on-disk
-                    // bytes are currently a mod/plugin overlay.
+                    // Refresh the underlying CASC fingerprint for future orphan recovery.
                     existing.CascCKey = ckeyHex;
                 }
                 else
