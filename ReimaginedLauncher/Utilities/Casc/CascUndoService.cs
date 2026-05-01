@@ -28,6 +28,15 @@ public sealed record CascUndoOptions(
 }
 
 /// <summary>
+/// Periodic progress heartbeat emitted while <see cref="CascUndoService.UndoAsync"/>
+/// walks the manifest. <paramref name="EntriesProcessed"/> climbs from 0 to
+/// <paramref name="EntriesTotal"/>; <paramref name="FilesDeleted"/> is the
+/// running count of files actually removed from disk so the UI can show
+/// e.g. "Undoing 12,345 / 148,217 (12,300 deleted)...".
+/// </summary>
+public sealed record CascUndoProgress(int EntriesProcessed, int EntriesTotal, int FilesDeleted);
+
+/// <summary>
 /// Outcome of an undo pass. <see cref="OverlaysPreserved"/> counts paths
 /// where the on-disk bytes were left intact because a mod or plugin overlay
 /// still owns them; for those entries only the <c>casc</c> token (and the
@@ -85,6 +94,7 @@ public sealed class CascUndoService
     public async Task<CascUndoResult> UndoAsync(
         string destinationRoot,
         CascUndoOptions? options = null,
+        IProgress<CascUndoProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(destinationRoot))
@@ -96,61 +106,82 @@ public sealed class CascUndoService
         var sw = Stopwatch.StartNew();
 
         var manifest = await _manifestService.LoadAsync(cancellationToken).ConfigureAwait(false);
+        var total = manifest.Files.Count;
 
-        var filesDeleted = 0;
-        long bytesDeleted = 0;
-        var overlaysPreserved = 0;
-        var entriesDropped = 0;
-        var directoriesToCheck = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        var remaining = new List<CascFastloadEntry>(manifest.Files.Count);
-
-        foreach (var entry in manifest.Files)
+        // The bulk of UndoAsync is synchronous file IO over potentially
+        // 100k+ entries. SemaphoreSlim.WaitAsync inside the manifest service
+        // returns synchronously when uncontended, so without this Task.Run
+        // the entire loop runs on the calling thread (the UI thread when
+        // invoked from a button click) and freezes the launcher until
+        // completion. Run on the thread pool to keep the UI responsive.
+        var (filesDeleted, bytesDeleted, overlaysPreserved, entriesDropped, directoriesToCheck, remaining) = await Task.Run(() =>
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var fd = 0;
+            long bd = 0;
+            var op = 0;
+            var ed = 0;
+            var dirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var rem = new List<CascFastloadEntry>(manifest.Files.Count);
+            var sinceReport = 0;
+            const int reportEvery = 500;
 
-            if (!HasCascToken(entry.Source))
+            for (var i = 0; i < manifest.Files.Count; i++)
             {
-                // Not ours to undo (manifest tracks something else for this path).
-                remaining.Add(entry);
-                continue;
-            }
+                cancellationToken.ThrowIfCancellationRequested();
+                var entry = manifest.Files[i];
 
-            var withoutCasc = StripCascToken(entry.Source);
-            if (string.IsNullOrEmpty(withoutCasc))
-            {
-                // CASC-only entry: delete the file and drop the manifest row.
-                var diskPath = Path.Combine(destinationRoot,
-                    CascExtractionService.NormalizeRelativePath(entry.Path));
-
-                if (TryDeleteFile(diskPath, out var deletedBytes))
+                if (!HasCascToken(entry.Source))
                 {
-                    filesDeleted++;
-                    bytesDeleted += deletedBytes;
-                    var parent = Path.GetDirectoryName(diskPath);
-                    if (!string.IsNullOrEmpty(parent))
+                    rem.Add(entry);
+                }
+                else
+                {
+                    var withoutCasc = StripCascToken(entry.Source);
+                    if (string.IsNullOrEmpty(withoutCasc))
                     {
-                        directoriesToCheck.Add(parent);
+                        var diskPath = Path.Combine(destinationRoot,
+                            CascExtractionService.NormalizeRelativePath(entry.Path));
+
+                        if (TryDeleteFile(diskPath, out var deletedBytes))
+                        {
+                            fd++;
+                            bd += deletedBytes;
+                            var parent = Path.GetDirectoryName(diskPath);
+                            if (!string.IsNullOrEmpty(parent))
+                            {
+                                dirs.Add(parent);
+                            }
+                        }
+
+                        ed++;
+                    }
+                    else
+                    {
+                        entry.Source = withoutCasc;
+                        entry.CascCKey = null;
+                        op++;
+                        rem.Add(entry);
                     }
                 }
 
-                entriesDropped++;
-                continue;
+                sinceReport++;
+                if (sinceReport >= reportEvery)
+                {
+                    progress?.Report(new CascUndoProgress(i + 1, total, fd));
+                    sinceReport = 0;
+                }
             }
 
-            // Overlay path: keep on-disk bytes (mod/plugin owns them now),
-            // but strip CASC ownership + CascCKey so future plans don't try
-            // to maintain a default we just disowned.
-            entry.Source = withoutCasc;
-            entry.CascCKey = null;
-            overlaysPreserved++;
-            remaining.Add(entry);
-        }
+            progress?.Report(new CascUndoProgress(total, total, fd));
+            return (fd, bd, op, ed, dirs, rem);
+        }, cancellationToken).ConfigureAwait(false);
 
         var directoriesPruned = 0;
         if (options.PruneEmptyDirectories && filesDeleted > 0)
         {
-            directoriesPruned = PruneEmptyDirectories(destinationRoot, directoriesToCheck, cancellationToken);
+            directoriesPruned = await Task.Run(
+                () => PruneEmptyDirectories(destinationRoot, directoriesToCheck, cancellationToken),
+                cancellationToken).ConfigureAwait(false);
         }
 
         var manifestDeleted = false;
@@ -270,8 +301,10 @@ public sealed class CascUndoService
     /// <summary>
     /// Walks each candidate directory upward, deleting empty directories that
     /// sit beneath one of the fastload roots (<c>data\global|hd|local</c>).
-    /// Stops at the fastload root itself; never touches the install root or
-    /// sibling directories the launcher does not own.
+    /// The fastload root itself is removed if it ends up empty (e.g. after
+    /// a full undo); the loop stops once we'd step outside the fastload
+    /// roots, so the install root and sibling directories the launcher does
+    /// not own are never touched.
     /// </summary>
     private static int PruneEmptyDirectories(
         string destinationRoot,
@@ -301,11 +334,6 @@ public sealed class CascUndoService
                 {
                     current = Path.GetDirectoryName(current);
                     continue;
-                }
-
-                if (IsAtFastloadRoot(rootFull, current))
-                {
-                    break;
                 }
 
                 bool empty;
@@ -361,19 +389,4 @@ public sealed class CascUndoService
         return false;
     }
 
-    private static bool IsAtFastloadRoot(string installRoot, string candidate)
-    {
-        var full = Path.GetFullPath(candidate).TrimEnd(Path.DirectorySeparatorChar);
-        foreach (var rel in FastloadRoots)
-        {
-            var fastloadRoot = Path.GetFullPath(Path.Combine(installRoot, rel))
-                .TrimEnd(Path.DirectorySeparatorChar);
-            if (string.Equals(full, fastloadRoot, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
 }

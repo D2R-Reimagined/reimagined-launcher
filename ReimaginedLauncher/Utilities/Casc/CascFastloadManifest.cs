@@ -27,7 +27,7 @@ public sealed class CascFastloadManifest
 
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
 
-    public DateTime LastUpdatedUtc { get; set; } = DateTime.UtcNow;
+    public DateTime LastUpdatedUtc { get; set; }
 
     /// <summary>
     /// CASC product code name (e.g. <c>"d2r"</c>) captured at the time of

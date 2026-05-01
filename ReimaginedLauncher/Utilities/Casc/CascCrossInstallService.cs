@@ -213,15 +213,22 @@ public sealed class CascCrossInstallService
         using var source = _extraction.OpenLocal(sourceInstallDirectory, localeMask)
             ?? throw new InvalidOperationException("Source CASC storage failed to open after eligibility check.");
 
+        // Fastload bytes belong inside the target install's Reimagined mod
+        // tree so D2R's mod overlay path resolution composes correctly with
+        // mod updates and orphan recovery on the target side.
+        var targetModRoot = System.IO.Path.Combine(targetInstallDirectory, "mods", "Reimagined", "Reimagined.mpq");
+        System.IO.Directory.CreateDirectory(targetModRoot);
+
         var plan = await _delta
-            .PlanAsync(source, targetInstallDirectory, filter, indexProgress: null, cancellationToken)
+            .PlanAsync(source, targetModRoot, filter, indexProgress: null, cancellationToken)
             .ConfigureAwait(false);
 
         return await _delta
             .ApplyAsync(
                 source,
                 plan,
-                targetInstallDirectory,
+                setStatus: null,
+                targetModRoot,
                 eligibility.SourceProduct,
                 progress,
                 progressInterval,

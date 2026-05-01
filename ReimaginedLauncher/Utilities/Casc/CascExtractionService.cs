@@ -16,26 +16,43 @@ namespace ReimaginedLauncher.Utilities.Casc;
 /// </summary>
 /// <param name="IncludeGlobal">Include entries under <c>data\global\</c>.</param>
 /// <param name="IncludeHd">Include entries under <c>data\hd\</c>.</param>
-/// <param name="IncludeLocal">Include entries under <c>data\local\</c>.</param>
+/// <param name="IncludeLocal">
+/// Include entries under <c>data\local\</c>. These are the small UI / sound
+/// files that ship as part of the user's installed locale and live in the
+/// canonical <c>data\</c> namespace (not the uninstalled <c>locales\</c>
+/// TVFS namespace, which is always rejected by the path prefix tests).
+/// Defaults to <c>true</c> — only the per-language <c>locales\&lt;lang&gt;\…</c>
+/// branches require explicit opt-in.
+/// </param>
 /// <param name="LocaleMask">
-/// Bitmask of <see cref="CascLocale"/> values to keep. Locale-neutral entries
-/// (<c>dwLocaleFlags == 0</c>) are always kept. Defaults to <c>None</c> so
-/// that locale-flagged entries are excluded unless the user explicitly
-/// opts into one or more language packs (each locale is hundreds of MB
-/// and only present on disk if installed via the game client).
+/// Bitmask of <see cref="CascLocale"/> values to keep. Reserved for the
+/// future per-locale opt-in UI; not currently consulted by <see cref="Accept"/>
+/// (locale gating is path-based, see remarks on the rejected
+/// <c>locales\&lt;lang&gt;\…</c> namespace).
 /// </param>
 public sealed record CascExtractionFilter(
     bool IncludeGlobal = true,
     bool IncludeHd = true,
-    bool IncludeLocal = false,
+    bool IncludeLocal = true,
     uint LocaleMask = CascLocale.None)
 {
     /// <summary>
-    /// Default fastload filter: extract <c>data\global\</c> and <c>data\hd\</c>
-    /// only, with locale-flagged entries skipped. Locale extraction
-    /// (<c>data\local\</c> and language-pack assets) is opt-in.
+    /// Default fastload filter: extract <c>data\global\</c>, <c>data\hd\</c>,
+    /// and <c>data\local\</c>. The uninstalled per-language
+    /// <c>locales\&lt;lang&gt;\…</c> TVFS branches are rejected by the
+    /// path-prefix tests regardless.
     /// </summary>
     public static readonly CascExtractionFilter Default = new();
+
+    /// <summary>
+    /// Optional fast-iteration scope: when non-empty, only entries whose
+    /// path starts with one of these prefixes are accepted (in addition to
+    /// the include-Global/Hd/Local gates). Useful for targeted test runs
+    /// such as <c>data\hd\ui\</c>. Comparison is case-insensitive and
+    /// forward-slashes in supplied prefixes are normalised to backslashes.
+    /// Empty list = no scope restriction (default).
+    /// </summary>
+    public IReadOnlyList<string> PathPrefixes { get; init; } = Array.Empty<string>();
 
     internal bool Accept(CascFileEntry entry)
     {
@@ -43,6 +60,25 @@ public sealed record CascExtractionFilter(
         if (string.IsNullOrEmpty(path))
         {
             return false;
+        }
+
+        // Optional scope gate (used by the "scope to subset" test affordance).
+        if (PathPrefixes.Count > 0)
+        {
+            var anyPrefix = false;
+            for (var i = 0; i < PathPrefixes.Count; i++)
+            {
+                if (PathStartsWith(path, PathPrefixes[i]))
+                {
+                    anyPrefix = true;
+                    break;
+                }
+            }
+
+            if (!anyPrefix)
+            {
+                return false;
+            }
         }
 
         // Locale gating is path-based, not flag-based: D2R's TVFS reports

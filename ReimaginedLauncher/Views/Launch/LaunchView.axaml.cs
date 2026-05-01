@@ -41,6 +41,18 @@ public partial class LaunchView : UserControl
         base.OnAttachedToVisualTree(e);
 
         CascFastloadOperationState.Instance.StateChanged += OnCascStateChanged;
+
+        // Re-evaluate disk-side mod detection every time the Launch tab becomes
+        // visible. Other flows (CASC fastload destructive bootstrap, mod
+        // install/update, manual file edits) can change `mods\Reimagined\…`
+        // between visits without this view ever being notified, so we refresh
+        // before reading `MainWindow.IsLocalModDetected` in
+        // `RefreshInstallDirectoryState`.
+        if (TopLevel.GetTopLevel(this) is MainWindow mwAttach)
+        {
+            mwAttach.RefreshLocalModState();
+        }
+
         RefreshInstallDirectoryState();
 
         if (MainWindow.Settings is not null && !LauncherService.IsDetecting)

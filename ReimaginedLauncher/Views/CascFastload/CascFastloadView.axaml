@@ -49,18 +49,31 @@
                 </Grid>
             </Border>
 
+            <Border Classes="panel" Padding="14">
+                <StackPanel Spacing="6">
+                    <TextBlock FontWeight="SemiBold" Text="Scope (optional, debug/test)"/>
+                    <TextBlock Classes="muted" TextWrapping="Wrap"
+                               Text="Limit Extract / Update to entries whose path starts with one of the prefixes below (semicolon-separated, e.g. data\hd\ui\;data\global\excel\). Leave blank for the full default scope (data\global\ + data\hd\)."/>
+                    <TextBox x:Name="ScopePrefixesTextBox" Watermark="data\hd\ui\"/>
+                </StackPanel>
+            </Border>
+
             <StackPanel Orientation="Horizontal" Spacing="8">
                 <Button x:Name="ExtractButton"
-                        Content="Extract / Update (Delta)"
-                        ToolTip.Tip="Extract or update from this install's CASC. Only changed files are written when a manifest already exists."
-                        Click="OnExtractClick"/>
+                        Content="Extract CASC"
+                        ToolTip.Tip="Run a fresh CASC extraction. This is destructive: the mod is uninstalled (modinfo.json deleted, Reimagined.mpq\data\ wiped) and the manifest is rebuilt from scratch. Run Install/Update afterwards to reapply the mod."
+                        Click="OnExtractCascClick"/>
+                <Button x:Name="UpdateButton"
+                        Content="Update (Delta)"
+                        ToolTip.Tip="Apply only files whose CASC content has changed since the last extract. Mod and plugin overlays are preserved. Disabled until an initial extract has populated the manifest."
+                        Click="OnUpdateClick"/>
                 <Button x:Name="UndoButton"
                         Content="Undo"
                         ToolTip.Tip="Remove the launcher's extracted CASC files (mod and plugin overlays are preserved)."
                         Click="OnUndoClick"/>
                 <Button x:Name="CrossInstallButton"
-                        Content="Cross-Extract from..."
-                        ToolTip.Tip="Use a sibling install (e.g. Battle.net) as the source to extract into this install, fully offline. Requires both installs to be at the same CASC build."
+                        Content="Cross-Extract from B.Net"
+                        ToolTip.Tip="Use the configured Battle.net install as the source to extract into this Steam install, fully offline. Disabled when the Battle.net profile is the current selection or when no Battle.net sibling install is configured. Requires both installs to be at the same CASC build."
                         Click="OnCrossInstallClick"/>
                 <Button x:Name="RefreshButton"
                         Content="Refresh"

@@ -104,6 +104,18 @@ public sealed class CascFastloadOperationState
                 // final status as the persistent "last result" line.
                 LastResultMessage = StatusMessage;
             }
+
+            // Clear the live progress strip on successful completion so the
+            // UI doesn't keep showing the last in-flight file / partial byte
+            // counts / stale ETA after the operation has finished. The
+            // persistent LastResultMessage continues to reflect the outcome.
+            // Cancel/error paths intentionally leave the last-known progress
+            // state alone so the user can see where things stopped.
+            CurrentFile = string.Empty;
+            ProgressDetail = string.Empty;
+            ProgressPercent = 0;
+            ProgressEta = "Complete";
+            _lastEtaText = ProgressEta;
             LaunchDiagnostics.Log($"CASC operation '{label}': completed normally.");
         }
         catch (OperationCanceledException)

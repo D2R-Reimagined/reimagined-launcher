@@ -11,6 +11,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using ReimaginedLauncher.Utilities;
 using ReimaginedLauncher.Utilities.Casc;
+using ReimaginedLauncher.Utilities.Json;
 
 namespace ReimaginedLauncher.Views.Update;
 
@@ -402,13 +403,16 @@ public partial class UpdateView : UserControl
         }
         else
         {
-            // Snapshot the existing mods/Reimagined payload before we extract
-            // the new zip over it so we can identify files that the new mod
-            // version no longer ships and reconcile them via
-            // CascOrphanRecoveryService below. This replaces the bulk
-            // "rename to Reimagined.backup" approach without losing orphan
-            // cleanup correctness.
-            var modRoot = Path.Combine(installDirectory, "mods", "Reimagined");
+            // Snapshot the existing mods/Reimagined/Reimagined.mpq payload
+            // before we extract the new zip over it so we can identify files
+            // that the new mod version no longer ships and reconcile them
+            // via CascOrphanRecoveryService below. The diff root is the
+            // .mpq directory (D2R's actual mod data root with -mod
+            // Reimagined -txt) so the relative paths produced here align
+            // with CASC manifest keys (e.g. "data\global\excel\armor.txt").
+            // This replaces the bulk "rename to Reimagined.backup" approach
+            // without losing orphan cleanup correctness.
+            var modRoot = Path.Combine(installDirectory, "mods", "Reimagined", "Reimagined.mpq");
             HashSet<string> oldModPaths;
             try
             {
@@ -445,9 +449,11 @@ public partial class UpdateView : UserControl
             // CASC at runtime. When fastload is configured this same call
             // either re-extracts the CASC default (preserving the speedup)
             // or strips ownership tokens for plugin-overlaid paths.
+            HashSet<string> newModPathsForFlip = new(StringComparer.OrdinalIgnoreCase);
             try
             {
                 var newModPaths = EnumerateModRelativePaths(modRoot);
+                newModPathsForFlip = newModPaths;
                 var removed = oldModPaths
                     .Where(p => !newModPaths.Contains(p))
                     .ToArray();
@@ -477,6 +483,75 @@ public partial class UpdateView : UserControl
             catch (Exception ex)
             {
                 LaunchDiagnostics.Log($"Mod orphan recovery failed: {ex.Message}");
+            }
+
+            // Manifest token-flip: every path the new mod zip wrote that
+            // already has a CASC fastload manifest entry is now an overlay
+            // (mod-authored bytes on top of the CASC default). Flip the
+            // entry's Source token to include "mod" so a future delta
+            // extract won't see the on-disk bytes diverging from the CKey
+            // and helpfully restore the CASC default over the mod's
+            // edits. CascCKey already records the underlying default for
+            // restore-on-removal; we only need to add the ownership flag.
+            //
+            // We also stamp ModVersion on every mod-overlay entry using the
+            // freshly extracted modinfo.json so the launcher can later
+            // detect stale overlays (e.g. when a user reinstalls or rolls
+            // back the mod) without re-reading every modinfo.json on
+            // startup. Previously this field was left null, which is what
+            // produced "ModVersion": null entries in the manifest even on
+            // freshly installed casc+mod paths.
+            try
+            {
+                if (newModPathsForFlip.Count > 0)
+                {
+                    var manifestService = new CascFastloadManifestService(installDirectory);
+                    var pre = await manifestService.LoadAsync().ConfigureAwait(false);
+                    if (pre.Files.Count > 0)
+                    {
+                        // Resolve the version once, from the just-installed
+                        // payload. Null is acceptable here (e.g. modinfo.json
+                        // missing the version field) — we simply skip the
+                        // ModVersion stamp in that case rather than writing
+                        // a placeholder we'd later have to special-case.
+                        var installedVersion = CharacterSelectPanelService.GetModVersion(modRoot);
+
+                        var flipped = 0;
+                        var versionStamped = 0;
+                        await manifestService.UpdateAsync(manifest =>
+                        {
+                            foreach (var entry in manifest.Files)
+                            {
+                                if (!newModPathsForFlip.Contains(entry.Path))
+                                {
+                                    continue;
+                                }
+
+                                var newSource = AddModToken(entry.Source);
+                                if (!string.Equals(newSource, entry.Source, StringComparison.Ordinal))
+                                {
+                                    entry.Source = newSource;
+                                    flipped++;
+                                }
+
+                                if (!string.IsNullOrWhiteSpace(installedVersion) &&
+                                    !string.Equals(entry.ModVersion, installedVersion, StringComparison.Ordinal))
+                                {
+                                    entry.ModVersion = installedVersion;
+                                    versionStamped++;
+                                }
+                            }
+                        }).ConfigureAwait(false);
+
+                        LaunchDiagnostics.Log(
+                            $"CASC manifest token-flip: {flipped} entries now flagged as casc+mod overlays, " +
+                            $"{versionStamped} ModVersion stamps written (version: {installedVersion ?? "<unknown>"}).");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LaunchDiagnostics.Log($"CASC manifest token-flip failed: {ex.Message}");
             }
 
             // Migration courtesy: remove any leftover mods/Reimagined.backup
@@ -594,6 +669,34 @@ public partial class UpdateView : UserControl
         }
 
         return set;
+    }
+
+    /// <summary>
+    /// Returns <paramref name="source"/> with the <c>mod</c> token added if
+    /// not already present. Recognises the canonical
+    /// <see cref="CascFastloadEntry.SourceTokens"/> combinations and falls
+    /// back to a "+"-suffixed concat for any unexpected starting value.
+    /// </summary>
+    private static string AddModToken(string? source)
+    {
+        if (string.IsNullOrEmpty(source))
+        {
+            return CascFastloadEntry.SourceTokens.Mod;
+        }
+
+        // Tokenise on '+' so we don't depend on insertion order; rebuild in
+        // the canonical casc/mod/plugin order so output matches SourceTokens
+        // constants exactly.
+        var parts = source.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var hasCasc = parts.Any(p => p.Equals(CascFastloadEntry.SourceTokens.Casc, StringComparison.OrdinalIgnoreCase));
+        var hasPlugin = parts.Any(p => p.Equals(CascFastloadEntry.SourceTokens.Plugin, StringComparison.OrdinalIgnoreCase));
+        // Mod is what we are adding; ignore whether it was already there.
+
+        var rebuilt = new List<string>(3);
+        if (hasCasc) rebuilt.Add(CascFastloadEntry.SourceTokens.Casc);
+        rebuilt.Add(CascFastloadEntry.SourceTokens.Mod);
+        if (hasPlugin) rebuilt.Add(CascFastloadEntry.SourceTokens.Plugin);
+        return string.Join('+', rebuilt);
     }
 
     /// <summary>

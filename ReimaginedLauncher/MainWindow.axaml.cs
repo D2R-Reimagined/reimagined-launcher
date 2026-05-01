@@ -236,17 +236,25 @@ public partial class MainWindow : Window
                 return;
             }
 
-            var manifestPath = Path.Combine(installDir, "data", ".reimagined-fastload.json");
-            if (!File.Exists(manifestPath))
+            var manifestService = new CascFastloadManifestService(installDir);
+            if (!manifestService.Exists)
             {
-                // User has not opted into CASC fastload — say nothing.
+                // No manifest at the canonical path means no extraction has
+                // been performed (or it was undone). Treat as a fresh slate:
+                // best-effort sweep any stale legacy-location manifest left
+                // behind by earlier development builds so nothing on disk
+                // can falsely imply a prior extraction.
+                TryDeleteLegacyFastloadManifest(installDir);
                 return;
             }
 
-            var manifestService = new CascFastloadManifestService(installDir);
             var manifest = await manifestService.LoadAsync().ConfigureAwait(false);
             if (manifest.Files.Count == 0)
             {
+                // Manifest file exists but is empty — same fresh-slate
+                // semantics; remove the empty file too so the on-disk state
+                // matches "never extracted".
+                TryDeleteEmptyFastloadManifest(manifestService);
                 return;
             }
 
@@ -307,6 +315,50 @@ public partial class MainWindow : Window
         {
             // Never let the prompt block startup. Silent failure is correct
             // here — the user can always run Extract manually from the view.
+        }
+    }
+
+    /// <summary>
+    /// Best-effort cleanup of a stale fastload manifest at the legacy
+    /// pre-mod-root path (<c>&lt;install&gt;\data\.reimagined-fastload.json</c>).
+    /// Called only when the canonical manifest is absent — guarantees the
+    /// launcher never observes leftover state that falsely implies a prior
+    /// extraction. Errors are swallowed; this is a UX nicety, not a hard
+    /// requirement.
+    /// </summary>
+    private static void TryDeleteLegacyFastloadManifest(string installDirectory)
+    {
+        try
+        {
+            var legacyPath = Path.Combine(installDirectory, "data", ".reimagined-fastload.json");
+            if (File.Exists(legacyPath))
+            {
+                File.Delete(legacyPath);
+            }
+        }
+        catch
+        {
+            // Cleanup-only path; ignore I/O / permission failures.
+        }
+    }
+
+    /// <summary>
+    /// Removes an empty/zero-entry manifest from disk so the launcher's
+    /// observable state matches "never extracted". Called only when the
+    /// manifest exists but contains zero file rows.
+    /// </summary>
+    private static void TryDeleteEmptyFastloadManifest(CascFastloadManifestService manifestService)
+    {
+        try
+        {
+            if (File.Exists(manifestService.ManifestPath))
+            {
+                File.Delete(manifestService.ManifestPath);
+            }
+        }
+        catch
+        {
+            // Cleanup-only path; ignore I/O / permission failures.
         }
     }
 
@@ -653,17 +705,14 @@ public partial class MainWindow : Window
                 var modPath = InstallDirectoryValidator.ResolveD2RmmModFolder(profile.InstallDirectory);
                 IsLocalModDetected = modPath != null;
 
-                var modInfoPath = modPath != null ? Path.Combine(modPath, "modinfo.json") : string.Empty;
-                var layoutsDir = modPath != null ? Path.Combine(modPath, "data", "global", "ui", "layouts") : string.Empty;
-
-                var panel = CharacterSelectPanelService.FromJson(layoutsDir);
-                var panelVersion = panel?.GetModVersion();
-                var modInfoVersion = TryGetVersionFromModInfo(modInfoPath);
-                _localModVersion = !string.IsNullOrWhiteSpace(panelVersion) && !panelVersion.Equals("Unknown", StringComparison.OrdinalIgnoreCase)
-                    ? panelVersion
-                    : !string.IsNullOrWhiteSpace(modInfoVersion)
-                        ? modInfoVersion
-                        : "Unknown";
+                // modinfo.json is the canonical version source — see
+                // CharacterSelectPanelService for the rationale behind
+                // moving away from the panel-text scrape (see ModVersion
+                // tracking notes in CascFastloadEntry).
+                var modInfoVersion = CharacterSelectPanelService.GetModVersion(modPath);
+                _localModVersion = !string.IsNullOrWhiteSpace(modInfoVersion)
+                    ? modInfoVersion
+                    : "Unknown";
             }
         }
         else
@@ -674,21 +723,26 @@ public partial class MainWindow : Window
                 var modRootDirectory = Path.Combine(installDir, "mods", "Reimagined");
                 var modInfoPath = Path.Combine(modRootDirectory, "modinfo.json");
                 var modInfoPathInMpq = Path.Combine(modRootDirectory, "Reimagined.mpq", "modinfo.json");
-                var layoutsDir = Path.Combine(
-                    modRootDirectory,
-                    "Reimagined.mpq", "data", "global", "ui", "layouts"
-                );
 
-                var panel = CharacterSelectPanelService.FromJson(layoutsDir);
-                var panelVersion = panel?.GetModVersion();
-                var modInfoVersion = TryGetVersionFromModInfo(modInfoPath) ?? TryGetVersionFromModInfo(modInfoPathInMpq);
-                _localModVersion = !string.IsNullOrWhiteSpace(panelVersion) && !panelVersion.Equals("Unknown", StringComparison.OrdinalIgnoreCase)
-                    ? panelVersion
-                    : !string.IsNullOrWhiteSpace(modInfoVersion)
-                        ? modInfoVersion
-                        : "Unknown";
+                // modinfo.json (resolved via CharacterSelectPanelService) is
+                // now the single source of truth for the installed mod
+                // version. It's also stamped onto every mod-source entry in
+                // the CASC fastload manifest at install/update time so the
+                // launcher can detect stale overlays without re-reading
+                // these files on every startup.
+                var modInfoVersion =
+                    CharacterSelectPanelService.GetModVersionFromFile(modInfoPath)
+                    ?? CharacterSelectPanelService.GetModVersionFromFile(modInfoPathInMpq);
+                _localModVersion = !string.IsNullOrWhiteSpace(modInfoVersion)
+                    ? modInfoVersion
+                    : "Unknown";
 
-                IsLocalModDetected = Directory.Exists(modRootDirectory) || File.Exists(modInfoPath) || File.Exists(modInfoPathInMpq);
+                // Detection requires an actual modinfo.json — directory existence alone
+                // is not sufficient because the CASC fastload bootstrap deliberately
+                // creates `mods\Reimagined\Reimagined.mpq\data\` while removing modinfo.json
+                // to signal "mod uninstalled, run Install/Update". Relying on Directory.Exists
+                // here would leave the launch button enabled in that bootstrapped state.
+                IsLocalModDetected = File.Exists(modInfoPath) || File.Exists(modInfoPathInMpq);
             }
         }
 
@@ -712,30 +766,6 @@ public partial class MainWindow : Window
         });
     }
 
-    private static string? TryGetVersionFromModInfo(string modInfoPath)
-    {
-        if (!File.Exists(modInfoPath))
-            return null;
-
-        try
-        {
-            using var document = JsonDocument.Parse(File.ReadAllText(modInfoPath));
-            if (document.RootElement.ValueKind != JsonValueKind.Object)
-                return null;
-
-            if (document.RootElement.TryGetProperty("version", out var versionElement) &&
-                versionElement.ValueKind == JsonValueKind.String)
-            {
-                return versionElement.GetString();
-            }
-
-            return null;
-        }
-        catch
-        {
-            return null;
-        }
-    }
 
     private async Task<NexusModsFileResponse?> GetLatestModFileAsync()
     {

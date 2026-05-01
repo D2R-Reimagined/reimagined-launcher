@@ -223,6 +223,7 @@ public sealed class CascDeltaService
     public async Task<CascDeltaApplyResult> ApplyAsync(
         SafeCascStorageHandle storage,
         CascDeltaPlan plan,
+        Action<string>? setStatus,
         string destinationRoot,
         CascStorageProduct? product,
         IProgress<CascProgress>? progress = null,
@@ -293,26 +294,30 @@ public sealed class CascDeltaService
         }
 
         // Persist the updated manifest atomically.
+        // NOTE: with ~150k entries the previous per-entry AddOrUpdate/Remove
+        // (linear scan over manifest.Files) was O(N^2) and could take several
+        // minutes after extraction completed, leaving the UI parked at 100%.
+        // We now build a single dict keyed by path, mutate in place, and
+        // rebuild manifest.Files once.
+        LaunchDiagnostics.Log($"CASC ApplyAsync: persisting manifest ({extractItems.Count:N0} extract entries, {plan.Removed.Count:N0} removals)...");
+        try { setStatus?.Invoke($"Persisting manifest ({extractItems.Count:N0} entries)..."); } catch { /* status sink errors are non-fatal */ }
+        var persistSw = System.Diagnostics.Stopwatch.StartNew();
         await _manifestService.UpdateAsync(manifest =>
         {
+            var byPath = new Dictionary<string, CascFastloadEntry>(
+                manifest.Files.Count + extractItems.Count,
+                StringComparer.OrdinalIgnoreCase);
+            foreach (var existing in manifest.Files)
+            {
+                byPath[existing.Path] = existing;
+            }
+
             foreach (var item in extractItems)
             {
                 var entry = item.Entry!;
                 var ckeyHex = HexEncode(entry.CKey);
 
-                var existing = item.ManifestEntry;
-                if (existing is null)
-                {
-                    CascFastloadManifestService.AddOrUpdate(manifest, new CascFastloadEntry
-                    {
-                        Path = entry.Path,
-                        CKey = ckeyHex,
-                        Size = (long)entry.FileSize,
-                        Source = CascFastloadEntry.SourceTokens.Casc,
-                        CascCKey = ckeyHex
-                    });
-                }
-                else
+                if (byPath.TryGetValue(entry.Path, out var existing))
                 {
                     existing.CKey = ckeyHex;
                     existing.Size = (long)entry.FileSize;
@@ -320,7 +325,17 @@ public sealed class CascDeltaService
                     // recoveries can target the right CKey even if the on-disk
                     // bytes are currently a mod/plugin overlay.
                     existing.CascCKey = ckeyHex;
-                    CascFastloadManifestService.AddOrUpdate(manifest, existing);
+                }
+                else
+                {
+                    byPath[entry.Path] = new CascFastloadEntry
+                    {
+                        Path = entry.Path,
+                        CKey = ckeyHex,
+                        Size = (long)entry.FileSize,
+                        Source = CascFastloadEntry.SourceTokens.Casc,
+                        CascCKey = ckeyHex
+                    };
                 }
             }
 
@@ -334,15 +349,21 @@ public sealed class CascDeltaService
 
                 if (IsCascOnlySource(m.Source))
                 {
-                    CascFastloadManifestService.Remove(manifest, m.Path);
+                    byPath.Remove(m.Path);
                 }
                 else
                 {
                     // Drop the CASC fingerprint but keep the entry so the
                     // mod/plugin overlay it tracks is still recorded.
                     m.CascCKey = null;
-                    CascFastloadManifestService.AddOrUpdate(manifest, m);
+                    byPath[m.Path] = m;
                 }
+            }
+
+            manifest.Files.Clear();
+            foreach (var v in byPath.Values)
+            {
+                manifest.Files.Add(v);
             }
 
             if (product is not null)
@@ -351,6 +372,8 @@ public sealed class CascDeltaService
                 manifest.BuildNumber = product.BuildNumber;
             }
         }, cancellationToken).ConfigureAwait(false);
+        persistSw.Stop();
+        LaunchDiagnostics.Log($"CASC ApplyAsync: manifest persisted in {persistSw.Elapsed}.");
 
         sw.Stop();
 
