@@ -50,8 +50,7 @@
                         <TextBlock Classes="bullet" Text="•  Manifest: plugininfo.json (name, version, modVersion, files)." />
                         <TextBlock Classes="bullet" Text="•  Excel edits: any base-folder .txt file except itemstatcost.txt." />
                         <TextBlock Classes="bullet" Text="•  String edits: .json files under data/local/lng/strings." />
-                        <TextBlock Classes="bullet" Text="•  Missiles edits: data/hd/missiles/missiles.json (replace existing keys or addRow new ones)." />
-                        <TextBlock Classes="bullet" Text="•  Monsters edits: data/hd/character/monsters.json (same flat layout as missiles.json; replace existing keys or addRow new ones)." />
+                        <TextBlock Classes="bullet" Text="•  Missiles &amp; Monsters edits: data/hd/missiles/missiles.json and data/hd/character/monsters.json (shared flat layout; replace existing keys or addRow new ones)." />
                     </StackPanel>
                     <TextBlock Classes="muted"
                                TextWrapping="Wrap"
@@ -105,6 +104,9 @@
                         <TextBlock Classes="bullet"
                                    TextWrapping="Wrap"
                                    Text="•  Warning: This plugin directly copies an asset into the mod without reading the mods data, it may cause problems if it is not setup correctly." />
+                        <TextBlock Classes="bullet"
+                                   TextWrapping="Wrap"
+                                   Text="•  Animation pair safety net: data/global/animdata.d2 and data/global/exanimdata.d2 are read together by the game, so if your plugin only copies one of the two the launcher automatically copies that same file onto the other path so they stay in sync. Ship both files yourself if you actually want them to differ." />
                     </StackPanel>
 
                     <TextBlock Classes="sub-title" Text="Example" />
@@ -140,20 +142,12 @@
                         <TextBlock Classes="bullet" Text="•  Only the language fields listed on an entry are overwritten; other languages and other entries are untouched. Unknown fields are ignored." />
                     </StackPanel>
 
-                    <TextBlock Classes="sub-title" Text="Missiles (missiles.json) target" />
+                    <TextBlock Classes="sub-title" Text="Missiles &amp; Monsters JSON targets" />
                     <StackPanel Spacing="2">
-                        <TextBlock Classes="bullet" Text="•  Used for the single missiles.json file at data/hd/missiles/missiles.json (resolved automatically from the mod data root)." />
-                        <TextBlock Classes="bullet" Text="•  Flat layout: file, Key, and a value supplied via updatedValue or parameterKey. No rowIdentifier or column fields." />
+                        <TextBlock Classes="bullet" Text="•  Used for the single missiles.json (data/hd/missiles/missiles.json) and monsters.json (data/hd/character/monsters.json) files, both resolved automatically from the mod data root." />
+                        <TextBlock Classes="bullet" Text="•  Shared flat layout: file, Key, and a value supplied via updatedValue or parameterKey. No rowIdentifier or column fields." />
                         <TextBlock Classes="bullet" Text="•  operation defaults to replace (the Key must already exist). Use addRow to append a brand-new key/value pair while preserving existing JSON formatting." />
                         <TextBlock Classes="bullet" Text="•  updatedValue supports {{parameter:key}} tokens just like excel operations." />
-                    </StackPanel>
-
-                    <TextBlock Classes="sub-title" Text="Monsters (monsters.json) target" />
-                    <StackPanel Spacing="2">
-                        <TextBlock Classes="bullet" Text="•  Used for the single monsters.json file at data/hd/character/monsters.json (resolved automatically from the mod data root)." />
-                        <TextBlock Classes="bullet" Text="•  Shares the missiles.json layout: file, Key, and a value supplied via updatedValue or parameterKey. No rowIdentifier or column fields." />
-                        <TextBlock Classes="bullet" Text="•  operation defaults to replace (the Key must already exist). Use addRow to append a brand-new key/value pair while preserving existing JSON formatting." />
-                        <TextBlock Classes="bullet" Text="•  updatedValue supports {{parameter:key}} tokens just like excel and missiles operations." />
                     </StackPanel>
 
                     <TextBlock Classes="sub-title" Text="Example" />
@@ -177,7 +171,7 @@
                         <TextBlock Classes="bullet" Text="•  file (required) — any base-folder .txt except itemstatcost.txt, any .json under data/local/lng/strings, missiles.json, or monsters.json." />
                     </StackPanel>
 
-                    <TextBlock Classes="sub-title" Text="Excel (.txt) operations" />
+                    <TextBlock Classes="sub-title" Text="Excel (.txt) — row matching" />
                     <StackPanel Spacing="2">
                         <TextBlock Classes="bullet" Text="•  rowIdentifier (required) — value from the identifier column, or numeric row ID for files with duplicate identifiers." />
                         <TextBlock Classes="bullet"
@@ -185,19 +179,34 @@
                         <TextBlock Classes="bullet"
                                    TextWrapping="Wrap"
                                    Text="•  rowIdentifier object — also accepts an object that overrides the default match logic by listing one or more {column: expectedValue} pairs (e.g. {&quot;Name&quot;: &quot;Skeleton&quot;, &quot;hcIdx&quot;: &quot;86&quot;}). The row must satisfy every pair. On files with duplicate identifier values (rowID files) you should list at least two columns; the launcher emits a warning otherwise so the intended row stays uniquely matched." />
+                        <TextBlock Classes="bullet"
+                                   TextWrapping="Wrap"
+                                   Text="•  rowIdentifier array (updateRow only) — also accepts an array whose elements are any mix of strings, numbers, ranges, and objects. The launcher matches rows for each element in turn and unions the results, so one operation can update several rows at once. Each string element follows the same rules as a single string rowIdentifier (identifier value, numeric row ID, or &quot;start-end&quot; range). Each object element keeps the multi-column AND check, so {&quot;Class&quot;: &quot;skeleton&quot;, &quot;Level&quot;: &quot;5&quot;} only matches rows where every listed column matches. Duplicate matches are de-duplicated. addRow, cloneRow, and swapRow only target one row at a time and reject the array form." />
+                    </StackPanel>
+
+                    <TextBlock Classes="sub-title" Text="Excel (.txt) — columns" />
+                    <StackPanel Spacing="2">
                         <TextBlock Classes="bullet" Text="•  column (required unless 'columns' is provided) — a column name on the target file." />
                         <TextBlock Classes="bullet" Text="•  columns (optional) — an array of {column, updatedValue, parameterKey, operation} objects to update multiple columns on the same row(s) with a single rowIdentifier. Each entry inherits operation/updatedValue/parameterKey from the parent operation when omitted." />
-                        <TextBlock Classes="bullet" Text="•  operation (optional) — replace (default), multiplyExisting, append, addRow, cloneRow, or swapRow." />
-                        <TextBlock Classes="bullet" Text="•  sourceRowIdentifier (cloneRow only) — the row to copy from; numeric 0-based index or default rowIdentifier column value." />
-                        <TextBlock Classes="bullet" Text="•  mode (cloneRow only) — 'add' (default) appends the cloned row to the end of the file (rowIdentifier must be omitted); 'replace' overwrites the row at rowIdentifier." />
-                        <TextBlock Classes="bullet" Text="•  swapRowIdentifier (swapRow only) — the second row to exchange with rowIdentifier." />
-                        <TextBlock Classes="bullet" Text="•  swapColumns (swapRow only, optional) — same shape as 'columns'; applied to the row that ends up at swapRowIdentifier after the swap." />
-                        <TextBlock Classes="bullet" Text="•  updatedValue — the replacement value, the multiplier for multiplyExisting, or the text appended for append." />
+                    </StackPanel>
+
+                    <TextBlock Classes="sub-title" Text="Excel (.txt) — operation &amp; values" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  operation (optional) — replace (default), multiplyExisting, addExisting, subtractExisting, divideExisting, append, addRow, cloneRow, or swapRow." />
+                        <TextBlock Classes="bullet" Text="•  updatedValue — the replacement value; the multiplier for multiplyExisting; the number to add, subtract, or divide by for addExisting / subtractExisting / divideExisting; or the text appended for append." />
                         <TextBlock Classes="bullet" Text="•  parameterKey (optional) — references a parameter declared in plugininfo.json." />
                         <TextBlock Classes="muted"
                                    TextWrapping="Wrap"
                                    Margin="14,2,0,0"
                                    Text="append wraps the existing value in parentheses and concatenates your entry, e.g. (existingValue)+10*20." />
+                    </StackPanel>
+
+                    <TextBlock Classes="sub-title" Text="Excel (.txt) — addRow, cloneRow &amp; swapRow" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  sourceRowIdentifier (cloneRow only) — the row to copy from; numeric 0-based index or default rowIdentifier column value." />
+                        <TextBlock Classes="bullet" Text="•  mode (cloneRow only) — 'add' (default) appends the cloned row to the end of the file (rowIdentifier must be omitted); 'replace' overwrites the row at rowIdentifier." />
+                        <TextBlock Classes="bullet" Text="•  swapRowIdentifier (swapRow only) — the second row to exchange with rowIdentifier." />
+                        <TextBlock Classes="bullet" Text="•  swapColumns (swapRow only, optional) — same shape as 'columns'; applied to the row that ends up at swapRowIdentifier after the swap." />
                         <TextBlock Classes="muted"
                                    TextWrapping="Wrap"
                                    Margin="14,2,0,0"
@@ -205,7 +214,7 @@
                         <TextBlock Classes="muted"
                                    TextWrapping="Wrap"
                                    Margin="14,2,0,0"
-                                   Text="cloneRow copies an existing row identified by sourceRowIdentifier (numeric 0-based index, or value of the default rowIdentifier column). mode: 'add' (default) always appends the clone to the end of the file — insertion at a specific index is not supported, so omit rowIdentifier. mode: 'replace' overwrites the row at rowIdentifier. Optional 'columns' apply column overrides on top of the clone using the standard replace/append/multiplyExisting operators." />
+                                   Text="cloneRow copies an existing row identified by sourceRowIdentifier (numeric 0-based index, or value of the default rowIdentifier column). mode: 'add' (default) always appends the clone to the end of the file — insertion at a specific index is not supported, so omit rowIdentifier. mode: 'replace' overwrites the row at rowIdentifier. Optional 'columns' apply column overrides on top of the clone using the standard replace / append / multiplyExisting / addExisting / subtractExisting / divideExisting operators." />
                         <TextBlock Classes="muted"
                                    TextWrapping="Wrap"
                                    Margin="14,2,0,0"
@@ -218,17 +227,10 @@
                         <TextBlock Classes="bullet" Text="•  Any of the 13 language codes alongside Key with the replacement string. Only the listed language fields on the matched entry are overwritten." />
                     </StackPanel>
 
-                    <TextBlock Classes="sub-title" Text="Missiles (missiles.json) operations" />
+                    <TextBlock Classes="sub-title" Text="Missiles &amp; Monsters JSON operations" />
                     <StackPanel Spacing="2">
-                        <TextBlock Classes="bullet" Text="•  Key (required) — the missile key inside missiles.json to update or add." />
-                        <TextBlock Classes="bullet" Text="•  updatedValue or parameterKey (required) — a single missile entry name (e.g. safe_arrow), not a file path. Both forms expand {{parameter:key}} tokens." />
-                        <TextBlock Classes="bullet" Text="•  operation (optional) — replace (default) requires the key to already exist; addRow appends a new key/value pair while preserving existing JSON formatting. No other operations are accepted." />
-                    </StackPanel>
-
-                    <TextBlock Classes="sub-title" Text="Monsters (monsters.json) operations" />
-                    <StackPanel Spacing="2">
-                        <TextBlock Classes="bullet" Text="•  Key (required) — the monster key inside monsters.json to update or add." />
-                        <TextBlock Classes="bullet" Text="•  updatedValue or parameterKey (required) — a single monster entry name (e.g. fallen1), not a file path. Both forms expand {{parameter:key}} tokens." />
+                        <TextBlock Classes="bullet" Text="•  Key (required) — the missile/monster key inside missiles.json or monsters.json to update or add." />
+                        <TextBlock Classes="bullet" Text="•  updatedValue or parameterKey (required) — a single entry name (e.g. safe_arrow for missiles, fallen1 for monsters), not a file path. Both forms expand {{parameter:key}} tokens." />
                         <TextBlock Classes="bullet" Text="•  operation (optional) — replace (default) requires the key to already exist; addRow appends a new key/value pair while preserving existing JSON formatting. No other operations are accepted." />
                     </StackPanel>
                 </StackPanel>
@@ -302,22 +304,42 @@
             <!-- Validation -->
             <Border Classes="panel"
                     Padding="20">
-                <StackPanel Spacing="8">
+                <StackPanel Spacing="10">
                     <TextBlock Classes="section-title"
                                Text="7. Validation Rules" />
+
+                    <TextBlock Classes="sub-title" Text="Manifest &amp; paths" />
                     <StackPanel Spacing="2">
                         <TextBlock Classes="bullet" Text="•  File paths must be relative and stay inside the plugin folder; absolute or traversing paths are rejected." />
                         <TextBlock Classes="bullet" Text="•  plugininfo.json must list files that actually exist in the archive." />
                         <TextBlock Classes="bullet" Text="•  modVersion is required and must be in #.#.# format (e.g. 3.0.7) or the plugin is rejected." />
-                        <TextBlock Classes="bullet" Text="•  multiplyExisting only works on numeric columns and requires either parameterKey or updatedValue." />
+                    </StackPanel>
+
+                    <TextBlock Classes="sub-title" Text="Numeric &amp; append operations" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  multiplyExisting, addExisting, subtractExisting, and divideExisting only work on numeric columns and each requires either parameterKey or updatedValue. divideExisting rejects an operand of zero." />
                         <TextBlock Classes="bullet" Text="•  append works on any column type and requires either parameterKey or updatedValue." />
+                    </StackPanel>
+
+                    <TextBlock Classes="sub-title" Text="addRow / cloneRow / swapRow" />
+                    <StackPanel Spacing="2">
                         <TextBlock Classes="bullet" Text="•  addRow rowIdentifier must be empty (append) or a numeric 0-based index in the range 0..rowCount; non-numeric identifiers are rejected." />
                         <TextBlock Classes="bullet" Text="•  cloneRow requires sourceRowIdentifier; mode='add' must omit rowIdentifier (the clone is always appended to the end); mode='replace' requires rowIdentifier. The clone is a deep copy of the source row, then 'columns' overrides apply on top." />
                         <TextBlock Classes="bullet" Text="•  swapRow requires both rowIdentifier and swapRowIdentifier and rejects swapping a row with itself; 'columns' apply post-swap to the row at rowIdentifier, 'swapColumns' to the row at swapRowIdentifier." />
+                    </StackPanel>
+
+                    <TextBlock Classes="sub-title" Text="rowIdentifier &amp; columns" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet"
+                                   TextWrapping="Wrap"
+                                   Text="•  rowIdentifier array elements are validated like the single-value forms: object elements must list real columns (with the same two-columns-on-rowID-files warning), and string elements on rowID files must be a numeric row ID or a &quot;start-end&quot; range. Empty array elements and arrays attached to addRow / cloneRow / swapRow are rejected." />
                         <TextBlock Classes="bullet" Text="•  When using 'columns', each entry must reference a known target column; per-column parameterKey/updatedValue overrides the parent operation's values." />
                         <TextBlock Classes="bullet" Text="•  Unknown parameters and unknown target columns are reported as plugin errors." />
-                        <TextBlock Classes="bullet" Text="•  missiles.json entries must include a Key and either updatedValue or parameterKey, and only support the replace (default) and addRow operations." />
-                        <TextBlock Classes="bullet" Text="•  monsters.json entries follow the same rules as missiles.json: a Key plus updatedValue or parameterKey, with only the replace (default) and addRow operations supported." />
+                    </StackPanel>
+
+                    <TextBlock Classes="sub-title" Text="Missiles &amp; Monsters JSON" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  missiles.json and monsters.json entries must include a Key and either updatedValue or parameterKey, and only support the replace (default) and addRow operations." />
                     </StackPanel>
                 </StackPanel>
             </Border>
@@ -351,11 +373,10 @@
                     <StackPanel Spacing="2">
                         <TextBlock Classes="bullet" Text="•  All base-folder .txt files are supported except itemstatcost.txt." />
                         <TextBlock Classes="bullet" Text="•  Matching is by unique identifier column, or by numeric row ID for files with duplicates." />
-                        <TextBlock Classes="bullet" Text="•  Supported operations: replace, multiplyExisting, append, addRow, cloneRow, swapRow." />
+                        <TextBlock Classes="bullet" Text="•  Supported operations: replace, multiplyExisting, addExisting, subtractExisting, divideExisting, append, addRow, cloneRow, swapRow." />
                         <TextBlock Classes="bullet" Text="•  A single operation can update multiple columns on the matched row(s) via the 'columns' array." />
                         <TextBlock Classes="bullet" Text="•  Most files use typed parsers from the D2RReimaginedTools library for column validation and data integrity." />
-                        <TextBlock Classes="bullet" Text="•  In addition to excel and strings files, the launcher supports edits to data/hd/missiles/missiles.json via replace (default) and addRow." />
-                        <TextBlock Classes="bullet" Text="•  data/hd/character/monsters.json shares the missiles.json layout and is supported with the same {file, Key, updatedValue|parameterKey, [operation]} shape and addRow semantics." />
+                        <TextBlock Classes="bullet" Text="•  In addition to excel and strings files, the launcher supports edits to data/hd/missiles/missiles.json and data/hd/character/monsters.json via replace (default) and addRow, using the shared {file, Key, updatedValue|parameterKey, [operation]} shape." />
                     </StackPanel>
                 </StackPanel>
             </Border>

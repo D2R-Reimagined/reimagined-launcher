@@ -606,6 +606,12 @@ public static class PluginsService
         }
     }
 
+    // Pair of binary files D2R reads as a unit. If a plugin replaces only one
+    // of the two, the launcher mirrors the replacement onto the other so the
+    // game does not see a mismatched pair (see SyncAnimDataPairAsync below).
+    private const string AnimDataRelativePath = "data/global/animdata.d2";
+    private const string ExAnimDataRelativePath = "data/global/exanimdata.d2";
+
     private static async Task ApplyPluginAssetsAsync(string excelDirectory, string pluginId, PluginState pluginState, IProgress<string>? progress)
     {
         var modRoot = ResolveModRootDirectory(excelDirectory);
@@ -627,6 +633,12 @@ public static class PluginsService
             parameter => parameter.Key,
             parameter => parameter.Value,
             StringComparer.OrdinalIgnoreCase);
+
+        // Track which of the animdata.d2 / exanimdata.d2 pair were successfully
+        // written by this plugin's assets so we can mirror a single-sided edit
+        // onto its twin once the regular asset loop finishes.
+        var animDataWritten = false;
+        var exAnimDataWritten = false;
 
         foreach (var asset in pluginState.Assets)
         {
@@ -657,6 +669,15 @@ public static class PluginsService
                 await PluginAssetBackupService.RegisterReplacementAsync(pluginId, destinationPath);
                 await FileCopyHelper.CopyFileAsync(asset.SourceAbsolutePath, destinationPath);
 
+                if (IsAnimDataPairTarget(relative, AnimDataRelativePath))
+                {
+                    animDataWritten = true;
+                }
+                else if (IsAnimDataPairTarget(relative, ExAnimDataRelativePath))
+                {
+                    exAnimDataWritten = true;
+                }
+
                 ReportProgress(progress, $"Copied asset to {asset.TargetRelativePath}.");
             }
             catch (Exception ex)
@@ -668,6 +689,71 @@ public static class PluginsService
                     "Warning");
                 ReportProgress(progress, $"Asset '{asset.TargetRelativePath}' failed: {ex.Message}");
             }
+        }
+
+        await SyncAnimDataPairAsync(modRootFull, pluginId, pluginState, animDataWritten, exAnimDataWritten, progress);
+    }
+
+    // Path-equality helper used to recognise the animdata.d2 / exanimdata.d2
+    // targets regardless of whether the author wrote forward or back slashes.
+    private static bool IsAnimDataPairTarget(string relativePath, string expectedRelativePath)
+    {
+        var normalizedActual = relativePath.Replace('\\', '/');
+        return string.Equals(normalizedActual, expectedRelativePath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // animdata.d2 and exanimdata.d2 are the same kind of binary table read by
+    // D2R as a pair; if a plugin only replaces one of them the game can end up
+    // with mismatched animation entries. When exactly one of the pair was
+    // written by this plugin's assets, mirror the written file onto its twin
+    // so both sides stay aligned. The pre-existing twin is registered with the
+    // backup service first so it can be restored when the plugin is disabled.
+    private static async Task SyncAnimDataPairAsync(
+        string modRootFull,
+        string pluginId,
+        PluginState pluginState,
+        bool animDataWritten,
+        bool exAnimDataWritten,
+        IProgress<string>? progress)
+    {
+        if (animDataWritten == exAnimDataWritten)
+        {
+            // Both written (author covered the pair) or neither written (this
+            // plugin did not touch the pair at all) — nothing to mirror.
+            return;
+        }
+
+        var sourceRelative = animDataWritten ? AnimDataRelativePath : ExAnimDataRelativePath;
+        var twinRelative = animDataWritten ? ExAnimDataRelativePath : AnimDataRelativePath;
+        var sourceAbsolute = Path.GetFullPath(Path.Combine(modRootFull, sourceRelative));
+        var twinAbsolute = Path.GetFullPath(Path.Combine(modRootFull, twinRelative));
+
+        if (!File.Exists(sourceAbsolute))
+        {
+            // The asset copy reported success but the file is gone — bail out
+            // rather than overwrite the twin with a non-existent payload.
+            return;
+        }
+
+        try
+        {
+            await PluginAssetBackupService.RegisterReplacementAsync(pluginId, twinAbsolute);
+            await FileCopyHelper.CopyFileAsync(sourceAbsolute, twinAbsolute);
+
+            LaunchDiagnostics.Log(
+                $"Plugin '{pluginState.Name}': mirrored {sourceRelative} onto {twinRelative} to keep the animdata pair in sync.");
+            ReportProgress(progress,
+                $"Mirrored {sourceRelative} onto {twinRelative} so the animdata pair stays in sync.");
+        }
+        catch (Exception ex)
+        {
+            LaunchDiagnostics.LogException(
+                $"Failed to mirror {sourceRelative} onto {twinRelative} for plugin '{pluginState.Name}'", ex);
+            Notifications.SendNotification(
+                $"Plugin '{pluginState.Name}': failed to mirror {sourceRelative} onto {twinRelative}: {ex.Message}",
+                "Warning");
+            ReportProgress(progress,
+                $"Mirror of {sourceRelative} onto {twinRelative} failed: {ex.Message}");
         }
     }
 
@@ -1100,6 +1186,12 @@ public static class PluginsService
 
             if (string.Equals(operation.Operation, "cloneRow", StringComparison.OrdinalIgnoreCase))
             {
+                if (operation.RowMatchers is { Count: > 0 })
+                {
+                    throw new InvalidDataException(
+                        $"cloneRow operation for {fileName} does not support the array form of 'rowIdentifier'. Use a single string or object so the launcher knows which row to copy or overwrite.");
+                }
+
                 if (string.IsNullOrWhiteSpace(operation.SourceRowIdentifier))
                 {
                     throw new InvalidDataException(
@@ -1160,6 +1252,12 @@ public static class PluginsService
 
             if (string.Equals(operation.Operation, "swapRow", StringComparison.OrdinalIgnoreCase))
             {
+                if (operation.RowMatchers is { Count: > 0 })
+                {
+                    throw new InvalidDataException(
+                        $"swapRow operation for {fileName} does not support the array form of 'rowIdentifier'. Use a single string or object — swapRow always exchanges exactly two rows.");
+                }
+
                 if (string.IsNullOrWhiteSpace(operation.RowIdentifier))
                 {
                     throw new InvalidDataException(
@@ -1221,6 +1319,12 @@ public static class PluginsService
 
             if (string.Equals(operation.Operation, "addRow", StringComparison.OrdinalIgnoreCase))
             {
+                if (operation.RowMatchers is { Count: > 0 })
+                {
+                    throw new InvalidDataException(
+                        $"addRow operation for {fileName} does not support the array form of 'rowIdentifier'. Use a single numeric 0-based index, or omit rowIdentifier to append at the end.");
+                }
+
                 if (assignments.Count == 0)
                 {
                     throw new InvalidDataException(
@@ -1280,7 +1384,23 @@ public static class PluginsService
 
             List<int> matchingIndices;
 
-            if (operation.RowIdentifiers is { Count: > 0 } identifierMap)
+            if (operation.RowMatchers is { Count: > 0 } rowMatchers)
+            {
+                // Array form: each element is OR-ed into the final row set, scalar elements use
+                // the same parsing rules as a single-string rowIdentifier (range, numeric index on
+                // usesRowId files, or default identifier-column equality), and object elements
+                // delegate to the multi-column AND matcher. Indices are de-duplicated so a row
+                // matched by two elements is still updated only once per assignment.
+                matchingIndices = ResolveRowMatcherIndices(
+                    entries,
+                    rowMatchers,
+                    rowIdentifierSelector,
+                    resolveColumn,
+                    fileName,
+                    rowIdentifierPropertyName,
+                    usesRowId);
+            }
+            else if (operation.RowIdentifiers is { Count: > 0 } identifierMap)
             {
                 // Multi-column identifier override: a row matches only when every listed
                 // column equals the supplied value (case-insensitive). This bypasses the
@@ -1432,6 +1552,109 @@ public static class PluginsService
         return true;
     }
 
+    // Resolves the canonical "array form" of rowIdentifier into a deduplicated list of row
+    // indices. Each matcher is evaluated independently (string matchers reuse the same
+    // range / usesRowId / default-column rules as the legacy scalar path; object matchers
+    // delegate to MatchesAllRowIdentifiers) and the union of their results is returned in the
+    // order matchers were declared, so authors get predictable apply ordering. Throws when an
+    // individual matcher resolves to zero rows or when the union ends up empty, mirroring the
+    // single-rowIdentifier behavior so authoring mistakes surface loudly.
+    private static List<int> ResolveRowMatcherIndices<TEntry>(
+        IList<TEntry> entries,
+        IReadOnlyList<PluginRowMatcher> matchers,
+        Func<TEntry, string?> rowIdentifierSelector,
+        Func<string, PropertyInfo?> resolveColumn,
+        string fileName,
+        string rowIdentifierPropertyName,
+        bool usesRowId)
+    {
+        var seen = new HashSet<int>();
+        var ordered = new List<int>();
+
+        for (var matcherIndex = 0; matcherIndex < matchers.Count; matcherIndex++)
+        {
+            var matcher = matchers[matcherIndex];
+            IEnumerable<int> matched;
+
+            if (matcher.Columns is { Count: > 0 } columnMap)
+            {
+                var indices = Enumerable.Range(0, entries.Count)
+                    .Where(i => MatchesAllRowIdentifiers(entries[i], columnMap, resolveColumn))
+                    .ToList();
+
+                if (indices.Count == 0)
+                {
+                    var description = string.Join(", ", columnMap.Select(p => $"{p.Key}='{p.Value}'"));
+                    throw new InvalidDataException(
+                        $"rowIdentifier array element at index {matcherIndex} matched no rows in {fileName}: {description}.");
+                }
+
+                matched = indices;
+            }
+            else
+            {
+                var value = matcher.Value ?? string.Empty;
+
+                if (TryParseRowRange(value, out var rangeStart, out var rangeEnd))
+                {
+                    if (rangeStart > rangeEnd)
+                    {
+                        (rangeStart, rangeEnd) = (rangeEnd, rangeStart);
+                    }
+
+                    if (rangeStart < 0 || rangeEnd >= entries.Count)
+                    {
+                        throw new InvalidDataException(
+                            $"rowIdentifier array element at index {matcherIndex} ('{value}') is out of bounds for {fileName}. Valid range is 0 to {entries.Count - 1}.");
+                    }
+
+                    matched = Enumerable.Range(rangeStart, rangeEnd - rangeStart + 1);
+                }
+                else if (usesRowId)
+                {
+                    if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var rowIndex)
+                        || rowIndex < 0 || rowIndex >= entries.Count)
+                    {
+                        throw new InvalidDataException(
+                            $"rowIdentifier array element at index {matcherIndex} ('{value}') is not a valid row index for {fileName}. Valid range is 0 to {entries.Count - 1}.");
+                    }
+
+                    matched = [rowIndex];
+                }
+                else
+                {
+                    var indices = Enumerable.Range(0, entries.Count)
+                        .Where(i => string.Equals(rowIdentifierSelector(entries[i]), value, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+
+                    if (indices.Count == 0)
+                    {
+                        throw new InvalidDataException(
+                            $"rowIdentifier array element at index {matcherIndex} ('{value}') matched no rows in {fileName} using the {rowIdentifierPropertyName} column.");
+                    }
+
+                    matched = indices;
+                }
+            }
+
+            foreach (var index in matched)
+            {
+                if (seen.Add(index))
+                {
+                    ordered.Add(index);
+                }
+            }
+        }
+
+        if (ordered.Count == 0)
+        {
+            throw new InvalidDataException(
+                $"rowIdentifier array for {fileName} matched no rows.");
+        }
+
+        return ordered;
+    }
+
     // Resolves a single-row identifier supplied to cloneRow/swapRow. Accepts either a numeric
     // 0-based row index, or a value matched (case-insensitive) against the file's default
     // rowIdentifier column. Throws when zero or multiple rows would match so authors get a clear
@@ -1560,7 +1783,10 @@ public static class PluginsService
             return resolvedUpdatedValue;
         }
 
-        if (operationType.Equals("multiplyExisting", StringComparison.OrdinalIgnoreCase))
+        if (operationType.Equals("multiplyExisting", StringComparison.OrdinalIgnoreCase) ||
+            operationType.Equals("addExisting", StringComparison.OrdinalIgnoreCase) ||
+            operationType.Equals("subtractExisting", StringComparison.OrdinalIgnoreCase) ||
+            operationType.Equals("divideExisting", StringComparison.OrdinalIgnoreCase))
         {
             var column = operation.Column ?? string.Empty;
             var property = resolveColumn?.Invoke(column)
@@ -1577,17 +1803,41 @@ public static class PluginsService
             if (!decimal.TryParse(currentValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var currentNumber))
             {
                 throw new InvalidDataException(
-                    $"The existing value '{currentValue}' in column '{column}' is not numeric and cannot be multiplied (file '{fileName}', row '{operation.RowIdentifier ?? "<unknown>"}').");
+                    $"The existing value '{currentValue}' in column '{column}' is not numeric and cannot be used with {operationType} (file '{fileName}', row '{operation.RowIdentifier ?? "<unknown>"}').");
             }
 
-            var multiplierText = ResolveMultiplierValue(operation, parameters, resolvedUpdatedValue);
-            if (!decimal.TryParse(multiplierText, NumberStyles.Float, CultureInfo.InvariantCulture, out var multiplier))
+            var operandText = ResolveExistingOperandValue(operation, parameters, resolvedUpdatedValue, operationType);
+            if (!decimal.TryParse(operandText, NumberStyles.Float, CultureInfo.InvariantCulture, out var operand))
             {
                 throw new InvalidDataException(
-                    $"The multiplier value '{multiplierText}' is not a valid decimal number (file '{fileName}', row '{operation.RowIdentifier ?? "<unknown>"}', column '{column}').");
+                    $"The {operationType} operand '{operandText}' is not a valid decimal number (file '{fileName}', row '{operation.RowIdentifier ?? "<unknown>"}', column '{column}').");
             }
 
-            return FormatDecimalValue(currentNumber * multiplier);
+            decimal result;
+            if (operationType.Equals("multiplyExisting", StringComparison.OrdinalIgnoreCase))
+            {
+                result = currentNumber * operand;
+            }
+            else if (operationType.Equals("addExisting", StringComparison.OrdinalIgnoreCase))
+            {
+                result = currentNumber + operand;
+            }
+            else if (operationType.Equals("subtractExisting", StringComparison.OrdinalIgnoreCase))
+            {
+                result = currentNumber - operand;
+            }
+            else
+            {
+                if (operand == 0m)
+                {
+                    throw new InvalidDataException(
+                        $"divideExisting cannot divide by zero (file '{fileName}', row '{operation.RowIdentifier ?? "<unknown>"}', column '{column}').");
+                }
+
+                result = currentNumber / operand;
+            }
+
+            return FormatDecimalValue(result);
         }
 
         if (operationType.Equals("append", StringComparison.OrdinalIgnoreCase))
@@ -1616,10 +1866,11 @@ public static class PluginsService
         throw new InvalidDataException($"Unsupported plugin operation '{operationType}' (file '{fileName}', row '{operation.RowIdentifier ?? "<unknown>"}', column '{operation.Column ?? string.Empty}').");
     }
 
-    private static string ResolveMultiplierValue(
+    private static string ResolveExistingOperandValue(
         PluginJsonOperation operation,
         IReadOnlyDictionary<string, string> parameters,
-        string? resolvedUpdatedValue)
+        string? resolvedUpdatedValue,
+        string operationType)
     {
         if (!string.IsNullOrWhiteSpace(operation.ParameterKey))
         {
@@ -1636,7 +1887,7 @@ public static class PluginsService
             return resolvedUpdatedValue;
         }
 
-        throw new InvalidDataException("multiplyExisting operations require either parameterKey or updatedValue.");
+        throw new InvalidDataException($"{operationType} operations require either parameterKey or updatedValue.");
     }
 
     private static string? ResolveParameterTokens(string? value, IReadOnlyDictionary<string, string> parameters)
@@ -2088,6 +2339,11 @@ public static class PluginsService
 
             if (isCloneRow)
             {
+                if (operation.RowMatchers is { Count: > 0 })
+                {
+                    errors.Add($"'{pluginFileName}' contains a cloneRow operation for {supportedTarget.FileName} with an array-form 'rowIdentifier'. cloneRow targets a single row — use one string or one object so the launcher knows which row to copy or overwrite.");
+                }
+
                 if (string.IsNullOrWhiteSpace(operation.SourceRowIdentifier))
                 {
                     errors.Add($"'{pluginFileName}' contains a cloneRow operation for {supportedTarget.FileName} without 'sourceRowIdentifier'.");
@@ -2119,6 +2375,11 @@ public static class PluginsService
 
             if (isSwapRow)
             {
+                if (operation.RowMatchers is { Count: > 0 })
+                {
+                    errors.Add($"'{pluginFileName}' contains a swapRow operation for {supportedTarget.FileName} with an array-form 'rowIdentifier'. swapRow always exchanges exactly two rows — use a single string or object on both 'rowIdentifier' and 'swapRowIdentifier'.");
+                }
+
                 if (string.IsNullOrWhiteSpace(operation.RowIdentifier))
                 {
                     errors.Add($"'{pluginFileName}' contains a swapRow operation for {supportedTarget.FileName} without 'rowIdentifier'.");
@@ -2142,10 +2403,61 @@ public static class PluginsService
 
             if (isAddRow)
             {
-                if (!string.IsNullOrWhiteSpace(operation.RowIdentifier)
-                    && !int.TryParse(operation.RowIdentifier, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+                if (operation.RowMatchers is { Count: > 0 })
+                {
+                    errors.Add($"'{pluginFileName}' contains an addRow operation for {supportedTarget.FileName} with an array-form 'rowIdentifier'. addRow inserts one new row — use a single numeric 0-based index, or omit 'rowIdentifier' to append at the end.");
+                }
+                else if (!string.IsNullOrWhiteSpace(operation.RowIdentifier)
+                         && !int.TryParse(operation.RowIdentifier, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
                 {
                     errors.Add($"'{pluginFileName}' contains an addRow operation for {supportedTarget.FileName} with non-numeric rowIdentifier '{operation.RowIdentifier}'. Use a 0-based row index, or omit it to append at the end.");
+                }
+            }
+            else if (operation.RowMatchers is { Count: > 0 } arrayMatchers)
+            {
+                // Array-form rowIdentifier (only honored on updateRow): validate each element using
+                // the same rules the runtime applies. Scalar string elements must either be a valid
+                // numeric index / "start-end" range on rowID-keyed files, or a non-empty default
+                // identifier-column value otherwise. Object elements must reference real columns.
+                for (var index = 0; index < arrayMatchers.Count; index++)
+                {
+                    var matcher = arrayMatchers[index];
+                    if (matcher.Columns is { Count: > 0 } columnMap)
+                    {
+                        foreach (var pair in columnMap)
+                        {
+                            var columnExists = supportedTarget.EntryType
+                                .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                                .Any(property => property.Name.Equals(pair.Key, StringComparison.OrdinalIgnoreCase));
+
+                            if (!columnExists && supportedTarget.ResolveColumn != null)
+                            {
+                                columnExists = supportedTarget.ResolveColumn(pair.Key) != null;
+                            }
+
+                            if (!columnExists)
+                            {
+                                errors.Add($"'{pluginFileName}' references unknown {supportedTarget.FileName} rowIdentifier column '{pair.Key}' (rowIdentifier array element {index}).");
+                            }
+                        }
+
+                        if (supportedTarget.UsesRowId && columnMap.Count < 2)
+                        {
+                            warnings.Add(
+                                $"'{pluginFileName}' targets {supportedTarget.FileName}, which contains duplicate identifier values. " +
+                                $"rowIdentifier array element {index} only lists {columnMap.Count} column(s); add at least two so the intended row is uniquely matched.");
+                        }
+                    }
+                    else if (string.IsNullOrWhiteSpace(matcher.Value))
+                    {
+                        errors.Add($"'{pluginFileName}' contains an empty rowIdentifier array element at index {index} for {supportedTarget.FileName}.");
+                    }
+                    else if (supportedTarget.UsesRowId
+                             && !int.TryParse(matcher.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _)
+                             && !TryParseRowRange(matcher.Value, out _, out _))
+                    {
+                        errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} rowIdentifier array element '{matcher.Value}' (index {index}) that is not a numeric row ID or range. This file uses numeric row IDs (e.g. \"5\" or \"50-100\").");
+                    }
                 }
             }
             else if (operation.RowIdentifiers is { Count: > 0 } identifierMap)
@@ -2221,6 +2533,9 @@ public static class PluginsService
 
                 if (!string.IsNullOrWhiteSpace(effectiveOperation) &&
                     (effectiveOperation.Equals("multiplyExisting", StringComparison.OrdinalIgnoreCase) ||
+                     effectiveOperation.Equals("addExisting", StringComparison.OrdinalIgnoreCase) ||
+                     effectiveOperation.Equals("subtractExisting", StringComparison.OrdinalIgnoreCase) ||
+                     effectiveOperation.Equals("divideExisting", StringComparison.OrdinalIgnoreCase) ||
                      effectiveOperation.Equals("append", StringComparison.OrdinalIgnoreCase)) &&
                     string.IsNullOrWhiteSpace(assignment.ParameterKey) &&
                     string.IsNullOrWhiteSpace(assignment.UpdatedValue) &&
@@ -2463,6 +2778,9 @@ public static class PluginsService
 
             if (!string.IsNullOrWhiteSpace(effectiveOperation) &&
                 (effectiveOperation.Equals("multiplyExisting", StringComparison.OrdinalIgnoreCase) ||
+                 effectiveOperation.Equals("addExisting", StringComparison.OrdinalIgnoreCase) ||
+                 effectiveOperation.Equals("subtractExisting", StringComparison.OrdinalIgnoreCase) ||
+                 effectiveOperation.Equals("divideExisting", StringComparison.OrdinalIgnoreCase) ||
                  effectiveOperation.Equals("append", StringComparison.OrdinalIgnoreCase)) &&
                 string.IsNullOrWhiteSpace(assignment.ParameterKey) &&
                 string.IsNullOrWhiteSpace(assignment.UpdatedValue) &&
@@ -2761,16 +3079,21 @@ public static class PluginsService
                 LanguageValues: languageValues);
         }
 
-        // Allow rowIdentifier to be either a string (legacy/default behavior) or an object that
-        // declares one or more identifier columns ({"key1":"col1","key2":"col2"}). A dedicated
-        // "rowIdentifiers" property is also accepted as a plural alias. When the property is an
-        // object we strip it from the element before deserialization so the standard string-typed
-        // RowIdentifier remains valid, then re-attach the parsed dictionary.
-        var rowIdentifiers = TryReadRowIdentifierMap(element, "rowIdentifier")
-                             ?? TryReadRowIdentifierMap(element, "rowIdentifiers");
+        // Allow rowIdentifier to be a string (default), an object declaring one or more identifier
+        // columns ({"key1":"col1","key2":"col2"}), or an array whose elements are any mix of those
+        // two scalar shapes (the array form unions the matched rows; only updateRow honors it).
+        // A dedicated "rowIdentifiers" property is also accepted as a plural alias for the object
+        // form. Whenever the property is non-string we strip it from the element before
+        // deserialization so the standard string-typed RowIdentifier remains valid, then re-attach
+        // the parsed structure.
+        var rowMatchers = TryReadRowMatcherList(element, "rowIdentifier");
+        var rowIdentifiers = rowMatchers != null
+            ? null
+            : TryReadRowIdentifierMap(element, "rowIdentifier")
+              ?? TryReadRowIdentifierMap(element, "rowIdentifiers");
 
         string elementJson;
-        if (rowIdentifiers != null)
+        if (rowIdentifiers != null || rowMatchers != null)
         {
             using var buffer = new MemoryStream();
             using (var writer = new Utf8JsonWriter(buffer))
@@ -2806,7 +3129,82 @@ public static class PluginsService
             operation = operation with { RowIdentifiers = rowIdentifiers };
         }
 
+        if (rowMatchers != null)
+        {
+            operation = operation with { RowMatchers = rowMatchers };
+        }
+
         return operation;
+    }
+
+    // Reads an array-shaped rowIdentifier into a canonical list of matchers. Each element is
+    // either a scalar (string/number/bool — coerced to its invariant string form) or an object of
+    // {column: expectedValue} pairs (same shape as the legacy object-form rowIdentifier). Returns
+    // null when the property is missing or is not an array, so callers can fall back to the
+    // string- or object-form parsers. Throws InvalidDataException with a clear element index when
+    // an element is neither a scalar nor an object.
+    private static IReadOnlyList<PluginRowMatcher>? TryReadRowMatcherList(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var matchers = new List<PluginRowMatcher>();
+        var elementIndex = 0;
+        foreach (var arrayElement in property.EnumerateArray())
+        {
+            switch (arrayElement.ValueKind)
+            {
+                case JsonValueKind.String:
+                case JsonValueKind.Number:
+                case JsonValueKind.True:
+                case JsonValueKind.False:
+                    var scalar = arrayElement.ValueKind == JsonValueKind.String
+                        ? arrayElement.GetString() ?? string.Empty
+                        : arrayElement.ToString();
+                    matchers.Add(new PluginRowMatcher(scalar, null));
+                    break;
+
+                case JsonValueKind.Object:
+                    var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var entry in arrayElement.EnumerateObject())
+                    {
+                        string? value = entry.Value.ValueKind switch
+                        {
+                            JsonValueKind.String => entry.Value.GetString(),
+                            JsonValueKind.Number => entry.Value.ToString(),
+                            JsonValueKind.True => "true",
+                            JsonValueKind.False => "false",
+                            _ => null
+                        };
+
+                        if (value == null)
+                        {
+                            continue;
+                        }
+
+                        dict[entry.Name] = value;
+                    }
+
+                    if (dict.Count == 0)
+                    {
+                        throw new InvalidDataException(
+                            $"rowIdentifier array element at index {elementIndex} is an empty object. List at least one column to match.");
+                    }
+
+                    matchers.Add(new PluginRowMatcher(null, dict));
+                    break;
+
+                default:
+                    throw new InvalidDataException(
+                        $"rowIdentifier array element at index {elementIndex} must be a string, number, boolean, or object, got {arrayElement.ValueKind}.");
+            }
+
+            elementIndex++;
+        }
+
+        return matchers.Count == 0 ? null : matchers;
     }
 
     // Reads an object-shaped rowIdentifier override into a column-name -> expected-value dictionary.
@@ -2895,6 +3293,47 @@ public static class PluginsService
             normalizedSwapColumns = list;
         }
 
+        IReadOnlyList<PluginRowMatcher>? normalizedRowMatchers = null;
+        if (operation.RowMatchers is { Count: > 0 } rowMatchers)
+        {
+            var list = new List<PluginRowMatcher>(rowMatchers.Count);
+            foreach (var matcher in rowMatchers)
+            {
+                if (matcher.Columns is { Count: > 0 } columnMap)
+                {
+                    var dict = new Dictionary<string, string>(columnMap.Count, StringComparer.OrdinalIgnoreCase);
+                    foreach (var pair in columnMap)
+                    {
+                        var key = pair.Key?.Trim();
+                        if (string.IsNullOrEmpty(key))
+                        {
+                            continue;
+                        }
+
+                        dict[key] = pair.Value?.Trim() ?? string.Empty;
+                    }
+
+                    if (dict.Count > 0)
+                    {
+                        list.Add(new PluginRowMatcher(null, dict));
+                    }
+                }
+                else
+                {
+                    var trimmed = matcher.Value?.Trim();
+                    if (!string.IsNullOrEmpty(trimmed))
+                    {
+                        list.Add(new PluginRowMatcher(trimmed, null));
+                    }
+                }
+            }
+
+            if (list.Count > 0)
+            {
+                normalizedRowMatchers = list;
+            }
+        }
+
         return operation with
         {
             File = NormalizeRelativePath(operation.File ?? string.Empty),
@@ -2905,6 +3344,7 @@ public static class PluginsService
             Key = operation.Key?.Trim(),
             Columns = normalizedColumns,
             RowIdentifiers = normalizedRowIdentifiers,
+            RowMatchers = normalizedRowMatchers,
             SourceRowIdentifier = operation.SourceRowIdentifier?.Trim(),
             Mode = operation.Mode?.Trim(),
             SwapRowIdentifier = operation.SwapRowIdentifier?.Trim(),
@@ -3376,6 +3816,15 @@ public static class PluginsService
         public PluginJsonCondition? Not { get; set; }
     }
 
+    // A single rowIdentifier matcher. Set Value for a scalar string match (default identifier
+    // column, numeric index, or "start-end" range, depending on the file); set Columns for a
+    // multi-column AND match (same semantics as the legacy object-form rowIdentifier). Authors
+    // never write this type directly — it is the canonical shape produced by the JSON parser
+    // for the array form of rowIdentifier (e.g. ["amazonjavazon", {"Class":"skeleton"}]).
+    private sealed record PluginRowMatcher(
+        string? Value,
+        IReadOnlyDictionary<string, string>? Columns);
+
     private sealed record PluginJsonOperation(
         string? File,
         string? RowIdentifier,
@@ -3392,6 +3841,14 @@ public static class PluginsService
         // "rowIdentifier" property (e.g. {"key1":"col1","key2":"col2"}) or via a dedicated
         // "rowIdentifiers" property.
         IReadOnlyDictionary<string, string>? RowIdentifiers = null,
+        // Canonical list of rowIdentifier matchers produced by the JSON parser when the author
+        // supplied an *array* under "rowIdentifier" (e.g. ["a", "b", {"Col":"v"}]). Each element is
+        // either a scalar string (parsed exactly like a top-level string rowIdentifier — supports
+        // numeric index, "start-end" range, or default-column value) or a multi-column AND map.
+        // Matched indices are OR-combined and de-duplicated. Only honored by updateRow operations;
+        // addRow / cloneRow / swapRow reject this shape because they target a single row.
+        [property: JsonIgnore]
+        IReadOnlyList<PluginRowMatcher>? RowMatchers = null,
         // cloneRow: identifies the row to copy from. Accepts a numeric 0-based index or a value
         // matched against the file's default rowIdentifier column (case-insensitive).
         string? SourceRowIdentifier = null,

@@ -90,6 +90,26 @@ public partial class PluginAuthoringGuideView : UserControl
                                                  "updatedValue": "55"
                                                },
                                                {
+                                                 "file": "skills.txt",
+                                                 "rowIdentifier": [
+                                                   "amazonjavazon",
+                                                   "amazonbowzon",
+                                                   "amazonlightningfury"
+                                                 ],
+                                                 "column": "reqlevel",
+                                                 "updatedValue": "1"
+                                               },
+                                               {
+                                                 "file": "monstats.txt",
+                                                 "rowIdentifier": [
+                                                   "skeleton1",
+                                                   { "Class": "zombie", "hcIdx": "12" },
+                                                   "50-55"
+                                                 ],
+                                                 "column": "Level",
+                                                 "updatedValue": "10"
+                                               },
+                                               {
                                                  "file": "magicprefix.txt",
                                                  "rowIdentifier": "86",
                                                  "column": "Spawnable",
@@ -118,6 +138,27 @@ public partial class PluginAuthoringGuideView : UserControl
                                                    { "column": "EMinLev" },
                                                    { "column": "EMaxLev" }
                                                  ]
+                                               },
+                                               {
+                                                 "file": "skills.txt",
+                                                 "rowIdentifier": "amazonlightningfury",
+                                                 "column": "reqlevel",
+                                                 "operation": "addExisting",
+                                                 "updatedValue": "5"
+                                               },
+                                               {
+                                                 "file": "skills.txt",
+                                                 "rowIdentifier": "amazonlightningfury",
+                                                 "column": "manacost",
+                                                 "operation": "subtractExisting",
+                                                 "updatedValue": "2"
+                                               },
+                                               {
+                                                 "file": "skills.txt",
+                                                 "rowIdentifier": "amazonlightningfury",
+                                                 "column": "ResultFlags",
+                                                 "operation": "divideExisting",
+                                                 "updatedValue": "2"
                                                },
                                                {
                                                  "file": "skills.txt",
