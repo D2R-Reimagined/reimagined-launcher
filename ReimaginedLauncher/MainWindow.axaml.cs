@@ -21,6 +21,7 @@ using ReimaginedLauncher.Generators;
 using ReimaginedLauncher.HttpClients;
 using ReimaginedLauncher.HttpClients.Models;
 using ReimaginedLauncher.Utilities;
+using ReimaginedLauncher.Utilities.Casc;
 using ReimaginedLauncher.Utilities.Json;
 using ReimaginedLauncher.Utilities.ViewModels;
 using Avalonia;
@@ -209,6 +210,154 @@ public partial class MainWindow : Window
                 await PromptInstallForMissingModAsync();
             }
         }
+
+        // Best-effort: if the user has previously opted into CASC fastload
+        // (i.e. a fastload manifest exists for this install), check whether
+        // D2R has patched since the last extraction and offer to run a delta
+        // update. Users who never opted in have no manifest and will not be
+        // pestered.
+        _ = PromptCascFastloadUpdateIfMismatchedAsync();
+    }
+
+    /// <summary>
+    /// Manifest-gated startup prompt: opens the local CASC storage, compares
+    /// its current build against the persisted fastload manifest's build, and
+    /// if they differ offers a one-click delta update. Silently does nothing
+    /// when fastload was never enabled, native CascLib is unavailable, or any
+    /// step fails (we never block launcher startup on this).
+    /// </summary>
+    public async Task PromptCascFastloadUpdateIfMismatchedAsync()
+    {
+        try
+        {
+            var installDir = Settings.CurrentProfile?.InstallDirectory;
+            if (string.IsNullOrWhiteSpace(installDir) || !Directory.Exists(installDir))
+            {
+                return;
+            }
+
+            var manifestPath = Path.Combine(installDir, "data", ".reimagined-fastload.json");
+            if (!File.Exists(manifestPath))
+            {
+                // User has not opted into CASC fastload — say nothing.
+                return;
+            }
+
+            var manifestService = new CascFastloadManifestService(installDir);
+            var manifest = await manifestService.LoadAsync().ConfigureAwait(false);
+            if (manifest.Files.Count == 0)
+            {
+                return;
+            }
+
+            var native = new NativeCascLib();
+            if (!native.IsAvailable)
+            {
+                return;
+            }
+
+            var extraction = new CascExtractionService(native);
+            using var storage = extraction.OpenLocal(installDir);
+            if (storage is null || storage.IsInvalid)
+            {
+                return;
+            }
+
+            var product = extraction.GetProduct(storage);
+            if (product is null)
+            {
+                return;
+            }
+
+            if (CascFastloadManifestService.BuildMatches(manifest, product))
+            {
+                return;
+            }
+
+            // Mismatch — prompt the user.
+            var oldDescriptor = string.IsNullOrWhiteSpace(manifest.BuildName)
+                ? $"#{manifest.BuildNumber}"
+                : $"{manifest.BuildName} (#{manifest.BuildNumber})";
+            var newDescriptor = string.IsNullOrWhiteSpace(product.CodeName)
+                ? $"#{product.BuildNumber}"
+                : $"{product.CodeName} (#{product.BuildNumber})";
+
+            var accepted = await Dispatcher.UIThread.InvokeAsync(
+                () => ShowFastloadUpdatePromptAsync(oldDescriptor, newDescriptor));
+
+            if (!accepted)
+            {
+                return;
+            }
+
+            await NavigateToCascFastloadViewAsync().ConfigureAwait(false);
+
+            // Hand control to the view's public entry point so the running
+            // operation is owned by CascFastloadOperationState — survives
+            // navigation, supports Cancel from the view, etc.
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (ContentArea.Content is CascFastloadView fastloadView)
+                {
+                    _ = fastloadView.StartExtractAsync(installDir);
+                }
+            });
+        }
+        catch
+        {
+            // Never let the prompt block startup. Silent failure is correct
+            // here — the user can always run Extract manually from the view.
+        }
+    }
+
+    private async Task<bool> ShowFastloadUpdatePromptAsync(string oldBuild, string newBuild)
+    {
+        var dialog = new Window
+        {
+            Width = 460,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Title = "D2R patched — update CASC fastload?"
+        };
+
+        var updateButton = new Button { Content = "Update Now", Classes = { "accent" }, MinWidth = 110 };
+        var laterButton = new Button { Content = "Later", MinWidth = 96 };
+
+        updateButton.Click += (_, _) => dialog.Close(true);
+        laterButton.Click += (_, _) => dialog.Close(false);
+
+        dialog.Content = new Border
+        {
+            Padding = new Avalonia.Thickness(20),
+            Child = new StackPanel
+            {
+                Spacing = 14,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "D2R appears to have patched since your last CASC fastload extraction.",
+                        FontWeight = FontWeight.SemiBold,
+                        TextWrapping = Avalonia.Media.TextWrapping.Wrap
+                    },
+                    new TextBlock
+                    {
+                        Text = $"Last extracted build: {oldBuild}{Environment.NewLine}Current CASC build: {newBuild}{Environment.NewLine}{Environment.NewLine}Run a delta update now to refresh only the changed files?",
+                        TextWrapping = Avalonia.Media.TextWrapping.Wrap
+                    },
+                    new StackPanel
+                    {
+                        Orientation = Avalonia.Layout.Orientation.Horizontal,
+                        HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                        Spacing = 10,
+                        Children = { laterButton, updateButton }
+                    }
+                }
+            }
+        };
+
+        return await dialog.ShowDialog<bool>(this);
     }
 
     public void ApplyUiScale()

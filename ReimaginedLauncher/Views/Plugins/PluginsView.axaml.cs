@@ -11,6 +11,7 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using ReimaginedLauncher.Utilities;
+using ReimaginedLauncher.Utilities.Casc;
 using TextMateSharp.Grammars;
 
 namespace ReimaginedLauncher.Views.Plugins;
@@ -32,6 +33,26 @@ public partial class PluginsView : UserControl
         SupportedTargetsTextBlock.Text = PluginsService.GetSupportedTargetsSummary();
         SetEditorState(fileSelected: false, isDirty: false);
         SetLoadingState(false);
+    }
+
+    private void OnCascStateChanged(object? sender, EventArgs e)
+    {
+        // Reapply Now drives the same ModTweaks pipeline that fights with a
+        // running CASC fastload op for the install/data tree.
+        ReapplyPluginsButton.IsEnabled = !_isLoading && !CascFastloadOperationState.Instance.IsRunning;
+    }
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        CascFastloadOperationState.Instance.StateChanged += OnCascStateChanged;
+        OnCascStateChanged(this, EventArgs.Empty);
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        CascFastloadOperationState.Instance.StateChanged -= OnCascStateChanged;
+        base.OnDetachedFromVisualTree(e);
     }
 
     public async Task RefreshPluginsStateAsync()
@@ -93,7 +114,8 @@ public partial class PluginsView : UserControl
         }
         finally
         {
-            ReapplyPluginsButton.IsEnabled = true;
+            // Respect the CASC gate when restoring the button state.
+            ReapplyPluginsButton.IsEnabled = !CascFastloadOperationState.Instance.IsRunning;
         }
     }
 

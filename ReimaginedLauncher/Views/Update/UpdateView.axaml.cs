@@ -24,6 +24,27 @@ public partial class UpdateView : UserControl
         RefreshUpdateState();
     }
 
+    private void OnCascStateChanged(object? sender, EventArgs e)
+    {
+        // Re-evaluate gated install/update buttons whenever a CASC fastload
+        // operation starts or stops so the user can't kick off an install
+        // mid-extraction.
+        RefreshUpdateState();
+    }
+
+    protected override void OnAttachedToVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        CascFastloadOperationState.Instance.StateChanged += OnCascStateChanged;
+        RefreshUpdateState();
+    }
+
+    protected override void OnDetachedFromVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)
+    {
+        CascFastloadOperationState.Instance.StateChanged -= OnCascStateChanged;
+        base.OnDetachedFromVisualTree(e);
+    }
+
     public void RefreshUpdateState()
     {
         var isAuthenticated = MainWindow.UserViewModel.User != null;
@@ -42,17 +63,22 @@ public partial class UpdateView : UserControl
         StatusMessageText.Text = MainWindow.UpdateStatusMessage;
         CurrentVersionText.Text = MainWindow.UpdateCurrentVersion;
         LatestVersionText.Text = MainWindow.UpdateLatestVersion;
+        // Block install/update activity while a CASC fastload op is running —
+        // they touch overlapping paths under <install>/data and <install>/mods.
+        var cascBusy = CascFastloadOperationState.Instance.IsRunning;
         InstallOrUpdateButton.IsEnabled = !_isLoading &&
+                                          !cascBusy &&
                                           MainWindow.CanInstallOrUpdate &&
                                           !MainWindow.IsInstallInProgress &&
                                           isAuthenticated &&
                                           canDownload;
         SelectZipManuallyButton.IsEnabled = !_isLoading &&
+                                            !cascBusy &&
                                             !MainWindow.IsInstallInProgress &&
                                             MainWindow.Settings.CurrentProfile.IsInstallDirectoryValidated &&
                                             !string.IsNullOrWhiteSpace(MainWindow.Settings.CurrentProfile.InstallDirectory);
         OpenDownloadPageButton.IsEnabled = !_isLoading && !string.IsNullOrWhiteSpace(MainWindow.UpdateDownloadUrl);
-        RecheckButton.IsEnabled = !_isLoading;
+        RecheckButton.IsEnabled = !_isLoading && !cascBusy;
         InstallOrUpdateButton.Content = MainWindow.UpdateCurrentVersion.Equals("Not detected", StringComparison.OrdinalIgnoreCase)
             ? "Download and Install"
             : "Download and Update";

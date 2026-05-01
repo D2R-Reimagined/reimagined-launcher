@@ -200,12 +200,15 @@ public sealed class CascDeltaService
         SafeCascStorageHandle storage,
         string destinationRoot,
         CascExtractionFilter? filter = null,
+        IProgress<CascIndexProgress>? indexProgress = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(storage);
         ArgumentNullException.ThrowIfNull(destinationRoot);
 
-        var entries = await _extraction.IndexAsync(storage, filter, cancellationToken).ConfigureAwait(false);
+        var entries = await _extraction
+            .IndexAsync(storage, filter, indexProgress, cancellationToken)
+            .ConfigureAwait(false);
         var manifest = await _manifestService.LoadAsync(cancellationToken).ConfigureAwait(false);
         return Plan(entries, manifest, destinationRoot, cancellationToken);
     }

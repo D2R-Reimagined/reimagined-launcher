@@ -15,7 +15,8 @@ public sealed record CascFileEntry(
     ulong FileSize,
     uint LocaleFlags,
     uint ContentFlags,
-    uint FileDataId);
+    uint FileDataId,
+    string? FullName = null);
 
 /// <summary>
 /// Storage product info (e.g. "d2r" + build number) used to match BN and

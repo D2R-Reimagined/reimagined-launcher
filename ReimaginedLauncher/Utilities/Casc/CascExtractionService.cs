@@ -19,29 +19,43 @@ namespace ReimaginedLauncher.Utilities.Casc;
 /// <param name="IncludeLocal">Include entries under <c>data\local\</c>.</param>
 /// <param name="LocaleMask">
 /// Bitmask of <see cref="CascLocale"/> values to keep. Locale-neutral entries
-/// (<c>dwLocaleFlags == 0</c>) are always kept. Defaults to all locales.
+/// (<c>dwLocaleFlags == 0</c>) are always kept. Defaults to <c>None</c> so
+/// that locale-flagged entries are excluded unless the user explicitly
+/// opts into one or more language packs (each locale is hundreds of MB
+/// and only present on disk if installed via the game client).
 /// </param>
 public sealed record CascExtractionFilter(
     bool IncludeGlobal = true,
     bool IncludeHd = true,
-    bool IncludeLocal = true,
-    uint LocaleMask = CascLocale.All)
+    bool IncludeLocal = false,
+    uint LocaleMask = CascLocale.None)
 {
+    /// <summary>
+    /// Default fastload filter: extract <c>data\global\</c> and <c>data\hd\</c>
+    /// only, with locale-flagged entries skipped. Locale extraction
+    /// (<c>data\local\</c> and language-pack assets) is opt-in.
+    /// </summary>
     public static readonly CascExtractionFilter Default = new();
 
     internal bool Accept(CascFileEntry entry)
     {
-        if (entry.LocaleFlags != 0 && (entry.LocaleFlags & LocaleMask) == 0)
-        {
-            return false;
-        }
-
-        var path = entry.Path;
+        var path = StripCascNamespace(entry.Path);
         if (string.IsNullOrEmpty(path))
         {
             return false;
         }
 
+        // Locale gating is path-based, not flag-based: D2R's TVFS reports
+        // non-zero LocaleFlags (typically a bitmask of installed locales)
+        // even for nominally locale-neutral content under data\global\ and
+        // data\hd\, so the prior `entry.LocaleFlags != 0 && (& mask) == 0`
+        // guard rejected every global/hd entry whenever LocaleMask was None
+        // — which is the default fastload filter. We instead trust the
+        // path prefix: locale-specific assets live under data\local\ (and
+        // the locales\<lang>\... TVFS namespace, which is filtered out by
+        // the absent path prefix). The LocaleMask field is retained on the
+        // record for the eventual locale-opt-in UI, but is no longer used
+        // here.
         if (IncludeGlobal && PathStartsWith(path, "data\\global\\"))
         {
             return true;
@@ -58,6 +72,39 @@ public sealed record CascExtractionFilter(
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Strips a leading TVFS namespace prefix (everything up to and including the
+    /// first <c>:</c> that occurs before any backslash). CascLib's TVFS layer
+    /// emits names like <c>data:data\global\excel\armor.txt</c> — we want the
+    /// part after the colon for both filtering and on-disk path mirroring.
+    /// Locale-namespace entries like <c>locales\audio\plpl\data\local\...</c>
+    /// fall through unchanged and are correctly rejected by the prefix tests
+    /// when locale extraction is opted out.
+    /// </summary>
+    internal static string StripCascNamespace(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            return path;
+        }
+
+        for (var i = 0; i < path.Length; i++)
+        {
+            var c = path[i];
+            if (c == '\\' || c == '/')
+            {
+                return path;
+            }
+
+            if (c == ':')
+            {
+                return i + 1 < path.Length ? path[(i + 1)..] : string.Empty;
+            }
+        }
+
+        return path;
     }
 
     private static bool PathStartsWith(string path, string prefix)
@@ -103,6 +150,22 @@ public sealed record CascProgress(
     long FilesTotal,
     long BytesDone,
     long BytesTotal,
+    string? CurrentPath,
+    TimeSpan Elapsed);
+
+/// <summary>
+/// Heartbeat emitted while walking the CASC TVFS during the indexing
+/// phase. CASC enumeration of D2R yields ~150k entries and can take
+/// minutes — emitting a running count + last-seen path lets the UI
+/// prove it isn't hung.
+/// </summary>
+/// <param name="EntriesSeen">Total entries observed so far (pre-filter).</param>
+/// <param name="EntriesAccepted">Entries that passed the active filter so far.</param>
+/// <param name="CurrentPath">Most recent CASC path seen by the enumerator.</param>
+/// <param name="Elapsed">Time since indexing started.</param>
+public sealed record CascIndexProgress(
+    long EntriesSeen,
+    long EntriesAccepted,
     string? CurrentPath,
     TimeSpan Elapsed);
 
@@ -169,6 +232,7 @@ public sealed class CascExtractionService
     public IReadOnlyList<CascFileEntry> Index(
         SafeCascStorageHandle storage,
         CascExtractionFilter? filter = null,
+        IProgress<CascIndexProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(storage);
@@ -176,14 +240,94 @@ public sealed class CascExtractionService
         var f = filter ?? CascExtractionFilter.Default;
         var entries = new List<CascFileEntry>(capacity: 8192);
 
-        foreach (var entry in _native.EnumerateFiles(storage))
+        var sw = Stopwatch.StartNew();
+        var lastEmit = TimeSpan.Zero;
+        var emitInterval = TimeSpan.FromMilliseconds(100); // ~10 Hz heartbeat
+        long seen = 0;
+        long lastLogged = 0;
+        // Track last *accepted* path separately from last *seen* path so the
+        // heartbeat (log + UI) only ever surfaces files that passed the
+        // filter — otherwise users see scary `data\local\...` /
+        // `locales\...` strings while indexing walks past entries that are
+        // about to be rejected, and assume locale extraction is happening
+        // when in reality the count of matched entries has already stopped
+        // growing.
+        string? lastAcceptedPath = null;
+
+        LaunchDiagnostics.Log($"CASC Index: starting (filter: includeGlobal={f.IncludeGlobal}, includeHd={f.IncludeHd}, includeLocal={f.IncludeLocal}, localeMask=0x{f.LocaleMask:X}).");
+
+        // Once we've started seeing accepted entries under `data\...` and then
+        // observe entries whose normalized path no longer begins with `data\`,
+        // CascLib's TVFS walk has crossed into namespaces such as
+        // `locales\<lang>\...` whose payload data isn't installed on disk.
+        // `CascFindNextFile` can stall for tens of seconds trying to resolve
+        // span/encoding info for those entries (the user hit a 44s freeze
+        // around entry 175,817 of `locales\...`). Since CascLib enumerates
+        // alphabetically (`data\` < `locales\`), once we leave `data\` we
+        // will not see any further wanted entries — break out cleanly.
+        bool sawDataNamespace = false;
+
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (f.Accept(entry))
+            foreach (var entry in _native.EnumerateFiles(storage))
             {
-                entries.Add(entry);
+                cancellationToken.ThrowIfCancellationRequested();
+                seen++;
+
+                var canonical = CascExtractionFilter.StripCascNamespace(entry.Path);
+                bool isDataNamespace = !string.IsNullOrEmpty(canonical)
+                    && canonical.StartsWith("data\\", StringComparison.OrdinalIgnoreCase);
+
+                if (isDataNamespace)
+                {
+                    sawDataNamespace = true;
+                }
+                else if (sawDataNamespace)
+                {
+                    // We've definitively left the `data\` namespace. Stop now
+                    // before CascFindNextFile parks on uninstalled-locale data.
+                    LaunchDiagnostics.Log($"CASC Index: leaving data\\ namespace at {seen:N0} seen, {entries.Count:N0} matched. Stopping early to avoid uninstalled-locale stall (next path was '{canonical}').");
+                    break;
+                }
+
+                if (f.Accept(entry))
+                {
+                    entries.Add(entry);
+                    lastAcceptedPath = entry.Path;
+                }
+
+                if (seen - lastLogged >= 5000)
+                {
+                    lastLogged = seen;
+                    LaunchDiagnostics.Log($"CASC Index: {seen:N0} seen, {entries.Count:N0} matched, lastMatched='{lastAcceptedPath ?? "(none yet)"}'.");
+                }
+
+                if (progress is not null)
+                {
+                    var elapsed = sw.Elapsed;
+                    if (elapsed - lastEmit >= emitInterval)
+                    {
+                        lastEmit = elapsed;
+                        progress.Report(new CascIndexProgress(seen, entries.Count, lastAcceptedPath, elapsed));
+                    }
+                }
             }
         }
+        catch (OperationCanceledException)
+        {
+            LaunchDiagnostics.Log($"CASC Index: cancellation observed at {seen:N0} seen / {entries.Count:N0} matched (elapsed {sw.Elapsed}).");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LaunchDiagnostics.LogException($"CASC Index: faulted at {seen:N0} seen / {entries.Count:N0} matched", ex);
+            throw;
+        }
+
+        LaunchDiagnostics.Log($"CASC Index: completed. {seen:N0} entries enumerated, {entries.Count:N0} matched, elapsed {sw.Elapsed}.");
+
+        // Final heartbeat so the UI sees the full count once the walk completes.
+        progress?.Report(new CascIndexProgress(seen, entries.Count, null, sw.Elapsed));
 
         return entries;
     }
@@ -195,11 +339,12 @@ public sealed class CascExtractionService
     public Task<IReadOnlyList<CascFileEntry>> IndexAsync(
         SafeCascStorageHandle storage,
         CascExtractionFilter? filter = null,
+        IProgress<CascIndexProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(storage);
 
-        return Task.Run(() => Index(storage, filter, cancellationToken), cancellationToken);
+        return Task.Run(() => Index(storage, filter, progress, cancellationToken), cancellationToken);
     }
 
     /// <summary>
@@ -258,7 +403,12 @@ public sealed class CascExtractionService
                        FileAccess.Write,
                        FileShare.None))
             {
-                bytesWritten = _native.ExtractTo(storage, entry.Path, tempStream, buffer);
+                // Prefer the original TVFS-prefixed name (e.g. "data:data\\...")
+                // because CascOpenFile resolves entries by the exact name returned
+                // from CascFindFirstFile/CascFindNextFile. Fall back to the
+                // stripped Path when FullName is not populated.
+                var openName = string.IsNullOrEmpty(entry.FullName) ? entry.Path : entry.FullName!;
+                bytesWritten = _native.ExtractTo(storage, openName, tempStream, buffer);
                 tempStream.Flush(flushToDisk: true);
             }
 
@@ -339,24 +489,48 @@ public sealed class CascExtractionService
 
         progress?.Report(new CascProgress(0, totalFiles, 0, totalBytes, null, sw.Elapsed));
 
-        foreach (var entry in entries)
+        LaunchDiagnostics.Log($"CASC ExtractAll: starting. {totalFiles:N0} files, {totalBytes:N0} bytes, dest='{destinationRoot}'.");
+        long lastLoggedFiles = 0;
+
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var relative = NormalizeRelativePath(entry.Path);
-            var destination = Path.Combine(destinationRoot, relative);
-
-            var written = await ExtractEntryAsync(storage, entry, destination, cancellationToken).ConfigureAwait(false);
-
-            filesDone++;
-            bytesDone += written;
-
-            if (sw.Elapsed - lastReport >= interval)
+            foreach (var entry in entries)
             {
-                lastReport = sw.Elapsed;
-                progress?.Report(new CascProgress(filesDone, totalFiles, bytesDone, totalBytes, entry.Path, sw.Elapsed));
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var relative = NormalizeRelativePath(entry.Path);
+                var destination = Path.Combine(destinationRoot, relative);
+
+                var written = await ExtractEntryAsync(storage, entry, destination, cancellationToken).ConfigureAwait(false);
+
+                filesDone++;
+                bytesDone += written;
+
+                if (filesDone - lastLoggedFiles >= 500)
+                {
+                    lastLoggedFiles = filesDone;
+                    LaunchDiagnostics.Log($"CASC ExtractAll: {filesDone:N0}/{totalFiles:N0} files, {bytesDone:N0}/{totalBytes:N0} bytes, last='{entry.Path}'.");
+                }
+
+                if (sw.Elapsed - lastReport >= interval)
+                {
+                    lastReport = sw.Elapsed;
+                    progress?.Report(new CascProgress(filesDone, totalFiles, bytesDone, totalBytes, entry.Path, sw.Elapsed));
+                }
             }
         }
+        catch (OperationCanceledException)
+        {
+            LaunchDiagnostics.Log($"CASC ExtractAll: cancellation observed at {filesDone:N0}/{totalFiles:N0} files (elapsed {sw.Elapsed}).");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LaunchDiagnostics.LogException($"CASC ExtractAll: faulted at {filesDone:N0}/{totalFiles:N0} files", ex);
+            throw;
+        }
+
+        LaunchDiagnostics.Log($"CASC ExtractAll: completed. {filesDone:N0} files, {bytesDone:N0} bytes, elapsed {sw.Elapsed}.");
 
         progress?.Report(new CascProgress(filesDone, totalFiles, bytesDone, totalBytes, null, sw.Elapsed));
     }
@@ -373,11 +547,13 @@ public sealed class CascExtractionService
             return cascPath;
         }
 
+        var stripped = CascExtractionFilter.StripCascNamespace(cascPath);
+
         if (Path.DirectorySeparatorChar == '\\')
         {
-            return cascPath;
+            return stripped;
         }
 
-        return cascPath.Replace('\\', Path.DirectorySeparatorChar);
+        return stripped.Replace('\\', Path.DirectorySeparatorChar);
     }
 }

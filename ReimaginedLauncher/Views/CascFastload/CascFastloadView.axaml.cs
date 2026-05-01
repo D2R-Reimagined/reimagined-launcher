@@ -17,20 +17,24 @@ public partial class CascFastloadView : UserControl
     private readonly NativeCascLib _native;
     private readonly CascExtractionService _extraction;
 
-    private CancellationTokenSource? _cts;
-    private bool _operationInProgress;
-
-    // EWMA throughput (bytes/sec) for ETA smoothing.
-    private double _ewmaBytesPerSec;
-    private DateTime _lastProgressUtc;
-    private long _lastBytesDone;
-
     public CascFastloadView()
     {
         InitializeComponent();
         _native = new NativeCascLib();
         _extraction = new CascExtractionService(_native);
+
         Loaded += OnLoaded;
+        // Subscribe/unsubscribe in attach/detach so navigating away does NOT
+        // cancel an in-flight CASC operation — the singleton state survives,
+        // and re-entering the view re-renders it from the live state.
+        AttachedToVisualTree += (_, _) =>
+        {
+            CascFastloadOperationState.Instance.StateChanged += OnOperationStateChanged;
+        };
+        DetachedFromVisualTree += (_, _) =>
+        {
+            CascFastloadOperationState.Instance.StateChanged -= OnOperationStateChanged;
+        };
     }
 
     private void OnLoaded(object? sender, RoutedEventArgs e)
@@ -38,6 +42,24 @@ public partial class CascFastloadView : UserControl
         RefreshState();
     }
 
+    private void OnOperationStateChanged(object? sender, EventArgs e)
+    {
+        // Already on UI thread (singleton marshals before raising), but be
+        // defensive in case future callers raise off-thread.
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            RenderOperationState();
+        }
+        else
+        {
+            Dispatcher.UIThread.Post(RenderOperationState);
+        }
+    }
+
+    /// <summary>
+    /// Refreshes everything visible: install path / native status / manifest
+    /// summary, plus the live operation panel from the singleton.
+    /// </summary>
     public void RefreshState()
     {
         var installDir = MainWindow.Settings?.CurrentProfile?.InstallDirectory;
@@ -94,19 +116,37 @@ public partial class CascFastloadView : UserControl
             BuildText.Text = "—";
         }
 
+        RenderOperationState();
+    }
+
+    private void RenderOperationState()
+    {
+        var state = CascFastloadOperationState.Instance;
+
+        var status = state.IsRunning
+            ? state.StatusMessage
+            : (string.IsNullOrEmpty(state.LastResultMessage) ? "Idle." : state.LastResultMessage);
+        StatusText.Text = string.IsNullOrEmpty(status) ? "Idle." : status;
+
+        ExtractProgressBar.Value = state.ProgressPercent;
+        ProgressDetailText.Text = state.ProgressDetail;
+        ProgressEtaText.Text = state.ProgressEta;
+        CurrentFileText.Text = state.CurrentFile;
+
         UpdateButtonStates();
     }
 
     private void UpdateButtonStates()
     {
         var hasInstall = !string.IsNullOrWhiteSpace(MainWindow.Settings?.CurrentProfile?.InstallDirectory);
-        var available = _extraction.IsAvailable && hasInstall && !_operationInProgress;
+        var running = CascFastloadOperationState.Instance.IsRunning;
+        var available = _extraction.IsAvailable && hasInstall && !running;
 
         ExtractButton.IsEnabled = available;
-        UndoButton.IsEnabled = hasInstall && !_operationInProgress;
+        UndoButton.IsEnabled = hasInstall && !running;
         CrossInstallButton.IsEnabled = available;
-        RefreshButton.IsEnabled = !_operationInProgress;
-        CancelButton.IsEnabled = _operationInProgress;
+        RefreshButton.IsEnabled = !running;
+        CancelButton.IsEnabled = running;
     }
 
     private void OnRefreshClick(object? sender, RoutedEventArgs e)
@@ -116,15 +156,7 @@ public partial class CascFastloadView : UserControl
 
     private void OnCancelClick(object? sender, RoutedEventArgs e)
     {
-        try
-        {
-            _cts?.Cancel();
-            StatusText.Text = "Cancelling...";
-        }
-        catch
-        {
-            // No-op: token may already be disposed.
-        }
+        CascFastloadOperationState.Instance.Cancel();
     }
 
     private async void OnExtractClick(object? sender, RoutedEventArgs e)
@@ -136,35 +168,63 @@ public partial class CascFastloadView : UserControl
             return;
         }
 
-        await RunOperationAsync("Extract / Update", async ct =>
+        await StartExtractAsync(installDir).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Public entry point so callers outside the view (e.g. the startup
+    /// build-mismatch prompt in <c>MainWindow</c>) can trigger an Extract
+    /// against the active install via the same singleton path.
+    /// </summary>
+    public Task StartExtractAsync(string installDir)
+    {
+        return CascFastloadOperationState.Instance.TryRunAsync("Extract / Update", async (ct, progress, setStatus) =>
         {
-            using var storage = _extraction.OpenLocal(installDir);
+            // Pass the filter's locale opt-in to CascOpenStorage so CascLib's
+            // TVFS iterator never enters uninstalled-locale branches. With
+            // CascLocale.All (the previous default), CascFindNextFile can
+            // hang for tens of seconds resolving a locale entry whose data
+            // isn't on disk. The default extraction filter opts out of
+            // locale, so the default mask is CascLocale.None.
+            var filter = CascExtractionFilter.Default;
+            var openMask = filter.IncludeLocal ? filter.LocaleMask : CascLocale.None;
+            LaunchDiagnostics.Log($"CASC StartExtract: opening storage at '{installDir}' (localeMask=0x{openMask:X}).");
+            using var storage = _extraction.OpenLocal(installDir, openMask);
             if (storage is null || storage.IsInvalid)
             {
+                LaunchDiagnostics.Log($"CASC StartExtract: OpenLocal returned null/invalid for '{installDir}'.");
                 throw new InvalidOperationException("Failed to open the local CASC storage. Confirm the install path points at the D2R root.");
             }
+            LaunchDiagnostics.Log("CASC StartExtract: storage opened, querying product info.");
 
             var product = _extraction.GetProduct(storage);
+            LaunchDiagnostics.Log($"CASC StartExtract: product='{product?.CodeName ?? "(null)"}' build={product?.BuildNumber ?? 0}.");
             var manifestService = new CascFastloadManifestService(installDir);
             var delta = new CascDeltaService(_extraction, manifestService);
 
-            StatusText.Text = "Indexing CASC...";
-            var plan = await delta.PlanAsync(storage, installDir, CascExtractionFilter.Default, ct).ConfigureAwait(false);
-
-            await Dispatcher.UIThread.InvokeAsync(() =>
+            setStatus("Indexing CASC...");
+            LaunchDiagnostics.Log("CASC StartExtract: planning delta (will index storage).");
+            var indexProgress = new Progress<CascIndexProgress>(ip =>
             {
-                StatusText.Text = plan.IsNoOp
-                    ? "Already up to date."
-                    : $"Applying delta: {plan.Added.Count} added, {plan.Updated.Count} updated, {plan.Restored.Count} restored, {plan.Removed.Count} removed.";
+                // Live heartbeat while walking the TVFS — without this the UI
+                // sits frozen for minutes on the static "Indexing CASC..." line.
+                CascFastloadOperationState.Instance.SetStatus(
+                    $"Indexing CASC... {ip.EntriesSeen:N0} entries seen, {ip.EntriesAccepted:N0} matched");
+                CascFastloadOperationState.Instance.SetCurrentFile(ip.CurrentPath);
             });
+            var plan = await delta
+                .PlanAsync(storage, installDir, CascExtractionFilter.Default, indexProgress, ct)
+                .ConfigureAwait(false);
+
+            setStatus(plan.IsNoOp
+                ? "Already up to date."
+                : $"Applying delta: {plan.Added.Count} added, {plan.Updated.Count} updated, {plan.Restored.Count} restored, {plan.Removed.Count} removed.");
 
             if (plan.IsNoOp)
             {
+                CascFastloadOperationState.Instance.SetResult("Already up to date.");
                 return;
             }
-
-            var progress = new Progress<CascProgress>(OnProgress);
-            ResetEwma();
 
             var result = await delta.ApplyAsync(
                 storage,
@@ -175,10 +235,8 @@ public partial class CascFastloadView : UserControl
                 TimeSpan.FromMilliseconds(100),
                 ct).ConfigureAwait(false);
 
-            await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                StatusText.Text = $"Done. +{result.Added} ~{result.Updated} ↺{result.Restored} −{result.Removed} • {FormatBytes(result.BytesWritten)} in {FormatElapsed(result.Elapsed)}.";
-            });
+            CascFastloadOperationState.Instance.SetResult(
+                $"Extract done. +{result.Added} ~{result.Updated} ↺{result.Restored} −{result.Removed} • {CascFastloadOperationState.FormatBytes(result.BytesWritten)} in {CascFastloadOperationState.FormatElapsed(result.Elapsed)}.");
         });
     }
 
@@ -191,24 +249,17 @@ public partial class CascFastloadView : UserControl
             return;
         }
 
-        await RunOperationAsync("Undo", async ct =>
+        await CascFastloadOperationState.Instance.TryRunAsync("Undo", async (ct, _, setStatus) =>
         {
             var manifestService = new CascFastloadManifestService(installDir);
             var undo = new CascUndoService(manifestService);
 
-            await Dispatcher.UIThread.InvokeAsync(() => StatusText.Text = "Undoing CASC fastload...");
-
+            setStatus("Undoing CASC fastload...");
             var result = await undo.UndoAsync(installDir, CascUndoOptions.Default, ct).ConfigureAwait(false);
 
-            await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                StatusText.Text = $"Undo complete. Deleted {result.FilesDeleted}, preserved {result.OverlaysPreserved} overlay(s), pruned {result.DirectoriesPruned} dir(s) in {FormatElapsed(result.Elapsed)}.";
-                ExtractProgressBar.Value = 0;
-                ProgressDetailText.Text = string.Empty;
-                ProgressEtaText.Text = string.Empty;
-                CurrentFileText.Text = string.Empty;
-            });
-        });
+            CascFastloadOperationState.Instance.SetResult(
+                $"Undo complete. Deleted {result.FilesDeleted}, preserved {result.OverlaysPreserved} overlay(s), pruned {result.DirectoriesPruned} dir(s) in {CascFastloadOperationState.FormatElapsed(result.Elapsed)}.");
+        }).ConfigureAwait(false);
     }
 
     private async void OnCrossInstallClick(object? sender, RoutedEventArgs e)
@@ -238,7 +289,7 @@ public partial class CascFastloadView : UserControl
 
         var sourceInstall = folders[0].Path.LocalPath;
 
-        await RunOperationAsync("Cross-extract", async ct =>
+        await CascFastloadOperationState.Instance.TryRunAsync("Cross-extract", async (ct, progress, setStatus) =>
         {
             var manifestService = new CascFastloadManifestService(targetInstall);
             var delta = new CascDeltaService(_extraction, manifestService);
@@ -250,13 +301,7 @@ public partial class CascFastloadView : UserControl
                 throw new InvalidOperationException(BuildIneligibilityMessage(eligibility));
             }
 
-            await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                StatusText.Text = $"Cross-extracting from {sourceInstall} (build #{eligibility.SourceProduct?.BuildNumber})...";
-            });
-
-            var progress = new Progress<CascProgress>(OnProgress);
-            ResetEwma();
+            setStatus($"Cross-extracting from {sourceInstall} (build #{eligibility.SourceProduct?.BuildNumber})...");
 
             var result = await cross.ApplyAsync(
                 sourceInstall,
@@ -267,133 +312,9 @@ public partial class CascFastloadView : UserControl
                 CascLocale.All,
                 ct).ConfigureAwait(false);
 
-            await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                StatusText.Text = $"Cross-extract done. +{result.Added} ~{result.Updated} ↺{result.Restored} −{result.Removed} • {FormatBytes(result.BytesWritten)} in {FormatElapsed(result.Elapsed)}.";
-            });
-        });
-    }
-
-    private async Task RunOperationAsync(string label, Func<CancellationToken, Task> body)
-    {
-        if (_operationInProgress)
-        {
-            return;
-        }
-
-        _operationInProgress = true;
-        _cts = new CancellationTokenSource();
-        UpdateButtonStates();
-
-        try
-        {
-            ExtractProgressBar.Value = 0;
-            ProgressDetailText.Text = string.Empty;
-            ProgressEtaText.Text = string.Empty;
-            CurrentFileText.Text = string.Empty;
-            StatusText.Text = $"{label}: starting...";
-
-            await body(_cts.Token).ConfigureAwait(true);
-        }
-        catch (OperationCanceledException)
-        {
-            StatusText.Text = $"{label} cancelled.";
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = $"{label} failed: {ex.Message}";
-            Notifications.SendNotification($"CASC {label} failed: {ex.Message}", "Error");
-        }
-        finally
-        {
-            _cts?.Dispose();
-            _cts = null;
-            _operationInProgress = false;
-            UpdateButtonStates();
-            RefreshState();
-        }
-    }
-
-    private void OnProgress(CascProgress p)
-    {
-        // Marshal to UI thread; throttling is already done by the service (~10 Hz).
-        Dispatcher.UIThread.Post(() =>
-        {
-            var nowUtc = DateTime.UtcNow;
-            var deltaSec = (nowUtc - _lastProgressUtc).TotalSeconds;
-            var deltaBytes = p.BytesDone - _lastBytesDone;
-
-            if (_lastProgressUtc != default && deltaSec > 0 && deltaBytes >= 0)
-            {
-                var instant = deltaBytes / deltaSec;
-                // EWMA with alpha ~0.3 (~5 s smoothing at 10 Hz).
-                _ewmaBytesPerSec = _ewmaBytesPerSec <= 0
-                    ? instant
-                    : (0.3 * instant) + (0.7 * _ewmaBytesPerSec);
-            }
-
-            _lastProgressUtc = nowUtc;
-            _lastBytesDone = p.BytesDone;
-
-            var pct = p.BytesTotal > 0
-                ? Math.Clamp(p.BytesDone * 100.0 / p.BytesTotal, 0.0, 100.0)
-                : 0.0;
-            ExtractProgressBar.Value = pct;
-
-            ProgressDetailText.Text =
-                $"{p.FilesDone:N0} / {p.FilesTotal:N0} files • {FormatBytes(p.BytesDone)} / {FormatBytes(p.BytesTotal)} • {FormatBytes((long)_ewmaBytesPerSec)}/s";
-
-            ProgressEtaText.Text = ComputeEtaText(p, _ewmaBytesPerSec);
-            CurrentFileText.Text = p.CurrentPath ?? string.Empty;
-        });
-    }
-
-    private void ResetEwma()
-    {
-        _ewmaBytesPerSec = 0;
-        _lastProgressUtc = default;
-        _lastBytesDone = 0;
-    }
-
-    private static string ComputeEtaText(CascProgress p, double ewmaBytesPerSec)
-    {
-        if (ewmaBytesPerSec <= 0 || p.BytesTotal <= p.BytesDone)
-        {
-            return string.Empty;
-        }
-
-        var remaining = p.BytesTotal - p.BytesDone;
-        var seconds = remaining / ewmaBytesPerSec;
-        if (double.IsNaN(seconds) || double.IsInfinity(seconds) || seconds < 0)
-        {
-            return string.Empty;
-        }
-
-        var eta = TimeSpan.FromSeconds(Math.Min(seconds, TimeSpan.FromDays(1).TotalSeconds));
-        return $"ETA {FormatElapsed(eta)}";
-    }
-
-    private static string FormatBytes(long bytes)
-    {
-        if (bytes < 0) bytes = 0;
-        const double KiB = 1024d;
-        const double MiB = 1024d * 1024d;
-        const double GiB = 1024d * 1024d * 1024d;
-
-        if (bytes >= GiB) return $"{bytes / GiB:F2} GiB";
-        if (bytes >= MiB) return $"{bytes / MiB:F1} MiB";
-        if (bytes >= KiB) return $"{bytes / KiB:F0} KiB";
-        return $"{bytes} B";
-    }
-
-    private static string FormatElapsed(TimeSpan ts)
-    {
-        if (ts.TotalHours >= 1)
-        {
-            return $"{(int)ts.TotalHours:D2}:{ts.Minutes:D2}:{ts.Seconds:D2}";
-        }
-
-        return $"{ts.Minutes:D2}:{ts.Seconds:D2}";
+            CascFastloadOperationState.Instance.SetResult(
+                $"Cross-extract done. +{result.Added} ~{result.Updated} ↺{result.Restored} −{result.Removed} • {CascFastloadOperationState.FormatBytes(result.BytesWritten)} in {CascFastloadOperationState.FormatElapsed(result.Elapsed)}.");
+        }).ConfigureAwait(false);
     }
 
     private static string BuildIneligibilityMessage(CascCrossInstallEligibility eligibility)

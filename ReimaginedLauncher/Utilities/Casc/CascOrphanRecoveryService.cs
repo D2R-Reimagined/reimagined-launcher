@@ -290,7 +290,7 @@ public sealed class CascOrphanRecoveryService
         CancellationToken cancellationToken)
     {
         var entries = await _extraction
-            .IndexAsync(storage, filter: null, cancellationToken)
+            .IndexAsync(storage, filter: null, progress: null, cancellationToken)
             .ConfigureAwait(false);
 
         var dict = new Dictionary<string, CascFileEntry>(entries.Count, StringComparer.OrdinalIgnoreCase);

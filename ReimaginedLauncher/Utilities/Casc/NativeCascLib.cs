@@ -149,12 +149,24 @@ public sealed class NativeCascLib : ICascNative
         if (!_available) return null;
         if (string.IsNullOrWhiteSpace(storagePath)) return null;
 
-        if (!CascOpenStorage(storagePath, localeMask, out IntPtr h) || CascHandles.IsInvalid(h))
+        try
         {
-            return null;
-        }
+            if (!CascOpenStorage(storagePath, localeMask, out IntPtr h) || CascHandles.IsInvalid(h))
+            {
+                return null;
+            }
 
-        return new SafeCascStorageHandle(h);
+            return new SafeCascStorageHandle(h);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            // Native call faulted (e.g. AccessViolation surfaced via runtime
+            // wrapping). Surface as a clear IOException so the operation
+            // body's catch records and notifies the user instead of
+            // crashing the launcher. Pure bool=false outcomes still return
+            // null, preserving existing caller semantics.
+            throw new IOException($"CascOpenStorage threw for '{storagePath}': {ex.Message}", ex);
+        }
     }
 
     public CascStorageProduct? GetStorageProduct(SafeCascStorageHandle storage)
@@ -187,7 +199,7 @@ public sealed class NativeCascLib : ICascNative
     {
         if (!_available || storage is null || storage.IsInvalid) yield break;
 
-        var data = new CASC_FIND_DATA
+        var seed = new CASC_FIND_DATA
         {
             szFileName = new byte[CASC_FIND_DATA.MaxPath],
             CKey = new byte[CASC_FIND_DATA.Md5HashSize],
@@ -199,33 +211,86 @@ public sealed class NativeCascLib : ICascNative
         SafeCascFindHandle? finder = null;
         try
         {
-            Marshal.StructureToPtr(data, buf, fDeleteOld: false);
-            IntPtr findHandle = CascFindFirstFile(storage.DangerousGetHandle(), "*", buf, null);
+            Marshal.StructureToPtr(seed, buf, fDeleteOld: false);
+            IntPtr findHandle;
+            try
+            {
+                findHandle = CascFindFirstFile(storage.DangerousGetHandle(), "*", buf, null);
+            }
+            catch (Exception ex)
+            {
+                throw new IOException("CascFindFirstFile threw: " + ex.Message, ex);
+            }
+
             if (CascHandles.IsInvalid(findHandle)) yield break;
             finder = new SafeCascFindHandle(findHandle);
 
-            do
+            while (true)
             {
-                data = Marshal.PtrToStructure<CASC_FIND_DATA>(buf);
-                string path = NullTerminatedAnsi(data.szFileName);
-                if (!string.IsNullOrEmpty(path))
+                CascFileEntry? next = TryReadFindEntry(buf);
+                if (next is not null)
                 {
-                    yield return new CascFileEntry(
-                        Path: path,
-                        CKey: (byte[])data.CKey.Clone(),
-                        EKey: (byte[])data.EKey.Clone(),
-                        FileSize: data.FileSize,
-                        LocaleFlags: data.dwLocaleFlags,
-                        ContentFlags: data.dwContentFlags,
-                        FileDataId: data.dwFileDataId);
+                    yield return next;
                 }
+
+                bool more;
+                try
+                {
+                    more = CascFindNextFile(finder.DangerousGetHandle(), buf);
+                }
+                catch
+                {
+                    // Native enumerator raised — abort the walk gracefully so
+                    // the caller can still operate on the entries collected so
+                    // far. The next index pass will retry.
+                    yield break;
+                }
+
+                if (!more) yield break;
             }
-            while (CascFindNextFile(finder.DangerousGetHandle(), buf));
         }
         finally
         {
             finder?.Dispose();
             Marshal.FreeHGlobal(buf);
+        }
+    }
+
+    /// <summary>
+    /// Marshals a <c>CASC_FIND_DATA</c> from the native buffer, swallowing
+    /// per-row marshalling exceptions so a single malformed entry doesn't
+    /// abort the entire enumeration.
+    /// </summary>
+    private static CascFileEntry? TryReadFindEntry(IntPtr buf)
+    {
+        try
+        {
+            var data = Marshal.PtrToStructure<CASC_FIND_DATA>(buf);
+            string fullName = NullTerminatedAnsi(data.szFileName);
+            if (string.IsNullOrEmpty(fullName)) return null;
+
+            // Strip the TVFS namespace prefix (e.g. "data:data\\global\\..." ->
+            // "data\\global\\...") so all downstream consumers (filter, manifest,
+            // disk path mirror, orphan recovery) operate on a single canonical
+            // form. The original prefixed name is retained on FullName because
+            // CascOpenFile (OpenByName) requires the exact name returned by
+            // CascFindFirstFile/CascFindNextFile to resolve TVFS entries.
+            string path = CascExtractionFilter.StripCascNamespace(fullName);
+            if (string.IsNullOrEmpty(path)) return null;
+
+            return new CascFileEntry(
+                Path: path,
+                CKey: (byte[])data.CKey.Clone(),
+                EKey: (byte[])data.EKey.Clone(),
+                FileSize: data.FileSize,
+                LocaleFlags: data.dwLocaleFlags,
+                ContentFlags: data.dwContentFlags,
+                FileDataId: data.dwFileDataId,
+                FullName: fullName);
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -239,8 +304,18 @@ public sealed class NativeCascLib : ICascNative
         IntPtr namePtr = Marshal.StringToCoTaskMemAnsi(cascPath);
         try
         {
-            if (!CascOpenFile(storage.DangerousGetHandle(), namePtr, CascLocale.All, CascOpenFlags.OpenByName, out IntPtr h)
-                || CascHandles.IsInvalid(h))
+            bool opened;
+            IntPtr h;
+            try
+            {
+                opened = CascOpenFile(storage.DangerousGetHandle(), namePtr, CascLocale.All, CascOpenFlags.OpenByName, out h);
+            }
+            catch (Exception ex)
+            {
+                throw new IOException($"CascOpenFile threw for '{cascPath}': {ex.Message}", ex);
+            }
+
+            if (!opened || CascHandles.IsInvalid(h))
             {
                 throw new IOException($"CascOpenFile failed for '{cascPath}'.");
             }
@@ -250,9 +325,20 @@ public sealed class NativeCascLib : ICascNative
             long total = 0;
             while (true)
             {
-                if (!CascReadFile(file.DangerousGetHandle(), buffer, (uint)buffer.Length, out uint read))
+                bool readOk;
+                uint read;
+                try
                 {
-                    throw new IOException($"CascReadFile failed for '{cascPath}'.");
+                    readOk = CascReadFile(file.DangerousGetHandle(), buffer, (uint)buffer.Length, out read);
+                }
+                catch (Exception ex)
+                {
+                    throw new IOException($"CascReadFile threw for '{cascPath}' after {total} bytes: {ex.Message}", ex);
+                }
+
+                if (!readOk)
+                {
+                    throw new IOException($"CascReadFile failed for '{cascPath}' after {total} bytes.");
                 }
                 if (read == 0) break;
                 destination.Write(buffer, 0, (int)read);

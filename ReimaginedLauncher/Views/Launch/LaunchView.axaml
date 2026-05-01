@@ -101,7 +101,8 @@
                                            VerticalAlignment="Center" />
                             </StackPanel>
                         </StackPanel>
-                        <Button Grid.Column="1"
+                        <Button x:Name="BrowseInstallDirectoryButton"
+                                Grid.Column="1"
                                 Content="Browse"
                                 Click="OnInstallDirectoryClick"
                                 VerticalContentAlignment="Center" />

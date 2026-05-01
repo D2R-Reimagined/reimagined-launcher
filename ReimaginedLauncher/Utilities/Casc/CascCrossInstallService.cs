@@ -214,7 +214,7 @@ public sealed class CascCrossInstallService
             ?? throw new InvalidOperationException("Source CASC storage failed to open after eligibility check.");
 
         var plan = await _delta
-            .PlanAsync(source, targetInstallDirectory, filter, cancellationToken)
+            .PlanAsync(source, targetInstallDirectory, filter, indexProgress: null, cancellationToken)
             .ConfigureAwait(false);
 
         return await _delta
