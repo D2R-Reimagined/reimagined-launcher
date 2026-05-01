@@ -52,6 +52,31 @@
        </None>
      </ItemGroup>
 
+     <!--
+        CascLib native binaries (MIT, Ladislav Zezula).
+        Launcher is Windows-only (WinExe + win-x64 RID), so only the Windows
+        DLL is wired here. The DLL is copied to the output root so default
+        P/Invoke resolution finds it without any custom resolver, on either
+        a framework-dependent or self-contained publish
+        (IncludeNativeLibrariesForSelfExtract=true).
+        A vendored linux-x64 libcasc.so is kept in-tree under
+        runtimes/linux-x64/native/ for a future Linux contributor to wire up.
+        See runtimes/README.md for attribution and update procedure.
+     -->
+     <ItemGroup>
+       <!-- Windows: copy DLL to output root so default P/Invoke resolution finds it. -->
+       <None Include="runtimes\win-x64\native\CascLib.dll" Condition="Exists('runtimes\win-x64\native\CascLib.dll')">
+         <Link>CascLib.dll</Link>
+         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+         <Pack>false</Pack>
+       </None>
+       <None Include="runtimes\CascLib.LICENSE" Condition="Exists('runtimes\CascLib.LICENSE')">
+         <Link>CascLib.LICENSE</Link>
+         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+         <Pack>false</Pack>
+       </None>
+     </ItemGroup>
+
 </Project>
 
 
