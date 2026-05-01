@@ -25,6 +25,7 @@ using ReimaginedLauncher.Utilities.Json;
 using ReimaginedLauncher.Utilities.ViewModels;
 using Avalonia;
 using ReimaginedLauncher.Views.Backups;
+using ReimaginedLauncher.Views.CascFastload;
 using ReimaginedLauncher.Views.Launch;
 using ReimaginedLauncher.Views.ModTweaks;
 using ReimaginedLauncher.Views.NewsAnnouncements;
@@ -692,6 +693,9 @@ public partial class MainWindow : Window
                 case "Backups":
                     _ = NavigateToBackupsViewAsync();
                     break;
+                case "CascFastload":
+                    _ = NavigateToCascFastloadViewAsync();
+                    break;
                 case "Plugins":
                     _ = NavigateToPluginsViewAsync();
                     break;
@@ -871,6 +875,20 @@ public partial class MainWindow : Window
                 }
             });
         }
+    }
+
+    public async Task NavigateToCascFastloadViewAsync()
+    {
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            var view = new CascFastloadView();
+            ContentArea.Content = view;
+
+            if (CascFastloadNavItem != null && NavigationList.SelectedItem != CascFastloadNavItem)
+            {
+                NavigationList.SelectedItem = CascFastloadNavItem;
+            }
+        });
     }
 
     public async Task NavigateToPluginsViewAsync()
