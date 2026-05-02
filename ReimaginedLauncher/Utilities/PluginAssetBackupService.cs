@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -24,35 +23,20 @@ public static class PluginAssetBackupService
     // Single-writer guard: all public mutators serialize through this semaphore.
     private static readonly SemaphoreSlim ServiceLock = new(1, 1);
 
-    // Targets already refreshed during the current apply pass.
-    private static readonly HashSet<string> RefreshedThisPass = new(StringComparer.OrdinalIgnoreCase);
-
-    // First plugin id to claim each target during the current apply pass; later claimants
-    // emit a conflict warning (last-applied wins).
-    private static readonly Dictionary<string, string> FirstClaimantThisPass = new(StringComparer.OrdinalIgnoreCase);
-
     public static string BackupRootDirectory =>
         Path.Combine(SettingsManager.AppDirectoryPath, BackupRootDirectoryName);
 
     private static string ManifestPath => Path.Combine(BackupRootDirectory, ManifestFileName);
 
-    /// <summary>Resets per-pass snapshot tracking; call once at the start of each plugin apply pass.</summary>
-    public static async Task BeginApplyPassAsync()
-    {
-        await ServiceLock.WaitAsync().ConfigureAwait(false);
-        try
-        {
-            RefreshedThisPass.Clear();
-            FirstClaimantThisPass.Clear();
-        }
-        finally
-        {
-            ServiceLock.Release();
-        }
-    }
-
     /// <summary>
-    /// Registers <paramref name="pluginId"/> as a claimant of <paramref name="destinationAbsolutePath"/>; snapshots the original on first sight and refreshes once per apply pass if the on-disk hash changed.
+    /// Records that <paramref name="pluginId"/> is about to overwrite the file
+    /// at <paramref name="destinationAbsolutePath"/>. The first time a target
+    /// is seen, the existing file (if any) is copied into the backup store so
+    /// it can be restored later. Subsequent calls only register the plugin as
+    /// an additional claimant; the snapshot is never refreshed mid-launch,
+    /// because <see cref="RestoreAllAsync"/> is invoked at the start of every
+    /// Start Game pass and clears the manifest, so any entry observed during a
+    /// pass already represents the true pre-plugin original.
     /// </summary>
     public static async Task RegisterReplacementAsync(string pluginId, string destinationAbsolutePath)
     {
@@ -86,40 +70,18 @@ public static class PluginAssetBackupService
                 entry = new PluginAssetBackupEntry { TargetAbsolutePath = normalizedTarget };
                 manifest.Entries.Add(entry);
                 await CaptureSnapshotAsync(entry, normalizedTarget).ConfigureAwait(false);
-                RefreshedThisPass.Add(normalizedTarget);
             }
-            else if (RefreshedThisPass.Add(normalizedTarget) &&
-                     await ShouldRefreshSnapshotAsync(entry, normalizedTarget).ConfigureAwait(false))
-            {
-                if (!string.IsNullOrWhiteSpace(entry.BackupAbsolutePath))
-                {
-                    TryDeleteFile(entry.BackupAbsolutePath);
-                }
 
-                await CaptureSnapshotAsync(entry, normalizedTarget).ConfigureAwait(false);
-            }
+            // If the entry already exists we deliberately do NOT re-snapshot:
+            // the on-disk file at this point is whatever a prior step wrote
+            // (e.g. the same plugin's asset copied during an earlier excel
+            // directory pass within this launch), so re-capturing would
+            // overwrite the genuine original with the plugin asset itself --
+            // exactly the bug that left files on disk after disabling.
 
             if (!entry.ClaimingPluginIds.Contains(pluginId, StringComparer.OrdinalIgnoreCase))
             {
                 entry.ClaimingPluginIds.Add(pluginId);
-            }
-
-            // Conflict detection: warn when more than one plugin claims the same target this pass.
-            if (FirstClaimantThisPass.TryGetValue(normalizedTarget, out var firstClaimant))
-            {
-                if (!string.Equals(firstClaimant, pluginId, StringComparison.OrdinalIgnoreCase))
-                {
-                    var fileName = Path.GetFileName(normalizedTarget);
-                    LaunchDiagnostics.Log(
-                        $"Plugin asset conflict on '{fileName}': plugin '{pluginId}' overrides plugin '{firstClaimant}'.");
-                    Notifications.SendNotification(
-                        $"Plugin conflict: '{fileName}' is claimed by multiple enabled plugins; the last-applied plugin's edits will win.",
-                        "Warning");
-                }
-            }
-            else
-            {
-                FirstClaimantThisPass[normalizedTarget] = pluginId;
             }
 
             SaveManifestUnsafe(manifest);
@@ -131,7 +93,83 @@ public static class PluginAssetBackupService
     }
 
     /// <summary>
-    /// Restores targets claimed by <paramref name="pluginId"/>; copy-back only runs after the last claimant releases. Failed restores keep the entry for retry.
+    /// Restores every tracked target back to its pre-plugin state regardless
+    /// of which plugin currently claims it. Intended to be called at the very
+    /// start of a Start Game pass so the on-disk mod folder is genuinely
+    /// pristine before tweaks and plugins are reapplied; this prevents the
+    /// next snapshot from capturing a previous run's plugin asset as the
+    /// "original". Entries whose restore fails are preserved in the manifest
+    /// so the failure can be retried on the next launch.
+    /// </summary>
+    public static async Task RestoreAllAsync()
+    {
+        await ServiceLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            var manifest = LoadManifestUnsafe();
+            if (manifest.Entries.Count == 0)
+            {
+                return;
+            }
+
+            var restoredEntries = new List<PluginAssetBackupEntry>();
+
+            foreach (var entry in manifest.Entries)
+            {
+                try
+                {
+                    if (entry.OriginalExisted &&
+                        !string.IsNullOrWhiteSpace(entry.BackupAbsolutePath) &&
+                        File.Exists(entry.BackupAbsolutePath))
+                    {
+                        var destinationFolder = Path.GetDirectoryName(entry.TargetAbsolutePath);
+                        if (!string.IsNullOrWhiteSpace(destinationFolder))
+                        {
+                            Directory.CreateDirectory(destinationFolder);
+                        }
+
+                        await FileCopyHelper.CopyFileAsync(entry.BackupAbsolutePath, entry.TargetAbsolutePath)
+                            .ConfigureAwait(false);
+                        TryDeleteFile(entry.BackupAbsolutePath);
+                    }
+                    else if (!entry.OriginalExisted && File.Exists(entry.TargetAbsolutePath))
+                    {
+                        TryDeleteFile(entry.TargetAbsolutePath);
+                    }
+
+                    restoredEntries.Add(entry);
+                }
+                catch (Exception ex)
+                {
+                    LaunchDiagnostics.LogException(
+                        $"Failed to restore plugin asset '{entry.TargetAbsolutePath}'", ex);
+                    Notifications.SendNotification(
+                        $"Failed to restore '{Path.GetFileName(entry.TargetAbsolutePath)}': {ex.Message}",
+                        "Warning");
+
+                    // Leave the entry intact so the next Start Game pass can
+                    // retry the restore instead of orphaning the backup.
+                }
+            }
+
+            if (restoredEntries.Count > 0)
+            {
+                manifest.Entries.RemoveAll(restoredEntries.Contains);
+                SaveManifestUnsafe(manifest);
+            }
+        }
+        finally
+        {
+            ServiceLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Restores every target previously claimed by <paramref name="pluginId"/>.
+    /// Other enabled plugins that still claim the same target keep the backup
+    /// in place; the actual copy back to disk only happens once the last
+    /// claimant releases the target. If a restore fails the entry is preserved
+    /// so the user can retry later.
     /// </summary>
     public static async Task RestoreForPluginAsync(string pluginId)
     {
@@ -237,51 +275,12 @@ public static class PluginAssetBackupService
 
             entry.OriginalExisted = true;
             entry.BackupAbsolutePath = backupPath;
-            entry.OriginalHash = await ComputeFileHashAsync(targetPath).ConfigureAwait(false);
         }
         else
         {
             entry.OriginalExisted = false;
             entry.BackupAbsolutePath = null;
-            entry.OriginalHash = null;
         }
-    }
-
-    private static async Task<bool> ShouldRefreshSnapshotAsync(PluginAssetBackupEntry entry, string targetPath)
-    {
-        var targetExists = File.Exists(targetPath);
-        if (!entry.OriginalExisted && !targetExists)
-        {
-            return false;
-        }
-
-        if (entry.OriginalExisted != targetExists)
-        {
-            return true;
-        }
-
-        if (!targetExists)
-        {
-            return false;
-        }
-
-        if (string.IsNullOrWhiteSpace(entry.OriginalHash))
-        {
-            // Entry was created before hashes were tracked; refresh once so
-            // future passes can compare against a known-good baseline.
-            return true;
-        }
-
-        var currentHash = await ComputeFileHashAsync(targetPath).ConfigureAwait(false);
-        return !string.Equals(currentHash, entry.OriginalHash, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static async Task<string> ComputeFileHashAsync(string path)
-    {
-        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        using var sha = SHA256.Create();
-        var bytes = await sha.ComputeHashAsync(stream).ConfigureAwait(false);
-        return Convert.ToHexString(bytes);
     }
 
     private static PluginAssetBackupManifest LoadManifestUnsafe()
@@ -381,7 +380,6 @@ public static class PluginAssetBackupService
         public string TargetAbsolutePath { get; set; } = string.Empty;
         public string? BackupAbsolutePath { get; set; }
         public bool OriginalExisted { get; set; }
-        public string? OriginalHash { get; set; }
         public List<string> ClaimingPluginIds { get; set; } = new();
     }
 }

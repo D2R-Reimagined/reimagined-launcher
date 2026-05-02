@@ -523,13 +523,292 @@ public static class PluginsService
         return true;
     }
 
-    public static async Task ApplyEnabledPluginsAsync(string excelDirectory, IProgress<string>? progress = null)
+    /// <summary>
+    /// Applies the excel-directory-scoped portion of every enabled plugin to
+    /// <paramref name="excelDirectory"/> -- i.e. operations that target a .txt
+    /// file inside the excel folder via the parser registry. The launcher
+    /// invokes this once per excel directory (e.g. <c>excel</c> and
+    /// <c>excel/base</c>) because those directories ship distinct .txt
+    /// content. Mod-root-relative work (missiles.json, monsters.json, strings,
+    /// asset copies) is intentionally NOT performed here -- it runs exactly
+    /// once per launch via <see cref="ApplyEnabledPluginsModRootAsync"/> so
+    /// the plugin asset backup service registers each destination a single
+    /// time per pass.
+    /// </summary>
+    public static async Task ApplyEnabledPluginsExcelAsync(string excelDirectory, IProgress<string>? progress = null)
     {
         MainWindow.Settings.CurrentProfile.Plugins ??= [];
 
-        // Notify the backup service that a fresh apply pass is starting so it
-        // can re-snapshot any targets the launcher regenerated since last run.
-        await PluginAssetBackupService.BeginApplyPassAsync();
+        foreach (var registration in MainWindow.Settings.CurrentProfile.Plugins.Where(plugin => plugin.IsEnabled))
+        {
+            var pluginState = await LoadPluginStateAsync(registration);
+            if (pluginState.Errors.Count > 0)
+            {
+                // Errors and authoring warnings are emitted once per launch
+                // from ApplyEnabledPluginsModRootAsync; skip silently here.
+                continue;
+            }
+
+            try
+            {
+                // Build the parameter dictionary once per plugin instead of
+                // per file; the values are constant for the entire apply pass.
+                var parameters = pluginState.Parameters.ToDictionary(
+                    parameter => parameter.Key,
+                    parameter => parameter.Value,
+                    StringComparer.OrdinalIgnoreCase);
+
+                var hasExcelWork = false;
+                foreach (var pluginFile in pluginState.Files)
+                {
+                    var operations = await LoadPluginOperationsAsync(GetPluginFilePath(registration.Id, pluginFile.RelativePath));
+                    var filtered = FilterConditionalOperations(operations, parameters, pluginState.Name, pluginFile.RelativePath);
+                    if (filtered.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    if (!hasExcelWork)
+                    {
+                        ReportProgress(progress, $"Applying plugin {pluginState.Name} (excel)...");
+                        hasExcelWork = true;
+                    }
+
+                    await ApplyExcelOperationsAsync(excelDirectory, filtered, parameters);
+                }
+            }
+            catch (Exception ex)
+            {
+                LaunchDiagnostics.LogException($"Failed to apply plugin '{pluginState.Name}' (excel)", ex);
+                Notifications.SendNotification($"Plugin '{pluginState.Name}' failed: {ex.Message}", "Warning");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Surfaces an authoring/load-order warning when two or more enabled plugins
+    /// declare an asset copy targeting the same destination under
+    /// <paramref name="modRoot"/>. Last-writer-wins semantics are unchanged --
+    /// this only makes the silent override visible. Conditional assets whose
+    /// <c>Condition</c> evaluates to <c>false</c> for the current parameters are
+    /// excluded from the collision set, and collisions where every claimant
+    /// ships byte-identical source bytes are demoted to a diagnostics-log entry
+    /// (no user-facing notification) since they cannot actually disagree.
+    /// Intended to be called once per launch, before the four pre-stage entry
+    /// points and <see cref="ApplyEnabledPluginsModRootAsync"/> run.
+    /// </summary>
+    public static async Task WarnAssetCollisionsAsync(string modRoot, IProgress<string>? progress = null)
+    {
+        if (string.IsNullOrWhiteSpace(modRoot))
+        {
+            return;
+        }
+
+        MainWindow.Settings.CurrentProfile.Plugins ??= [];
+
+        var modRootFull = Path.GetFullPath(modRoot);
+        var claimants = new Dictionary<string, List<AssetClaim>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var registration in MainWindow.Settings.CurrentProfile.Plugins.Where(plugin => plugin.IsEnabled))
+        {
+            PluginState pluginState;
+            try
+            {
+                pluginState = await LoadPluginStateAsync(registration);
+            }
+            catch
+            {
+                // Loading failures surface from ApplyEnabledPluginsModRootAsync;
+                // skip silently here so the same plugin is not double-reported.
+                continue;
+            }
+
+            if (pluginState.Errors.Count > 0 || pluginState.Assets.Count == 0)
+            {
+                continue;
+            }
+
+            var parameterValues = pluginState.Parameters.ToDictionary(
+                parameter => parameter.Key,
+                parameter => parameter.Value,
+                StringComparer.OrdinalIgnoreCase);
+
+            foreach (var asset in pluginState.Assets)
+            {
+                if (asset.Condition != null && !EvaluateCondition(asset.Condition, parameterValues))
+                {
+                    continue;
+                }
+
+                string destinationFull;
+                try
+                {
+                    destinationFull = Path.GetFullPath(Path.Combine(modRootFull, asset.TargetRelativePath));
+                }
+                catch
+                {
+                    // Path resolution failures are reported by the canonical
+                    // apply pass; ignore here to avoid duplicate notifications.
+                    continue;
+                }
+
+                if (!claimants.TryGetValue(destinationFull, out var list))
+                {
+                    list = new List<AssetClaim>();
+                    claimants[destinationFull] = list;
+                }
+
+                list.Add(new AssetClaim(pluginState.Name, asset.SourceAbsolutePath, asset.TargetRelativePath));
+            }
+        }
+
+        foreach (var (destinationFull, list) in claimants)
+        {
+            if (list.Count < 2)
+            {
+                continue;
+            }
+
+            var relative = TryGetModRootRelativePath(modRootFull, destinationFull);
+            var winner = list[^1];
+            var losers = list.Take(list.Count - 1).ToList();
+
+            // If every claimant ships byte-identical source bytes the override
+            // cannot disagree. Log it for auditability but do not raise a
+            // warning notification -- otherwise authors who legitimately
+            // bundle the same upstream file in two compatible plugins would
+            // see noise on every launch.
+            if (await AreAllSourcesIdenticalAsync(list))
+            {
+                LaunchDiagnostics.Log(
+                    $"Asset collision on '{relative}': {list.Count} plugins ship identical bytes; "
+                    + $"resolving to '{winner.PluginName}' (load-order last).");
+                continue;
+            }
+
+            var loserList = string.Join(", ", losers.Select(c => $"'{c.PluginName}'"));
+            var message =
+                $"Asset collision on '{relative}': {loserList} will be overwritten by "
+                + $"'{winner.PluginName}' (later in load order).";
+
+            ReportProgress(progress, message);
+            LaunchDiagnostics.Log(message);
+            Notifications.SendNotification(message, "Warning");
+        }
+    }
+
+    private sealed record AssetClaim(string PluginName, string SourceAbsolutePath, string TargetRelativePath);
+
+    private static string TryGetModRootRelativePath(string modRootFull, string destinationFull)
+    {
+        try
+        {
+            var relative = Path.GetRelativePath(modRootFull, destinationFull);
+            return string.IsNullOrEmpty(relative) ? destinationFull : relative;
+        }
+        catch
+        {
+            return destinationFull;
+        }
+    }
+
+    // Cheap structural compare: short-circuit on length mismatch, then stream
+    // both files in matched chunks. No crypto -- mirrors the launcher's
+    // existing "no hashing for parser-managed paths" stance.
+    private static async Task<bool> AreAllSourcesIdenticalAsync(IReadOnlyList<AssetClaim> claims)
+    {
+        if (claims.Count < 2)
+        {
+            return true;
+        }
+
+        try
+        {
+            var firstInfo = new FileInfo(claims[0].SourceAbsolutePath);
+            if (!firstInfo.Exists)
+            {
+                return false;
+            }
+
+            var firstLength = firstInfo.Length;
+            for (var i = 1; i < claims.Count; i++)
+            {
+                var info = new FileInfo(claims[i].SourceAbsolutePath);
+                if (!info.Exists || info.Length != firstLength)
+                {
+                    return false;
+                }
+            }
+
+            const int bufferSize = 64 * 1024;
+            var streams = new FileStream[claims.Count];
+            try
+            {
+                for (var i = 0; i < claims.Count; i++)
+                {
+                    streams[i] = new FileStream(
+                        claims[i].SourceAbsolutePath,
+                        FileMode.Open, FileAccess.Read, FileShare.Read,
+                        bufferSize, useAsync: true);
+                }
+
+                var firstBuffer = new byte[bufferSize];
+                var otherBuffer = new byte[bufferSize];
+
+                while (true)
+                {
+                    var firstRead = await streams[0].ReadAsync(firstBuffer.AsMemory(0, bufferSize));
+                    if (firstRead == 0)
+                    {
+                        return true;
+                    }
+
+                    for (var i = 1; i < streams.Length; i++)
+                    {
+                        var totalRead = 0;
+                        while (totalRead < firstRead)
+                        {
+                            var read = await streams[i].ReadAsync(otherBuffer.AsMemory(totalRead, firstRead - totalRead));
+                            if (read == 0)
+                            {
+                                return false;
+                            }
+                            totalRead += read;
+                        }
+
+                        if (!firstBuffer.AsSpan(0, firstRead).SequenceEqual(otherBuffer.AsSpan(0, firstRead)))
+                        {
+                            return false;
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                foreach (var stream in streams)
+                {
+                    stream?.Dispose();
+                }
+            }
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Applies the mod-root-scoped portion of every enabled plugin under
+    /// <paramref name="modRoot"/>: missiles.json, monsters.json, the strings
+    /// translation files, and all asset copies (including the animdata.d2 /
+    /// exanimdata.d2 pair sync). Authoring warnings and per-plugin errors are
+    /// also emitted from here so users see them exactly once per launch
+    /// regardless of how many excel directories
+    /// <see cref="ApplyEnabledPluginsExcelAsync"/> iterates over.
+    /// </summary>
+    public static async Task ApplyEnabledPluginsModRootAsync(string modRoot, IProgress<string>? progress = null)
+    {
+        MainWindow.Settings.CurrentProfile.Plugins ??= [];
 
         foreach (var registration in MainWindow.Settings.CurrentProfile.Plugins.Where(plugin => plugin.IsEnabled))
         {
@@ -552,8 +831,6 @@ public static class PluginsService
 
             try
             {
-                // Build the parameter dictionary once per plugin instead of
-                // per file; the values are constant for the entire apply pass.
                 var parameters = pluginState.Parameters.ToDictionary(
                     parameter => parameter.Key,
                     parameter => parameter.Value,
@@ -562,32 +839,18 @@ public static class PluginsService
                 foreach (var pluginFile in pluginState.Files)
                 {
                     var operations = await LoadPluginOperationsAsync(GetPluginFilePath(registration.Id, pluginFile.RelativePath));
-
-                    // Drop operations whose declarative condition evaluates to false; preserve order.
-                    var filtered = new List<PluginJsonOperation>(operations.Count);
-                    foreach (var op in operations)
-                    {
-                        if (op.Condition != null && !EvaluateCondition(op.Condition, parameters))
-                        {
-                            LaunchDiagnostics.Log(
-                                $"Plugin '{pluginState.Name}': skipped conditional operation in '{pluginFile.RelativePath}' targeting '{op.File}'.");
-                            continue;
-                        }
-
-                        filtered.Add(op);
-                    }
-
+                    var filtered = FilterConditionalOperations(operations, parameters, pluginState.Name, pluginFile.RelativePath);
                     if (filtered.Count == 0)
                     {
                         continue;
                     }
 
-                    await ApplyOperationsAsync(excelDirectory, filtered, parameters);
+                    await ApplyModRootOperationsAsync(modRoot, filtered, parameters);
                 }
 
                 if (pluginState.Assets.Count > 0)
                 {
-                    await ApplyPluginAssetsAsync(excelDirectory, registration.Id, pluginState, progress);
+                    await ApplyPluginAssetsAsync(modRoot, registration.Id, pluginState, progress);
                 }
             }
             catch (Exception ex)
@@ -598,13 +861,267 @@ public static class PluginsService
         }
     }
 
-    // animdata.d2 / exanimdata.d2 are read as a pair; SyncAnimDataPairAsync mirrors single-side edits.
+    /// <summary>
+    /// Pre-stages plugin asset copies whose target lies *directly* under the supplied
+    /// <paramref name="excelDirectory"/>. Called from the per-excel-directory loop after
+    /// the launcher's clean variant has been copied into place and before parser ops
+    /// run, so plugin parser ops layer on top of the wholesale replacement
+    /// (clean -> plugin asset -> launcher tweaks -> plugin parser ops).
+    /// No backup is registered with <see cref="PluginAssetBackupService"/> because the
+    /// launcher's clean-copy step is the recovery mechanism for excel files.
+    /// </summary>
+    public static Task ApplyEnabledPluginsExcelAssetsAsync(string modRoot, string excelDirectory, IProgress<string>? progress = null)
+    {
+        if (string.IsNullOrWhiteSpace(modRoot) || string.IsNullOrWhiteSpace(excelDirectory))
+        {
+            return Task.CompletedTask;
+        }
+
+        var excelFull = Path.GetFullPath(excelDirectory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        // Match assets whose direct parent directory is the supplied excel directory --
+        // assets under <excel>/base are pre-staged on the base pass instead, so each
+        // excel iteration only touches files that variant actually owns.
+        return ApplyPreStagedAssetsAsync(
+            modRoot,
+            "excel",
+            destinationFull => string.Equals(
+                Path.GetDirectoryName(destinationFull),
+                excelFull,
+                StringComparison.OrdinalIgnoreCase),
+            progress);
+    }
+
+    /// <summary>
+    /// Pre-stages plugin asset copies whose target is the mod's missiles.json. Called
+    /// after <c>RestoreMissilesFileAsync</c> and before <c>ApplyMissilesTweaksAsync</c>
+    /// so launcher tweaks and plugin parser ops both layer on top of the plugin asset.
+    /// </summary>
+    public static Task ApplyEnabledPluginsMissilesAssetsAsync(string modRoot, IProgress<string>? progress = null)
+    {
+        if (string.IsNullOrWhiteSpace(modRoot))
+        {
+            return Task.CompletedTask;
+        }
+
+        var missilesFull = Path.GetFullPath(Path.Combine(modRoot, "data", "hd", "missiles", MissilesTargetFileName));
+
+        return ApplyPreStagedAssetsAsync(
+            modRoot,
+            "missiles",
+            destinationFull => string.Equals(destinationFull, missilesFull, StringComparison.OrdinalIgnoreCase),
+            progress);
+    }
+
+    /// <summary>
+    /// Pre-stages plugin asset copies whose target is the mod's monsters.json. Called
+    /// after <c>RestoreMonstersFileAsync</c> so plugin parser ops layer on top.
+    /// </summary>
+    public static Task ApplyEnabledPluginsMonstersAssetsAsync(string modRoot, IProgress<string>? progress = null)
+    {
+        if (string.IsNullOrWhiteSpace(modRoot))
+        {
+            return Task.CompletedTask;
+        }
+
+        var monstersFull = Path.GetFullPath(Path.Combine(modRoot, "data", "hd", "character", MonstersTargetFileName));
+
+        return ApplyPreStagedAssetsAsync(
+            modRoot,
+            "monsters",
+            destinationFull => string.Equals(destinationFull, monstersFull, StringComparison.OrdinalIgnoreCase),
+            progress);
+    }
+
+    /// <summary>
+    /// Pre-stages plugin asset copies whose target is any .json file under
+    /// <c>data/local/lng/strings</c>. Called after <c>RestoreStringsFromCleanCopyAsync</c>
+    /// so plugin parser ops layer on top.
+    /// </summary>
+    public static Task ApplyEnabledPluginsStringsAssetsAsync(string modRoot, IProgress<string>? progress = null)
+    {
+        if (string.IsNullOrWhiteSpace(modRoot))
+        {
+            return Task.CompletedTask;
+        }
+
+        var stringsRootFull = Path.GetFullPath(Path.Combine(modRoot, "data", "local", "lng", "strings"))
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var stringsPrefix = stringsRootFull + Path.DirectorySeparatorChar;
+
+        return ApplyPreStagedAssetsAsync(
+            modRoot,
+            "strings",
+            destinationFull =>
+                destinationFull.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                && destinationFull.StartsWith(stringsPrefix, StringComparison.OrdinalIgnoreCase),
+            progress);
+    }
+
+    // Shared body for the four pre-stage entry points above. Iterates enabled
+    // plugins in load order, evaluates each asset's condition, validates the
+    // resolved destination stays inside the mod root, and copies via
+    // FileCopyHelper -- no backup registration, because the caller has just
+    // restored the destination from a launcher-managed clean copy.
+    private static async Task ApplyPreStagedAssetsAsync(
+        string modRoot,
+        string scopeLabel,
+        Func<string, bool> destinationIsInScope,
+        IProgress<string>? progress)
+    {
+        MainWindow.Settings.CurrentProfile.Plugins ??= [];
+        var modRootFull = Path.GetFullPath(modRoot);
+
+        foreach (var registration in MainWindow.Settings.CurrentProfile.Plugins.Where(plugin => plugin.IsEnabled))
+        {
+            var pluginState = await LoadPluginStateAsync(registration);
+            if (pluginState.Errors.Count > 0 || pluginState.Assets.Count == 0)
+            {
+                // Errors and authoring warnings are emitted once per launch from
+                // ApplyEnabledPluginsModRootAsync -- skip silently here so users
+                // do not see them N times across the four pre-stage passes.
+                continue;
+            }
+
+            var parameterValues = pluginState.Parameters.ToDictionary(
+                parameter => parameter.Key,
+                parameter => parameter.Value,
+                StringComparer.OrdinalIgnoreCase);
+
+            var announced = false;
+            foreach (var asset in pluginState.Assets)
+            {
+                string destinationFull;
+                try
+                {
+                    destinationFull = Path.GetFullPath(Path.Combine(modRootFull, asset.TargetRelativePath));
+                }
+                catch
+                {
+                    // Path resolution failures are reported by the canonical
+                    // ApplyPluginAssetsAsync pass; skip silently here.
+                    continue;
+                }
+
+                if (!destinationIsInScope(destinationFull))
+                {
+                    continue;
+                }
+
+                if (asset.Condition != null && !EvaluateCondition(asset.Condition, parameterValues))
+                {
+                    LaunchDiagnostics.Log(
+                        $"Plugin '{pluginState.Name}': skipped conditional asset '{asset.TargetRelativePath}' ({scopeLabel} pre-stage).");
+                    continue;
+                }
+
+                try
+                {
+                    var relative = Path.GetRelativePath(modRootFull, destinationFull);
+                    if (string.IsNullOrEmpty(relative) ||
+                        relative.StartsWith("..", StringComparison.Ordinal) ||
+                        Path.IsPathRooted(relative))
+                    {
+                        throw new InvalidDataException(
+                            $"Asset target '{asset.TargetRelativePath}' resolves outside the mod folder.");
+                    }
+
+                    if (!announced)
+                    {
+                        ReportProgress(progress, $"Pre-staging {scopeLabel} assets for {pluginState.Name}...");
+                        announced = true;
+                    }
+
+                    await FileCopyHelper.CopyFileAsync(asset.SourceAbsolutePath, destinationFull);
+                    LaunchDiagnostics.Log(
+                        $"Plugin '{pluginState.Name}': pre-staged {scopeLabel} asset '{asset.TargetRelativePath}'.");
+                    ReportProgress(progress, $"Copied asset to {asset.TargetRelativePath}.");
+                }
+                catch (Exception ex)
+                {
+                    LaunchDiagnostics.LogException(
+                        $"Failed to pre-stage {scopeLabel} asset '{asset.TargetRelativePath}' for plugin '{pluginState.Name}'", ex);
+                    Notifications.SendNotification(
+                        $"Plugin '{pluginState.Name}': failed to pre-stage asset '{asset.TargetRelativePath}': {ex.Message}",
+                        "Warning");
+                }
+            }
+        }
+    }
+
+    // Returns true if the supplied absolute destination sits inside one of the
+    // launcher's clean-copy-managed scopes (excel, missiles, monsters, strings).
+    // Such destinations are pre-staged earlier in the launch pipeline and must
+    // be skipped by ApplyPluginAssetsAsync to avoid double-writing the file and
+    // registering a redundant backup -- restoration is handled by the next
+    // launch's clean-copy step rather than by PluginAssetBackupService.
+    private static bool IsAssetTargetCleanCovered(string modRootFull, string destinationFull)
+    {
+        var excelDir = Path.GetFullPath(Path.Combine(modRootFull, "data", "global", "excel"))
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (destinationFull.StartsWith(excelDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var missilesFull = Path.GetFullPath(Path.Combine(modRootFull, "data", "hd", "missiles", MissilesTargetFileName));
+        if (string.Equals(destinationFull, missilesFull, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var monstersFull = Path.GetFullPath(Path.Combine(modRootFull, "data", "hd", "character", MonstersTargetFileName));
+        if (string.Equals(destinationFull, monstersFull, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var stringsRootFull = Path.GetFullPath(Path.Combine(modRootFull, "data", "local", "lng", "strings"))
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (destinationFull.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+            && destinationFull.StartsWith(stringsRootFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    // Drops any operation whose declarative condition evaluates to false
+    // against the plugin's effective parameter values; preserves the original
+    // operation order for the remaining entries so the apply pipeline behaves
+    // identically when no conditions are present.
+    private static List<PluginJsonOperation> FilterConditionalOperations(
+        IReadOnlyList<PluginJsonOperation> operations,
+        IReadOnlyDictionary<string, string> parameters,
+        string pluginName,
+        string pluginRelativePath)
+    {
+        var filtered = new List<PluginJsonOperation>(operations.Count);
+        foreach (var op in operations)
+        {
+            if (op.Condition != null && !EvaluateCondition(op.Condition, parameters))
+            {
+                LaunchDiagnostics.Log(
+                    $"Plugin '{pluginName}': skipped conditional operation in '{pluginRelativePath}' targeting '{op.File}'.");
+                continue;
+            }
+
+            filtered.Add(op);
+        }
+
+        return filtered;
+    }
+
+    // Pair of binary files D2R reads as a unit. If a plugin replaces only one
+    // of the two, the launcher mirrors the replacement onto the other so the
+    // game does not see a mismatched pair (see SyncAnimDataPairAsync below).
     private const string AnimDataRelativePath = "data/global/animdata.d2";
     private const string ExAnimDataRelativePath = "data/global/exanimdata.d2";
 
-    private static async Task ApplyPluginAssetsAsync(string excelDirectory, string pluginId, PluginState pluginState, IProgress<string>? progress)
+    private static async Task ApplyPluginAssetsAsync(string modRoot, string pluginId, PluginState pluginState, IProgress<string>? progress)
     {
-        var modRoot = ResolveModRootDirectory(excelDirectory);
         if (string.IsNullOrWhiteSpace(modRoot))
         {
             ReportProgress(progress, $"Skipped assets for plugin '{pluginState.Name}': mod root could not be resolved.");
@@ -648,6 +1165,20 @@ public static class PluginsService
                 {
                     throw new InvalidDataException(
                         $"Asset target '{asset.TargetRelativePath}' resolves outside the mod folder.");
+                }
+
+                // Destinations covered by a launcher-managed clean copy are
+                // pre-staged earlier in the launch pipeline (before parser ops
+                // run) so plugin parser ops can layer on top of the wholesale
+                // replacement. Skip them here to avoid double-writing the file
+                // and registering a redundant backup; the next launch's
+                // clean-copy step is the recovery mechanism, not the backup
+                // service.
+                if (IsAssetTargetCleanCovered(modRootFull, destinationPath))
+                {
+                    LaunchDiagnostics.Log(
+                        $"Plugin '{pluginState.Name}': asset '{asset.TargetRelativePath}' was pre-staged earlier; skipping mod-root pass.");
+                    continue;
                 }
 
                 // Capture the pre-plugin original (if any) before we overwrite it,
@@ -739,31 +1270,41 @@ public static class PluginsService
         }
     }
 
-    private static string? ResolveModRootDirectory(string excelDirectory)
-    {
-        // excelDirectory is expected to be "<modRoot>/data/global/excel" (or a base/ variant beneath it).
-        // Walk up until we find the parent of a "data" segment to get the mod root.
-        var current = new DirectoryInfo(excelDirectory);
-        while (current is not null)
-        {
-            if (string.Equals(current.Name, "data", StringComparison.OrdinalIgnoreCase) && current.Parent is not null)
-            {
-                return current.Parent.FullName;
-            }
-
-            current = current.Parent;
-        }
-
-        return null;
-    }
-
     public static string GetSupportedTargetsSummary()
     {
         return "All .txt files in the base excel folder are supported except itemstatcost.txt. Most files match rows by a unique column; files with duplicate values in their identifier column use a numeric row ID (0-based data row index) instead. Multiply-existing and append operations can reference parameters declared in plugininfo.json. String JSON files from data/local/lng/strings (e.g. item-runes.json) are also supported using the same flat d2rr-style layout: each entry lists the target file, the D2R Key, and one or more language fields (enUS, zhTW, deDE, esES, frFR, itIT, koKR, plPL, esMX, jaJP, ptBR, ruRU, zhCN); only the listed languages are replaced and any other languages on that entry are left untouched. The missiles.json file at data/hd/missiles/missiles.json is also supported: each entry lists the target file, a Key, and an updatedValue (or parameterKey) to write; addRow appends a new key/value pair while preserving the existing JSON formatting. The monsters.json file at data/hd/character/monsters.json shares the same layout and is supported with the same {file, Key, updatedValue|parameterKey, [operation]} shape and addRow semantics.";
     }
 
-    private static async Task ApplyOperationsAsync(
+    // Dispatches the subset of plugin operations whose target lives inside the
+    // excel directory (i.e. .txt files routed through ParserRegistry).
+    // Mod-root-relative targets are intentionally ignored here; they are
+    // dispatched by ApplyModRootOperationsAsync exactly once per launch.
+    private static async Task ApplyExcelOperationsAsync(
         string excelDirectory,
+        IReadOnlyList<PluginJsonOperation> operations,
+        IReadOnlyDictionary<string, string> parameters)
+    {
+        var fileNames = operations
+            .Where(operation => !string.IsNullOrWhiteSpace(operation.File) && IsSupportedTargetFile(operation.File))
+            .Select(operation => operation.File!)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var fileName in fileNames)
+        {
+            if (ParserRegistry.TryGetValue(fileName, out var registration))
+            {
+                await registration.ApplyAsync(excelDirectory, operations, parameters);
+            }
+        }
+    }
+
+    // Dispatches the subset of plugin operations whose target lives outside
+    // the excel directory but under the mod root (missiles.json,
+    // monsters.json, the strings translation files). Excel parser operations
+    // are intentionally ignored here; they are dispatched by
+    // ApplyExcelOperationsAsync once per excel directory.
+    private static async Task ApplyModRootOperationsAsync(
+        string modRoot,
         IReadOnlyList<PluginJsonOperation> operations,
         IReadOnlyDictionary<string, string> parameters)
     {
@@ -776,17 +1317,11 @@ public static class PluginsService
 
         foreach (var fileName in fileNames)
         {
-            if (ParserRegistry.TryGetValue(fileName, out var registration))
-            {
-                await registration.ApplyAsync(excelDirectory, operations, parameters);
-                continue;
-            }
-
             if (IsMissilesTargetFile(fileName))
             {
-                var missilesFilePath = ResolveMissilesFilePath(excelDirectory)
+                var missilesFilePath = ResolveMissilesFilePathFromModRoot(modRoot)
                     ?? throw new FileNotFoundException(
-                        $"Could not resolve {MissilesTargetFileName} ({MissilesRelativePath}) relative to '{excelDirectory}'.");
+                        $"Could not resolve {MissilesTargetFileName} ({MissilesRelativePath}) relative to mod root '{modRoot}'.");
 
                 await ApplyMissilesOperationsAsync(missilesFilePath, operations, parameters);
                 continue;
@@ -794,9 +1329,9 @@ public static class PluginsService
 
             if (IsMonstersTargetFile(fileName))
             {
-                var monstersFilePath = ResolveMonstersFilePath(excelDirectory)
+                var monstersFilePath = ResolveMonstersFilePathFromModRoot(modRoot)
                     ?? throw new FileNotFoundException(
-                        $"Could not resolve {MonstersTargetFileName} ({MonstersRelativePath}) relative to '{excelDirectory}'.");
+                        $"Could not resolve {MonstersTargetFileName} ({MonstersRelativePath}) relative to mod root '{modRoot}'.");
 
                 await ApplyMonstersOperationsAsync(monstersFilePath, operations, parameters);
                 continue;
@@ -804,16 +1339,48 @@ public static class PluginsService
 
             if (IsStringsTargetFile(fileName))
             {
-                resolvedStringsDirectory ??= ResolveStringsDirectory(excelDirectory)
+                resolvedStringsDirectory ??= ResolveStringsDirectoryFromModRoot(modRoot)
                     ?? throw new DirectoryNotFoundException(
-                        $"Could not resolve the strings directory ({StringsDirectoryRelativePath}) relative to '{excelDirectory}'.");
+                        $"Could not resolve the strings directory ({StringsDirectoryRelativePath}) relative to mod root '{modRoot}'.");
 
                 await ApplyStringsOperationsForTargetAsync(resolvedStringsDirectory, operations, fileName);
             }
         }
     }
 
-    // Replace-by-key and addRow dispatcher for missiles.json (preserves on-disk property order).
+    private static string? ResolveMissilesFilePathFromModRoot(string modRoot)
+    {
+        if (string.IsNullOrWhiteSpace(modRoot))
+        {
+            return null;
+        }
+
+        return Path.Combine(modRoot, "data", "hd", "missiles", MissilesTargetFileName);
+    }
+
+    private static string? ResolveMonstersFilePathFromModRoot(string modRoot)
+    {
+        if (string.IsNullOrWhiteSpace(modRoot))
+        {
+            return null;
+        }
+
+        return Path.Combine(modRoot, "data", "hd", "character", MonstersTargetFileName);
+    }
+
+    private static string? ResolveStringsDirectoryFromModRoot(string modRoot)
+    {
+        if (string.IsNullOrWhiteSpace(modRoot))
+        {
+            return null;
+        }
+
+        return Path.Combine(modRoot, "data", "local", "lng", "strings");
+    }
+
+    // Replace-by-key and addRow dispatcher for missiles.json. The file is a single JSON object
+    // mapping a missile key to a string asset; edits go through MissilesFileParser so the original
+    // property order and surrounding entries are preserved on disk.
     private static async Task ApplyMissilesOperationsAsync(
         string missilesFilePath,
         IReadOnlyList<PluginJsonOperation> operations,
@@ -896,27 +1463,6 @@ public static class PluginsService
                && string.Equals(fileName, MissilesTargetFileName, StringComparison.OrdinalIgnoreCase);
     }
 
-    // Resolves <modRoot>/data/hd/missiles/missiles.json from the excel directory.
-    private static string? ResolveMissilesFilePath(string excelDirectory)
-    {
-        if (string.IsNullOrWhiteSpace(excelDirectory))
-        {
-            return null;
-        }
-
-        var current = new DirectoryInfo(excelDirectory);
-        while (current != null && !string.Equals(current.Name, "data", StringComparison.OrdinalIgnoreCase))
-        {
-            current = current.Parent;
-        }
-
-        if (current == null)
-        {
-            return null;
-        }
-
-        return Path.Combine(current.FullName, "hd", "missiles", MissilesTargetFileName);
-    }
 
     // Replace-by-key and addRow dispatcher for monsters.json (same shape as missiles.json).
     private static async Task ApplyMonstersOperationsAsync(
@@ -1001,27 +1547,6 @@ public static class PluginsService
                && string.Equals(fileName, MonstersTargetFileName, StringComparison.OrdinalIgnoreCase);
     }
 
-    // Resolves <modRoot>/data/hd/character/monsters.json from the excel directory.
-    private static string? ResolveMonstersFilePath(string excelDirectory)
-    {
-        if (string.IsNullOrWhiteSpace(excelDirectory))
-        {
-            return null;
-        }
-
-        var current = new DirectoryInfo(excelDirectory);
-        while (current != null && !string.Equals(current.Name, "data", StringComparison.OrdinalIgnoreCase))
-        {
-            current = current.Parent;
-        }
-
-        if (current == null)
-        {
-            return null;
-        }
-
-        return Path.Combine(current.FullName, "hd", "character", MonstersTargetFileName);
-    }
 
     private static async Task ApplyStringsOperationsForTargetAsync(
         string stringsDirectory,
@@ -1094,26 +1619,6 @@ public static class PluginsService
         return fileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string? ResolveStringsDirectory(string excelDirectory)
-    {
-        if (string.IsNullOrWhiteSpace(excelDirectory))
-        {
-            return null;
-        }
-
-        var current = new DirectoryInfo(excelDirectory);
-        while (current != null && !string.Equals(current.Name, "data", StringComparison.OrdinalIgnoreCase))
-        {
-            current = current.Parent;
-        }
-
-        if (current == null)
-        {
-            return null;
-        }
-
-        return Path.Combine(current.FullName, "local", "lng", "strings");
-    }
 
     private static async Task ApplyOperationsForTargetAsync<TEntry>(
         string excelDirectory,
