@@ -39,6 +39,19 @@ public partial class CascFastloadView : UserControl
         {
             CascFastloadOperationState.Instance.StateChanged -= OnOperationStateChanged;
         };
+
+        // Locale combobox is dimmed until the opt-in checkbox is checked, to make
+        // it visually obvious that the locale namespace is gated behind the checkbox.
+        if (IncludeLocaleDataCheckBox is not null)
+        {
+            IncludeLocaleDataCheckBox.IsCheckedChanged += (_, _) =>
+            {
+                if (LocaleComboBox is not null)
+                {
+                    LocaleComboBox.IsEnabled = IncludeLocaleDataCheckBox.IsChecked == true;
+                }
+            };
+        }
     }
 
     private void OnLoaded(object? sender, RoutedEventArgs e)
@@ -224,6 +237,7 @@ public partial class CascFastloadView : UserControl
         // Run the wipe + re-extract on the background pipeline; snapshot UI text up front because
         // the worker body must not touch controls.
         var scopeText = ScopePrefixesTextBox?.Text ?? string.Empty;
+        var allowedLocales = SnapshotAllowedLocales();
         await CascFastloadOperationState.Instance.TryRunAsync("Extract / Update", async (ct, progress, setStatus) =>
         {
             setStatus("Preparing: removing previous extraction...");
@@ -246,7 +260,7 @@ public partial class CascFastloadView : UserControl
                 }
             });
 
-            await RunExtractBodyAsync(installDir, scopeText, ct, progress, setStatus).ConfigureAwait(false);
+            await RunExtractBodyAsync(installDir, scopeText, allowedLocales, ct, progress, setStatus).ConfigureAwait(false);
         }).ConfigureAwait(false);
     }
 
@@ -364,30 +378,51 @@ public partial class CascFastloadView : UserControl
     // Public entry point so external callers (e.g. startup build-mismatch prompt) can trigger an Extract.
     public Task StartExtractAsync(string installDir)
     {
-        // Snapshot scope on the UI thread; the worker must not touch controls. Empty = default scope.
+        // Snapshot UI inputs on the UI thread; the worker must not touch controls. Empty = default scope.
         var scopeText = ScopePrefixesTextBox?.Text ?? string.Empty;
+        var allowedLocales = SnapshotAllowedLocales();
         return CascFastloadOperationState.Instance.TryRunAsync("Extract / Update",
-            (ct, progress, setStatus) => RunExtractBodyAsync(installDir, scopeText, ct, progress, setStatus));
+            (ct, progress, setStatus) => RunExtractBodyAsync(installDir, scopeText, allowedLocales, ct, progress, setStatus));
+    }
+
+    // Snapshot of the locale opt-in checkbox + selected combo item, taken on the UI thread.
+    private IReadOnlyList<string> SnapshotAllowedLocales()
+    {
+        if (IncludeLocaleDataCheckBox?.IsChecked != true) return Array.Empty<string>();
+        var item = LocaleComboBox?.SelectedItem as ComboBoxItem;
+        var code = (item?.Content as string)?.Trim();
+        return string.IsNullOrEmpty(code) ? Array.Empty<string>() : new[] { code };
     }
 
     // Core extract body; must run on a worker thread (via TryRunAsync) and not touch controls.
     private async Task RunExtractBodyAsync(
         string installDir,
         string scopeText,
+        IReadOnlyList<string> allowedLocales,
         CancellationToken ct,
         IProgress<CascProgress> progress,
         Action<string> setStatus)
     {
         // Pass locale opt-in to CascOpenStorage so the TVFS iterator skips uninstalled-locale branches.
             var prefixes = ParseScopePrefixes(scopeText);
-            var filter = prefixes.Count == 0
-                ? CascExtractionFilter.Default
-                : CascExtractionFilter.Default with { PathPrefixes = prefixes };
+            var filter = CascExtractionFilter.Default with
+            {
+                PathPrefixes = prefixes,
+                AllowedLocales = allowedLocales,
+            };
             if (prefixes.Count > 0)
             {
                 LaunchDiagnostics.Log($"CASC StartExtract: scoping to {prefixes.Count} prefix(es): {string.Join(" ; ", prefixes)}");
             }
-            var openMask = filter.IncludeLocal ? filter.LocaleMask : CascLocale.None;
+            if (allowedLocales.Count > 0)
+            {
+                LaunchDiagnostics.Log($"CASC StartExtract: locale opt-in active for [{string.Join(",", allowedLocales)}]; watchdog will abort the indexer if CascFindNextFile stalls.");
+            }
+            // Open with the full locale mask: locale gating is applied later by the
+            // CascExtractionFilter (path-prefix based), not by CascLib at open time.
+            // Passing 0 here caused CascOpenStorage to fail on Steam D2R after PR #284
+            // (no locale tags accepted -> downstream EKey lookups returned ERROR_FILE_NOT_FOUND).
+            var openMask = CascLocale.All;
             LaunchDiagnostics.Log($"CASC StartExtract: opening storage at '{installDir}' (localeMask=0x{openMask:X}).");
             using var storage = _extraction.OpenLocal(installDir, openMask);
             if (storage is null || storage.IsInvalid)

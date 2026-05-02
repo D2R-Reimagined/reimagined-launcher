@@ -26,6 +26,15 @@ public sealed record CascExtractionFilter(
     /// </summary>
     public IReadOnlyList<string> PathPrefixes { get; init; } = Array.Empty<string>();
 
+    /// <summary>
+    /// Opt-in locale namespaces (e.g. <c>"enUS"</c>, <c>"deDE"</c>) the indexer is permitted
+    /// to descend into beyond <c>data\…</c>. Empty (default) preserves the historical
+    /// freeze-safe behaviour: the enumerator breaks out of <c>locales\…</c> before
+    /// <c>CascFindNextFile</c> can park on uninstalled-locale namespaces.
+    /// Wildcards are intentionally not supported.
+    /// </summary>
+    public IReadOnlyList<string> AllowedLocales { get; init; } = Array.Empty<string>();
+
     internal bool Accept(CascFileEntry entry)
     {
         var path = StripCascNamespace(entry.Path);
@@ -68,6 +77,41 @@ public sealed record CascExtractionFilter(
         if (IncludeLocal && PathStartsWith(path, "data\\local\\"))
         {
             return true;
+        }
+
+        // Opt-in: locales\audio\<lang>\... and locales\text\<lang>\... for explicitly allowed languages.
+        if (AllowedLocales.Count > 0 && IsAllowedLocalePath(path))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// True when <paramref name="path"/> sits under <c>locales\&lt;bucket&gt;\&lt;lang&gt;\</c>
+    /// for one of <see cref="AllowedLocales"/>. Locale codes are matched case-insensitively
+    /// (CASC stores them lowercase, e.g. <c>enus</c>).
+    /// </summary>
+    internal bool IsAllowedLocalePath(string path)
+    {
+        if (AllowedLocales.Count == 0) return false;
+        if (!PathStartsWith(path, "locales\\")) return false;
+
+        // Skip "locales\<bucket>\" (audio|text|...) to land on the language token.
+        int firstSep = path.IndexOf('\\', "locales\\".Length);
+        if (firstSep < 0) return false;
+        int langStart = firstSep + 1;
+        int langEnd = path.IndexOf('\\', langStart);
+        if (langEnd < 0) return false;
+
+        var lang = path.AsSpan(langStart, langEnd - langStart);
+        for (var i = 0; i < AllowedLocales.Count; i++)
+        {
+            if (lang.Equals(AllowedLocales[i].AsSpan(), StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
         }
 
         return false;
@@ -231,10 +275,15 @@ public sealed class CascExtractionService
         // only surfaces files that passed the filter.
         string? lastAcceptedPath = null;
 
-        LaunchDiagnostics.Log($"CASC Index: starting (filter: includeGlobal={f.IncludeGlobal}, includeHd={f.IncludeHd}, includeLocal={f.IncludeLocal}, localeMask=0x{f.LocaleMask:X}).");
+        var localeOptIn = f.AllowedLocales.Count > 0;
+        LaunchDiagnostics.Log(
+            $"CASC Index: starting (filter: includeGlobal={f.IncludeGlobal}, includeHd={f.IncludeHd}, includeLocal={f.IncludeLocal}, " +
+            $"allowedLocales=[{string.Join(",", f.AllowedLocales)}]).");
 
         // CascLib enumerates alphabetically; once we leave `data\` we won't see further wanted
-        // entries, and `CascFindNextFile` can stall on uninstalled-locale namespaces. Break out.
+        // entries, and `CascFindNextFile` can stall on uninstalled-locale namespaces.
+        // Break out unless the caller explicitly opted into locale data — in which case
+        // the watchdog around IndexAsync is the safety net for any uninstalled-locale stall.
         bool sawDataNamespace = false;
 
         try
@@ -252,7 +301,7 @@ public sealed class CascExtractionService
                 {
                     sawDataNamespace = true;
                 }
-                else if (sawDataNamespace)
+                else if (sawDataNamespace && !localeOptIn)
                 {
                     // We've definitively left the `data\` namespace. Stop now
                     // before CascFindNextFile parks on uninstalled-locale data.
@@ -306,15 +355,75 @@ public sealed class CascExtractionService
     /// Asynchronous wrapper over <see cref="Index"/>. The CascLib enumeration
     /// is blocking so the work runs on the thread pool.
     /// </summary>
-    public Task<IReadOnlyList<CascFileEntry>> IndexAsync(
+    /// <param name="noProgressTimeout">
+    /// If the underlying enumeration emits no new heartbeat for this duration the watchdog
+    /// requests cancellation and throws <see cref="TimeoutException"/>; the worker thread
+    /// is *not* joined because <c>CascFindNextFile</c> may be wedged on an uninstalled-locale
+    /// namespace and is unsafe to keep poking. Defaults to 15 s when not specified — generous
+    /// enough never to fire on the default path, tight enough to release the UI quickly when
+    /// the locale opt-in trips a stall. Pass <see cref="Timeout.InfiniteTimeSpan"/> to disable.
+    /// </param>
+    public async Task<IReadOnlyList<CascFileEntry>> IndexAsync(
         SafeCascStorageHandle storage,
         CascExtractionFilter? filter = null,
         IProgress<CascIndexProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        TimeSpan? noProgressTimeout = null)
     {
         ArgumentNullException.ThrowIfNull(storage);
 
-        return Task.Run(() => Index(storage, filter, progress, cancellationToken), cancellationToken);
+        var timeout = noProgressTimeout ?? TimeSpan.FromSeconds(15);
+        // Disabled watchdog (Infinite) shortcuts to the original behaviour.
+        if (timeout == Timeout.InfiniteTimeSpan)
+        {
+            return await Task.Run(() => Index(storage, filter, progress, cancellationToken), cancellationToken).ConfigureAwait(false);
+        }
+
+        using var watchdogCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        long lastSeen = -1;
+        var lastTickUtc = DateTime.UtcNow;
+
+        // Wrap the caller's progress sink so each heartbeat resets the watchdog clock,
+        // piggybacking on Index's existing 100 ms emission cadence (no extra timer).
+        var watchedProgress = new Progress<CascIndexProgress>(p =>
+        {
+            if (p.EntriesSeen != lastSeen)
+            {
+                lastSeen = p.EntriesSeen;
+                lastTickUtc = DateTime.UtcNow;
+            }
+            progress?.Report(p);
+        });
+
+        var indexTask = Task.Run(
+            () => Index(storage, filter, watchedProgress, watchdogCts.Token),
+            watchdogCts.Token);
+
+        while (!indexTask.IsCompleted)
+        {
+            var sinceTick = DateTime.UtcNow - lastTickUtc;
+            if (sinceTick > timeout)
+            {
+                LaunchDiagnostics.Log(
+                    $"CASC Index watchdog: no progress for {sinceTick.TotalSeconds:F1}s (last seen={lastSeen}); abandoning local enumerator.");
+                // Best-effort cooperative cancel; do NOT Wait() — CascFindNextFile may be wedged.
+                try { watchdogCts.Cancel(); } catch { /* already disposed/cancelled */ }
+                throw new TimeoutException(
+                    $"CASC index made no progress for {sinceTick.TotalSeconds:F1}s; locale namespace likely wedged the enumerator.");
+            }
+
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // External cancel — let the inner task observe it the same way.
+                throw;
+            }
+        }
+
+        return await indexTask.ConfigureAwait(false);
     }
 
     /// <summary>

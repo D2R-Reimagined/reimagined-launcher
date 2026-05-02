@@ -4,6 +4,7 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using ReimaginedLauncher.Utilities;
 
 namespace ReimaginedLauncher.Utilities.Casc;
 
@@ -97,6 +98,10 @@ public sealed class NativeCascLib : ICascNative
     /// <summary>Import name; resolved to <c>CascLib.dll</c> (Windows) or <c>libcasc.so</c> (Linux) by the registered resolver.</summary>
     private const string LibraryName = "CascLib";
 
+    // CDN region used when CascLib falls back to online for EKeys not indexed locally.
+    // "us" pairs with the enUS locale and is the default for D2R installs we care about.
+    private const string DefaultRegion = "us";
+
     private static readonly object ResolverLock = new();
     private static bool s_resolverRegistered;
     private static string? s_loadFailure;
@@ -139,10 +144,43 @@ public sealed class NativeCascLib : ICascNative
         if (!_available) return null;
         if (string.IsNullOrWhiteSpace(storagePath)) return null;
 
+        IntPtr szLocalPath = IntPtr.Zero;
+        IntPtr szRegion = IntPtr.Zero;
+        // Keep the delegate rooted so the GC can't collect it while CascLib is calling back.
+        PfnProgressCallback progressDelegate = OnCascProgress;
+        var keepAlive = GCHandle.Alloc(progressDelegate);
+
         try
         {
-            if (!CascOpenStorage(storagePath, localeMask, out IntPtr h) || CascHandles.IsInvalid(h))
+            szLocalPath = Marshal.StringToCoTaskMemAnsi(storagePath);
+            // Default region "us" (enUS): needed by CascLib to select a CDN host when
+            // online fallback runs for EKeys not present in the local .idx map (Steam D2R).
+            szRegion = Marshal.StringToCoTaskMemAnsi(DefaultRegion);
+
+            // For the local-path branch (Steam, BNet — anywhere `.build.info` exists), CascLib
+            // sources `CASC_FEATURE_ALLOW_DOWNLOAD` *only* from `pArgs->dwFlags`; the
+            // `bOnlineStorage` parameter is consulted only when no local build file is found.
+            // Without this bit, `LoadEncodingManifest` skips its CDN fallback and returns
+            // ERROR_FILE_NOT_FOUND for any EKey not covered by the local .idx map (Steam D2R).
+            const uint dwFlags = CascFeature.AllowDownload;
+
+            var args = new CASC_OPEN_STORAGE_ARGS
             {
+                Size = (UIntPtr)Marshal.SizeOf<CASC_OPEN_STORAGE_ARGS>(),
+                szLocalPath = szLocalPath,
+                szRegion = szRegion,
+                PfnProgressCallback = Marshal.GetFunctionPointerForDelegate(progressDelegate),
+                dwLocaleMask = localeMask,
+                dwFlags = dwFlags,
+            };
+
+            if (!CascOpenStorageEx(IntPtr.Zero, ref args, true, out IntPtr h) || CascHandles.IsInvalid(h))
+            {
+                // Surface CascLib's own error code so callers can tell ERROR_FILE_NOT_FOUND
+                // (bad path / DLL not picked up) from ERROR_BAD_FORMAT (parse failure) etc.
+                uint err = TryGetCascError();
+                LaunchDiagnostics.Log(
+                    $"CascOpenStorageEx returned false for '{storagePath}' (localeMask=0x{localeMask:X}, region='{DefaultRegion}', dwFlags=0x{dwFlags:X}, online=true); CascLib error {err} (0x{err:X}).");
                 return null;
             }
 
@@ -152,8 +190,47 @@ public sealed class NativeCascLib : ICascNative
         {
             // Surface native faults as IOException so the caller can record/notify
             // instead of crashing the launcher. bool=false outcomes still return null.
-            throw new IOException($"CascOpenStorage threw for '{storagePath}': {ex.Message}", ex);
+            uint err = TryGetCascError();
+            throw new IOException($"CascOpenStorageEx threw for '{storagePath}' (CascLib error {err} / 0x{err:X}): {ex.Message}", ex);
         }
+        finally
+        {
+            if (szLocalPath != IntPtr.Zero) Marshal.FreeCoTaskMem(szLocalPath);
+            if (szRegion != IntPtr.Zero) Marshal.FreeCoTaskMem(szRegion);
+            if (keepAlive.IsAllocated) keepAlive.Free();
+        }
+    }
+
+    /// <summary>
+    /// Matches CascLib's <c>PFNPROGRESSCALLBACK</c>. Return <c>true</c> to cancel; we never cancel from here.
+    /// </summary>
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Ansi)]
+    private delegate bool PfnProgressCallback(
+        IntPtr ptrUserParam,
+        CASC_PROGRESS_MSG progressMsg,
+        [MarshalAs(UnmanagedType.LPStr)] string? szObject,
+        uint currentValue,
+        uint totalValue);
+
+    private static bool OnCascProgress(
+        IntPtr ptrUserParam,
+        CASC_PROGRESS_MSG progressMsg,
+        string? szObject,
+        uint currentValue,
+        uint totalValue)
+    {
+        // Last breadcrumb before a CascOpenStorageEx failure tells us which step
+        // (loading indexes, encoding manifest, install/download, etc.) errored.
+        try
+        {
+            LaunchDiagnostics.Log(
+                $"CASC progress: {progressMsg} '{szObject ?? ""}' ({currentValue}/{totalValue}).");
+        }
+        catch
+        {
+            // Never let a logging fault propagate into the native callback.
+        }
+        return false;
     }
 
     public CascStorageProduct? GetStorageProduct(SafeCascStorageHandle storage)
@@ -372,6 +449,7 @@ public sealed class NativeCascLib : ICascNative
         {
             if (NativeLibrary.TryLoad(candidate, out IntPtr h))
             {
+                LogLoadedNative(candidate);
                 return h;
             }
         }
@@ -379,11 +457,59 @@ public sealed class NativeCascLib : ICascNative
         // Fall through to default search (system PATH / OS loader).
         if (NativeLibrary.TryLoad(LibraryName, assembly, searchPath, out IntPtr defaultHandle))
         {
+            LogLoadedNative("<default search: " + LibraryName + ">");
             return defaultHandle;
         }
 
         s_loadFailure = "CascLib native binary could not be located.";
         return IntPtr.Zero;
+    }
+
+    // Resolver is invoked per-import, not per-process; dedupe to keep launch.log readable.
+    private static int s_loadLogged;
+
+    private static void LogLoadedNative(string candidate)
+    {
+        if (System.Threading.Interlocked.Exchange(ref s_loadLogged, 1) != 0)
+        {
+            return;
+        }
+        try
+        {
+            string detail;
+            if (File.Exists(candidate))
+            {
+                var mtime = File.GetLastWriteTimeUtc(candidate);
+                long size = new FileInfo(candidate).Length;
+                detail = $"mtimeUtc={mtime:o}, size={size}";
+            }
+            else
+            {
+                detail = "mtime=<unavailable>";
+            }
+            LaunchDiagnostics.Log($"CascLib native loaded: '{candidate}' ({detail}).");
+        }
+        catch (Exception ex)
+        {
+            LaunchDiagnostics.Log($"CascLib native loaded: '{candidate}' (mtime probe failed: {ex.Message}).");
+        }
+    }
+
+    private static uint TryGetCascError()
+    {
+        try
+        {
+            return GetCascError();
+        }
+        catch (EntryPointNotFoundException)
+        {
+            // Older CascLib builds without GetCascError export.
+            return 0;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     private static IEnumerable<string> EnumerateCandidates()
@@ -412,11 +538,14 @@ public sealed class NativeCascLib : ICascNative
 
     // P/Invoke surface. CharSet.Ansi matches the LPCSTR signatures.
 
+    // CascOpenStorageEx: structured open API. szParams is ignored when args.szLocalPath is set.
+    // bOnlineStorage=false because this launcher only opens local D2R installs.
     [DllImport(LibraryName, CharSet = CharSet.Ansi, SetLastError = false)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool CascOpenStorage(
-        [MarshalAs(UnmanagedType.LPStr)] string szParams,
-        uint dwLocaleMask,
+    internal static extern bool CascOpenStorageEx(
+        IntPtr szParams,
+        ref CASC_OPEN_STORAGE_ARGS pArgs,
+        [MarshalAs(UnmanagedType.U1)] bool bOnlineStorage,
         out IntPtr phStorage);
 
     [DllImport(LibraryName, SetLastError = false)]
@@ -474,4 +603,7 @@ public sealed class NativeCascLib : ICascNative
 
     [DllImport(LibraryName, SetLastError = false)]
     internal static extern IntPtr CascCdnGetDefault();
+
+    [DllImport(LibraryName, SetLastError = false)]
+    internal static extern uint GetCascError();
 }

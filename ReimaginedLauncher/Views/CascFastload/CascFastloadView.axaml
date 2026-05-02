@@ -58,6 +58,36 @@
                 </StackPanel>
             </Border>
 
+            <Border Classes="panel" Padding="14">
+                <StackPanel Spacing="6">
+                    <TextBlock FontWeight="SemiBold" Text="Locale data (experimental, opt-in)"/>
+                    <TextBlock Classes="muted" TextWrapping="Wrap"
+                               Text="Off by default. When enabled, the indexer is allowed to descend into the selected locale namespace (locales\audio\&lt;lang&gt;\ + locales\text\&lt;lang&gt;\). A no-progress watchdog will abort the local enumeration if CascFindNextFile stalls on uninstalled-locale archives — this was the original freeze and is still possible per locale."/>
+                    <StackPanel Orientation="Horizontal" Spacing="12">
+                        <CheckBox x:Name="IncludeLocaleDataCheckBox" Content="Include locale data"/>
+                        <ComboBox x:Name="LocaleComboBox" Width="120" IsEnabled="False">
+                            <ComboBoxItem Content="enUS" IsSelected="True"/>
+                            <ComboBoxItem Content="deDE"/>
+                            <ComboBoxItem Content="esES"/>
+                            <ComboBoxItem Content="esMX"/>
+                            <ComboBoxItem Content="frFR"/>
+                            <ComboBoxItem Content="itIT"/>
+                            <ComboBoxItem Content="jaJP"/>
+                            <ComboBoxItem Content="koKR"/>
+                            <ComboBoxItem Content="plPL"/>
+                            <ComboBoxItem Content="ptBR"/>
+                            <ComboBoxItem Content="ruRU"/>
+                            <ComboBoxItem Content="zhCN"/>
+                            <ComboBoxItem Content="zhTW"/>
+                        </ComboBox>
+                    </StackPanel>
+                    <TextBlock TextWrapping="Wrap"
+                               FontWeight="SemiBold"
+                               Foreground="#FFD166"
+                               Text="⚠ Only select a language you have actually installed via the official Battle.net / Steam launcher. Selecting an uninstalled language will stall the indexer; the watchdog will abort the extraction after ~15s with a TimeoutException. To add a language, install it through the official launcher first, then retry here."/>
+                </StackPanel>
+            </Border>
+
             <StackPanel Orientation="Horizontal" Spacing="8">
                 <Button x:Name="ExtractButton"
                         Content="Extract CASC"

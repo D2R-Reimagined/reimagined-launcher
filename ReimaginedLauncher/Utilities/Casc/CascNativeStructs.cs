@@ -100,10 +100,60 @@ internal static class CascOpenFlags
     public const uint OvercomeEncrypted = 0x00000020u;
 }
 
+/// <summary>Storage feature flag constants from <c>CascLib.h</c> (subset used by the launcher).</summary>
+internal static class CascFeature
+{
+    public const uint Online = 0x00000400u;
+    public const uint AllowDownload = 0x00002000u;
+}
+
 /// <summary>Sentinel handle value (<c>INVALID_HANDLE_VALUE</c>) used by CascLib.</summary>
 internal static class CascHandles
 {
     public static readonly IntPtr InvalidHandle = new(-1);
 
     public static bool IsInvalid(IntPtr h) => h == IntPtr.Zero || h == InvalidHandle;
+}
+
+/// <summary>Mirrors <c>CASC_PROGRESS_MSG</c>: kind of activity reported by <c>PFNPROGRESSCALLBACK</c>.</summary>
+internal enum CASC_PROGRESS_MSG
+{
+    CascProgressLoadingFile = 0,
+    CascProgressLoadingManifest = 1,
+    CascProgressDownloadingFile = 2,
+    CascProgressLoadingIndexes = 3,
+    CascProgressDownloadingArchiveIndexes = 4,
+}
+
+/// <summary>
+/// Mirrors <c>CASC_OPEN_STORAGE_ARGS</c> from CascLib's <c>CascLib.h</c> as built for
+/// Windows x64 with <c>CharSet.Ansi</c>. All <c>LPCSTR</c> / function-pointer fields are
+/// declared as <see cref="IntPtr"/>; callers manage their lifetime explicitly.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 8)]
+internal struct CASC_OPEN_STORAGE_ARGS
+{
+    /// <summary>Must be set to <c>sizeof(CASC_OPEN_STORAGE_ARGS)</c> before the call.</summary>
+    public UIntPtr Size;
+
+    /// <summary>Storage directory (ANSI). Allocated via <see cref="Marshal.StringToCoTaskMemAnsi"/>.</summary>
+    public IntPtr szLocalPath;
+
+    public IntPtr szCodeName;
+    public IntPtr szRegion;
+
+    /// <summary>Function pointer for <c>PFNPROGRESSCALLBACK</c>; obtain via <see cref="Marshal.GetFunctionPointerForDelegate{TDelegate}"/>.</summary>
+    public IntPtr PfnProgressCallback;
+    public IntPtr PtrProgressParam;
+
+    public IntPtr PfnProductCallback;
+    public IntPtr PtrProductParam;
+
+    public uint dwLocaleMask;
+    public uint dwFlags;
+
+    // Versioned tail (PR #284-era CascLib). Probed by ExtractVersionedArgument
+    // against the Size field, so a too-small Size simply hides these.
+    public IntPtr szBuildKey;
+    public IntPtr szCdnHostUrl;
 }
