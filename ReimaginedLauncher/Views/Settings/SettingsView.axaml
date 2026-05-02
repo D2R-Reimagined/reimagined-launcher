@@ -135,6 +135,32 @@
                     </StackPanel>
                 </StackPanel>
             </Border>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="14">
+                    <TextBlock Classes="section-title"
+                               Text="Plugins" />
+                    <StackPanel Spacing="4">
+                        <CheckBox x:Name="EnableInstalledPluginsByDefaultCheckBox"
+                                  Content="Enable installed plugins by default"
+                                  IsCheckedChanged="OnEnableInstalledPluginsByDefaultChanged"/>
+                        <TextBlock Classes="muted"
+                                   Margin="28,0,0,0"
+                                   TextWrapping="Wrap"
+                                   Text="When enabled, newly installed or imported plugins start in the Enabled state. Disable to install plugins in the Disabled state and opt them in manually." />
+                    </StackPanel>
+                    <StackPanel Spacing="4">
+                        <CheckBox x:Name="ExpandPluginParametersByDefaultCheckBox"
+                                  Content="Expand plugin parameters by default"
+                                  IsCheckedChanged="OnExpandPluginParametersByDefaultChanged"/>
+                        <TextBlock Classes="muted"
+                                   Margin="28,0,0,0"
+                                   TextWrapping="Wrap"
+                                   Text="When enabled, the parameters section for each plugin in the Plugins tab starts expanded instead of collapsed." />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

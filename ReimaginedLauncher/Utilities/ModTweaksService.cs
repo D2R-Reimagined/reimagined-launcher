@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using D2RReimaginedTools.TextFileParsers;
@@ -307,7 +306,6 @@ public static class ModTweaksService
         }
     }
 
-    private const string SnapshotMetaFileName = ".snapshot.meta";
 
     /// <summary>
     /// Removes every <c>*_launcher_clean</c> directory or file under the
@@ -364,7 +362,7 @@ public static class ModTweaksService
             }
         }
 
-        // File-shaped snapshots + sidecars (.missing markers, .snapshot.meta).
+        // File-shaped snapshots + sidecars (.missing markers).
         foreach (var file in EnumerateSafely(() =>
                      Directory.EnumerateFiles(root, "*_launcher_clean*", SearchOption.AllDirectories)))
         {
@@ -377,125 +375,6 @@ public static class ModTweaksService
             {
                 LaunchDiagnostics.Log($"Failed to delete launcher_clean file '{file}': {ex.Message}");
             }
-        }
-    }
-
-    /// <summary>
-    /// Returns the full path of the sidecar meta file used to fingerprint a
-    /// snapshot artefact against the source it was taken from. The sidecar
-    /// stores a SHA-256 of the source content. When the source's hash no
-    /// longer matches, callers refresh the snapshot.
-    /// </summary>
-    private static string GetSnapshotMetaPath(string snapshotPath)
-    {
-        // For directory snapshots, place the meta file inside the directory.
-        // For file snapshots, place it as a sibling with the same stem.
-        return Directory.Exists(snapshotPath)
-            ? Path.Combine(snapshotPath, SnapshotMetaFileName)
-            : snapshotPath + SnapshotMetaFileName;
-    }
-
-    private static async Task<string> ComputeFileHashAsync(string filePath)
-    {
-        await using var stream = new FileStream(
-            filePath,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.ReadWrite);
-        using var sha = SHA256.Create();
-        var hash = await sha.ComputeHashAsync(stream).ConfigureAwait(false);
-        return Convert.ToHexString(hash);
-    }
-
-    private static async Task<string> ComputeDirectoryHashAsync(string directory)
-    {
-        // Composite SHA-256 over (relative path + content hash) pairs, ordered deterministically.
-        // Excludes the sidecar itself.
-        using var sha = SHA256.Create();
-        var entries = Directory
-            .EnumerateFiles(directory, "*", SearchOption.AllDirectories)
-            .Where(p => !string.Equals(Path.GetFileName(p), SnapshotMetaFileName, StringComparison.Ordinal))
-            .Select(p => (Relative: Path.GetRelativePath(directory, p).Replace('\\', '/'), Full: p))
-            .OrderBy(p => p.Relative, StringComparer.Ordinal)
-            .ToList();
-
-        foreach (var (relative, full) in entries)
-        {
-            var pathBytes = System.Text.Encoding.UTF8.GetBytes(relative + "\n");
-            sha.TransformBlock(pathBytes, 0, pathBytes.Length, null, 0);
-            var fileHash = await ComputeFileHashAsync(full).ConfigureAwait(false);
-            var hashBytes = System.Text.Encoding.UTF8.GetBytes(fileHash + "\n");
-            sha.TransformBlock(hashBytes, 0, hashBytes.Length, null, 0);
-        }
-
-        sha.TransformFinalBlock([], 0, 0);
-        return Convert.ToHexString(sha.Hash!);
-    }
-
-    /// <summary>
-    /// Computes a deterministic composite SHA-256 hash for an explicit set of
-    /// source files identified by stable relative keys. Missing files are
-    /// fingerprinted as "missing" so their absence is part of the signature
-    /// and triggers a refresh when one of them appears or disappears.
-    /// </summary>
-    private static async Task<string> ComputeSourceListHashAsync(
-        IEnumerable<(string Key, string FullPath)> entries)
-    {
-        using var sha = SHA256.Create();
-        foreach (var (key, full) in entries.OrderBy(e => e.Key, StringComparer.Ordinal))
-        {
-            var pathBytes = System.Text.Encoding.UTF8.GetBytes(key + "\n");
-            sha.TransformBlock(pathBytes, 0, pathBytes.Length, null, 0);
-
-            string fileHash;
-            if (File.Exists(full))
-            {
-                fileHash = await ComputeFileHashAsync(full).ConfigureAwait(false);
-            }
-            else
-            {
-                fileHash = "missing";
-            }
-
-            var hashBytes = System.Text.Encoding.UTF8.GetBytes(fileHash + "\n");
-            sha.TransformBlock(hashBytes, 0, hashBytes.Length, null, 0);
-        }
-
-        sha.TransformFinalBlock([], 0, 0);
-        return Convert.ToHexString(sha.Hash!);
-    }
-
-    private static async Task<bool> IsSnapshotFreshAsync(string snapshotPath, string expectedSourceHash)
-    {
-        var metaPath = GetSnapshotMetaPath(snapshotPath);
-        if (!File.Exists(metaPath))
-        {
-            return false;
-        }
-
-        try
-        {
-            var stored = (await File.ReadAllTextAsync(metaPath).ConfigureAwait(false)).Trim();
-            return string.Equals(stored, expectedSourceHash, StringComparison.OrdinalIgnoreCase);
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static async Task WriteSnapshotMetaAsync(string snapshotPath, string sourceHash)
-    {
-        try
-        {
-            var metaPath = GetSnapshotMetaPath(snapshotPath);
-            await File.WriteAllTextAsync(metaPath, sourceHash).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            // Failing to write the sidecar must not abort the snapshot itself;
-            // the worst case is that the next launch refreshes redundantly.
-            LaunchDiagnostics.Log($"Failed to write snapshot meta for '{snapshotPath}': {ex.Message}");
         }
     }
 
@@ -664,7 +543,6 @@ public static class ModTweaksService
         }
 
         await CopyDirectoryAsync(excelDirectory, cleanExcelDirectory, overwrite: true);
-        await WriteSnapshotMetaAsync(cleanExcelDirectory, string.Empty).ConfigureAwait(false);
     }
 
     private static string GetCleanMissilesFilePath(string? missilesFilePath)
@@ -698,7 +576,6 @@ public static class ModTweaksService
         }
 
         await CopyFileAsync(missilesFilePath, cleanMissilesFilePath, overwrite: true);
-        await WriteSnapshotMetaAsync(cleanMissilesFilePath, string.Empty).ConfigureAwait(false);
     }
 
     private static string GetCleanMonstersFilePath(string? monstersFilePath)
@@ -794,7 +671,6 @@ public static class ModTweaksService
         }
 
         await CopyFileAsync(layoutsProfileHdFilePath, cleanLayoutsProfileHdFilePath, overwrite: true);
-        await WriteSnapshotMetaAsync(cleanLayoutsProfileHdFilePath, string.Empty).ConfigureAwait(false);
     }
 
     private static string GetCleanArmorTweaksDirectory(string? armorDirectory)
@@ -839,8 +715,6 @@ public static class ModTweaksService
 
             await File.WriteAllTextAsync($"{cleanFilePath}.missing", string.Empty);
         }
-
-        await WriteSnapshotMetaAsync(cleanArmorTweaksDirectory, string.Empty).ConfigureAwait(false);
     }
 
     private static string GetCleanDesecratedZonesFilePath(string? desecratedZonesFilePath)
@@ -874,7 +748,6 @@ public static class ModTweaksService
         }
 
         await CopyFileAsync(desecratedZonesFilePath, cleanDesecratedZonesFilePath, overwrite: true);
-        await WriteSnapshotMetaAsync(cleanDesecratedZonesFilePath, string.Empty).ConfigureAwait(false);
     }
 
     private static async Task RestoreDesecratedZonesFileAsync(string cleanDesecratedZonesFilePath, string? desecratedZonesFilePath)
@@ -1678,6 +1551,8 @@ public static class ModTweaksService
         return Path.Combine(parentDirectory, CleanVisDirectoryName);
     }
 
+    // See EnsureCleanExcelCopyAsync for the rationale: the clean snapshot is
+    // captured once and only refreshed by InvalidateCleanSnapshots.
     private static async Task EnsureCleanVisCopyAsync()
     {
         var visDirectory = GetVisDirectory();
@@ -1688,6 +1563,11 @@ public static class ModTweaksService
         }
 
         var cleanVisDirectory = GetCleanVisDirectory(visDirectory);
+
+        if (Directory.Exists(cleanVisDirectory))
+        {
+            return;
+        }
 
         var desecratedFiles = Directory.GetFiles(visDirectory, "*.json")
             .Where(f => Path.GetFileName(f).Contains(DesecratedFilePattern, StringComparison.OrdinalIgnoreCase))
@@ -1700,22 +1580,6 @@ public static class ModTweaksService
             return;
         }
 
-        var sourceEntries = desecratedFiles
-            .Select(f => (Key: Path.GetFileName(f), FullPath: f))
-            .ToList();
-        var sourceHash = await ComputeSourceListHashAsync(sourceEntries).ConfigureAwait(false);
-
-        if (Directory.Exists(cleanVisDirectory) &&
-            await IsSnapshotFreshAsync(cleanVisDirectory, sourceHash).ConfigureAwait(false))
-        {
-            return;
-        }
-
-        if (Directory.Exists(cleanVisDirectory))
-        {
-            Directory.Delete(cleanVisDirectory, recursive: true);
-        }
-
         Directory.CreateDirectory(cleanVisDirectory);
 
         foreach (var file in desecratedFiles)
@@ -1725,8 +1589,6 @@ public static class ModTweaksService
             await CopyFileAsync(file, cleanFilePath, overwrite: true);
             LaunchDiagnostics.Log($"Backed up desecrated vis file: {fileName}");
         }
-
-        await WriteSnapshotMetaAsync(cleanVisDirectory, sourceHash).ConfigureAwait(false);
     }
 
     private static async Task RestoreVisFilesAsync()

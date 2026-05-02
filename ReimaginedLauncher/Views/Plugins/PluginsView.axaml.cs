@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia;
+using Avalonia.Threading;
 using AvaloniaEdit.TextMate;
 using AvaloniaEdit;
 using Avalonia.Controls;
@@ -86,6 +87,9 @@ public partial class PluginsView : UserControl
         _isLoading = isLoading;
         LoadingBanner.IsVisible = isLoading;
         ContentPanel.IsVisible = !isLoading;
+        // Reapply Now's enable gate depends on _isLoading; refresh it here so the
+        // button doesn't get stuck disabled when the view is attached mid-load.
+        OnCascStateChanged(this, EventArgs.Empty);
     }
 
     private async void OnRefreshClicked(object? sender, RoutedEventArgs e)
@@ -221,10 +225,15 @@ public partial class PluginsView : UserControl
             return;
         }
 
+        // Preserve scroll position so toggling a plugin checkbox doesn't snap the
+        // ScrollViewer back to the top after the catalog rebuild in RefreshPluginsStateAsync.
+        var scrollOffset = RootScrollViewer.Offset;
+
         try
         {
             await PluginsService.SetPluginEnabledAsync(plugin.Id, checkBox.IsChecked == true);
             await RefreshPluginsStateAsync();
+            Dispatcher.UIThread.Post(() => RootScrollViewer.Offset = scrollOffset, DispatcherPriority.Background);
         }
         catch (Exception ex)
         {

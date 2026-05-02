@@ -182,7 +182,8 @@ public static class PluginsService
                 Parameters = pluginState.Parameters,
                 Files = pluginState.Files,
                 Errors = pluginState.Errors,
-                Warnings = pluginState.Warnings
+                Warnings = pluginState.Warnings,
+                IsParametersExpanded = MainWindow.Settings.ExpandPluginParametersByDefault
             });
         }
 
@@ -216,16 +217,17 @@ public static class PluginsService
             await CopyDirectoryAsync(sourceDirectory, destinationDirectory);
         }
 
+        var enableByDefault = MainWindow.Settings.EnableInstalledPluginsByDefault;
         if (registration == null)
         {
             MainWindow.Settings.CurrentProfile.Plugins.Add(new PluginRegistration
             {
                 Id = Guid.NewGuid().ToString("N"),
                 FolderName = folderName,
-                IsEnabled = true
+                IsEnabled = enableByDefault
             });
         }
-        else
+        else if (enableByDefault)
         {
             registration.IsEnabled = true;
         }
@@ -386,7 +388,7 @@ public static class PluginsService
             {
                 Id = Guid.NewGuid().ToString("N"),
                 FolderName = destinationFolderName,
-                IsEnabled = false
+                IsEnabled = MainWindow.Settings.EnableInstalledPluginsByDefault
             });
 
             await SettingsManager.SaveAsync(MainWindow.Settings);

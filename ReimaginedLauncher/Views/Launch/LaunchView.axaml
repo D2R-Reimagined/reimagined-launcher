@@ -4,9 +4,27 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
              x:Class="ReimaginedLauncher.Views.Launch.LaunchView">
-    <ScrollViewer HorizontalScrollBarVisibility="Disabled"
-                  VerticalScrollBarVisibility="Auto">
-        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+    <DockPanel LastChildFill="True">
+        <Border x:Name="LaunchStatusPanel"
+                DockPanel.Dock="Bottom"
+                Classes="panel"
+                Padding="20"
+                Margin="0,18,0,0"
+                IsVisible="False">
+            <StackPanel Spacing="10">
+                <TextBlock Classes="section-title"
+                           Text="Launch Status" />
+                <TextBlock x:Name="LaunchStatusText"
+                           Classes="muted"
+                           Text="Preparing launch..." />
+                <ProgressBar x:Name="LaunchProgressBar"
+                             IsIndeterminate="True"
+                             Height="8" />
+            </StackPanel>
+        </Border>
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto">
+        <Grid RowDefinitions="Auto,Auto,Auto,Auto"
               RowSpacing="18">
             <StackPanel Spacing="4">
                 <TextBlock Classes="view-title"
@@ -143,22 +161,7 @@
                 </StackPanel>
             </Border>
 
-            <Border x:Name="LaunchStatusPanel"
-                    Grid.Row="4"
-                    Classes="panel"
-                    Padding="20"
-                    IsVisible="False">
-                <StackPanel Spacing="10">
-                    <TextBlock Classes="section-title"
-                               Text="Launch Status" />
-                    <TextBlock x:Name="LaunchStatusText"
-                               Classes="muted"
-                               Text="Preparing launch..." />
-                    <ProgressBar x:Name="LaunchProgressBar"
-                                 IsIndeterminate="True"
-                                 Height="8" />
-                </StackPanel>
-            </Border>
         </Grid>
-    </ScrollViewer>
+        </ScrollViewer>
+    </DockPanel>
 </UserControl>

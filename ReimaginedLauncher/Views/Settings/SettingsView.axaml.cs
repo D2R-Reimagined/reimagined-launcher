@@ -52,8 +52,32 @@ public partial class SettingsView : UserControl
 
         MinimizeToTrayCheckBox.IsChecked = MainWindow.Settings.MinimizeToTray;
         MinimizeToTrayOnCloseCheckBox.IsChecked = MainWindow.Settings.MinimizeToTrayOnClose;
+        EnableInstalledPluginsByDefaultCheckBox.IsChecked = MainWindow.Settings.EnableInstalledPluginsByDefault;
+        ExpandPluginParametersByDefaultCheckBox.IsChecked = MainWindow.Settings.ExpandPluginParametersByDefault;
 
         _isRefreshingSettings = false;
+    }
+
+    private async void OnEnableInstalledPluginsByDefaultChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_isRefreshingSettings)
+        {
+            return;
+        }
+
+        MainWindow.Settings.EnableInstalledPluginsByDefault = EnableInstalledPluginsByDefaultCheckBox.IsChecked ?? false;
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private async void OnExpandPluginParametersByDefaultChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_isRefreshingSettings)
+        {
+            return;
+        }
+
+        MainWindow.Settings.ExpandPluginParametersByDefault = ExpandPluginParametersByDefaultCheckBox.IsChecked ?? false;
+        await SettingsManager.SaveAsync(MainWindow.Settings);
     }
 
     private async void OnLaunchSettingChanged(object? sender, RoutedEventArgs e)
