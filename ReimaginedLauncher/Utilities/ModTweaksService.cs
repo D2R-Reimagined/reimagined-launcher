@@ -119,6 +119,14 @@ public static class ModTweaksService
 
         try
         {
+            // Revert any previous plugin asset writes before tweaks or plugins
+            // run so this pass operates on a genuinely pre-plugin baseline.
+            // Without this, the next plugin snapshot would capture the prior
+            // run's asset as the "original", leaving files behind on disable.
+            ReportProgress(progress, "Restoring plugin asset backups...");
+            LaunchDiagnostics.Log("Restoring plugin asset backups before tweaks.");
+            await PluginAssetBackupService.RestoreAllAsync();
+
             ReportProgress(progress, "Preparing clean excel copy...");
             LaunchDiagnostics.Log("Ensuring clean excel copy.");
             await EnsureCleanExcelCopyAsync(excelDirectory, cleanExcelDirectory);
@@ -147,6 +155,12 @@ public static class ModTweaksService
                 await ValidateExcelFilesAsync(sourceExcelDirectory);
                 await CopyDirectoryAsync(sourceExcelDirectory, targetExcelDirectory, overwrite: true);
                 await ApplyTweaksAsync(targetExcelDirectory, progress);
+
+                // Plugin operations targeting excel .txt files (via ParserRegistry)
+                // genuinely differ between excel and excel/base because those
+                // directories ship distinct .txt content. Mod-root-relative
+                // plugin work runs exactly once after this loop.
+                await PluginsService.ApplyEnabledPluginsExcelAsync(targetExcelDirectory, progress);
             }
 
             ReportProgress(progress, "Restoring missiles.json...");
@@ -190,15 +204,24 @@ public static class ModTweaksService
             LaunchDiagnostics.Log("Applying vignette tweaks.");
             await ApplyVignetteTweakAsync(profile.RemoveVignette);
 
-            // Apply enabled plugins last so their edits to non-excel JSON targets
-            // (missiles.json, layouts_profilehd.json, armor JSONs, desecratedzones.json,
-            // vis files) are not clobbered by the Restore*/Apply*Tweaks* steps above.
-            foreach (var targetExcelDirectory in excelDirectories)
+            // Apply mod-root-relative plugin work (missiles.json, monsters.json,
+            // strings, asset copies, animdata.d2 pair sync) exactly once per
+            // launch. Doing this once -- rather than per-excel-directory --
+            // means the asset backup service registers each destination a
+            // single time per pass, which is what makes disable-then-Start-Game
+            // reliably restore the pre-plugin originals. Run after the
+            // Restore*/Apply*Tweaks* block so plugin edits to those tweak-managed
+            // JSON targets are not clobbered.
+            var modRoot = GetMpqBaseDirectory();
+            if (!string.IsNullOrWhiteSpace(modRoot))
             {
-                var targetLabel = Path.GetFileName(targetExcelDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-                ReportProgress(progress, $"Applying plugins in {targetLabel}...");
-                LaunchDiagnostics.Log($"Applying plugins in {targetExcelDirectory}.");
-                await PluginsService.ApplyEnabledPluginsAsync(targetExcelDirectory, progress);
+                ReportProgress(progress, "Applying plugins...");
+                LaunchDiagnostics.Log($"Applying mod-root plugin operations and assets in {modRoot}.");
+                await PluginsService.ApplyEnabledPluginsModRootAsync(modRoot, progress);
+            }
+            else
+            {
+                LaunchDiagnostics.Log("Skipping mod-root plugin pass: mod root could not be resolved.");
             }
 
             LaunchDiagnostics.Log("Mod tweak preparation succeeded.");

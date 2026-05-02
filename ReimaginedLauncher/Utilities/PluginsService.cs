@@ -528,13 +528,80 @@ public static class PluginsService
         return true;
     }
 
-    public static async Task ApplyEnabledPluginsAsync(string excelDirectory, IProgress<string>? progress = null)
+    /// <summary>
+    /// Applies the excel-directory-scoped portion of every enabled plugin to
+    /// <paramref name="excelDirectory"/> -- i.e. operations that target a .txt
+    /// file inside the excel folder via the parser registry. The launcher
+    /// invokes this once per excel directory (e.g. <c>excel</c> and
+    /// <c>excel/base</c>) because those directories ship distinct .txt
+    /// content. Mod-root-relative work (missiles.json, monsters.json, strings,
+    /// asset copies) is intentionally NOT performed here -- it runs exactly
+    /// once per launch via <see cref="ApplyEnabledPluginsModRootAsync"/> so
+    /// the plugin asset backup service registers each destination a single
+    /// time per pass.
+    /// </summary>
+    public static async Task ApplyEnabledPluginsExcelAsync(string excelDirectory, IProgress<string>? progress = null)
     {
         MainWindow.Settings.CurrentProfile.Plugins ??= [];
 
-        // Notify the backup service that a fresh apply pass is starting so it
-        // can re-snapshot any targets the launcher regenerated since last run.
-        await PluginAssetBackupService.BeginApplyPassAsync();
+        foreach (var registration in MainWindow.Settings.CurrentProfile.Plugins.Where(plugin => plugin.IsEnabled))
+        {
+            var pluginState = await LoadPluginStateAsync(registration);
+            if (pluginState.Errors.Count > 0)
+            {
+                // Errors and authoring warnings are emitted once per launch
+                // from ApplyEnabledPluginsModRootAsync; skip silently here.
+                continue;
+            }
+
+            try
+            {
+                // Build the parameter dictionary once per plugin instead of
+                // per file; the values are constant for the entire apply pass.
+                var parameters = pluginState.Parameters.ToDictionary(
+                    parameter => parameter.Key,
+                    parameter => parameter.Value,
+                    StringComparer.OrdinalIgnoreCase);
+
+                var hasExcelWork = false;
+                foreach (var pluginFile in pluginState.Files)
+                {
+                    var operations = await LoadPluginOperationsAsync(GetPluginFilePath(registration.Id, pluginFile.RelativePath));
+                    var filtered = FilterConditionalOperations(operations, parameters, pluginState.Name, pluginFile.RelativePath);
+                    if (filtered.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    if (!hasExcelWork)
+                    {
+                        ReportProgress(progress, $"Applying plugin {pluginState.Name} (excel)...");
+                        hasExcelWork = true;
+                    }
+
+                    await ApplyExcelOperationsAsync(excelDirectory, filtered, parameters);
+                }
+            }
+            catch (Exception ex)
+            {
+                LaunchDiagnostics.LogException($"Failed to apply plugin '{pluginState.Name}' (excel)", ex);
+                Notifications.SendNotification($"Plugin '{pluginState.Name}' failed: {ex.Message}", "Warning");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Applies the mod-root-scoped portion of every enabled plugin under
+    /// <paramref name="modRoot"/>: missiles.json, monsters.json, the strings
+    /// translation files, and all asset copies (including the animdata.d2 /
+    /// exanimdata.d2 pair sync). Authoring warnings and per-plugin errors are
+    /// also emitted from here so users see them exactly once per launch
+    /// regardless of how many excel directories
+    /// <see cref="ApplyEnabledPluginsExcelAsync"/> iterates over.
+    /// </summary>
+    public static async Task ApplyEnabledPluginsModRootAsync(string modRoot, IProgress<string>? progress = null)
+    {
+        MainWindow.Settings.CurrentProfile.Plugins ??= [];
 
         foreach (var registration in MainWindow.Settings.CurrentProfile.Plugins.Where(plugin => plugin.IsEnabled))
         {
@@ -557,8 +624,6 @@ public static class PluginsService
 
             try
             {
-                // Build the parameter dictionary once per plugin instead of
-                // per file; the values are constant for the entire apply pass.
                 var parameters = pluginState.Parameters.ToDictionary(
                     parameter => parameter.Key,
                     parameter => parameter.Value,
@@ -567,35 +632,18 @@ public static class PluginsService
                 foreach (var pluginFile in pluginState.Files)
                 {
                     var operations = await LoadPluginOperationsAsync(GetPluginFilePath(registration.Id, pluginFile.RelativePath));
-
-                    // Drop any operation whose declarative condition evaluates to false against the
-                    // plugin's effective parameter values; preserves the original operation order
-                    // for the remaining entries so the apply pipeline behaves identically when no
-                    // conditions are present.
-                    var filtered = new List<PluginJsonOperation>(operations.Count);
-                    foreach (var op in operations)
-                    {
-                        if (op.Condition != null && !EvaluateCondition(op.Condition, parameters))
-                        {
-                            LaunchDiagnostics.Log(
-                                $"Plugin '{pluginState.Name}': skipped conditional operation in '{pluginFile.RelativePath}' targeting '{op.File}'.");
-                            continue;
-                        }
-
-                        filtered.Add(op);
-                    }
-
+                    var filtered = FilterConditionalOperations(operations, parameters, pluginState.Name, pluginFile.RelativePath);
                     if (filtered.Count == 0)
                     {
                         continue;
                     }
 
-                    await ApplyOperationsAsync(excelDirectory, filtered, parameters);
+                    await ApplyModRootOperationsAsync(modRoot, filtered, parameters);
                 }
 
                 if (pluginState.Assets.Count > 0)
                 {
-                    await ApplyPluginAssetsAsync(excelDirectory, registration.Id, pluginState, progress);
+                    await ApplyPluginAssetsAsync(modRoot, registration.Id, pluginState, progress);
                 }
             }
             catch (Exception ex)
@@ -606,15 +654,40 @@ public static class PluginsService
         }
     }
 
+    // Drops any operation whose declarative condition evaluates to false
+    // against the plugin's effective parameter values; preserves the original
+    // operation order for the remaining entries so the apply pipeline behaves
+    // identically when no conditions are present.
+    private static List<PluginJsonOperation> FilterConditionalOperations(
+        IReadOnlyList<PluginJsonOperation> operations,
+        IReadOnlyDictionary<string, string> parameters,
+        string pluginName,
+        string pluginRelativePath)
+    {
+        var filtered = new List<PluginJsonOperation>(operations.Count);
+        foreach (var op in operations)
+        {
+            if (op.Condition != null && !EvaluateCondition(op.Condition, parameters))
+            {
+                LaunchDiagnostics.Log(
+                    $"Plugin '{pluginName}': skipped conditional operation in '{pluginRelativePath}' targeting '{op.File}'.");
+                continue;
+            }
+
+            filtered.Add(op);
+        }
+
+        return filtered;
+    }
+
     // Pair of binary files D2R reads as a unit. If a plugin replaces only one
     // of the two, the launcher mirrors the replacement onto the other so the
     // game does not see a mismatched pair (see SyncAnimDataPairAsync below).
     private const string AnimDataRelativePath = "data/global/animdata.d2";
     private const string ExAnimDataRelativePath = "data/global/exanimdata.d2";
 
-    private static async Task ApplyPluginAssetsAsync(string excelDirectory, string pluginId, PluginState pluginState, IProgress<string>? progress)
+    private static async Task ApplyPluginAssetsAsync(string modRoot, string pluginId, PluginState pluginState, IProgress<string>? progress)
     {
-        var modRoot = ResolveModRootDirectory(excelDirectory);
         if (string.IsNullOrWhiteSpace(modRoot))
         {
             ReportProgress(progress, $"Skipped assets for plugin '{pluginState.Name}': mod root could not be resolved.");
@@ -757,31 +830,41 @@ public static class PluginsService
         }
     }
 
-    private static string? ResolveModRootDirectory(string excelDirectory)
-    {
-        // excelDirectory is expected to be "<modRoot>/data/global/excel" (or a base/ variant beneath it).
-        // Walk up until we find the parent of a "data" segment to get the mod root.
-        var current = new DirectoryInfo(excelDirectory);
-        while (current is not null)
-        {
-            if (string.Equals(current.Name, "data", StringComparison.OrdinalIgnoreCase) && current.Parent is not null)
-            {
-                return current.Parent.FullName;
-            }
-
-            current = current.Parent;
-        }
-
-        return null;
-    }
-
     public static string GetSupportedTargetsSummary()
     {
         return "All .txt files in the base excel folder are supported except itemstatcost.txt. Most files match rows by a unique column; files with duplicate values in their identifier column use a numeric row ID (0-based data row index) instead. Multiply-existing and append operations can reference parameters declared in plugininfo.json. String JSON files from data/local/lng/strings (e.g. item-runes.json) are also supported using the same flat d2rr-style layout: each entry lists the target file, the D2R Key, and one or more language fields (enUS, zhTW, deDE, esES, frFR, itIT, koKR, plPL, esMX, jaJP, ptBR, ruRU, zhCN); only the listed languages are replaced and any other languages on that entry are left untouched. The missiles.json file at data/hd/missiles/missiles.json is also supported: each entry lists the target file, a Key, and an updatedValue (or parameterKey) to write; addRow appends a new key/value pair while preserving the existing JSON formatting. The monsters.json file at data/hd/character/monsters.json shares the same layout and is supported with the same {file, Key, updatedValue|parameterKey, [operation]} shape and addRow semantics.";
     }
 
-    private static async Task ApplyOperationsAsync(
+    // Dispatches the subset of plugin operations whose target lives inside the
+    // excel directory (i.e. .txt files routed through ParserRegistry).
+    // Mod-root-relative targets are intentionally ignored here; they are
+    // dispatched by ApplyModRootOperationsAsync exactly once per launch.
+    private static async Task ApplyExcelOperationsAsync(
         string excelDirectory,
+        IReadOnlyList<PluginJsonOperation> operations,
+        IReadOnlyDictionary<string, string> parameters)
+    {
+        var fileNames = operations
+            .Where(operation => !string.IsNullOrWhiteSpace(operation.File) && IsSupportedTargetFile(operation.File))
+            .Select(operation => operation.File!)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var fileName in fileNames)
+        {
+            if (ParserRegistry.TryGetValue(fileName, out var registration))
+            {
+                await registration.ApplyAsync(excelDirectory, operations, parameters);
+            }
+        }
+    }
+
+    // Dispatches the subset of plugin operations whose target lives outside
+    // the excel directory but under the mod root (missiles.json,
+    // monsters.json, the strings translation files). Excel parser operations
+    // are intentionally ignored here; they are dispatched by
+    // ApplyExcelOperationsAsync once per excel directory.
+    private static async Task ApplyModRootOperationsAsync(
+        string modRoot,
         IReadOnlyList<PluginJsonOperation> operations,
         IReadOnlyDictionary<string, string> parameters)
     {
@@ -794,17 +877,11 @@ public static class PluginsService
 
         foreach (var fileName in fileNames)
         {
-            if (ParserRegistry.TryGetValue(fileName, out var registration))
-            {
-                await registration.ApplyAsync(excelDirectory, operations, parameters);
-                continue;
-            }
-
             if (IsMissilesTargetFile(fileName))
             {
-                var missilesFilePath = ResolveMissilesFilePath(excelDirectory)
+                var missilesFilePath = ResolveMissilesFilePathFromModRoot(modRoot)
                     ?? throw new FileNotFoundException(
-                        $"Could not resolve {MissilesTargetFileName} ({MissilesRelativePath}) relative to '{excelDirectory}'.");
+                        $"Could not resolve {MissilesTargetFileName} ({MissilesRelativePath}) relative to mod root '{modRoot}'.");
 
                 await ApplyMissilesOperationsAsync(missilesFilePath, operations, parameters);
                 continue;
@@ -812,9 +889,9 @@ public static class PluginsService
 
             if (IsMonstersTargetFile(fileName))
             {
-                var monstersFilePath = ResolveMonstersFilePath(excelDirectory)
+                var monstersFilePath = ResolveMonstersFilePathFromModRoot(modRoot)
                     ?? throw new FileNotFoundException(
-                        $"Could not resolve {MonstersTargetFileName} ({MonstersRelativePath}) relative to '{excelDirectory}'.");
+                        $"Could not resolve {MonstersTargetFileName} ({MonstersRelativePath}) relative to mod root '{modRoot}'.");
 
                 await ApplyMonstersOperationsAsync(monstersFilePath, operations, parameters);
                 continue;
@@ -822,13 +899,43 @@ public static class PluginsService
 
             if (IsStringsTargetFile(fileName))
             {
-                resolvedStringsDirectory ??= ResolveStringsDirectory(excelDirectory)
+                resolvedStringsDirectory ??= ResolveStringsDirectoryFromModRoot(modRoot)
                     ?? throw new DirectoryNotFoundException(
-                        $"Could not resolve the strings directory ({StringsDirectoryRelativePath}) relative to '{excelDirectory}'.");
+                        $"Could not resolve the strings directory ({StringsDirectoryRelativePath}) relative to mod root '{modRoot}'.");
 
                 await ApplyStringsOperationsForTargetAsync(resolvedStringsDirectory, operations, fileName);
             }
         }
+    }
+
+    private static string? ResolveMissilesFilePathFromModRoot(string modRoot)
+    {
+        if (string.IsNullOrWhiteSpace(modRoot))
+        {
+            return null;
+        }
+
+        return Path.Combine(modRoot, "data", "hd", "missiles", MissilesTargetFileName);
+    }
+
+    private static string? ResolveMonstersFilePathFromModRoot(string modRoot)
+    {
+        if (string.IsNullOrWhiteSpace(modRoot))
+        {
+            return null;
+        }
+
+        return Path.Combine(modRoot, "data", "hd", "character", MonstersTargetFileName);
+    }
+
+    private static string? ResolveStringsDirectoryFromModRoot(string modRoot)
+    {
+        if (string.IsNullOrWhiteSpace(modRoot))
+        {
+            return null;
+        }
+
+        return Path.Combine(modRoot, "data", "local", "lng", "strings");
     }
 
     // Replace-by-key and addRow dispatcher for missiles.json. The file is a single JSON object
@@ -918,28 +1025,6 @@ public static class PluginsService
                && string.Equals(fileName, MissilesTargetFileName, StringComparison.OrdinalIgnoreCase);
     }
 
-    // Resolves <modRoot>/data/hd/missiles/missiles.json from the excel directory by walking up to
-    // the parent 'data' folder (mirroring ResolveStringsDirectory) and joining the missiles path.
-    private static string? ResolveMissilesFilePath(string excelDirectory)
-    {
-        if (string.IsNullOrWhiteSpace(excelDirectory))
-        {
-            return null;
-        }
-
-        var current = new DirectoryInfo(excelDirectory);
-        while (current != null && !string.Equals(current.Name, "data", StringComparison.OrdinalIgnoreCase))
-        {
-            current = current.Parent;
-        }
-
-        if (current == null)
-        {
-            return null;
-        }
-
-        return Path.Combine(current.FullName, "hd", "missiles", MissilesTargetFileName);
-    }
 
     // Replace-by-key and addRow dispatcher for monsters.json. Mirrors ApplyMissilesOperationsAsync:
     // monsters.json shares the missiles.json layout (flat key->asset string map with a leading
@@ -1029,28 +1114,6 @@ public static class PluginsService
                && string.Equals(fileName, MonstersTargetFileName, StringComparison.OrdinalIgnoreCase);
     }
 
-    // Resolves <modRoot>/data/hd/character/monsters.json from the excel directory by walking up to
-    // the parent 'data' folder (mirroring ResolveMissilesFilePath) and joining the monsters path.
-    private static string? ResolveMonstersFilePath(string excelDirectory)
-    {
-        if (string.IsNullOrWhiteSpace(excelDirectory))
-        {
-            return null;
-        }
-
-        var current = new DirectoryInfo(excelDirectory);
-        while (current != null && !string.Equals(current.Name, "data", StringComparison.OrdinalIgnoreCase))
-        {
-            current = current.Parent;
-        }
-
-        if (current == null)
-        {
-            return null;
-        }
-
-        return Path.Combine(current.FullName, "hd", "character", MonstersTargetFileName);
-    }
 
     private static async Task ApplyStringsOperationsForTargetAsync(
         string stringsDirectory,
@@ -1125,26 +1188,6 @@ public static class PluginsService
         return fileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string? ResolveStringsDirectory(string excelDirectory)
-    {
-        if (string.IsNullOrWhiteSpace(excelDirectory))
-        {
-            return null;
-        }
-
-        var current = new DirectoryInfo(excelDirectory);
-        while (current != null && !string.Equals(current.Name, "data", StringComparison.OrdinalIgnoreCase))
-        {
-            current = current.Parent;
-        }
-
-        if (current == null)
-        {
-            return null;
-        }
-
-        return Path.Combine(current.FullName, "local", "lng", "strings");
-    }
 
     private static async Task ApplyOperationsForTargetAsync<TEntry>(
         string excelDirectory,
