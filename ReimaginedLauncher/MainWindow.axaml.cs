@@ -229,11 +229,9 @@ public partial class MainWindow : Window
                 return;
             }
 
-            var manifestService = new CascFastloadManifestService(installDir);
+            var manifestService = new CascFastloadManifestService(Settings.CurrentProfile!.Type, installDir);
             if (!manifestService.Exists)
             {
-                // No canonical manifest = fresh slate; sweep stale legacy-location manifests.
-                TryDeleteLegacyFastloadManifest(installDir);
                 return;
             }
 
@@ -300,23 +298,6 @@ public partial class MainWindow : Window
         {
             // Never let the prompt block startup. Silent failure is correct
             // here — the user can always run Extract manually from the view.
-        }
-    }
-
-    /// <summary>Best-effort delete of the legacy <c>&lt;install&gt;\data\.reimagined-fastload.json</c>; called only when the canonical manifest is absent.</summary>
-    private static void TryDeleteLegacyFastloadManifest(string installDirectory)
-    {
-        try
-        {
-            var legacyPath = Path.Combine(installDirectory, "data", ".reimagined-fastload.json");
-            if (File.Exists(legacyPath))
-            {
-                File.Delete(legacyPath);
-            }
-        }
-        catch
-        {
-            // Cleanup-only path; ignore I/O / permission failures.
         }
     }
 

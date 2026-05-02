@@ -102,7 +102,7 @@ public partial class CascFastloadView : UserControl
         {
             try
             {
-                var manifestService = new CascFastloadManifestService(installDir);
+                var manifestService = new CascFastloadManifestService(MainWindow.Settings!.CurrentProfile!.Type, installDir);
                 var manifest = manifestService.LoadAsync().GetAwaiter().GetResult();
                 _manifestHasEntries = manifest.Files.Count > 0;
                 if (manifest.Files.Count == 0)
@@ -168,6 +168,9 @@ public partial class CascFastloadView : UserControl
         ExtractButton.IsEnabled = available;
         UpdateButton.IsEnabled = available && _manifestHasEntries;
         UndoButton.IsEnabled = hasInstall && !running && !isD2Rmm;
+        // Reset is gated identically to Update: it needs a populated manifest, and it
+        // chains a delta to re-extract dropped CASC files (which needs the native lib).
+        ResetVanillaButton.IsEnabled = available && _manifestHasEntries;
         // Cross-extract is BN -> Steam only: enabled on Steam profile when a sibling BN install exists.
         CrossInstallButton.IsEnabled =
             available &&
@@ -446,7 +449,7 @@ public partial class CascFastloadView : UserControl
             Directory.CreateDirectory(modRoot);
             LaunchDiagnostics.Log($"CASC StartExtract: destination root='{modRoot}'.");
 
-            var manifestService = new CascFastloadManifestService(installDir);
+            var manifestService = new CascFastloadManifestService(MainWindow.Settings!.CurrentProfile!.Type, installDir);
             var delta = new CascDeltaService(_extraction, manifestService);
 
             setStatus("Indexing CASC...");
@@ -486,6 +489,154 @@ public partial class CascFastloadView : UserControl
                 $"Extract done. +{result.Added} ~{result.Updated} ↺{result.Restored} −{result.Removed} • {CascFastloadOperationState.FormatBytes(result.BytesWritten)} in {CascFastloadOperationState.FormatElapsed(result.Elapsed)}.");
     }
 
+    // "Reset to Vanilla" handler: reconcile the on-disk fastload tree against the
+    // manifest, then chain a delta pass to re-extract any dropped CASC files.
+    private async void OnResetVanillaClick(object? sender, RoutedEventArgs e)
+    {
+        var installDir = MainWindow.Settings?.CurrentProfile?.InstallDirectory;
+        if (string.IsNullOrWhiteSpace(installDir) || !Directory.Exists(installDir))
+        {
+            Notifications.SendNotification("CASC fastload: no install directory is configured.", "Warning");
+            return;
+        }
+
+        if (!_manifestHasEntries)
+        {
+            Notifications.SendNotification(
+                "No fastload manifest yet. Use Extract CASC first to populate the manifest.",
+                "Information");
+            return;
+        }
+
+        var confirmed = await ShowResetVanillaPromptAsync().ConfigureAwait(true);
+        if (!confirmed)
+        {
+            return;
+        }
+
+        var scopeText = ScopePrefixesTextBox?.Text ?? string.Empty;
+        var allowedLocales = SnapshotAllowedLocales();
+
+        await CascFastloadOperationState.Instance.TryRunAsync("Reset to Vanilla", async (ct, progress, setStatus) =>
+        {
+            var manifestService = new CascFastloadManifestService(MainWindow.Settings!.CurrentProfile!.Type, installDir);
+            var reset = new CascResetService(manifestService);
+            var modRoot = Path.Combine(installDir, "mods", "Reimagined", "Reimagined.mpq");
+
+            setStatus("Reconciling extraction with manifest...");
+
+            var lastUiUpdate = DateTime.MinValue;
+            var resetProgress = new Progress<CascResetProgress>(p =>
+            {
+                var now = DateTime.UtcNow;
+                if ((now - lastUiUpdate).TotalMilliseconds < 500)
+                {
+                    return;
+                }
+                lastUiUpdate = now;
+                setStatus($"Reconciling... {p.FilesScanned:N0} scanned, {p.OrphansDeleted:N0} orphan(s), {p.MismatchedDeleted:N0} mismatched");
+            });
+
+            var resetResult = await reset.ResetAsync(modRoot, CascResetOptions.Default, resetProgress, ct).ConfigureAwait(false);
+
+            LaunchDiagnostics.Log(
+                $"CASC Reset: scanned={resetResult.FilesScanned} orphans={resetResult.OrphansDeleted} mismatched={resetResult.MismatchedDeleted} " +
+                $"overlayIgnored={resetResult.OverlayMismatchesIgnored} bytes={resetResult.BytesDeleted} dropped={resetResult.ManifestEntriesDropped} " +
+                $"pruned={resetResult.DirectoriesPruned} elapsed={resetResult.Elapsed}.");
+
+            // If nothing needed restoring there is no point opening the live
+            // CASC storage; report and exit.
+            if (resetResult.OrphansDeleted == 0 && resetResult.MismatchedDeleted == 0)
+            {
+                CascFastloadOperationState.Instance.SetResult(
+                    $"Reset complete. Nothing to do — installation already matches the manifest " +
+                    $"({resetResult.FilesScanned:N0} files scanned in {CascFastloadOperationState.FormatElapsed(resetResult.Elapsed)}).");
+                return;
+            }
+
+            setStatus($"Reset removed {resetResult.OrphansDeleted:N0} orphan(s) and {resetResult.MismatchedDeleted:N0} mismatched file(s); restoring vanilla CASC files...");
+
+            // Re-extract dropped CASC files via a delta pass. This needs the
+            // native CascLib binary; if unavailable we still leave the disk
+            // in a consistent state because the manifest entries were dropped.
+            if (!_extraction.IsAvailable)
+            {
+                CascFastloadOperationState.Instance.SetResult(
+                    $"Reset removed {resetResult.OrphansDeleted:N0} orphan(s) and {resetResult.MismatchedDeleted:N0} mismatched file(s) " +
+                    $"({CascFastloadOperationState.FormatBytes(resetResult.BytesDeleted)}); re-extraction skipped — native CascLib unavailable.");
+                return;
+            }
+
+            await RunExtractBodyAsync(installDir, scopeText, allowedLocales, ct, progress, setStatus).ConfigureAwait(false);
+
+            CascFastloadOperationState.Instance.SetResult(
+                $"Reset complete. Removed {resetResult.OrphansDeleted:N0} orphan(s), {resetResult.MismatchedDeleted:N0} mismatched file(s) " +
+                $"({CascFastloadOperationState.FormatBytes(resetResult.BytesDeleted)}); pruned {resetResult.DirectoriesPruned:N0} dir(s); " +
+                $"vanilla files re-extracted via delta.");
+        }).ConfigureAwait(false);
+    }
+
+    /// <summary>Confirmation dialog for the "Reset to Vanilla" action.</summary>
+    private async Task<bool> ShowResetVanillaPromptAsync()
+    {
+        var owner = TopLevel.GetTopLevel(this) as Window;
+        if (owner is null)
+        {
+            return false;
+        }
+
+        var dialog = new Window
+        {
+            Width = 520,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Title = "CASC fastload — reset to vanilla extraction"
+        };
+
+        var continueButton = new Button { Content = "Continue", Classes = { "accent" }, MinWidth = 110 };
+        var cancelButton = new Button { Content = "Cancel", MinWidth = 96 };
+
+        continueButton.Click += (_, _) => dialog.Close(true);
+        cancelButton.Click += (_, _) => dialog.Close(false);
+
+        dialog.Content = new Border
+        {
+            Padding = new Avalonia.Thickness(20),
+            Child = new StackPanel
+            {
+                Spacing = 14,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "Reset the CASC fastload tree to its tracked vanilla extraction state.",
+                        FontWeight = FontWeight.SemiBold,
+                        TextWrapping = Avalonia.Media.TextWrapping.Wrap
+                    },
+                    new TextBlock
+                    {
+                        Text = "The launcher will compare the files in Reimagined.mpq\\data\\ against the fastload manifest and:" + Environment.NewLine +
+                               "  • delete files that are not tracked at all (e.g. content dropped in manually)" + Environment.NewLine +
+                               "  • delete CASC-tracked files whose size no longer matches the manifest" + Environment.NewLine +
+                               "  • re-extract the dropped vanilla files via a delta pass" + Environment.NewLine + Environment.NewLine +
+                               "Mod and plugin overlays tracked in the manifest are preserved. If you've modified mod files manually, run Install/Update afterwards to reapply the mod on top.",
+                        TextWrapping = Avalonia.Media.TextWrapping.Wrap
+                    },
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Spacing = 10,
+                        Children = { cancelButton, continueButton }
+                    }
+                }
+            }
+        };
+
+        return await dialog.ShowDialog<bool>(owner);
+    }
+
     private async void OnUndoClick(object? sender, RoutedEventArgs e)
     {
         var installDir = MainWindow.Settings?.CurrentProfile?.InstallDirectory;
@@ -497,7 +648,7 @@ public partial class CascFastloadView : UserControl
 
         await CascFastloadOperationState.Instance.TryRunAsync("Undo", async (ct, _, setStatus) =>
         {
-            var manifestService = new CascFastloadManifestService(installDir);
+            var manifestService = new CascFastloadManifestService(MainWindow.Settings!.CurrentProfile!.Type, installDir);
             var undo = new CascUndoService(manifestService);
 
             setStatus("Undoing CASC fastload...");
@@ -544,7 +695,7 @@ public partial class CascFastloadView : UserControl
 
         await CascFastloadOperationState.Instance.TryRunAsync("Cross-extract", async (ct, progress, setStatus) =>
         {
-            var manifestService = new CascFastloadManifestService(targetInstall);
+            var manifestService = new CascFastloadManifestService(MainWindow.Settings!.CurrentProfile!.Type, targetInstall);
             var delta = new CascDeltaService(_extraction, manifestService);
             var cross = new CascCrossInstallService(_native, _extraction, delta);
 

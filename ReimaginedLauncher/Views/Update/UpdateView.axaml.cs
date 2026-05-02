@@ -440,7 +440,7 @@ public partial class UpdateView : UserControl
 
                 if (removed.Length > 0)
                 {
-                    var manifestService = new CascFastloadManifestService(installDirectory);
+                    var manifestService = new CascFastloadManifestService(profile.Type, installDirectory);
                     var extractionService = new CascExtractionService(new NativeCascLib());
                     var orphanService = new CascOrphanRecoveryService(extractionService, manifestService);
 
@@ -469,7 +469,7 @@ public partial class UpdateView : UserControl
             {
                 if (newModPathsForFlip.Count > 0)
                 {
-                    var manifestService = new CascFastloadManifestService(installDirectory);
+                    var manifestService = new CascFastloadManifestService(profile.Type, installDirectory);
                     var pre = await manifestService.LoadAsync().ConfigureAwait(false);
                     if (pre.Files.Count > 0)
                     {

@@ -1,32 +1,54 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using ReimaginedLauncher.Generators;
+using ReimaginedLauncher.Utilities;
 
 namespace ReimaginedLauncher.Utilities.Casc;
 
 /// <summary>
-/// Atomic, per-install reader/writer for <see cref="CascFastloadManifest"/>. The manifest lives
-/// inside Reimagined.mpq/data/ so it sits next to the bytes it tracks; corrupt files are quarantined.
+/// Atomic, per-install reader/writer for <see cref="CascFastloadManifest"/>. The manifest is stored
+/// under <c>%AppData%\ReimaginedLauncher\Casc\</c>, keyed by profile type + install-path hash so
+/// users cannot corrupt it by editing the game directory; corrupt files are quarantined in-place.
 /// </summary>
 public sealed class CascFastloadManifestService
 {
-    public const string ManifestRelativePath = "mods\\Reimagined\\Reimagined.mpq\\data\\.reimagined-fastload.json";
+    /// <summary>Subdirectory under <see cref="SettingsManager.AppDirectoryPath"/> that holds per-install manifests.</summary>
+    public const string ManifestSubdirectory = "Casc";
 
     private readonly string _manifestPath;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
-    public CascFastloadManifestService(string installDirectory)
+    public CascFastloadManifestService(InstallationType type, string installDirectory)
     {
         if (string.IsNullOrWhiteSpace(installDirectory))
         {
             throw new ArgumentException("Install directory must be provided.", nameof(installDirectory));
         }
 
-        _manifestPath = Path.Combine(installDirectory, ManifestRelativePath);
+        _manifestPath = BuildManifestPath(type, installDirectory);
+    }
+
+    /// <summary>
+    /// Resolves the manifest file location for a given profile type + install directory pair.
+    /// File name shape: <c>{type}-{8 hex chars of SHA1(install dir)}.json</c>; collisions across
+    /// the handful of installs a single user has are vanishingly unlikely at 8 hex chars.
+    /// </summary>
+    public static string BuildManifestPath(InstallationType type, string installDirectory)
+    {
+        var normalized = (installDirectory ?? string.Empty).Trim().TrimEnd('\\', '/').ToLowerInvariant();
+        var hash = SHA1.HashData(Encoding.UTF8.GetBytes(normalized));
+        var key = Convert.ToHexString(hash, 0, 4).ToLowerInvariant();
+        var typeToken = type.ToString().ToLowerInvariant();
+        return Path.Combine(
+            SettingsManager.AppDirectoryPath,
+            ManifestSubdirectory,
+            $"{typeToken}-{key}.json");
     }
 
     /// <summary>Absolute path to the manifest file (may not exist yet).</summary>

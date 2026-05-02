@@ -107,6 +107,10 @@
                         Content="Undo"
                         ToolTip.Tip="Remove the launcher's extracted CASC files (mod and plugin overlays are preserved)."
                         Click="OnUndoClick"/>
+                <Button x:Name="ResetVanillaButton"
+                        Content="Reset to Vanilla"
+                        ToolTip.Tip="Compare the on-disk fastload tree against the manifest. Files not tracked by fastload are deleted, and CASC files whose size disagrees with the manifest are deleted and re-extracted by a follow-up delta pass. Mod and plugin overlays are preserved. Disabled until an initial extract has populated the manifest."
+                        Click="OnResetVanillaClick"/>
                 <Button x:Name="CrossInstallButton"
                         Content="Cross-Extract from B.Net"
                         ToolTip.Tip="Use the configured Battle.net install as the source to extract into this Steam install, fully offline. Disabled when the Battle.net profile is the current selection or when no Battle.net sibling install is configured. Requires both installs to be at the same CASC build."
