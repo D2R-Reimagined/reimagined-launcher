@@ -10,11 +10,7 @@ using ReimaginedLauncher.Generators;
 namespace ReimaginedLauncher.Utilities;
 
 /// <summary>
-/// Tracks original copies of mod files that have been replaced by plugin asset
-/// operations so they can be restored when a plugin is later disabled or
-/// deleted. Backups and the manifest live under the launcher's app data
-/// directory and are keyed by absolute target path so the same plugin can
-/// safely target multiple installations.
+/// Tracks original mod files replaced by plugin asset ops so they can be restored on disable/delete. Backups are keyed by absolute target path under the launcher's app data dir.
 /// </summary>
 public static class PluginAssetBackupService
 {
@@ -24,9 +20,7 @@ public static class PluginAssetBackupService
     private static readonly JsonSerializerOptions ReadOptions = SerializerOptions.PropertyNameCaseInsensitive;
     private static readonly JsonSerializerOptions WriteOptions = SerializerOptions.CamelCase;
 
-    // Async-safe single-writer guard. All public mutators serialize through this
-    // semaphore so concurrent register/restore calls cannot race on the
-    // manifest contents or duplicate-snapshot a target.
+    // Single-writer guard: all public mutators serialize through this semaphore.
     private static readonly SemaphoreSlim ServiceLock = new(1, 1);
 
     public static string BackupRootDirectory =>
@@ -163,6 +157,8 @@ public static class PluginAssetBackupService
                 manifest.Entries.RemoveAll(restoredEntries.Contains);
                 SaveManifestUnsafe(manifest);
             }
+
+            CleanupOrphanGuidFoldersUnsafe(manifest);
         }
         finally
         {
@@ -255,9 +251,7 @@ public static class PluginAssetBackupService
                         $"Failed to restore '{Path.GetFileName(entry.TargetAbsolutePath)}': {ex.Message}",
                         "Warning");
 
-                    // Leave the plugin id on the entry so a future
-                    // SetEnabled(false)/Delete invocation can retry the restore
-                    // instead of orphaning the backup permanently.
+                    // Leave the plugin id so a future disable/delete can retry the restore.
                 }
             }
 
@@ -266,6 +260,8 @@ public static class PluginAssetBackupService
                 manifest.Entries.RemoveAll(entry => entry.ClaimingPluginIds.Count == 0);
                 SaveManifestUnsafe(manifest);
             }
+
+            CleanupOrphanGuidFoldersUnsafe(manifest);
         }
         finally
         {
@@ -343,9 +339,7 @@ public static class PluginAssetBackupService
         Directory.CreateDirectory(BackupRootDirectory);
         var json = JsonSerializer.Serialize(manifest, WriteOptions);
 
-        // Write atomically so an interrupted save can never leave a truncated
-        // manifest behind (which LoadManifestUnsafe would otherwise quietly
-        // treat as "no backups exist").
+        // Write atomically: an interrupted save must not leave a truncated manifest behind.
         var tempPath = ManifestPath + ".tmp";
         File.WriteAllText(tempPath, json);
         File.Move(tempPath, ManifestPath, overwrite: true);
@@ -375,6 +369,103 @@ public static class PluginAssetBackupService
         catch (Exception ex)
         {
             LaunchDiagnostics.LogException($"Failed to delete plugin asset backup file '{path}'", ex);
+            return;
+        }
+
+        TryDeleteEmptyBackupSubfolder(Path.GetDirectoryName(path));
+    }
+
+    private static void TryDeleteEmptyBackupSubfolder(string? directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return;
+        }
+
+        try
+        {
+            var normalized = NormalizePath(directory);
+            var root = NormalizePath(BackupRootDirectory);
+            if (!string.Equals(NormalizePath(Path.GetDirectoryName(normalized) ?? string.Empty), root, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (!Directory.Exists(normalized))
+            {
+                return;
+            }
+
+            if (Directory.EnumerateFileSystemEntries(normalized).Any())
+            {
+                return;
+            }
+
+            Directory.Delete(normalized);
+        }
+        catch (Exception ex)
+        {
+            LaunchDiagnostics.LogException($"Failed to delete empty plugin asset backup folder '{directory}'", ex);
+        }
+    }
+
+    private static void CleanupOrphanGuidFoldersUnsafe(PluginAssetBackupManifest manifest)
+    {
+        if (!Directory.Exists(BackupRootDirectory))
+        {
+            return;
+        }
+
+        var referenced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in manifest.Entries)
+        {
+            if (string.IsNullOrWhiteSpace(entry.BackupAbsolutePath))
+            {
+                continue;
+            }
+
+            var parent = Path.GetDirectoryName(entry.BackupAbsolutePath);
+            if (!string.IsNullOrWhiteSpace(parent))
+            {
+                referenced.Add(NormalizePath(parent));
+            }
+        }
+
+        IEnumerable<string> subfolders;
+        try
+        {
+            subfolders = Directory.EnumerateDirectories(BackupRootDirectory).ToList();
+        }
+        catch (Exception ex)
+        {
+            LaunchDiagnostics.LogException(
+                "Failed to enumerate plugin asset backup folders for orphan cleanup", ex);
+            return;
+        }
+
+        foreach (var directory in subfolders)
+        {
+            var name = Path.GetFileName(directory);
+            if (!Guid.TryParseExact(name, "N", out _))
+            {
+                continue;
+            }
+
+            var normalized = NormalizePath(directory);
+            if (referenced.Contains(normalized))
+            {
+                continue;
+            }
+
+            try
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+            catch (Exception ex)
+            {
+                LaunchDiagnostics.LogException(
+                    $"Failed to delete orphan plugin asset backup folder '{directory}'", ex);
+            }
         }
     }
 
