@@ -28,6 +28,13 @@ public static class ModTweaksService
     private const string MissilesDirectoryName = "missiles";
     private const string MissilesFileName = "missiles.json";
     private const string CleanMissilesFileName = "missiles_launcher_clean.json";
+    private const string CharacterDirectoryName = "character";
+    private const string MonstersFileName = "monsters.json";
+    private const string CleanMonstersFileName = "monsters_launcher_clean.json";
+    private const string LocalDirectoryName = "local";
+    private const string LngDirectoryName = "lng";
+    private const string StringsDirectoryName = "strings";
+    private const string CleanStringsDirectoryName = "strings_launcher_clean";
     private const string LayoutsProfileHdFileName = "_profilehd.json";
     private const string CleanLayoutsProfileHdFileName = "layouts_profilehd_launcher_clean.json";
     private const string CleanArmorTweaksDirectoryName = "armor_launcher_clean";
@@ -101,17 +108,24 @@ public static class ModTweaksService
             return false;
         }
 
+        var modRoot = GetMpqBaseDirectory();
         var missilesFilePath = GetMissilesFilePath();
+        var monstersFilePath = GetMonstersFilePath();
+        var stringsDirectory = GetStringsDirectory();
         var layoutsProfileHdFilePath = GetLayoutsProfileHdFilePath();
         var armorDirectory = GetArmorDirectory();
         var desecratedZonesFilePath = GetDesecratedZonesFilePath();
         var cleanExcelDirectory = GetCleanExcelDirectory(excelDirectory);
         var cleanMissilesFilePath = GetCleanMissilesFilePath(missilesFilePath);
+        var cleanMonstersFilePath = GetCleanMonstersFilePath(monstersFilePath);
+        var cleanStringsDirectory = GetCleanStringsDirectory(stringsDirectory);
         var cleanLayoutsProfileHdFilePath = GetCleanLayoutsProfileHdFilePath(layoutsProfileHdFilePath);
         var cleanArmorTweaksDirectory = GetCleanArmorTweaksDirectory(armorDirectory);
         var cleanDesecratedZonesFilePath = GetCleanDesecratedZonesFilePath(desecratedZonesFilePath);
         var excelDirectories = GetExcelDirectories(excelDirectory).ToList();
         LaunchDiagnostics.Log($"Resolved missiles file path: {missilesFilePath ?? "<null>"}");
+        LaunchDiagnostics.Log($"Resolved monsters file path: {monstersFilePath ?? "<null>"}");
+        LaunchDiagnostics.Log($"Resolved strings directory path: {stringsDirectory ?? "<null>"}");
         LaunchDiagnostics.Log($"Resolved layouts_profilehd.json path: {layoutsProfileHdFilePath ?? "<null>"}");
         LaunchDiagnostics.Log($"Resolved armor directory path: {armorDirectory ?? "<null>"}");
         LaunchDiagnostics.Log($"Resolved desecratedzones.json path: {desecratedZonesFilePath ?? "<null>"}");
@@ -133,6 +147,12 @@ public static class ModTweaksService
             ReportProgress(progress, "Preparing clean missiles copy...");
             LaunchDiagnostics.Log("Ensuring clean missiles copy.");
             await EnsureCleanMissilesCopyAsync(missilesFilePath, cleanMissilesFilePath);
+            ReportProgress(progress, "Preparing clean monsters copy...");
+            LaunchDiagnostics.Log("Ensuring clean monsters.json copy.");
+            await EnsureCleanMonstersCopyAsync(monstersFilePath, cleanMonstersFilePath);
+            ReportProgress(progress, "Preparing clean strings copy...");
+            LaunchDiagnostics.Log("Ensuring clean strings directory copy.");
+            await EnsureCleanStringsCopyAsync(stringsDirectory, cleanStringsDirectory);
             ReportProgress(progress, "Preparing clean tooltip layout copy...");
             LaunchDiagnostics.Log("Ensuring clean layouts_profilehd.json copy.");
             await EnsureCleanLayoutsProfileHdCopyAsync(layoutsProfileHdFilePath, cleanLayoutsProfileHdFilePath);
@@ -154,6 +174,18 @@ public static class ModTweaksService
                 LaunchDiagnostics.Log($"Processing excel directory. Source={sourceExcelDirectory}, Target={targetExcelDirectory}");
                 await ValidateExcelFilesAsync(sourceExcelDirectory);
                 await CopyDirectoryAsync(sourceExcelDirectory, targetExcelDirectory, overwrite: true);
+
+                // Pre-stage plugin asset copies whose target lives directly under
+                // this excel variant *before* launcher tweaks and parser ops run,
+                // so the layering is: clean -> plugin asset -> launcher tweaks ->
+                // plugin parser ops. No PluginAssetBackupService snapshot is
+                // needed because the launcher's clean-copy step is the recovery
+                // mechanism for excel files.
+                if (!string.IsNullOrWhiteSpace(modRoot))
+                {
+                    await PluginsService.ApplyEnabledPluginsExcelAssetsAsync(modRoot, targetExcelDirectory, progress);
+                }
+
                 await ApplyTweaksAsync(targetExcelDirectory, progress);
 
                 // Plugin operations targeting excel .txt files (via ParserRegistry)
@@ -166,6 +198,15 @@ public static class ModTweaksService
             ReportProgress(progress, "Restoring missiles.json...");
             LaunchDiagnostics.Log("Restoring missiles file from clean copy.");
             await RestoreMissilesFileAsync(cleanMissilesFilePath, missilesFilePath);
+
+            // Pre-stage plugin asset copies targeting missiles.json before
+            // launcher tweaks and plugin parser ops run, so launcher tweaks
+            // (e.g. RemoveSplashVfx) and plugin parser ops both layer on top.
+            if (!string.IsNullOrWhiteSpace(modRoot))
+            {
+                await PluginsService.ApplyEnabledPluginsMissilesAssetsAsync(modRoot, progress);
+            }
+
             ReportProgress(progress, "Applying missiles tweaks...");
             LaunchDiagnostics.Log("Applying missiles tweaks.");
             var profile = MainWindow.Settings.CurrentProfile;
@@ -204,15 +245,34 @@ public static class ModTweaksService
             LaunchDiagnostics.Log("Applying vignette tweaks.");
             await ApplyVignetteTweakAsync(profile.RemoveVignette);
 
-            // Apply mod-root-relative plugin work (missiles.json, monsters.json,
-            // strings, asset copies, animdata.d2 pair sync) exactly once per
-            // launch. Doing this once -- rather than per-excel-directory --
-            // means the asset backup service registers each destination a
-            // single time per pass, which is what makes disable-then-Start-Game
-            // reliably restore the pre-plugin originals. Run after the
-            // Restore*/Apply*Tweaks* block so plugin edits to those tweak-managed
-            // JSON targets are not clobbered.
-            var modRoot = GetMpqBaseDirectory();
+            // Restore monsters.json from the launcher's clean copy and pre-stage
+            // any plugin asset copies targeting it. monsters.json has no launcher
+            // tweaks today, but the pre-stage runs before plugin parser ops in
+            // ApplyEnabledPluginsModRootAsync below so parser ops layer on top.
+            ReportProgress(progress, "Restoring monsters.json...");
+            LaunchDiagnostics.Log("Restoring monsters file from clean copy.");
+            await RestoreMonstersFileAsync(cleanMonstersFilePath, monstersFilePath);
+            if (!string.IsNullOrWhiteSpace(modRoot))
+            {
+                await PluginsService.ApplyEnabledPluginsMonstersAssetsAsync(modRoot, progress);
+            }
+
+            // Restore the strings directory and pre-stage any plugin asset
+            // copies targeting *.json under it, so plugin parser ops in
+            // ApplyEnabledPluginsModRootAsync below layer on top.
+            ReportProgress(progress, "Restoring strings directory...");
+            LaunchDiagnostics.Log("Restoring strings directory from clean copy.");
+            await RestoreStringsFromCleanCopyAsync(stringsDirectory, cleanStringsDirectory);
+            if (!string.IsNullOrWhiteSpace(modRoot))
+            {
+                await PluginsService.ApplyEnabledPluginsStringsAssetsAsync(modRoot, progress);
+            }
+
+            // Apply the remaining mod-root-relative plugin work exactly once per
+            // launch: parser ops on missiles/monsters/strings JSON, plugin asset
+            // copies whose target is NOT covered by a launcher clean-copy (those
+            // were pre-staged earlier and are skipped here), and the
+            // animdata.d2 / exanimdata.d2 pair sync.
             if (!string.IsNullOrWhiteSpace(modRoot))
             {
                 ReportProgress(progress, "Applying plugins...");
@@ -337,6 +397,38 @@ public static class ModTweaksService
             ArmorDirectoryName);
     }
 
+    private static string? GetMonstersFilePath()
+    {
+        var mpqBase = GetMpqBaseDirectory();
+        if (string.IsNullOrWhiteSpace(mpqBase))
+        {
+            return null;
+        }
+
+        return Path.Combine(
+            mpqBase,
+            DataDirectoryName,
+            HdDirectoryName,
+            CharacterDirectoryName,
+            MonstersFileName);
+    }
+
+    private static string? GetStringsDirectory()
+    {
+        var mpqBase = GetMpqBaseDirectory();
+        if (string.IsNullOrWhiteSpace(mpqBase))
+        {
+            return null;
+        }
+
+        return Path.Combine(
+            mpqBase,
+            DataDirectoryName,
+            LocalDirectoryName,
+            LngDirectoryName,
+            StringsDirectoryName);
+    }
+
     private static string GetCleanExcelDirectory(string excelDirectory)
     {
         var parentDirectory = Directory.GetParent(excelDirectory)?.FullName;
@@ -387,6 +479,68 @@ public static class ModTweaksService
         }
 
         await CopyFileAsync(missilesFilePath, cleanMissilesFilePath, overwrite: true);
+    }
+
+    private static string GetCleanMonstersFilePath(string? monstersFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(monstersFilePath))
+        {
+            throw new FileNotFoundException("monsters.json path could not be resolved.");
+        }
+
+        var monstersDirectory = Path.GetDirectoryName(monstersFilePath);
+        if (string.IsNullOrWhiteSpace(monstersDirectory))
+        {
+            throw new DirectoryNotFoundException("Character folder could not be resolved.");
+        }
+
+        return Path.Combine(monstersDirectory, CleanMonstersFileName);
+    }
+
+    private static async Task EnsureCleanMonstersCopyAsync(string? monstersFilePath, string cleanMonstersFilePath)
+    {
+        if (File.Exists(cleanMonstersFilePath))
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(monstersFilePath) || !File.Exists(monstersFilePath))
+        {
+            throw new FileNotFoundException("monsters.json was not found in the Reimagined hd character folder.");
+        }
+
+        await CopyFileAsync(monstersFilePath, cleanMonstersFilePath, overwrite: true);
+    }
+
+    private static string GetCleanStringsDirectory(string? stringsDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(stringsDirectory))
+        {
+            throw new DirectoryNotFoundException("Strings folder could not be resolved.");
+        }
+
+        var parentDirectory = Directory.GetParent(stringsDirectory)?.FullName;
+        if (string.IsNullOrWhiteSpace(parentDirectory))
+        {
+            throw new DirectoryNotFoundException("Strings folder parent directory could not be resolved.");
+        }
+
+        return Path.Combine(parentDirectory, CleanStringsDirectoryName);
+    }
+
+    private static async Task EnsureCleanStringsCopyAsync(string? stringsDirectory, string cleanStringsDirectory)
+    {
+        if (Directory.Exists(cleanStringsDirectory))
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(stringsDirectory) || !Directory.Exists(stringsDirectory))
+        {
+            throw new DirectoryNotFoundException("Strings folder was not found in the Reimagined local lng folder.");
+        }
+
+        await CopyDirectoryAsync(stringsDirectory, cleanStringsDirectory, overwrite: true);
     }
 
     private static string GetCleanLayoutsProfileHdFilePath(string? layoutsProfileHdFilePath)
@@ -701,6 +855,36 @@ public static class ModTweaksService
         }
 
         await CopyFileAsync(cleanMissilesFilePath, missilesFilePath, overwrite: true);
+    }
+
+    private static async Task RestoreMonstersFileAsync(string cleanMonstersFilePath, string? monstersFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(monstersFilePath))
+        {
+            throw new FileNotFoundException("monsters.json path could not be resolved.");
+        }
+
+        if (!File.Exists(cleanMonstersFilePath))
+        {
+            throw new FileNotFoundException("Clean monsters.json copy was not found.");
+        }
+
+        await CopyFileAsync(cleanMonstersFilePath, monstersFilePath, overwrite: true);
+    }
+
+    private static async Task RestoreStringsFromCleanCopyAsync(string? stringsDirectory, string cleanStringsDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(stringsDirectory))
+        {
+            throw new DirectoryNotFoundException("Strings folder could not be resolved.");
+        }
+
+        if (!Directory.Exists(cleanStringsDirectory))
+        {
+            throw new DirectoryNotFoundException("Clean strings copy was not found.");
+        }
+
+        await CopyDirectoryAsync(cleanStringsDirectory, stringsDirectory, overwrite: true);
     }
 
     private static async Task ApplyMissilesTweaksAsync(string? missilesFilePath, bool removeSplashVfx)

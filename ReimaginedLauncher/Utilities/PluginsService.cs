@@ -654,6 +654,233 @@ public static class PluginsService
         }
     }
 
+    /// <summary>
+    /// Pre-stages plugin asset copies whose target lies *directly* under the supplied
+    /// <paramref name="excelDirectory"/>. Called from the per-excel-directory loop after
+    /// the launcher's clean variant has been copied into place and before parser ops
+    /// run, so plugin parser ops layer on top of the wholesale replacement
+    /// (clean -> plugin asset -> launcher tweaks -> plugin parser ops).
+    /// No backup is registered with <see cref="PluginAssetBackupService"/> because the
+    /// launcher's clean-copy step is the recovery mechanism for excel files.
+    /// </summary>
+    public static Task ApplyEnabledPluginsExcelAssetsAsync(string modRoot, string excelDirectory, IProgress<string>? progress = null)
+    {
+        if (string.IsNullOrWhiteSpace(modRoot) || string.IsNullOrWhiteSpace(excelDirectory))
+        {
+            return Task.CompletedTask;
+        }
+
+        var excelFull = Path.GetFullPath(excelDirectory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        // Match assets whose direct parent directory is the supplied excel directory --
+        // assets under <excel>/base are pre-staged on the base pass instead, so each
+        // excel iteration only touches files that variant actually owns.
+        return ApplyPreStagedAssetsAsync(
+            modRoot,
+            "excel",
+            destinationFull => string.Equals(
+                Path.GetDirectoryName(destinationFull),
+                excelFull,
+                StringComparison.OrdinalIgnoreCase),
+            progress);
+    }
+
+    /// <summary>
+    /// Pre-stages plugin asset copies whose target is the mod's missiles.json. Called
+    /// after <c>RestoreMissilesFileAsync</c> and before <c>ApplyMissilesTweaksAsync</c>
+    /// so launcher tweaks and plugin parser ops both layer on top of the plugin asset.
+    /// </summary>
+    public static Task ApplyEnabledPluginsMissilesAssetsAsync(string modRoot, IProgress<string>? progress = null)
+    {
+        if (string.IsNullOrWhiteSpace(modRoot))
+        {
+            return Task.CompletedTask;
+        }
+
+        var missilesFull = Path.GetFullPath(Path.Combine(modRoot, "data", "hd", "missiles", MissilesTargetFileName));
+
+        return ApplyPreStagedAssetsAsync(
+            modRoot,
+            "missiles",
+            destinationFull => string.Equals(destinationFull, missilesFull, StringComparison.OrdinalIgnoreCase),
+            progress);
+    }
+
+    /// <summary>
+    /// Pre-stages plugin asset copies whose target is the mod's monsters.json. Called
+    /// after <c>RestoreMonstersFileAsync</c> so plugin parser ops layer on top.
+    /// </summary>
+    public static Task ApplyEnabledPluginsMonstersAssetsAsync(string modRoot, IProgress<string>? progress = null)
+    {
+        if (string.IsNullOrWhiteSpace(modRoot))
+        {
+            return Task.CompletedTask;
+        }
+
+        var monstersFull = Path.GetFullPath(Path.Combine(modRoot, "data", "hd", "character", MonstersTargetFileName));
+
+        return ApplyPreStagedAssetsAsync(
+            modRoot,
+            "monsters",
+            destinationFull => string.Equals(destinationFull, monstersFull, StringComparison.OrdinalIgnoreCase),
+            progress);
+    }
+
+    /// <summary>
+    /// Pre-stages plugin asset copies whose target is any .json file under
+    /// <c>data/local/lng/strings</c>. Called after <c>RestoreStringsFromCleanCopyAsync</c>
+    /// so plugin parser ops layer on top.
+    /// </summary>
+    public static Task ApplyEnabledPluginsStringsAssetsAsync(string modRoot, IProgress<string>? progress = null)
+    {
+        if (string.IsNullOrWhiteSpace(modRoot))
+        {
+            return Task.CompletedTask;
+        }
+
+        var stringsRootFull = Path.GetFullPath(Path.Combine(modRoot, "data", "local", "lng", "strings"))
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var stringsPrefix = stringsRootFull + Path.DirectorySeparatorChar;
+
+        return ApplyPreStagedAssetsAsync(
+            modRoot,
+            "strings",
+            destinationFull =>
+                destinationFull.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                && destinationFull.StartsWith(stringsPrefix, StringComparison.OrdinalIgnoreCase),
+            progress);
+    }
+
+    // Shared body for the four pre-stage entry points above. Iterates enabled
+    // plugins in load order, evaluates each asset's condition, validates the
+    // resolved destination stays inside the mod root, and copies via
+    // FileCopyHelper -- no backup registration, because the caller has just
+    // restored the destination from a launcher-managed clean copy.
+    private static async Task ApplyPreStagedAssetsAsync(
+        string modRoot,
+        string scopeLabel,
+        Func<string, bool> destinationIsInScope,
+        IProgress<string>? progress)
+    {
+        MainWindow.Settings.CurrentProfile.Plugins ??= [];
+        var modRootFull = Path.GetFullPath(modRoot);
+
+        foreach (var registration in MainWindow.Settings.CurrentProfile.Plugins.Where(plugin => plugin.IsEnabled))
+        {
+            var pluginState = await LoadPluginStateAsync(registration);
+            if (pluginState.Errors.Count > 0 || pluginState.Assets.Count == 0)
+            {
+                // Errors and authoring warnings are emitted once per launch from
+                // ApplyEnabledPluginsModRootAsync -- skip silently here so users
+                // do not see them N times across the four pre-stage passes.
+                continue;
+            }
+
+            var parameterValues = pluginState.Parameters.ToDictionary(
+                parameter => parameter.Key,
+                parameter => parameter.Value,
+                StringComparer.OrdinalIgnoreCase);
+
+            var announced = false;
+            foreach (var asset in pluginState.Assets)
+            {
+                string destinationFull;
+                try
+                {
+                    destinationFull = Path.GetFullPath(Path.Combine(modRootFull, asset.TargetRelativePath));
+                }
+                catch
+                {
+                    // Path resolution failures are reported by the canonical
+                    // ApplyPluginAssetsAsync pass; skip silently here.
+                    continue;
+                }
+
+                if (!destinationIsInScope(destinationFull))
+                {
+                    continue;
+                }
+
+                if (asset.Condition != null && !EvaluateCondition(asset.Condition, parameterValues))
+                {
+                    LaunchDiagnostics.Log(
+                        $"Plugin '{pluginState.Name}': skipped conditional asset '{asset.TargetRelativePath}' ({scopeLabel} pre-stage).");
+                    continue;
+                }
+
+                try
+                {
+                    var relative = Path.GetRelativePath(modRootFull, destinationFull);
+                    if (string.IsNullOrEmpty(relative) ||
+                        relative.StartsWith("..", StringComparison.Ordinal) ||
+                        Path.IsPathRooted(relative))
+                    {
+                        throw new InvalidDataException(
+                            $"Asset target '{asset.TargetRelativePath}' resolves outside the mod folder.");
+                    }
+
+                    if (!announced)
+                    {
+                        ReportProgress(progress, $"Pre-staging {scopeLabel} assets for {pluginState.Name}...");
+                        announced = true;
+                    }
+
+                    await FileCopyHelper.CopyFileAsync(asset.SourceAbsolutePath, destinationFull);
+                    LaunchDiagnostics.Log(
+                        $"Plugin '{pluginState.Name}': pre-staged {scopeLabel} asset '{asset.TargetRelativePath}'.");
+                    ReportProgress(progress, $"Copied asset to {asset.TargetRelativePath}.");
+                }
+                catch (Exception ex)
+                {
+                    LaunchDiagnostics.LogException(
+                        $"Failed to pre-stage {scopeLabel} asset '{asset.TargetRelativePath}' for plugin '{pluginState.Name}'", ex);
+                    Notifications.SendNotification(
+                        $"Plugin '{pluginState.Name}': failed to pre-stage asset '{asset.TargetRelativePath}': {ex.Message}",
+                        "Warning");
+                }
+            }
+        }
+    }
+
+    // Returns true if the supplied absolute destination sits inside one of the
+    // launcher's clean-copy-managed scopes (excel, missiles, monsters, strings).
+    // Such destinations are pre-staged earlier in the launch pipeline and must
+    // be skipped by ApplyPluginAssetsAsync to avoid double-writing the file and
+    // registering a redundant backup -- restoration is handled by the next
+    // launch's clean-copy step rather than by PluginAssetBackupService.
+    private static bool IsAssetTargetCleanCovered(string modRootFull, string destinationFull)
+    {
+        var excelDir = Path.GetFullPath(Path.Combine(modRootFull, "data", "global", "excel"))
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (destinationFull.StartsWith(excelDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var missilesFull = Path.GetFullPath(Path.Combine(modRootFull, "data", "hd", "missiles", MissilesTargetFileName));
+        if (string.Equals(destinationFull, missilesFull, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var monstersFull = Path.GetFullPath(Path.Combine(modRootFull, "data", "hd", "character", MonstersTargetFileName));
+        if (string.Equals(destinationFull, monstersFull, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var stringsRootFull = Path.GetFullPath(Path.Combine(modRootFull, "data", "local", "lng", "strings"))
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (destinationFull.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+            && destinationFull.StartsWith(stringsRootFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
     // Drops any operation whose declarative condition evaluates to false
     // against the plugin's effective parameter values; preserves the original
     // operation order for the remaining entries so the apply pipeline behaves
@@ -735,6 +962,20 @@ public static class PluginsService
                 {
                     throw new InvalidDataException(
                         $"Asset target '{asset.TargetRelativePath}' resolves outside the mod folder.");
+                }
+
+                // Destinations covered by a launcher-managed clean copy are
+                // pre-staged earlier in the launch pipeline (before parser ops
+                // run) so plugin parser ops can layer on top of the wholesale
+                // replacement. Skip them here to avoid double-writing the file
+                // and registering a redundant backup; the next launch's
+                // clean-copy step is the recovery mechanism, not the backup
+                // service.
+                if (IsAssetTargetCleanCovered(modRootFull, destinationPath))
+                {
+                    LaunchDiagnostics.Log(
+                        $"Plugin '{pluginState.Name}': asset '{asset.TargetRelativePath}' was pre-staged earlier; skipping mod-root pass.");
+                    continue;
                 }
 
                 // Capture the pre-plugin original (if any) before we overwrite it,
