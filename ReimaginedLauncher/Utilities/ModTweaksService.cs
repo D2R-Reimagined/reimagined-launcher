@@ -141,6 +141,16 @@ public static class ModTweaksService
             LaunchDiagnostics.Log("Restoring plugin asset backups before tweaks.");
             await PluginAssetBackupService.RestoreAllAsync();
 
+            // Surface asset-copy collisions across enabled plugins exactly once
+            // per launch, before any pre-stage entry point or
+            // ApplyEnabledPluginsModRootAsync runs. Last-writer-wins semantics
+            // are preserved; this only tells the user that a silent override
+            // is happening so they can adjust load order if it was unintended.
+            if (!string.IsNullOrWhiteSpace(modRoot))
+            {
+                await PluginsService.WarnAssetCollisionsAsync(modRoot, progress);
+            }
+
             ReportProgress(progress, "Preparing clean excel copy...");
             LaunchDiagnostics.Log("Ensuring clean excel copy.");
             await EnsureCleanExcelCopyAsync(excelDirectory, cleanExcelDirectory);

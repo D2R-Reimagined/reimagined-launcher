@@ -591,6 +591,218 @@ public static class PluginsService
     }
 
     /// <summary>
+    /// Surfaces an authoring/load-order warning when two or more enabled plugins
+    /// declare an asset copy targeting the same destination under
+    /// <paramref name="modRoot"/>. Last-writer-wins semantics are unchanged --
+    /// this only makes the silent override visible. Conditional assets whose
+    /// <c>Condition</c> evaluates to <c>false</c> for the current parameters are
+    /// excluded from the collision set, and collisions where every claimant
+    /// ships byte-identical source bytes are demoted to a diagnostics-log entry
+    /// (no user-facing notification) since they cannot actually disagree.
+    /// Intended to be called once per launch, before the four pre-stage entry
+    /// points and <see cref="ApplyEnabledPluginsModRootAsync"/> run.
+    /// </summary>
+    public static async Task WarnAssetCollisionsAsync(string modRoot, IProgress<string>? progress = null)
+    {
+        if (string.IsNullOrWhiteSpace(modRoot))
+        {
+            return;
+        }
+
+        MainWindow.Settings.CurrentProfile.Plugins ??= [];
+
+        var modRootFull = Path.GetFullPath(modRoot);
+        var claimants = new Dictionary<string, List<AssetClaim>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var registration in MainWindow.Settings.CurrentProfile.Plugins.Where(plugin => plugin.IsEnabled))
+        {
+            PluginState pluginState;
+            try
+            {
+                pluginState = await LoadPluginStateAsync(registration);
+            }
+            catch
+            {
+                // Loading failures surface from ApplyEnabledPluginsModRootAsync;
+                // skip silently here so the same plugin is not double-reported.
+                continue;
+            }
+
+            if (pluginState.Errors.Count > 0 || pluginState.Assets.Count == 0)
+            {
+                continue;
+            }
+
+            var parameterValues = pluginState.Parameters.ToDictionary(
+                parameter => parameter.Key,
+                parameter => parameter.Value,
+                StringComparer.OrdinalIgnoreCase);
+
+            foreach (var asset in pluginState.Assets)
+            {
+                if (asset.Condition != null && !EvaluateCondition(asset.Condition, parameterValues))
+                {
+                    continue;
+                }
+
+                string destinationFull;
+                try
+                {
+                    destinationFull = Path.GetFullPath(Path.Combine(modRootFull, asset.TargetRelativePath));
+                }
+                catch
+                {
+                    // Path resolution failures are reported by the canonical
+                    // apply pass; ignore here to avoid duplicate notifications.
+                    continue;
+                }
+
+                if (!claimants.TryGetValue(destinationFull, out var list))
+                {
+                    list = new List<AssetClaim>();
+                    claimants[destinationFull] = list;
+                }
+
+                list.Add(new AssetClaim(pluginState.Name, asset.SourceAbsolutePath, asset.TargetRelativePath));
+            }
+        }
+
+        foreach (var (destinationFull, list) in claimants)
+        {
+            if (list.Count < 2)
+            {
+                continue;
+            }
+
+            var relative = TryGetModRootRelativePath(modRootFull, destinationFull);
+            var winner = list[^1];
+            var losers = list.Take(list.Count - 1).ToList();
+
+            // If every claimant ships byte-identical source bytes the override
+            // cannot disagree. Log it for auditability but do not raise a
+            // warning notification -- otherwise authors who legitimately
+            // bundle the same upstream file in two compatible plugins would
+            // see noise on every launch.
+            if (await AreAllSourcesIdenticalAsync(list))
+            {
+                LaunchDiagnostics.Log(
+                    $"Asset collision on '{relative}': {list.Count} plugins ship identical bytes; "
+                    + $"resolving to '{winner.PluginName}' (load-order last).");
+                continue;
+            }
+
+            var loserList = string.Join(", ", losers.Select(c => $"'{c.PluginName}'"));
+            var message =
+                $"Asset collision on '{relative}': {loserList} will be overwritten by "
+                + $"'{winner.PluginName}' (later in load order).";
+
+            ReportProgress(progress, message);
+            LaunchDiagnostics.Log(message);
+            Notifications.SendNotification(message, "Warning");
+        }
+    }
+
+    private sealed record AssetClaim(string PluginName, string SourceAbsolutePath, string TargetRelativePath);
+
+    private static string TryGetModRootRelativePath(string modRootFull, string destinationFull)
+    {
+        try
+        {
+            var relative = Path.GetRelativePath(modRootFull, destinationFull);
+            return string.IsNullOrEmpty(relative) ? destinationFull : relative;
+        }
+        catch
+        {
+            return destinationFull;
+        }
+    }
+
+    // Cheap structural compare: short-circuit on length mismatch, then stream
+    // both files in matched chunks. No crypto -- mirrors the launcher's
+    // existing "no hashing for parser-managed paths" stance.
+    private static async Task<bool> AreAllSourcesIdenticalAsync(IReadOnlyList<AssetClaim> claims)
+    {
+        if (claims.Count < 2)
+        {
+            return true;
+        }
+
+        try
+        {
+            var firstInfo = new FileInfo(claims[0].SourceAbsolutePath);
+            if (!firstInfo.Exists)
+            {
+                return false;
+            }
+
+            var firstLength = firstInfo.Length;
+            for (var i = 1; i < claims.Count; i++)
+            {
+                var info = new FileInfo(claims[i].SourceAbsolutePath);
+                if (!info.Exists || info.Length != firstLength)
+                {
+                    return false;
+                }
+            }
+
+            const int bufferSize = 64 * 1024;
+            var streams = new FileStream[claims.Count];
+            try
+            {
+                for (var i = 0; i < claims.Count; i++)
+                {
+                    streams[i] = new FileStream(
+                        claims[i].SourceAbsolutePath,
+                        FileMode.Open, FileAccess.Read, FileShare.Read,
+                        bufferSize, useAsync: true);
+                }
+
+                var firstBuffer = new byte[bufferSize];
+                var otherBuffer = new byte[bufferSize];
+
+                while (true)
+                {
+                    var firstRead = await streams[0].ReadAsync(firstBuffer.AsMemory(0, bufferSize));
+                    if (firstRead == 0)
+                    {
+                        return true;
+                    }
+
+                    for (var i = 1; i < streams.Length; i++)
+                    {
+                        var totalRead = 0;
+                        while (totalRead < firstRead)
+                        {
+                            var read = await streams[i].ReadAsync(otherBuffer.AsMemory(totalRead, firstRead - totalRead));
+                            if (read == 0)
+                            {
+                                return false;
+                            }
+                            totalRead += read;
+                        }
+
+                        if (!firstBuffer.AsSpan(0, firstRead).SequenceEqual(otherBuffer.AsSpan(0, firstRead)))
+                        {
+                            return false;
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                foreach (var stream in streams)
+                {
+                    stream?.Dispose();
+                }
+            }
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Applies the mod-root-scoped portion of every enabled plugin under
     /// <paramref name="modRoot"/>: missiles.json, monsters.json, the strings
     /// translation files, and all asset copies (including the animdata.d2 /
