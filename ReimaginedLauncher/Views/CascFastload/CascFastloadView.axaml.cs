@@ -80,6 +80,11 @@ public partial class CascFastloadView : UserControl
             ? "(not configured)"
             : installDir;
 
+        // CASC fastload is fundamentally incompatible with the D2RMM layout (no .build.info /
+        // CASC archive in a mods folder); show a dedicated banner and disable everything below.
+        var isD2Rmm = MainWindow.Settings?.CurrentProfile?.Type == InstallationType.D2RMM;
+        D2rmmBanner.IsVisible = isD2Rmm;
+
         if (_extraction.IsAvailable)
         {
             UnavailableBanner.IsVisible = false;
@@ -87,7 +92,7 @@ public partial class CascFastloadView : UserControl
         }
         else
         {
-            UnavailableBanner.IsVisible = true;
+            UnavailableBanner.IsVisible = !isD2Rmm;
             UnavailableReasonText.Text = _extraction.UnavailableReason ?? "Native CascLib binary is not available.";
             NativeStatusText.Text = "Unavailable.";
         }
@@ -157,11 +162,12 @@ public partial class CascFastloadView : UserControl
         var profile = MainWindow.Settings?.CurrentProfile;
         var hasInstall = !string.IsNullOrWhiteSpace(profile?.InstallDirectory);
         var running = CascFastloadOperationState.Instance.IsRunning;
-        var available = _extraction.IsAvailable && hasInstall && !running;
+        var isD2Rmm = profile?.Type == InstallationType.D2RMM;
+        var available = _extraction.IsAvailable && hasInstall && !running && !isD2Rmm;
 
         ExtractButton.IsEnabled = available;
         UpdateButton.IsEnabled = available && _manifestHasEntries;
-        UndoButton.IsEnabled = hasInstall && !running;
+        UndoButton.IsEnabled = hasInstall && !running && !isD2Rmm;
         // Cross-extract is BN -> Steam only: enabled on Steam profile when a sibling BN install exists.
         CrossInstallButton.IsEnabled =
             available &&
