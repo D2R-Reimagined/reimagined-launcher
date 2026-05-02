@@ -11,6 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Controls.Notifications;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
@@ -1313,6 +1314,41 @@ public partial class MainWindow : Window
         }
     }
 
+
+    private async void OnCopySessionLogClicked(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+            if (clipboard == null)
+            {
+                return;
+            }
+
+            var entries = SessionLogService.Entries;
+            if (entries.Count == 0)
+            {
+                await clipboard.SetTextAsync(string.Empty);
+                Notifications.SendNotification("Session log is empty.", "Info");
+                return;
+            }
+
+            var builder = new System.Text.StringBuilder();
+            foreach (var entry in entries)
+            {
+                builder.Append('[').Append(entry.Timestamp.ToString("HH:mm:ss")).Append("] ");
+                builder.Append(entry.Type).Append(": ");
+                builder.AppendLine(entry.Message);
+            }
+
+            await clipboard.SetTextAsync(builder.ToString());
+            Notifications.SendNotification($"Copied {entries.Count} session log entries to the clipboard.", "Success");
+        }
+        catch (Exception ex)
+        {
+            Notifications.SendNotification($"Failed to copy session log: {ex.Message}", "Error");
+        }
+    }
 
     private async void OnLogoutClicked(object? sender, RoutedEventArgs e)
     {

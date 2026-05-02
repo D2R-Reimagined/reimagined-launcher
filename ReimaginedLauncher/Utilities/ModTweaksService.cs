@@ -643,6 +643,14 @@ public static class ModTweaksService
         return Path.Combine(parentDirectory, CleanExcelDirectoryName);
     }
 
+    // The clean snapshot is treated as authoritative once captured. It is
+    // intentionally NOT re-derived from the live mod files on every launch:
+    // by the time the second launch runs, the live excel directory contains
+    // launcher tweaks and plugin output from the previous launch, so a
+    // hash-based freshness check would silently promote that polluted state
+    // into the new "clean" baseline. The snapshot is refreshed only when
+    // <see cref="InvalidateCleanSnapshots"/> deletes it after a mod
+    // install/update, which is the sole legitimate way the base files change.
     private static async Task EnsureCleanExcelCopyAsync(string excelDirectory, string cleanExcelDirectory)
     {
         if (!Directory.Exists(excelDirectory))
@@ -650,21 +658,13 @@ public static class ModTweaksService
             return;
         }
 
-        var sourceHash = await ComputeDirectoryHashAsync(excelDirectory).ConfigureAwait(false);
-
-        if (Directory.Exists(cleanExcelDirectory) &&
-            await IsSnapshotFreshAsync(cleanExcelDirectory, sourceHash).ConfigureAwait(false))
+        if (Directory.Exists(cleanExcelDirectory))
         {
             return;
         }
 
-        if (Directory.Exists(cleanExcelDirectory))
-        {
-            Directory.Delete(cleanExcelDirectory, recursive: true);
-        }
-
         await CopyDirectoryAsync(excelDirectory, cleanExcelDirectory, overwrite: true);
-        await WriteSnapshotMetaAsync(cleanExcelDirectory, sourceHash).ConfigureAwait(false);
+        await WriteSnapshotMetaAsync(cleanExcelDirectory, string.Empty).ConfigureAwait(false);
     }
 
     private static string GetCleanMissilesFilePath(string? missilesFilePath)
@@ -683,23 +683,22 @@ public static class ModTweaksService
         return Path.Combine(missilesDirectory, CleanMissilesFileName);
     }
 
+    // See EnsureCleanExcelCopyAsync for the rationale: the clean snapshot is
+    // captured once and only refreshed by InvalidateCleanSnapshots.
     private static async Task EnsureCleanMissilesCopyAsync(string? missilesFilePath, string cleanMissilesFilePath)
     {
+        if (File.Exists(cleanMissilesFilePath))
+        {
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(missilesFilePath) || !File.Exists(missilesFilePath))
         {
             throw new FileNotFoundException("missiles.json was not found in the Reimagined hd missiles folder.");
         }
 
-        var sourceHash = await ComputeFileHashAsync(missilesFilePath).ConfigureAwait(false);
-
-        if (File.Exists(cleanMissilesFilePath) &&
-            await IsSnapshotFreshAsync(cleanMissilesFilePath, sourceHash).ConfigureAwait(false))
-        {
-            return;
-        }
-
         await CopyFileAsync(missilesFilePath, cleanMissilesFilePath, overwrite: true);
-        await WriteSnapshotMetaAsync(cleanMissilesFilePath, sourceHash).ConfigureAwait(false);
+        await WriteSnapshotMetaAsync(cleanMissilesFilePath, string.Empty).ConfigureAwait(false);
     }
 
     private static string GetCleanMonstersFilePath(string? monstersFilePath)
@@ -780,23 +779,22 @@ public static class ModTweaksService
         return Path.Combine(layoutsDirectory, CleanLayoutsProfileHdFileName);
     }
 
+    // See EnsureCleanExcelCopyAsync for the rationale: the clean snapshot is
+    // captured once and only refreshed by InvalidateCleanSnapshots.
     private static async Task EnsureCleanLayoutsProfileHdCopyAsync(string? layoutsProfileHdFilePath, string cleanLayoutsProfileHdFilePath)
     {
+        if (File.Exists(cleanLayoutsProfileHdFilePath))
+        {
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(layoutsProfileHdFilePath) || !File.Exists(layoutsProfileHdFilePath))
         {
             throw new FileNotFoundException("layouts_profilehd.json was not found in the Reimagined global ui folder.");
         }
 
-        var sourceHash = await ComputeFileHashAsync(layoutsProfileHdFilePath).ConfigureAwait(false);
-
-        if (File.Exists(cleanLayoutsProfileHdFilePath) &&
-            await IsSnapshotFreshAsync(cleanLayoutsProfileHdFilePath, sourceHash).ConfigureAwait(false))
-        {
-            return;
-        }
-
         await CopyFileAsync(layoutsProfileHdFilePath, cleanLayoutsProfileHdFilePath, overwrite: true);
-        await WriteSnapshotMetaAsync(cleanLayoutsProfileHdFilePath, sourceHash).ConfigureAwait(false);
+        await WriteSnapshotMetaAsync(cleanLayoutsProfileHdFilePath, string.Empty).ConfigureAwait(false);
     }
 
     private static string GetCleanArmorTweaksDirectory(string? armorDirectory)
@@ -809,6 +807,8 @@ public static class ModTweaksService
         return Path.Combine(armorDirectory, CleanArmorTweaksDirectoryName);
     }
 
+    // See EnsureCleanExcelCopyAsync for the rationale: the clean snapshot is
+    // captured once and only refreshed by InvalidateCleanSnapshots.
     private static async Task EnsureCleanArmorTweaksCopyAsync(string? armorDirectory, string cleanArmorTweaksDirectory)
     {
         if (string.IsNullOrWhiteSpace(armorDirectory) || !Directory.Exists(armorDirectory))
@@ -816,20 +816,9 @@ public static class ModTweaksService
             throw new DirectoryNotFoundException("Armor folder was not found in the Reimagined hd items folder.");
         }
 
-        var sourceEntries = HelmetVisualRelativePaths
-            .Select(rel => (Key: rel.Replace('\\', '/'), FullPath: Path.Combine(armorDirectory, rel)))
-            .ToList();
-        var sourceHash = await ComputeSourceListHashAsync(sourceEntries).ConfigureAwait(false);
-
-        if (Directory.Exists(cleanArmorTweaksDirectory) &&
-            await IsSnapshotFreshAsync(cleanArmorTweaksDirectory, sourceHash).ConfigureAwait(false))
-        {
-            return;
-        }
-
         if (Directory.Exists(cleanArmorTweaksDirectory))
         {
-            Directory.Delete(cleanArmorTweaksDirectory, recursive: true);
+            return;
         }
 
         foreach (var relativePath in HelmetVisualRelativePaths)
@@ -851,7 +840,7 @@ public static class ModTweaksService
             await File.WriteAllTextAsync($"{cleanFilePath}.missing", string.Empty);
         }
 
-        await WriteSnapshotMetaAsync(cleanArmorTweaksDirectory, sourceHash).ConfigureAwait(false);
+        await WriteSnapshotMetaAsync(cleanArmorTweaksDirectory, string.Empty).ConfigureAwait(false);
     }
 
     private static string GetCleanDesecratedZonesFilePath(string? desecratedZonesFilePath)
@@ -870,23 +859,22 @@ public static class ModTweaksService
         return Path.Combine(desecratedZonesDirectory, CleanDesecratedZonesFileName);
     }
 
+    // See EnsureCleanExcelCopyAsync for the rationale: the clean snapshot is
+    // captured once and only refreshed by InvalidateCleanSnapshots.
     private static async Task EnsureCleanDesecratedZonesCopyAsync(string? desecratedZonesFilePath, string cleanDesecratedZonesFilePath)
     {
+        if (File.Exists(cleanDesecratedZonesFilePath))
+        {
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(desecratedZonesFilePath) || !File.Exists(desecratedZonesFilePath))
         {
             throw new FileNotFoundException("desecratedzones.json was not found in the Reimagined hd global excel folder.");
         }
 
-        var sourceHash = await ComputeFileHashAsync(desecratedZonesFilePath).ConfigureAwait(false);
-
-        if (File.Exists(cleanDesecratedZonesFilePath) &&
-            await IsSnapshotFreshAsync(cleanDesecratedZonesFilePath, sourceHash).ConfigureAwait(false))
-        {
-            return;
-        }
-
         await CopyFileAsync(desecratedZonesFilePath, cleanDesecratedZonesFilePath, overwrite: true);
-        await WriteSnapshotMetaAsync(cleanDesecratedZonesFilePath, sourceHash).ConfigureAwait(false);
+        await WriteSnapshotMetaAsync(cleanDesecratedZonesFilePath, string.Empty).ConfigureAwait(false);
     }
 
     private static async Task RestoreDesecratedZonesFileAsync(string cleanDesecratedZonesFilePath, string? desecratedZonesFilePath)
