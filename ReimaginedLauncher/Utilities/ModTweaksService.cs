@@ -984,7 +984,35 @@ public static class ModTweaksService
                 continue;
             }
 
-            throw new FileNotFoundException($"Clean helmet visual state was missing for {relativePath}.");
+            // Neither a clean copy nor a ".missing" marker is present for this
+            // entry. This happens when the on-disk armor_launcher_clean folder
+            // was created (or partially shipped) by a different version of the
+            // launcher / mod than the one that owns the current
+            // HelmetVisualRelativePaths list -- typically right after a mod
+            // install or update, where the freshly-extracted mod tree includes
+            // a stale clean folder that doesn't cover every helmet path the
+            // launcher now tweaks. The mod doesn't ship these helmet JSONs as
+            // baseline files (the launcher only tweaks them into place), so
+            // the safe interpretation is "this file is absent from the mod's
+            // baseline", which is exactly the semantics of a ".missing"
+            // marker. Treat it as such instead of failing the entire launch,
+            // and reseed the marker so subsequent launches don't re-trigger
+            // the diagnostic.
+            LaunchDiagnostics.Log(
+                $"Clean helmet visual state missing for {relativePath}; treating as absent baseline and reseeding marker.");
+
+            var cleanEntryDirectory = Path.GetDirectoryName(missingMarkerPath);
+            if (!string.IsNullOrWhiteSpace(cleanEntryDirectory))
+            {
+                Directory.CreateDirectory(cleanEntryDirectory);
+            }
+
+            await File.WriteAllTextAsync(missingMarkerPath, string.Empty);
+
+            if (File.Exists(targetFilePath))
+            {
+                File.Delete(targetFilePath);
+            }
         }
     }
 
