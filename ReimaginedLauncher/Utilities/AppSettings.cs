@@ -67,7 +67,20 @@ public class AppSettings
     public double? WindowY { get; set; }
     public bool IsMaximized { get; set; }
     public int LastReadAnnouncementNumber { get; set; }
+
+    [JsonIgnore]
     public string? NexusModsSSOApiKey { get; set; }
+
+    // Persisted form of the Nexus API key. Stored encrypted-at-rest via
+    // SecretProtector so that settings.json never holds the raw key. Legacy
+    // plaintext values are read transparently and re-encrypted on next save.
+    [JsonPropertyName("NexusModsSSOApiKey")]
+    public string? NexusModsSSOApiKeyEncrypted
+    {
+        get => SecretProtector.Protect(NexusModsSSOApiKey);
+        set => NexusModsSSOApiKey = SecretProtector.Unprotect(value);
+    }
+
     public bool? NexusPremiumDownloadAccess { get; set; }
     
     public List<InstallationProfile> Profiles { get; set; } = [];

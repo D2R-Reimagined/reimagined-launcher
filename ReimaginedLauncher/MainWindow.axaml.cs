@@ -626,8 +626,27 @@ public partial class MainWindow : Window
         var name = file.Name ?? string.Empty;
         var fileName = file.FileName ?? string.Empty;
 
-        return !name.Contains(LauncherFileMarker, StringComparison.OrdinalIgnoreCase) &&
-               !fileName.Contains(LauncherFileMarker, StringComparison.OrdinalIgnoreCase);
+        if (name.Contains(LauncherFileMarker, StringComparison.OrdinalIgnoreCase) ||
+            fileName.Contains(LauncherFileMarker, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // Skip files Nexus marks as old or archived so the launcher does not
+        // surface superseded versions (category_id 4 = OLD_VERSION, 7 = ARCHIVED).
+        if (file.CategoryId == 4 || file.CategoryId == 7)
+        {
+            return false;
+        }
+
+        var categoryName = file.CategoryName ?? string.Empty;
+        if (categoryName.Equals("OLD_VERSION", StringComparison.OrdinalIgnoreCase) ||
+            categoryName.Equals("ARCHIVED", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private async Task<(string Url, bool IsDirect)> GetUpdateUrlAsync(
