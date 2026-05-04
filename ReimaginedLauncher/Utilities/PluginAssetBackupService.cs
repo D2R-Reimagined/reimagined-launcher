@@ -157,6 +157,8 @@ public static class PluginAssetBackupService
                 manifest.Entries.RemoveAll(restoredEntries.Contains);
                 SaveManifestUnsafe(manifest);
             }
+
+            CleanupOrphanGuidFoldersUnsafe(manifest);
         }
         finally
         {
@@ -258,6 +260,8 @@ public static class PluginAssetBackupService
                 manifest.Entries.RemoveAll(entry => entry.ClaimingPluginIds.Count == 0);
                 SaveManifestUnsafe(manifest);
             }
+
+            CleanupOrphanGuidFoldersUnsafe(manifest);
         }
         finally
         {
@@ -365,6 +369,103 @@ public static class PluginAssetBackupService
         catch (Exception ex)
         {
             LaunchDiagnostics.LogException($"Failed to delete plugin asset backup file '{path}'", ex);
+            return;
+        }
+
+        TryDeleteEmptyBackupSubfolder(Path.GetDirectoryName(path));
+    }
+
+    private static void TryDeleteEmptyBackupSubfolder(string? directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return;
+        }
+
+        try
+        {
+            var normalized = NormalizePath(directory);
+            var root = NormalizePath(BackupRootDirectory);
+            if (!string.Equals(NormalizePath(Path.GetDirectoryName(normalized) ?? string.Empty), root, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (!Directory.Exists(normalized))
+            {
+                return;
+            }
+
+            if (Directory.EnumerateFileSystemEntries(normalized).Any())
+            {
+                return;
+            }
+
+            Directory.Delete(normalized);
+        }
+        catch (Exception ex)
+        {
+            LaunchDiagnostics.LogException($"Failed to delete empty plugin asset backup folder '{directory}'", ex);
+        }
+    }
+
+    private static void CleanupOrphanGuidFoldersUnsafe(PluginAssetBackupManifest manifest)
+    {
+        if (!Directory.Exists(BackupRootDirectory))
+        {
+            return;
+        }
+
+        var referenced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in manifest.Entries)
+        {
+            if (string.IsNullOrWhiteSpace(entry.BackupAbsolutePath))
+            {
+                continue;
+            }
+
+            var parent = Path.GetDirectoryName(entry.BackupAbsolutePath);
+            if (!string.IsNullOrWhiteSpace(parent))
+            {
+                referenced.Add(NormalizePath(parent));
+            }
+        }
+
+        IEnumerable<string> subfolders;
+        try
+        {
+            subfolders = Directory.EnumerateDirectories(BackupRootDirectory).ToList();
+        }
+        catch (Exception ex)
+        {
+            LaunchDiagnostics.LogException(
+                "Failed to enumerate plugin asset backup folders for orphan cleanup", ex);
+            return;
+        }
+
+        foreach (var directory in subfolders)
+        {
+            var name = Path.GetFileName(directory);
+            if (!Guid.TryParseExact(name, "N", out _))
+            {
+                continue;
+            }
+
+            var normalized = NormalizePath(directory);
+            if (referenced.Contains(normalized))
+            {
+                continue;
+            }
+
+            try
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+            catch (Exception ex)
+            {
+                LaunchDiagnostics.LogException(
+                    $"Failed to delete orphan plugin asset backup folder '{directory}'", ex);
+            }
         }
     }
 
