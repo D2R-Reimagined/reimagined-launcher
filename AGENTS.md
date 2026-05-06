@@ -16,3 +16,9 @@ These instructions apply to the entire repository.
 - `Program.cs` configures dependency injection and Avalonia startup.
 - HTTP client code lives under `ReimaginedLauncher/HttpClients/`.
 - Shared application helpers live under `ReimaginedLauncher/Utilities/`.
+- Match the surrounding comment density. Do not add narrative or rationale comments; put rationale in the commit message or PR description instead. Keep only short comments (at most a couple of lines) that document non-obvious behavior, invariants, or external contracts.
+
+Avalonia templated controls (Flyout, MenuFlyout, ToolTip, ContextMenu, ScrollViewer, TextBox/TextPresenter, ContentPresenter, ItemsPresenter, Window chrome, etc.):
+- If a property on an inner element "doesn't take", the templated parent or theme is overriding it. Stop after 1–2 child-property probes and look upstream.
+- Inspection order: (1) active theme's control template and its presenter bindings; (2) theme resources it consumes (`FlyoutThemeMaxWidth`, `*ThemeMinWidth/MaxWidth`, `*ThemeFontSize`, `*ThemeHeight`, `ControlContentThemeFontSize`); (3) implicit styles / `*PresenterClasses` selectors; (4) parent layout contract (Grid star sizing, DockPanel `LastChildFill`, ScrollViewer infinite measure, Viewbox).
+- Fix is almost always one of: override a theme resource at the right scope (`Application`/`Window`/local `Resources`); add a style targeting the presenter (`FlyoutPresenter`, `MenuFlyoutPresenter`, `ToolTip`, `TextPresenter`, `ScrollContentPresenter`); or adjust the parent's sizing contract. Modifying the inner child is rarely the right fix.
