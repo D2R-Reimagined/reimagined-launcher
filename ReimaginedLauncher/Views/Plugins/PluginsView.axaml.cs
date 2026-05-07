@@ -195,6 +195,16 @@ public partial class PluginsView : UserControl
         RootScrollViewer.Focus();
     }
 
+    // Shift+Click on Up/Down jumps to the top/bottom of the installed plugin list; a plain click
+    // moves the plugin one slot. The Shift state is captured via PointerPressed (Click events do
+    // not expose modifiers) and consumed by the matching Click handler.
+    private bool _shiftPressedDuringMoveClick;
+
+    private void OnMovePluginButtonPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        _shiftPressedDuringMoveClick = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+    }
+
     private async void OnMovePluginUpClicked(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button { DataContext: PluginCatalogItem plugin })
@@ -202,7 +212,18 @@ public partial class PluginsView : UserControl
             return;
         }
 
-        await PluginsService.MovePluginAsync(plugin.Id, -1);
+        var moveToEdge = _shiftPressedDuringMoveClick;
+        _shiftPressedDuringMoveClick = false;
+
+        if (moveToEdge)
+        {
+            await PluginsService.MovePluginToEdgeAsync(plugin.Id, toTop: true);
+        }
+        else
+        {
+            await PluginsService.MovePluginAsync(plugin.Id, -1);
+        }
+
         await RefreshPluginsStateAsync();
     }
 
@@ -213,7 +234,18 @@ public partial class PluginsView : UserControl
             return;
         }
 
-        await PluginsService.MovePluginAsync(plugin.Id, 1);
+        var moveToEdge = _shiftPressedDuringMoveClick;
+        _shiftPressedDuringMoveClick = false;
+
+        if (moveToEdge)
+        {
+            await PluginsService.MovePluginToEdgeAsync(plugin.Id, toTop: false);
+        }
+        else
+        {
+            await PluginsService.MovePluginAsync(plugin.Id, 1);
+        }
+
         await RefreshPluginsStateAsync();
     }
 

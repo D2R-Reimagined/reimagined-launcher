@@ -438,6 +438,29 @@ public static class PluginsService
         await SettingsManager.SaveAsync(MainWindow.Settings);
     }
 
+    public static async Task MovePluginToEdgeAsync(string pluginId, bool toTop)
+    {
+        MainWindow.Settings.CurrentProfile.Plugins ??= [];
+        var plugins = MainWindow.Settings.CurrentProfile.Plugins;
+        var currentIndex = plugins.FindIndex(plugin => plugin.Id == pluginId);
+        if (currentIndex < 0)
+        {
+            throw new InvalidOperationException("The selected plugin could not be found.");
+        }
+
+        var targetIndex = toTop ? 0 : plugins.Count - 1;
+        if (currentIndex == targetIndex)
+        {
+            return;
+        }
+
+        var registration = plugins[currentIndex];
+        plugins.RemoveAt(currentIndex);
+        plugins.Insert(targetIndex, registration);
+
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
     public static async Task DeletePluginAsync(string pluginId)
     {
         MainWindow.Settings.CurrentProfile.Plugins ??= [];
@@ -1601,7 +1624,25 @@ public static class PluginsService
             if (languageValues == null || languageValues.Count == 0)
             {
                 throw new InvalidDataException(
-                    $"The {fileName} entry for Key '{operation.Key}' does not list any language fields to replace.");
+                    $"The {fileName} entry for Key '{operation.Key}' does not list any language fields.");
+            }
+
+            var isAddRow = !string.IsNullOrWhiteSpace(operation.Operation)
+                && operation.Operation.Equals("addRow", StringComparison.OrdinalIgnoreCase);
+
+            if (isAddRow)
+            {
+                // The library's AddRowAsync auto-increments the last entry's id, requires a
+                // non-empty enUS value, and falls back to enUS for any of the other 12 columns
+                // that aren't supplied.
+                var languageValueMap = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+                foreach (var pair in languageValues)
+                {
+                    languageValueMap[pair.Key] = pair.Value;
+                }
+
+                await parser.AddRowAsync(operation.Key!, languageValueMap);
+                continue;
             }
 
             var matchedAny = false;
@@ -2784,11 +2825,32 @@ public static class PluginsService
                     errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} entry with no Key.");
                 }
 
+                var isStringsAddRow = !string.IsNullOrWhiteSpace(operation.Operation)
+                    && operation.Operation.Equals("addRow", StringComparison.OrdinalIgnoreCase);
+
+                if (!string.IsNullOrWhiteSpace(operation.Operation)
+                    && !operation.Operation.Equals("replace", StringComparison.OrdinalIgnoreCase)
+                    && !isStringsAddRow)
+                {
+                    errors.Add(
+                        $"'{pluginFileName}' contains a {supportedTarget.FileName} entry with unsupported operation '{operation.Operation}'. Use 'replace' (default) or 'addRow'.");
+                }
+
                 if (operation.LanguageValues == null || operation.LanguageValues.Count == 0)
                 {
                     var known = string.Join(", ", KnownStringLanguageColumns);
                     errors.Add(
-                        $"'{pluginFileName}' contains a {supportedTarget.FileName} entry for Key '{operation.Key}' with no language fields to replace. Add one or more of: {known}.");
+                        $"'{pluginFileName}' contains a {supportedTarget.FileName} entry for Key '{operation.Key}' with no language fields. Add one or more of: {known}.");
+                }
+                else if (isStringsAddRow)
+                {
+                    var enUs = operation.LanguageValues
+                        .FirstOrDefault(pair => pair.Key.Equals("enUS", StringComparison.OrdinalIgnoreCase));
+                    if (string.IsNullOrEmpty(enUs.Value))
+                    {
+                        errors.Add(
+                            $"'{pluginFileName}' contains an addRow {supportedTarget.FileName} entry for Key '{operation.Key}' without an enUS value. enUS is required and is used to populate any unsupplied language columns.");
+                    }
                 }
 
                 continue;
@@ -3542,10 +3604,16 @@ public static class PluginsService
                 key = keyPropertyLower.GetString();
             }
 
+            string? operationName = null;
+            if (element.TryGetProperty("operation", out var operationProperty) && operationProperty.ValueKind == JsonValueKind.String)
+            {
+                operationName = operationProperty.GetString();
+            }
+
             var languageValues = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var property in element.EnumerateObject())
             {
-                if (property.NameEquals("file") || property.NameEquals("Key") || property.NameEquals("key") || property.NameEquals("id"))
+                if (property.NameEquals("file") || property.NameEquals("Key") || property.NameEquals("key") || property.NameEquals("id") || property.NameEquals("operation"))
                 {
                     continue;
                 }
@@ -3568,7 +3636,7 @@ public static class PluginsService
                 File: file,
                 RowIdentifier: null,
                 Column: null,
-                Operation: null,
+                Operation: operationName,
                 ParameterKey: null,
                 UpdatedValue: null,
                 Key: key,
