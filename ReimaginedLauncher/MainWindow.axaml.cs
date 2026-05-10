@@ -39,6 +39,7 @@ public partial class MainWindow : Window
     private const string NexusGameName = "diablo2resurrected";
     private const int NexusModId = 503;
     private const string LauncherFileMarker = "launcher";
+    private const string MainReleaseNamePrefix = "D2R Reimagined - ";
     // Make URLs readonly for safe reuse across the file
     private const string WebsiteUrl = "https://www.d2r-reimagined.com";
     private const string WikiUrl = "https://wiki.d2r-reimagined.com";
@@ -632,16 +633,19 @@ public partial class MainWindow : Window
             return false;
         }
 
-        // Skip files Nexus marks as old or archived so the launcher does not
-        // surface superseded versions (category_id 4 = OLD_VERSION, 7 = ARCHIVED).
-        if (file.CategoryId == 4 || file.CategoryId == 7)
+        // Only accept MAIN files (category_id 1). OPTIONAL/UPDATE/MISC files
+        // can be uploaded after a main release and would otherwise win the
+        // timestamp sort, so they must be excluded here.
+        var categoryName = file.CategoryName ?? string.Empty;
+        var isMainCategory = file.CategoryId == 1 ||
+                             categoryName.Equals("MAIN", StringComparison.OrdinalIgnoreCase);
+        if (!isMainCategory)
         {
             return false;
         }
 
-        var categoryName = file.CategoryName ?? string.Empty;
-        if (categoryName.Equals("OLD_VERSION", StringComparison.OrdinalIgnoreCase) ||
-            categoryName.Equals("ARCHIVED", StringComparison.OrdinalIgnoreCase))
+        // Name backstop: the canonical main release is named "D2R Reimagined - X.Y.Z".
+        if (!name.StartsWith(MainReleaseNamePrefix, StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
