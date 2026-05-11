@@ -140,6 +140,7 @@
                         <TextBlock Classes="bullet" Text="•  Flat d2rr-style layout: file, Key, plus one or more language fields." />
                         <TextBlock Classes="bullet" Text="•  Supported languages: enUS, zhTW, deDE, esES, frFR, itIT, koKR, plPL, esMX, jaJP, ptBR, ruRU, zhCN." />
                         <TextBlock Classes="bullet" Text="•  Only the language fields listed on an entry are overwritten; other languages and other entries are untouched. Unknown fields are ignored." />
+                        <TextBlock Classes="bullet" Text="•  operation defaults to replace (the Key must already exist). Use addRow to append a brand-new entry: the launcher reads the last entry's id, increments it by 1, and writes the new id, Key, and 13 language columns. enUS is required; any of the other 12 languages you omit fall back to the enUS value." />
                     </StackPanel>
 
                     <TextBlock Classes="sub-title" Text="Missiles &amp; Monsters JSON targets" />
@@ -223,8 +224,9 @@
 
                     <TextBlock Classes="sub-title" Text="String (.json) operations" />
                     <StackPanel Spacing="2">
-                        <TextBlock Classes="bullet" Text="•  Key (required) — matches the D2R entry's Key." />
-                        <TextBlock Classes="bullet" Text="•  Any of the 13 language codes alongside Key with the replacement string. Only the listed language fields on the matched entry are overwritten." />
+                        <TextBlock Classes="bullet" Text="•  Key (required) — matches the D2R entry's Key (replace) or the unique Key for the new entry (addRow)." />
+                        <TextBlock Classes="bullet" Text="•  Any of the 13 language codes alongside Key with the replacement string. For replace, only the listed language fields on the matched entry are overwritten. For addRow, enUS is required and any of the other 12 languages omitted are populated with the enUS value." />
+                        <TextBlock Classes="bullet" Text="•  operation (optional) — replace (default) or addRow. addRow auto-assigns the next id (last entry's id + 1) and writes all 13 language columns." />
                     </StackPanel>
 
                     <TextBlock Classes="sub-title" Text="Missiles &amp; Monsters JSON operations" />
@@ -377,6 +379,7 @@
                         <TextBlock Classes="bullet" Text="•  A single operation can update multiple columns on the matched row(s) via the 'columns' array." />
                         <TextBlock Classes="bullet" Text="•  Most files use typed parsers from the D2RReimaginedTools library for column validation and data integrity." />
                         <TextBlock Classes="bullet" Text="•  In addition to excel and strings files, the launcher supports edits to data/hd/missiles/missiles.json and data/hd/character/monsters.json via replace (default) and addRow, using the shared {file, Key, updatedValue|parameterKey, [operation]} shape." />
+                        <TextBlock Classes="bullet" Text="•  Strings (.json) targets also support replace (default) and addRow. addRow auto-assigns the next id, requires enUS, and falls back to enUS for any of the other 12 language columns that aren't supplied." />
                     </StackPanel>
                 </StackPanel>
             </Border>
