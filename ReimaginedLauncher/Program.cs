@@ -3,6 +3,7 @@ using Avalonia;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using ReimaginedLauncher.HttpClients;
+using ReimaginedLauncher.Utilities;
 using Velopack;
 
 namespace ReimaginedLauncher;
@@ -25,7 +26,13 @@ class Program
         services.AddHttpClient<NexusModsHttpClient>();
         
         ServiceProvider = services.BuildServiceProvider();
-        
+
+        // Reconcile plugin state and purge stray files before the UI comes
+        // up: drops orphan asset-backup claims for plugins no longer in
+        // settings, removes unreferenced empty subdirs under %AppData%, and
+        // clears stale plugin zip downloads from %TEMP%.
+        PluginStateSanitizer.RunStartupSanitizationAsync().GetAwaiter().GetResult();
+
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 

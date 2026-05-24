@@ -144,7 +144,7 @@
             <Setter Property="Background" Value="#0B0909" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource BorderStrongBrush}" />
-            <Setter Property="FontFamily" Value="Cascadia Code" />
+            <Setter Property="FontFamily" Value="Cascadia Mono, Consolas, Menlo, monospace" />
             <Setter Property="FontSize" Value="13" />
             <Setter Property="LineNumbersForeground" Value="{StaticResource MutedTextBrush}" />
         </Style>

@@ -840,9 +840,20 @@ public static class PluginsService
             var pluginState = await LoadPluginStateAsync(registration);
             if (pluginState.Errors.Count > 0)
             {
-                var message = $"Plugin '{pluginState.Name}' is invalid and was skipped.";
-                ReportProgress(progress, message);
-                Notifications.SendNotification(message, "Warning");
+                var summary = $"Plugin '{pluginState.Name}' is invalid and was skipped.";
+                ReportProgress(progress, summary);
+                Notifications.SendNotification(summary, "Warning");
+                // Surface each validation error so authors see the actual cause
+                // (unsupported operation, unknown column, malformed condition, etc.)
+                // instead of only a generic "skipped" toast.
+                foreach (var error in pluginState.Errors)
+                {
+                    ReportProgress(progress, $"Plugin '{pluginState.Name}' error: {error}");
+                    Notifications.SendNotification($"Plugin '{pluginState.Name}': {error}", "Warning");
+                    LaunchDiagnostics.LogException(
+                        $"Plugin '{pluginState.Name}' validation error",
+                        new InvalidDataException(error));
+                }
                 continue;
             }
 
@@ -3824,7 +3835,7 @@ public static class PluginsService
             }
         }
 
-        return operation with
+        var normalized = operation with
         {
             File = NormalizeRelativePath(operation.File ?? string.Empty),
             RowIdentifier = operation.RowIdentifier?.Trim() ?? string.Empty,
@@ -3840,6 +3851,71 @@ public static class PluginsService
             SwapRowIdentifier = operation.SwapRowIdentifier?.Trim(),
             SwapColumns = normalizedSwapColumns
         };
+
+        // Reject literal tab characters in any value that flows into a TSV cell
+        // (column name, row identifier, or updated value). A stray tab -- usually
+        // pasted from a spreadsheet -- would silently split into extra columns
+        // when the excel file is rewritten by File.WriteAllLinesAsync with
+        // string.Join('\t', ...). JSON-only fields (LanguageValues) are not
+        // checked here because tabs are legal in JSON string values.
+        RejectTabCharacter(normalized.RowIdentifier, "rowIdentifier", normalized.File);
+        RejectTabCharacter(normalized.Column, "column", normalized.File);
+        RejectTabCharacter(normalized.UpdatedValue, "updatedValue", normalized.File);
+        RejectTabCharacter(normalized.SourceRowIdentifier, "sourceRowIdentifier", normalized.File);
+        RejectTabCharacter(normalized.SwapRowIdentifier, "swapRowIdentifier", normalized.File);
+        if (normalized.RowIdentifiers != null)
+        {
+            foreach (var pair in normalized.RowIdentifiers)
+            {
+                RejectTabCharacter(pair.Value, $"rowIdentifier.{pair.Key}", normalized.File);
+            }
+        }
+        if (normalized.RowMatchers != null)
+        {
+            foreach (var matcher in normalized.RowMatchers)
+            {
+                RejectTabCharacter(matcher.Value, "rowIdentifier", normalized.File);
+                if (matcher.Columns != null)
+                {
+                    foreach (var pair in matcher.Columns)
+                    {
+                        RejectTabCharacter(pair.Value, $"rowIdentifier.{pair.Key}", normalized.File);
+                    }
+                }
+            }
+        }
+        if (normalized.Columns != null)
+        {
+            foreach (var column in normalized.Columns)
+            {
+                RejectTabCharacter(column.Column, "columns.column", normalized.File);
+                RejectTabCharacter(column.UpdatedValue, $"columns.{column.Column}.updatedValue", normalized.File);
+            }
+        }
+        if (normalized.SwapColumns != null)
+        {
+            foreach (var column in normalized.SwapColumns)
+            {
+                RejectTabCharacter(column.Column, "swapColumns.column", normalized.File);
+                RejectTabCharacter(column.UpdatedValue, $"swapColumns.{column.Column}.updatedValue", normalized.File);
+            }
+        }
+
+        return normalized;
+    }
+
+    private static void RejectTabCharacter(string? value, string fieldName, string? file)
+    {
+        if (value == null || value.IndexOf('\t') < 0)
+        {
+            return;
+        }
+
+        var location = string.IsNullOrWhiteSpace(file) ? string.Empty : $" in '{file}'";
+        throw new InvalidDataException(
+            $"Plugin operation field '{fieldName}'{location} contains a tab character. " +
+            "Tabs are not allowed because they would split values into extra columns when " +
+            "the target excel file is rewritten. Replace the tab with spaces.");
     }
 
     private static PluginRegistration GetRegistration(string pluginId)

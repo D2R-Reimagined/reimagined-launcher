@@ -269,6 +269,97 @@ public static class PluginAssetBackupService
         }
     }
 
+    /// <summary>
+    /// Startup safety net: drops claims for plugin ids that no longer exist
+    /// in settings, restores any entry left with zero claimants, and prunes
+    /// orphan backup payload folders. Closes the hole where a plugin is
+    /// removed from settings (or deleted from disk) without going through
+    /// <see cref="RestoreForPluginAsync"/>, which would otherwise leave its
+    /// targets permanently mutated in the user's mod folder.
+    /// </summary>
+    public static async Task ReconcileWithKnownPluginIdsAsync(IEnumerable<string> knownPluginIds)
+    {
+        var known = new HashSet<string>(
+            knownPluginIds ?? Array.Empty<string>(),
+            StringComparer.OrdinalIgnoreCase);
+
+        await ServiceLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            var manifest = LoadManifestUnsafe();
+            if (manifest.Entries.Count == 0)
+            {
+                CleanupOrphanGuidFoldersUnsafe(manifest);
+                return;
+            }
+
+            var dirty = false;
+
+            foreach (var entry in manifest.Entries)
+            {
+                var retained = entry.ClaimingPluginIds
+                    .Where(id => known.Contains(id))
+                    .ToList();
+
+                if (retained.Count == entry.ClaimingPluginIds.Count)
+                {
+                    continue;
+                }
+
+                if (retained.Count > 0)
+                {
+                    entry.ClaimingPluginIds = retained;
+                    dirty = true;
+                    continue;
+                }
+
+                try
+                {
+                    if (entry.OriginalExisted &&
+                        !string.IsNullOrWhiteSpace(entry.BackupAbsolutePath) &&
+                        File.Exists(entry.BackupAbsolutePath))
+                    {
+                        var destinationFolder = Path.GetDirectoryName(entry.TargetAbsolutePath);
+                        if (!string.IsNullOrWhiteSpace(destinationFolder))
+                        {
+                            Directory.CreateDirectory(destinationFolder);
+                        }
+
+                        await FileCopyHelper.CopyFileAsync(entry.BackupAbsolutePath, entry.TargetAbsolutePath)
+                            .ConfigureAwait(false);
+                        TryDeleteFile(entry.BackupAbsolutePath);
+                    }
+                    else if (!entry.OriginalExisted && File.Exists(entry.TargetAbsolutePath))
+                    {
+                        TryDeleteFile(entry.TargetAbsolutePath);
+                    }
+
+                    entry.ClaimingPluginIds = retained;
+                    dirty = true;
+                }
+                catch (Exception ex)
+                {
+                    LaunchDiagnostics.LogException(
+                        $"Failed to restore orphaned plugin asset '{entry.TargetAbsolutePath}'", ex);
+                    // Keep the original claim ids so the next startup can
+                    // retry the restore instead of losing the backup.
+                }
+            }
+
+            if (dirty)
+            {
+                manifest.Entries.RemoveAll(entry => entry.ClaimingPluginIds.Count == 0);
+                SaveManifestUnsafe(manifest);
+            }
+
+            CleanupOrphanGuidFoldersUnsafe(manifest);
+        }
+        finally
+        {
+            ServiceLock.Release();
+        }
+    }
+
     private static async Task CaptureSnapshotAsync(PluginAssetBackupEntry entry, string targetPath)
     {
         if (File.Exists(targetPath))
