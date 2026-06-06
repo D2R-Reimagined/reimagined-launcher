@@ -810,37 +810,34 @@ public static class ModTweaksService
             : Path.Combine(cleanExcelDirectory, relativePath);
     }
 
+    private static string GetExcelFilePath(string excelDirectory, string fileName)
+    {
+        var exactPath = Path.Combine(excelDirectory, fileName);
+        if (File.Exists(exactPath))
+        {
+            return exactPath;
+        }
+
+        var actualFileName = Directory
+            .EnumerateFiles(excelDirectory)
+            .Select(Path.GetFileName)
+            .FirstOrDefault(f => f is not null && f.Equals(fileName, StringComparison.OrdinalIgnoreCase));
+
+        if (actualFileName == null)
+        {
+            throw new FileNotFoundException($"{fileName} was not found in the Reimagined excel folder: {excelDirectory}");
+        }
+
+        return Path.Combine(excelDirectory, actualFileName);
+    }
+
     private static Task ValidateExcelFilesAsync(string excelDirectory)
     {
-        var charStatsFilePath = Path.Combine(excelDirectory, CharStatsFileName);
-        if (!File.Exists(charStatsFilePath))
-        {
-            throw new FileNotFoundException($"charstats.txt was not found in the Reimagined excel folder: {excelDirectory}");
-        }
-
-        var difficultyLevelsFilePath = Path.Combine(excelDirectory, DifficultyLevelsFileName);
-        if (!File.Exists(difficultyLevelsFilePath))
-        {
-            throw new FileNotFoundException($"DifficultyLevels.txt was not found in the Reimagined excel folder: {excelDirectory}");
-        }
-
-        var skillsFilePath = Path.Combine(excelDirectory, SkillsFileName);
-        if (!File.Exists(skillsFilePath))
-        {
-            throw new FileNotFoundException($"skills.txt was not found in the Reimagined excel folder: {excelDirectory}");
-        }
-
-        var statesFilePath = Path.Combine(excelDirectory, StatesFileName);
-        if (!File.Exists(statesFilePath))
-        {
-            throw new FileNotFoundException($"states.txt was not found in the Reimagined excel folder: {excelDirectory}");
-        }
-
-        var propertiesFilePath = Path.Combine(excelDirectory, PropertiesFileName);
-        if (!File.Exists(propertiesFilePath))
-        {
-            throw new FileNotFoundException($"Properties.txt was not found in the Reimagined excel folder: {excelDirectory}");
-        }
+        _ = GetExcelFilePath(excelDirectory, CharStatsFileName);
+        _ = GetExcelFilePath(excelDirectory, DifficultyLevelsFileName);
+        _ = GetExcelFilePath(excelDirectory, SkillsFileName);
+        _ = GetExcelFilePath(excelDirectory, StatesFileName);
+        _ = GetExcelFilePath(excelDirectory, PropertiesFileName);
 
         return Task.CompletedTask;
     }
@@ -851,40 +848,40 @@ public static class ModTweaksService
         ReportProgress(progress, "Updating charstats.txt...");
         LaunchDiagnostics.Log($"Applying charstats tweaks in {excelDirectory}.");
         await ApplyCharStatsTweaksAsync(
-            Path.Combine(excelDirectory, CharStatsFileName),
+            GetExcelFilePath(excelDirectory, CharStatsFileName),
             profile.SkillPointsPerLevel,
             profile.AttributesPerLevel);
         ReportProgress(progress, "Updating skills.txt...");
         LaunchDiagnostics.Log($"Applying skills tweaks in {excelDirectory}.");
         await ApplySkillsTweaksAsync(
-            Path.Combine(excelDirectory, SkillsFileName),
+            GetExcelFilePath(excelDirectory, SkillsFileName),
             profile.MaxSkillLevel,
             profile.RemoveFadeEffect);
         ReportProgress(progress, "Updating DifficultyLevels.txt...");
         LaunchDiagnostics.Log($"Applying difficulty tweaks in {excelDirectory}.");
         await ApplyDifficultyLevelsTweaksAsync(
-            Path.Combine(excelDirectory, DifficultyLevelsFileName),
+            GetExcelFilePath(excelDirectory, DifficultyLevelsFileName),
             profile.NormalResistPenalty,
             profile.NightmareResistPenalty,
             profile.HellResistPenalty);
         ReportProgress(progress, "Updating states.txt...");
         LaunchDiagnostics.Log($"Applying states tweaks in {excelDirectory}.");
         await ApplyStatesTweaksAsync(
-            Path.Combine(excelDirectory, StatesFileName),
+            GetExcelFilePath(excelDirectory, StatesFileName),
             profile.RemovePaladinAuraSound,
             profile.RemoveFadeEffect);
         ReportProgress(progress, "Updating Properties.txt...");
         LaunchDiagnostics.Log($"Applying properties tweaks in {excelDirectory}.");
         await ApplyPropertiesTweaksAsync(
-            Path.Combine(excelDirectory, PropertiesFileName),
+            GetExcelFilePath(excelDirectory, PropertiesFileName),
             profile.RemoveFadeEffect);
         ReportProgress(progress, "Updating treasureclassex.txt...");
         LaunchDiagnostics.Log($"Applying treasure class tweaks in {excelDirectory}.");
         await ApplyTreasureClassExTweaksAsync(
-            Path.Combine(excelDirectory, TreasureClassExFileName),
+            GetExcelFilePath(excelDirectory, TreasureClassExFileName),
             profile.OrbStackDrops,
             profile.RuneStackDrops);
-        var soundsFilePath = Path.Combine(excelDirectory, SoundsFileName);
+        var soundsFilePath = GetExcelFilePath(excelDirectory, SoundsFileName);
         if (File.Exists(soundsFilePath))
         {
             ReportProgress(progress, "Updating sounds.txt...");

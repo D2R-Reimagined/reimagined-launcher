@@ -7,6 +7,27 @@ namespace ReimaginedLauncher.Utilities;
 
 public class SaveFileService
 {
+    public static string? ResolveDirectoryCaseInsensitive(string parentDirectory, string targetName)
+    {
+        if (!Directory.Exists(parentDirectory))
+        {
+            return null;
+        }
+
+        var exactPath = Path.Combine(parentDirectory, targetName);
+        if (Directory.Exists(exactPath))
+        {
+            return exactPath;
+        }
+
+        var actualName = Directory
+            .EnumerateDirectories(parentDirectory)
+            .Select(Path.GetFileName)
+            .FirstOrDefault(d => d is not null && d.Equals(targetName, StringComparison.OrdinalIgnoreCase));
+
+        return actualName == null ? null : Path.Combine(parentDirectory, actualName);
+    }
+
     public static string GetSavedGamesPath()
     {
         var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -14,7 +35,26 @@ public class SaveFileService
 
         var candidates = new List<string>();
 
-        // 1. Try the one derived from MyDocuments (handles OneDrive better as MyDocuments is often redirected to OneDrive)
+        // 1. Linux: Steam Proton prefix path (prioritize on Linux)
+        if (!string.IsNullOrWhiteSpace(userProfile))
+        {
+            var steamCompatPath = Path.Combine(
+                userProfile,
+                ".local", "share", "Steam", "steamapps", "compatdata", "2536520", "pfx",
+                "drive_c", "users", "steamuser", "Saved Games");
+            candidates.Add(steamCompatPath);
+        }
+
+        // 2. Linux: Wine default path
+        if (!string.IsNullOrWhiteSpace(userProfile))
+        {
+            var winePath = Path.Combine(
+                userProfile,
+                ".wine", "drive_c", "users", "steamuser", "Saved Games");
+            candidates.Add(winePath);
+        }
+
+        // 3. Try the one derived from MyDocuments (handles OneDrive better as MyDocuments is often redirected to OneDrive)
         if (!string.IsNullOrWhiteSpace(myDocuments))
         {
             var parent = Path.GetDirectoryName(myDocuments);
@@ -24,29 +64,29 @@ public class SaveFileService
             }
         }
 
-        // 2. Try the standard one under UserProfile
+        // 4. Try the standard one under UserProfile
         if (!string.IsNullOrWhiteSpace(userProfile))
         {
             candidates.Add(Path.Combine(userProfile, "Saved Games"));
         }
 
-        // 3. Try inside MyDocuments (some systems might have it there)
+        // 5. Try inside MyDocuments (some systems might have it there)
         if (!string.IsNullOrWhiteSpace(myDocuments))
         {
             candidates.Add(Path.Combine(myDocuments, "Saved Games"));
         }
 
-        // Return the first candidate that exists and contains the "Diablo II Resurrected" folder
+        // Return the first candidate that has a Diablo II Resurrected folder
         foreach (var candidate in candidates)
         {
-            var d2rPath = Path.Combine(candidate, "Diablo II Resurrected");
-            if (Directory.Exists(d2rPath))
+            var d2rPath = ResolveDirectoryCaseInsensitive(candidate, "Diablo II Resurrected");
+            if (d2rPath != null)
             {
                 return candidate;
             }
         }
 
-        // Fallback to the first existing candidate, or the default if none exist
+        // Fallback
         return candidates.FirstOrDefault(Directory.Exists)
                ?? candidates.FirstOrDefault(c => !string.IsNullOrWhiteSpace(c))
                ?? Path.Combine(userProfile, "Saved Games");

@@ -481,12 +481,6 @@ public class GameLauncherService
 
         LaunchDiagnostics.Log($"Resolved executable path: {executablePath}");
         LaunchDiagnostics.Log($"Launch parameters: {finalArgs}");
-            
-        if (!OperatingSystem.IsWindows())
-        {
-            Notifications.SendNotification("This only works on Windows");
-            return null;
-        }
 
         var processStartInfo = new ProcessStartInfo(executablePath)
         {

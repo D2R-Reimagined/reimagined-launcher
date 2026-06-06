@@ -9,6 +9,7 @@ public static class Notifications
     public static void SendNotification(string message, string badgeType = "Info")
     {
         SessionLogService.AddEntry(message, badgeType);
+        Console.WriteLine($"[{badgeType}] {message}");
         Dispatcher.UIThread.Post(() =>
         {
             MainWindow.NotificationManager?.Show(new Notification(

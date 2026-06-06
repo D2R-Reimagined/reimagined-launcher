@@ -173,7 +173,19 @@ public static class BackupService
             return string.Empty;
         }
 
-        return Path.Combine(savedGamesPath, "Diablo II Resurrected", "mods", trimmedSavePath);
+        var d2rPath = SaveFileService.ResolveDirectoryCaseInsensitive(savedGamesPath, "Diablo II Resurrected");
+        if (d2rPath == null)
+        {
+            return string.Empty;
+        }
+
+        var modsPath = SaveFileService.ResolveDirectoryCaseInsensitive(d2rPath, "mods");
+        if (modsPath == null)
+        {
+            return string.Empty;
+        }
+
+        return Path.Combine(modsPath, trimmedSavePath);
     }
 
     public static Task<bool> CreateLaunchBackupAsync()
@@ -409,10 +421,13 @@ public static class BackupService
             return string.Empty;
         }
 
-        return Path.Combine(
-            savedGamesPath,
-            "Diablo II Resurrected",
-            DefaultBackupDirectoryName);
+        var d2rPath = SaveFileService.ResolveDirectoryCaseInsensitive(savedGamesPath, "Diablo II Resurrected");
+        if (d2rPath == null)
+        {
+            return string.Empty;
+        }
+
+        return Path.Combine(d2rPath, DefaultBackupDirectoryName);
     }
 
     private static void TrimBackups()
@@ -706,7 +721,25 @@ public static class BackupService
         }
 
         // For B.net and Steam, only use the canonical Reimagined.mpq location.
-        var modInfoPath = Path.Combine(installDirectory, "mods", "Reimagined", "Reimagined.mpq", "modinfo.json");
+        var modsPath = SaveFileService.ResolveDirectoryCaseInsensitive(installDirectory, "mods");
+        if (modsPath == null)
+        {
+            return null;
+        }
+
+        var reimaginedPath = SaveFileService.ResolveDirectoryCaseInsensitive(modsPath, "Reimagined");
+        if (reimaginedPath == null)
+        {
+            return null;
+        }
+
+        var mpqPath = SaveFileService.ResolveDirectoryCaseInsensitive(reimaginedPath, "Reimagined.mpq");
+        if (mpqPath == null)
+        {
+            return null;
+        }
+
+        var modInfoPath = Path.Combine(mpqPath, "modinfo.json");
         return File.Exists(modInfoPath) ? modInfoPath : null;
     }
 

@@ -41,7 +41,7 @@
                     <StackPanel Grid.Row="0" Grid.Column="0" Spacing="6">
                         <TextBlock Text="Save Directory"
                                    FontWeight="SemiBold"/>
-                        <TextBox x:Name="SaveDirectoryTextBox" IsReadOnly="True"/>
+                        <TextBox x:Name="SaveDirectoryTextBox" LostFocus="OnSaveDirectoryChanged"/>
                     </StackPanel>
                     <Button Grid.Row="0" Grid.Column="1"
                             x:Name="SaveDirectoryBrowseButton"

@@ -77,6 +77,19 @@ public partial class BackupsView : UserControl
         RefreshBackupState();
     }
 
+    private async void OnSaveDirectoryChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_isRefreshing)
+        {
+            return;
+        }
+
+        var profile = MainWindow.Settings.CurrentProfile;
+        var text = SaveDirectoryTextBox.Text?.Trim() ?? string.Empty;
+        profile.SaveDirectory = text;
+        await PersistBackupSettingsAsync();
+    }
+
     private async void OnBackupDirectoryClick(object? sender, RoutedEventArgs e)
     {
         if (TopLevel.GetTopLevel(this) is not Window window)
@@ -226,18 +239,7 @@ public partial class BackupsView : UserControl
 
     private void UpdateSaveDirectoryBrowseState()
     {
-        var profile = MainWindow.Settings.CurrentProfile;
-
-        if (profile.Type == InstallationType.D2RMM)
-        {
-            // D2RMM: save directory must always be selected manually.
-            SaveDirectoryBrowseButton.IsEnabled = true;
-            return;
-        }
-
-        // Steam / B.net: disable browse when auto-resolution succeeds.
-        var autoResolved = BackupService.GetAutoResolvedSaveDirectory();
-        SaveDirectoryBrowseButton.IsEnabled = string.IsNullOrWhiteSpace(autoResolved);
+        SaveDirectoryBrowseButton.IsEnabled = true;
     }
 
 }
