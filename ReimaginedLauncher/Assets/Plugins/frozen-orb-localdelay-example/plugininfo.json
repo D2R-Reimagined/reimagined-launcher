@@ -3,9 +3,10 @@
   "version": "1.0.0",
   "modVersion": "3.0.7",
   "author": "Reimagined Launcher",
-  "description": "Dropdown example: choose how Frozen Orb's localdelay (skills.txt) is set — leave it unchanged, force 300, or enter your own value.",
+  "description": "Dropdown example: choose how Frozen Orb's localdelay (skills.txt) is set. 'Fixed (300)' also lowers Blizzard and Meteor localdelay to 150; 'Custom' lets you type a value and (for testing) bundles the Aura Spirits plugin.",
   "files": [
-    "operations.json"
+    "operations.json",
+    "aura-spirits.json"
   ],
   "parameters": [
     {
@@ -26,6 +27,17 @@
       "type": "text",
       "defaultValue": "25",
       "description": "The localdelay value written to Frozen Orb when the dropdown is set to 'Custom'. Only shown while 'Custom' is selected.",
+      "visibleWhen": {
+        "parameterKey": "frozenOrbLocalDelayMode",
+        "equals": "Custom"
+      }
+    },
+    {
+      "key": "applyAuraSpirits",
+      "name": "Also apply Aura Spirits (test)",
+      "type": "checkbox",
+      "defaultValue": "true",
+      "description": "When enabled, the bundled Aura Spirits changes are applied alongside the custom Frozen Orb delay. Only shown while 'Custom' is selected.",
       "visibleWhen": {
         "parameterKey": "frozenOrbLocalDelayMode",
         "equals": "Custom"

@@ -224,6 +224,14 @@ public sealed class PluginParameterItem : INotifyPropertyChanged
     // Optional condition gating this parameter's visibility in the UI. Null means always visible.
     public PluginParameterCondition? VisibleWhen { get; init; }
 
+    // A parameter that only appears based on another parameter's value (visibleWhen) is treated as
+    // subordinate to it, and is indented in the UI to show that dependency hierarchy.
+    public bool IsSubordinate => VisibleWhen != null;
+
+    // Per-item bottom spacing plus a left indent for subordinate (visibleWhen-gated) parameters.
+    public Avalonia.Thickness ItemMargin =>
+        IsSubordinate ? new Avalonia.Thickness(20, 0, 0, 8) : new Avalonia.Thickness(0, 0, 0, 8);
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     private void OnPropertyChanged(string propertyName)

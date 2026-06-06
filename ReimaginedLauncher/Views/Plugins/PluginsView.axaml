@@ -208,8 +208,17 @@
                                                                 <ItemsControl ItemsSource="{Binding Parameters}">
                                                                     <ItemsControl.ItemTemplate>
                                                                         <DataTemplate x:DataType="plugins:PluginParameterItem">
-                                                                            <StackPanel Margin="0,0,0,8"
-                                                                                        IsVisible="{Binding IsVisible}">
+                                                                            <Grid Margin="{Binding ItemMargin}"
+                                                                                  IsVisible="{Binding IsVisible}"
+                                                                                  ColumnDefinitions="Auto,*">
+                                                                                <!-- Accent line + indent (via ItemMargin) mark a parameter as subordinate to the one its visibleWhen references. -->
+                                                                                <Border Grid.Column="0"
+                                                                                        Width="2"
+                                                                                        Margin="0,2,10,2"
+                                                                                        CornerRadius="1"
+                                                                                        Background="{StaticResource GoldTextBrush}"
+                                                                                        IsVisible="{Binding IsSubordinate}" />
+                                                                            <StackPanel Grid.Column="1">
                                                                 <!-- Text parameter layout: title/description on top, full-width TextBox + Default badge below. -->
                                                                 <StackPanel Spacing="6"
                                                                             IsVisible="{Binding IsTextParameter}">
@@ -288,6 +297,7 @@
                                                                     </Grid>
                                                                 </StackPanel>
                                                                             </StackPanel>
+                                                                            </Grid>
                                                                         </DataTemplate>
                                                                     </ItemsControl.ItemTemplate>
                                                                 </ItemsControl>

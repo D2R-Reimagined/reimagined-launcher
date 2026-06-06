@@ -12,6 +12,28 @@
   },
   {
     "file": "skills.txt",
+    "rowIdentifier": "Blizzard",
+    "column": "localdelay",
+    "operation": "replace",
+    "updatedValue": "150",
+    "condition": {
+      "parameterKey": "frozenOrbLocalDelayMode",
+      "equals": "Fixed (300)"
+    }
+  },
+  {
+    "file": "skills.txt",
+    "rowIdentifier": "Meteor",
+    "column": "localdelay",
+    "operation": "replace",
+    "updatedValue": "150",
+    "condition": {
+      "parameterKey": "frozenOrbLocalDelayMode",
+      "equals": "Fixed (300)"
+    }
+  },
+  {
+    "file": "skills.txt",
     "rowIdentifier": "Frozen Orb",
     "column": "localdelay",
     "operation": "replace",

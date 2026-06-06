@@ -1,0 +1,319 @@
+[
+  {
+    "file": "skills.txt",
+    "operation": "addRow",
+    "rowName": "AuraSpiritBase",
+    "condition": { "all": [ { "parameterKey": "frozenOrbLocalDelayMode", "equals": "Custom" }, { "parameterKey": "applyAuraSpirits", "equals": "true" } ] },
+    "columns": [
+      { "column": "Skill", "updatedValue": "AuraSpiritBase" },
+      { "column": "summon", "updatedValue": "auraspirit" },
+      { "column": "charclass", "updatedValue": "pal" },
+      { "column": "srvdofunc", "updatedValue": "44" },
+      { "column": "pettype", "updatedValue": "aura" },
+      { "column": "petmax", "updatedValue": "1" },
+      { "column": "summode", "updatedValue": "S1" },
+      { "column": "sumsk1calc", "updatedValue": "ln56" },
+      { "column": "stsound", "updatedValue": "necromancer_corpse_cast" },
+      { "column": "castoverlay", "updatedValue": "cast_undead" },
+      { "column": "enhanceable", "updatedValue": "1" },
+      { "column": "range", "updatedValue": "none" },
+      { "column": "anim", "updatedValue": "SC" },
+      { "column": "seqtrans", "updatedValue": "SC" },
+      { "column": "monanim", "updatedValue": "xx" },
+      { "column": "LineOfSight", "updatedValue": "4" },
+      { "column": "ItemEffect", "updatedValue": "1" },
+      { "column": "maxlvl", "updatedValue": "25" },
+      { "column": "rightskill", "updatedValue": "1" },
+      { "column": "InTown", "updatedValue": "1" },
+      { "column": "Param5", "updatedValue": "1" },
+      { "column": "*Param5 Description", "updatedValue": "Aura Base Level" },
+      { "column": "Param6", "updatedValue": "1" },
+      { "column": "*Param6 Description", "updatedValue": "Aura Level per Level" },
+      { "column": "InGame", "updatedValue": "1" },
+      { "column": "HitShift", "updatedValue": "8" }
+    ]
+  },
+  {
+    "file": "skills.txt",
+    "operation": "cloneRow",
+    "sourceRowIdentifier": "AuraSpiritBase",
+    "condition": { "all": [ { "parameterKey": "frozenOrbLocalDelayMode", "equals": "Custom" }, { "parameterKey": "applyAuraSpirits", "equals": "true" } ] },
+    "columns": [
+      { "column": "Skill", "updatedValue": "Spirit of Conviction" },
+      { "column": "*Id", "updatedValue": "123" },
+      { "column": "skilldesc", "updatedValue": "conviction" },
+      { "column": "sumskill1", "updatedValue": "Conviction" },
+      { "column": "reqlevel", "updatedValue": "30" },
+      { "column": "reqskill1", "updatedValue": "Spirit of Sanctuary" },
+      { "column": "reqskill2", "updatedValue": "Holy Shock" },
+      { "column": "sumsk1calc", "updatedValue": "par5 + (lvl - 1) * par6 + skill('Spirit of Conviction'.blvl) * 3" }
+    ]
+  },
+  {
+    "file": "skills.txt",
+    "operation": "cloneRow",
+    "sourceRowIdentifier": "AuraSpiritBase",
+    "condition": { "all": [ { "parameterKey": "frozenOrbLocalDelayMode", "equals": "Custom" }, { "parameterKey": "applyAuraSpirits", "equals": "true" } ] },
+    "columns": [
+      { "column": "Skill", "updatedValue": "Spirit of Sanctuary" },
+      { "column": "*Id", "updatedValue": "119" },
+      { "column": "skilldesc", "updatedValue": "sanctuary" },
+      { "column": "sumskill1", "updatedValue": "Sanctuary" },
+      { "column": "reqlevel", "updatedValue": "24" },
+      { "column": "reqskill1", "updatedValue": "Thorns" }
+    ]
+  },
+  {
+    "file": "skills.txt",
+    "operation": "cloneRow",
+    "sourceRowIdentifier": "AuraSpiritBase",
+    "condition": { "all": [ { "parameterKey": "frozenOrbLocalDelayMode", "equals": "Custom" }, { "parameterKey": "applyAuraSpirits", "equals": "true" } ] },
+    "columns": [
+      { "column": "Skill", "updatedValue": "Spirit of Concentration" },
+      { "column": "*Id", "updatedValue": "113" },
+      { "column": "skilldesc", "updatedValue": "concentration" },
+      { "column": "sumskill1", "updatedValue": "Concentration" },
+      { "column": "reqlevel", "updatedValue": "18" },
+      { "column": "reqskill1", "updatedValue": "Blessed Aim" }
+    ]
+  },
+  {
+    "file": "skills.txt",
+    "operation": "cloneRow",
+    "sourceRowIdentifier": "AuraSpiritBase",
+    "condition": { "all": [ { "parameterKey": "frozenOrbLocalDelayMode", "equals": "Custom" }, { "parameterKey": "applyAuraSpirits", "equals": "true" } ] },
+    "columns": [
+      { "column": "Skill", "updatedValue": "Spirit of Fanaticism" },
+      { "column": "*Id", "updatedValue": "122" },
+      { "column": "skilldesc", "updatedValue": "fanaticism" },
+      { "column": "sumskill1", "updatedValue": "Fanaticism" },
+      { "column": "reqlevel", "updatedValue": "30" },
+      { "column": "reqskill1", "updatedValue": "Spirit of Concentration" }
+    ]
+  },
+  {
+    "file": "skills.txt",
+    "operation": "cloneRow",
+    "sourceRowIdentifier": "AuraSpiritBase",
+    "condition": { "all": [ { "parameterKey": "frozenOrbLocalDelayMode", "equals": "Custom" }, { "parameterKey": "applyAuraSpirits", "equals": "true" } ] },
+    "columns": [
+      { "column": "Skill", "updatedValue": "Spirit of Might" },
+      { "column": "*Id", "updatedValue": "98" },
+      { "column": "skilldesc", "updatedValue": "might" },
+      { "column": "sumskill1", "updatedValue": "Might" },
+      { "column": "reqlevel", "updatedValue": "1" }
+    ]
+  },
+  {
+    "file": "skills.txt",
+    "rowIdentifier": "AuraSpiritBase",
+    "operation": "replace",
+    "condition": { "all": [ { "parameterKey": "frozenOrbLocalDelayMode", "equals": "Custom" }, { "parameterKey": "applyAuraSpirits", "equals": "true" } ] },
+    "columns": [
+      { "column": "Skill", "updatedValue": "Spirit of Salvation" },
+      { "column": "*Id", "updatedValue": "125" },
+      { "column": "skilldesc", "updatedValue": "salvation" },
+      { "column": "sumskill1", "updatedValue": "Salvation" },
+      { "column": "reqlevel", "updatedValue": "30" }
+    ]
+  },
+  {
+    "file": "skills.txt",
+    "operation": "swapRow",
+    "rowIdentifier": "Conviction",
+    "swapRowIdentifier": "Spirit of Conviction",
+    "condition": { "all": [ { "parameterKey": "frozenOrbLocalDelayMode", "equals": "Custom" }, { "parameterKey": "applyAuraSpirits", "equals": "true" } ] },
+    "swapColumns": [
+      { "column": "*Id", "updatedValue": "" },
+      { "column": "charclass", "updatedValue": "" },
+      { "column": "Param1", "updatedValue": "20" },
+      { "column": "Param2", "updatedValue": "1" }
+    ]
+  },
+  {
+    "file": "skills.txt",
+    "operation": "swapRow",
+    "rowIdentifier": "Sanctuary",
+    "swapRowIdentifier": "Spirit of Sanctuary",
+    "condition": { "all": [ { "parameterKey": "frozenOrbLocalDelayMode", "equals": "Custom" }, { "parameterKey": "applyAuraSpirits", "equals": "true" } ] },
+    "swapColumns": [
+      { "column": "*Id", "updatedValue": "" },
+      { "column": "charclass", "updatedValue": "" },
+      { "column": "Param1", "updatedValue": "20" },
+      { "column": "Param2", "updatedValue": "1" }
+    ]
+  },
+  {
+    "file": "skills.txt",
+    "operation": "swapRow",
+    "rowIdentifier": "Concentration",
+    "swapRowIdentifier": "Spirit of Concentration",
+    "condition": { "all": [ { "parameterKey": "frozenOrbLocalDelayMode", "equals": "Custom" }, { "parameterKey": "applyAuraSpirits", "equals": "true" } ] },
+    "swapColumns": [
+      { "column": "*Id", "updatedValue": "" },
+      { "column": "charclass", "updatedValue": "" },
+      { "column": "Param1", "updatedValue": "20" },
+      { "column": "Param2", "updatedValue": "1" }
+    ]
+  },
+  {
+    "file": "skills.txt",
+    "operation": "swapRow",
+    "rowIdentifier": "Fanaticism",
+    "swapRowIdentifier": "Spirit of Fanaticism",
+    "condition": { "all": [ { "parameterKey": "frozenOrbLocalDelayMode", "equals": "Custom" }, { "parameterKey": "applyAuraSpirits", "equals": "true" } ] },
+    "swapColumns": [
+      { "column": "*Id", "updatedValue": "" },
+      { "column": "charclass", "updatedValue": "" },
+      { "column": "Param1", "updatedValue": "20" },
+      { "column": "Param2", "updatedValue": "1" }
+    ]
+  },
+  {
+    "file": "skills.txt",
+    "operation": "swapRow",
+    "rowIdentifier": "Might",
+    "swapRowIdentifier": "Spirit of Might",
+    "condition": { "all": [ { "parameterKey": "frozenOrbLocalDelayMode", "equals": "Custom" }, { "parameterKey": "applyAuraSpirits", "equals": "true" } ] },
+    "swapColumns": [
+      { "column": "*Id", "updatedValue": "" },
+      { "column": "charclass", "updatedValue": "" },
+      { "column": "Param1", "updatedValue": "20" },
+      { "column": "Param2", "updatedValue": "1" }
+    ]
+  },
+  {
+    "file": "skills.txt",
+    "operation": "swapRow",
+    "rowIdentifier": "Salvation",
+    "swapRowIdentifier": "Spirit of Salvation",
+    "condition": { "all": [ { "parameterKey": "frozenOrbLocalDelayMode", "equals": "Custom" }, { "parameterKey": "applyAuraSpirits", "equals": "true" } ] },
+    "swapColumns": [
+      { "column": "*Id", "updatedValue": "" },
+      { "column": "charclass", "updatedValue": "" },
+      { "column": "Param1", "updatedValue": "20" },
+      { "column": "Param2", "updatedValue": "1" }
+    ]
+  },
+  {
+    "file": "skills.txt",
+    "operation": "replace",
+    "rowIdentifier": "Vengeance",
+    "column": "calc5",
+    "updatedValue": "ln34+(skill('Holy Fire'.blvl) + skill('Holy Shock'.blvl) + skill('Holy Freeze'.blvl))*par7+skill('Spirit of Conviction'.blvl)*par8",
+    "condition": { "all": [ { "parameterKey": "frozenOrbLocalDelayMode", "equals": "Custom" }, { "parameterKey": "applyAuraSpirits", "equals": "true" } ] }
+  },
+  {
+    "file": "skills.txt",
+    "operation": "replace",
+    "rowIdentifier": "Charge",
+    "column": "DmgSymPerCalc",
+    "updatedValue": "(skill('Vigor'.blvl)+skill('Spirit of Might'.blvl))*par8",
+    "condition": { "all": [ { "parameterKey": "frozenOrbLocalDelayMode", "equals": "Custom" }, { "parameterKey": "applyAuraSpirits", "equals": "true" } ] }
+  },
+  {
+    "file": "skills.txt",
+    "operation": "replace",
+    "rowIdentifier": "Holy Fire",
+    "column": "EDmgSymPerCalc",
+    "updatedValue": "skill('Resist Fire'.blvl)*par8+skill('Spirit of Salvation'.blvl)*par7",
+    "condition": { "all": [ { "parameterKey": "frozenOrbLocalDelayMode", "equals": "Custom" }, { "parameterKey": "applyAuraSpirits", "equals": "true" } ] }
+  },
+  {
+    "file": "skills.txt",
+    "operation": "replace",
+    "rowIdentifier": "Holy Freeze",
+    "column": "EDmgSymPerCalc",
+    "updatedValue": "skill('Resist Cold'.blvl)*par8+skill('Spirit of Salvation'.blvl)*par7",
+    "condition": { "all": [ { "parameterKey": "frozenOrbLocalDelayMode", "equals": "Custom" }, { "parameterKey": "applyAuraSpirits", "equals": "true" } ] }
+  },
+  {
+    "file": "skills.txt",
+    "operation": "replace",
+    "rowIdentifier": "Holy Shock",
+    "column": "EDmgSymPerCalc",
+    "updatedValue": "skill('Resist Lightning'.blvl)*par8+skill('Spirit of Salvation'.blvl)*par7",
+    "condition": { "all": [ { "parameterKey": "frozenOrbLocalDelayMode", "equals": "Custom" }, { "parameterKey": "applyAuraSpirits", "equals": "true" } ] }
+  },
+  {
+    "file": "monstats.txt",
+    "operation": "addRow",
+    "rowName": "auraspirit",
+    "condition": { "all": [ { "parameterKey": "frozenOrbLocalDelayMode", "equals": "Custom" }, { "parameterKey": "applyAuraSpirits", "equals": "true" } ] },
+    "columns": [
+      { "column": "Id", "updatedValue": "auraspirit" },
+      { "column": "BaseId", "updatedValue": "auraspirit" },
+      { "column": "NameStr", "updatedValue": "strUI14" },
+      { "column": "MonStatsEx", "updatedValue": "willowisp1" },
+      { "column": "AI", "updatedValue": "GenericPet" },
+      { "column": "Code", "updatedValue": "BH" },
+      { "column": "enabled", "updatedValue": "1" },
+      { "column": "rangedtype", "updatedValue": "1" },
+      { "column": "MinGrp", "updatedValue": "1" },
+      { "column": "MaxGrp", "updatedValue": "1" },
+      { "column": "Velocity", "updatedValue": "20" },
+      { "column": "Run", "updatedValue": "20" },
+      { "column": "aidel", "updatedValue": "5" },
+      { "column": "aidel(N)", "updatedValue": "5" },
+      { "column": "aidel(H)", "updatedValue": "5" },
+      { "column": "aip1", "updatedValue": "30" },
+      { "column": "aip1(N)", "updatedValue": "30" },
+      { "column": "aip1(H)", "updatedValue": "60" },
+      { "column": "aip3(H)", "updatedValue": "1" },
+      { "column": "aip5(N)", "updatedValue": "15" },
+      { "column": "aip6", "updatedValue": "1" },
+      { "column": "aip6(N)", "updatedValue": "25" },
+      { "column": "aip6(H)", "updatedValue": "10" },
+      { "column": "Align", "updatedValue": "1" },
+      { "column": "inTown", "updatedValue": "1" },
+      { "column": "flying", "updatedValue": "1" },
+      { "column": "opendoors", "updatedValue": "1" },
+      { "column": "switchai", "updatedValue": "1" },
+      { "column": "neverCount", "updatedValue": "1" },
+      { "column": "petIgnore", "updatedValue": "1" },
+      { "column": "Sk2mode", "updatedValue": "S1" },
+      { "column": "Sk2lvl", "updatedValue": "1" },
+      { "column": "DamageRegen", "updatedValue": "100" },
+      { "column": "noRatio", "updatedValue": "1" },
+      { "column": "minHP", "updatedValue": "10000" },
+      { "column": "maxHP", "updatedValue": "10000" },
+      { "column": "minHP(N)", "updatedValue": "10000" },
+      { "column": "maxHP(N)", "updatedValue": "10000" },
+      { "column": "minHP(H)", "updatedValue": "10000" },
+      { "column": "maxHP(H)", "updatedValue": "10000" }
+    ]
+  },
+  {
+    "file": "monstats2.txt",
+    "operation": "cloneRow",
+    "sourceRowIdentifier": "warputriddefiler",
+    "condition": { "all": [ { "parameterKey": "frozenOrbLocalDelayMode", "equals": "Custom" }, { "parameterKey": "applyAuraSpirits", "equals": "true" } ] },
+    "columns": [
+      { "column": "Id", "updatedValue": "auraspirit" },
+      { "column": "*hcIdx", "updatedValue": "" }
+    ]
+  },
+  {
+    "file": "pettype.txt",
+    "operation": "addRow",
+    "condition": { "all": [ { "parameterKey": "frozenOrbLocalDelayMode", "equals": "Custom" }, { "parameterKey": "applyAuraSpirits", "equals": "true" } ] },
+    "columns": [
+      { "column": "pettype", "updatedValue": "aura" },
+      { "column": "pool", "updatedValue": "1" },
+      { "column": "basemax", "updatedValue": "1" },
+      { "column": "warp", "updatedValue": "1" },
+      { "column": "partysend", "updatedValue": "1" },
+      { "column": "unsummon", "updatedValue": "1" },
+      { "column": "name", "updatedValue": "strUI14" },
+      { "column": "icontype", "updatedValue": "1" },
+      { "column": "baseicon", "updatedValue": "revivedicon" }
+    ]
+  },
+  {
+    "file": "monsters.json",
+    "key": "auraspirit",
+    "operation": "addRow",
+    "updatedValue": "willowisp1",
+    "condition": { "all": [ { "parameterKey": "frozenOrbLocalDelayMode", "equals": "Custom" }, { "parameterKey": "applyAuraSpirits", "equals": "true" } ] }
+  }
+]
