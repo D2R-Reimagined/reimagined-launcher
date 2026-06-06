@@ -17,13 +17,20 @@ public static class LauncherUpdateService
     public static bool IsUpdateAvailable { get; private set; }
     public static bool IsDownloading { get; private set; }
     public static bool IsUpdateDownloaded { get; private set; }
+
+    // When true, all automatic update behavior is suppressed: update checks (startup,
+    // hourly poll, and the version-label click) are skipped, no update is downloaded so
+    // no reminder banner appears, and any previously downloaded update is never applied
+    // on close/restart. Driven by the "Disable automatic launcher updates" setting.
+    public static bool AreUpdatesDisabled { get; set; }
+
     public static string? LatestVersion { get; private set; }
     public static event EventHandler? UpdateDownloaded;
     public static event EventHandler? UpdateStateChanged;
 
     public static async Task CheckForUpdatesAsync()
     {
-        if (_hasCheckedForUpdates || !OperatingSystem.IsWindows())
+        if (AreUpdatesDisabled || _hasCheckedForUpdates || !OperatingSystem.IsWindows())
         {
             return;
         }
@@ -74,6 +81,11 @@ public static class LauncherUpdateService
 
     public static void ApplyUpdateAndRestart()
     {
+        if (AreUpdatesDisabled)
+        {
+            return;
+        }
+
         if (_updateManager != null && _updateInfo != null && IsUpdateDownloaded)
         {
             _updateManager.ApplyUpdatesAndRestart(_updateInfo);

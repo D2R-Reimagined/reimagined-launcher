@@ -195,6 +195,7 @@ public partial class MainWindow : Window
         await SettingsManager.SaveAsync(Settings);
 
         await RefreshUpdateStateAsync();
+        LauncherUpdateService.AreUpdatesDisabled = Settings.DisableLauncherUpdates;
         _ = LauncherUpdateService.CheckForUpdatesAsync();
         StartLauncherUpdateCheckTimer();
 
@@ -1165,6 +1166,14 @@ public partial class MainWindow : Window
     // click feels acknowledged regardless of whether an update is available.
     private async void OnLauncherVersionClicked(object? sender, Avalonia.Input.PointerPressedEventArgs e)
     {
+        if (LauncherUpdateService.AreUpdatesDisabled)
+        {
+            Notifications.SendNotification(
+                "Automatic launcher updates are disabled. Enable them in Settings to check for updates.",
+                "Launcher");
+            return;
+        }
+
         try
         {
             Notifications.SendNotification("Checking for launcher updates...", "Launcher");
