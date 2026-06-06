@@ -1,0 +1,35 @@
+{
+  "name": "Frozen Orb Local Delay Example",
+  "version": "1.0.0",
+  "modVersion": "3.0.7",
+  "author": "Reimagined Launcher",
+  "description": "Dropdown example: choose how Frozen Orb's localdelay (skills.txt) is set — leave it unchanged, force 300, or enter your own value.",
+  "files": [
+    "operations.json"
+  ],
+  "parameters": [
+    {
+      "key": "frozenOrbLocalDelayMode",
+      "name": "Frozen Orb Local Delay",
+      "type": "dropdown",
+      "defaultValue": "Unchanged",
+      "options": [
+        "Unchanged",
+        "Fixed (300)",
+        "Custom"
+      ],
+      "description": "How to set Frozen Orb's localdelay column. 'Unchanged' makes no edit, 'Fixed (300)' writes 300, 'Custom' writes the value you type below."
+    },
+    {
+      "key": "customLocalDelay",
+      "name": "Custom Local Delay",
+      "type": "text",
+      "defaultValue": "25",
+      "description": "The localdelay value written to Frozen Orb when the dropdown is set to 'Custom'. Only shown while 'Custom' is selected.",
+      "visibleWhen": {
+        "parameterKey": "frozenOrbLocalDelayMode",
+        "equals": "Custom"
+      }
+    }
+  ]
+}

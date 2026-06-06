@@ -12,6 +12,7 @@ using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using ReimaginedLauncher.Utilities;
 using TextMateSharp.Grammars;
+using ReimaginedLauncher;
 
 namespace ReimaginedLauncher.Views.Plugins;
 
@@ -24,6 +25,7 @@ public partial class PluginsView : UserControl
     private string _originalEditorContent = string.Empty;
     private bool _isUpdatingEditorState;
     private bool _isLoading;
+    private bool _isDryRunning;
 
     public PluginsView()
     {
@@ -70,6 +72,70 @@ public partial class PluginsView : UserControl
     private async void OnRefreshClicked(object? sender, RoutedEventArgs e)
     {
         await RefreshPluginsStateAsync();
+    }
+
+    private async void OnDryRunClicked(object? sender, RoutedEventArgs e)
+    {
+        if (_isDryRunning || _isLoading)
+        {
+            return;
+        }
+
+        var profile = MainWindow.Settings.CurrentProfile;
+        if (!profile.IsInstallDirectoryValidated)
+        {
+            Notifications.SendNotification(
+                "Install directory not validated",
+                "Choose the Diablo II: Resurrected folder that contains D2R.exe before running a dry run.");
+            return;
+        }
+
+        if (profile.Type != InstallationType.D2RMM && !MainWindow.IsLocalModDetected)
+        {
+            Notifications.SendNotification(
+                "D2R Reimagined mod not detected",
+                "Install the mod in the selected directory before running a dry run.");
+            return;
+        }
+
+        var mainWindow = TopLevel.GetTopLevel(this) as MainWindow;
+
+        _isDryRunning = true;
+        mainWindow?.SetNavigationEnabled(false);
+        ContentPanel.IsEnabled = false;
+        DryRunStatusText.Text = "Applying all tweaks and enabled plugins without launching the game.";
+        DryRunBanner.IsVisible = true;
+
+        // Progress is created on the UI thread, so its callback marshals back to it.
+        var progress = new Progress<string>(status => DryRunStatusText.Text = status);
+
+        try
+        {
+            var prepared = await Task.Run(() => ModTweaksService.PrepareForLaunchAsync(progress));
+            if (prepared)
+            {
+                Notifications.SendNotification(
+                    "Dry run complete. All tweaks and enabled plugins were applied without launching the game.",
+                    "Success");
+            }
+            else
+            {
+                Notifications.SendNotification(
+                    "Dry run failed. See previous warning for details.",
+                    "Warning");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notifications.SendNotification($"Dry run failed: {ex.Message}", "Warning");
+        }
+        finally
+        {
+            _isDryRunning = false;
+            DryRunBanner.IsVisible = false;
+            ContentPanel.IsEnabled = true;
+            mainWindow?.SetNavigationEnabled(true);
+        }
     }
 
     private async void OnImportPluginClicked(object? sender, RoutedEventArgs e)
@@ -335,12 +401,46 @@ public partial class PluginsView : UserControl
 
         var serialized = checkBox.IsChecked == true ? "true" : "false";
 
-        // Intentionally avoid RefreshPluginsStateAsync() and a success toast here: checkbox-heavy
-        // plugins would otherwise spam notifications and rebuild the catalog on every click,
-        // causing flicker, focus loss, and scroll jumps. Save quietly; only surface failures.
+        // Update the in-memory value first so any parameter whose visibleWhen condition depends on
+        // this checkbox shows/hides immediately, then persist. Intentionally avoid
+        // RefreshPluginsStateAsync() and a success toast here: checkbox-heavy plugins would otherwise
+        // spam notifications and rebuild the catalog on every click, causing flicker, focus loss, and
+        // scroll jumps. Save quietly; only surface failures.
+        parameter.UpdateValue(serialized);
         try
         {
             await PluginsService.SaveParameterValueAsync(parameter.PluginId, parameter.Key, serialized);
+        }
+        catch (Exception ex)
+        {
+            Notifications.SendNotification($"Could not save plugin parameter: {ex.Message}", "Warning");
+        }
+    }
+
+    // Persists dropdown-typed plugin parameters. Mirrors OnParameterCheckedChanged: the in-memory
+    // value is updated first so dependent visibleWhen parameters react live, then the selection is
+    // saved quietly without rebuilding the catalog.
+    private async void OnParameterSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not ComboBox { DataContext: PluginParameterItem parameter } comboBox)
+        {
+            return;
+        }
+
+        if (comboBox.SelectedItem is not string selected)
+        {
+            return;
+        }
+
+        if (string.Equals(parameter.Value, selected, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        parameter.UpdateValue(selected);
+        try
+        {
+            await PluginsService.SaveParameterValueAsync(parameter.PluginId, parameter.Key, selected);
         }
         catch (Exception ex)
         {

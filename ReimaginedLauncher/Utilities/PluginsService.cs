@@ -537,9 +537,29 @@ public static class PluginsService
         // Checkbox parameters always persist as the canonical "true"/"false" so the saved
         // plugininfo.json stays consistent regardless of whether the UI sent "true"/"false",
         // "1"/"0", a localized string, or the empty string when the user uncheck/checks the box.
-        var normalizedValue = string.Equals(parameter.Type, "checkbox", StringComparison.OrdinalIgnoreCase)
-            ? NormalizeCheckboxValue(value)
-            : value.Trim();
+        // Dropdown parameters only persist a value that is one of their declared options (matched
+        // case-insensitively, stored in the option's canonical casing).
+        string normalizedValue;
+        if (string.Equals(parameter.Type, "checkbox", StringComparison.OrdinalIgnoreCase))
+        {
+            normalizedValue = NormalizeCheckboxValue(value);
+        }
+        else if (string.Equals(parameter.Type, "dropdown", StringComparison.OrdinalIgnoreCase))
+        {
+            var options = parameter.Options ?? [];
+            var match = options.FirstOrDefault(option =>
+                string.Equals(option, value.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (match == null)
+            {
+                throw new InvalidOperationException("The selected value is not one of the parameter's allowed options.");
+            }
+
+            normalizedValue = match;
+        }
+        else
+        {
+            normalizedValue = value.Trim();
+        }
         var currentValue = string.IsNullOrWhiteSpace(parameter.Value) ? parameter.DefaultValue : parameter.Value;
         if (string.Equals(currentValue, normalizedValue, StringComparison.Ordinal))
         {
@@ -2703,12 +2723,25 @@ public static class PluginsService
             {
                 var rawValue = string.IsNullOrWhiteSpace(parameter.Value) ? parameter.DefaultValue : parameter.Value;
                 var normalizedType = parameter.Type ?? string.Empty;
+                var options = parameter.Options ?? [];
                 // Checkbox parameters always materialize as the canonical "true"/"false" so the UI
                 // and the condition evaluator agree on the effective value, even if the on-disk
-                // value uses one of the lenient boolean forms (1/0/yes/no/on/off/checked).
-                var effectiveValue = string.Equals(normalizedType, "checkbox", StringComparison.OrdinalIgnoreCase)
-                    ? NormalizeCheckboxValue(rawValue)
-                    : rawValue;
+                // value uses one of the lenient boolean forms (1/0/yes/no/on/off/checked). Dropdown
+                // parameters coerce the effective value to a member of their option set so a stale or
+                // hand-edited value can never leave the combobox without a selection.
+                string effectiveValue;
+                if (string.Equals(normalizedType, "checkbox", StringComparison.OrdinalIgnoreCase))
+                {
+                    effectiveValue = NormalizeCheckboxValue(rawValue);
+                }
+                else if (string.Equals(normalizedType, "dropdown", StringComparison.OrdinalIgnoreCase))
+                {
+                    effectiveValue = CoerceDropdownValue(rawValue, parameter.DefaultValue, options);
+                }
+                else
+                {
+                    effectiveValue = rawValue;
+                }
 
                 return new PluginParameterItem
                 {
@@ -2719,9 +2752,25 @@ public static class PluginsService
                     DefaultValue = parameter.DefaultValue,
                     Value = effectiveValue,
                     Type = normalizedType,
+                    Options = options.ToList(),
+                    VisibleWhen = MapCondition(parameter.VisibleWhen),
                     Group = parameter.Group ?? string.Empty
                 };
             }).ToList();
+
+            foreach (var definition in pluginInfo.Parameters)
+            {
+                ValidateParameterDefinition(definition, errors);
+
+                if (definition.VisibleWhen != null)
+                {
+                    ValidateCondition(
+                        definition.VisibleWhen,
+                        parameters,
+                        $"parameter '{definition.Key}' visibleWhen",
+                        errors);
+                }
+            }
 
             if (pluginInfo.Files.Count == 0 && pluginInfo.Assets.Count == 0)
             {
@@ -3310,6 +3359,78 @@ public static class PluginsService
         return "false";
     }
 
+    // Coerces a dropdown parameter's effective value to a member of its option set. Prefers an exact
+    // (case-insensitive) match against an option, then the declared default, then the first option.
+    // Returns the canonical option casing so the persisted value and the UI selection stay in sync.
+    private static string CoerceDropdownValue(string? rawValue, string defaultValue, IReadOnlyList<string> options)
+    {
+        if (options.Count == 0)
+        {
+            return rawValue ?? string.Empty;
+        }
+
+        var trimmed = (rawValue ?? string.Empty).Trim();
+        var match = options.FirstOrDefault(option => string.Equals(option, trimmed, StringComparison.OrdinalIgnoreCase));
+        if (match != null)
+        {
+            return match;
+        }
+
+        return options.FirstOrDefault(option => string.Equals(option, defaultValue, StringComparison.OrdinalIgnoreCase))
+            ?? options[0];
+    }
+
+    // Projects the internal JSON condition onto the public, UI-facing PluginParameterCondition so the
+    // Plugins view can evaluate parameter visibility (visibleWhen) without depending on private types.
+    private static PluginParameterCondition? MapCondition(PluginJsonCondition? condition)
+    {
+        if (condition is null)
+        {
+            return null;
+        }
+
+        return new PluginParameterCondition
+        {
+            ParameterKey = condition.ParameterKey,
+            EqualsValue = condition.EqualsValue,
+            NotEqualsValue = condition.NotEqualsValue,
+            All = condition.All?.Where(nested => nested != null).Select(nested => MapCondition(nested)!).ToList(),
+            Any = condition.Any?.Where(nested => nested != null).Select(nested => MapCondition(nested)!).ToList(),
+            Not = MapCondition(condition.Not)
+        };
+    }
+
+    // Validates a single parameter definition. Today this only enforces dropdown-specific rules
+    // (at least one option, and a default that is one of the options); other types have no extra
+    // requirements beyond the global name/defaultValue checks in ValidatePluginInfo.
+    private static void ValidateParameterDefinition(
+        PluginParameterDefinition definition,
+        List<string> errors)
+    {
+        if (!string.Equals(definition.Type, "dropdown", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var options = definition.Options ?? [];
+        if (options.Count == 0)
+        {
+            errors.Add($"Parameter '{definition.Key}' is a dropdown but lists no options.");
+            return;
+        }
+
+        if (options.Any(string.IsNullOrWhiteSpace))
+        {
+            errors.Add($"Parameter '{definition.Key}' dropdown options must not be empty.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(definition.DefaultValue) &&
+            options.All(option => !string.Equals(option, definition.DefaultValue, StringComparison.OrdinalIgnoreCase)))
+        {
+            errors.Add($"Parameter '{definition.Key}' dropdown defaultValue '{definition.DefaultValue}' is not one of its options.");
+        }
+    }
+
     // Validates a list of column assignments against the target file. Used by cloneRow/swapRow,
     // which accept optional assignments and therefore must not error when the list is empty.
     private static void ValidateColumnAssignments(
@@ -3499,6 +3620,26 @@ public static class PluginsService
             if (string.IsNullOrWhiteSpace(parameter.DefaultValue))
             {
                 throw new InvalidDataException($"Parameter '{parameter.Key}' must include a defaultValue.");
+            }
+
+            if (string.Equals(parameter.Type, "dropdown", StringComparison.OrdinalIgnoreCase))
+            {
+                var options = parameter.Options ?? [];
+                if (options.Count == 0)
+                {
+                    throw new InvalidDataException($"Parameter '{parameter.Key}' is a dropdown but lists no options.");
+                }
+
+                if (options.Any(string.IsNullOrWhiteSpace))
+                {
+                    throw new InvalidDataException($"Parameter '{parameter.Key}' dropdown options must not be empty.");
+                }
+
+                if (options.All(option => !string.Equals(option, parameter.DefaultValue, StringComparison.OrdinalIgnoreCase)))
+                {
+                    throw new InvalidDataException(
+                        $"Parameter '{parameter.Key}' dropdown defaultValue '{parameter.DefaultValue}' is not one of its options.");
+                }
             }
         }
 
@@ -4411,9 +4552,21 @@ public static class PluginsService
         public string Name { get; set; } = string.Empty;
 
         // Optional parameter type: "text" (default, missing) renders as a textbox; "checkbox"
-        // renders as a checkbox/switch and persists "true"/"false". Other types are reserved.
+        // renders as a checkbox/switch and persists "true"/"false"; "dropdown" renders as a combobox
+        // that selects one of Options. Other types are reserved.
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? Type { get; set; }
+
+        // Allowed values for a "dropdown" parameter. Required (and must contain DefaultValue) when
+        // Type == "dropdown"; ignored for other types.
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<string>? Options { get; set; }
+
+        // Optional declarative condition controlling whether this parameter is shown in the UI. When
+        // omitted the parameter is always visible. Same shapes as PluginJsonCondition. Visibility is a
+        // pure UI concern; it never affects parameterKey lookup, saving, or apply behavior.
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public PluginJsonCondition? VisibleWhen { get; set; }
 
         public string? Description { get; set; }
 

@@ -1,0 +1,24 @@
+[
+  {
+    "file": "skills.txt",
+    "rowIdentifier": "Frozen Orb",
+    "column": "localdelay",
+    "operation": "replace",
+    "updatedValue": "300",
+    "condition": {
+      "parameterKey": "frozenOrbLocalDelayMode",
+      "equals": "Fixed (300)"
+    }
+  },
+  {
+    "file": "skills.txt",
+    "rowIdentifier": "Frozen Orb",
+    "column": "localdelay",
+    "operation": "replace",
+    "updatedValue": "{{parameter:customLocalDelay}}",
+    "condition": {
+      "parameterKey": "frozenOrbLocalDelayMode",
+      "equals": "Custom"
+    }
+  }
+]

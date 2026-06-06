@@ -265,7 +265,16 @@
                     <StackPanel Spacing="2">
                         <TextBlock Classes="bullet" Text="•  Missing or 'text' — existing behavior. Rendered as a textbox." />
                         <TextBlock Classes="bullet" Text="•  'checkbox' — rendered as a checkbox/switch. The launcher normalizes the persisted value to 'true' or 'false' (case-insensitive aliases such as 1/0/yes/no/on/off/checked are accepted on read)." />
-                        <TextBlock Classes="bullet" Text="•  Existing parameterKey and {{parameter:key}} substitution behavior is unchanged for both kinds." />
+                        <TextBlock Classes="bullet" Text="•  'dropdown' — rendered as a combobox. Provide an 'options' array of allowed values; 'defaultValue' must be one of them. Only a listed option can be selected/saved, matched case-insensitively and stored in the option's canonical casing." />
+                        <TextBlock Classes="bullet" Text="•  Existing parameterKey and {{parameter:key}} substitution behavior is unchanged for all kinds. A dropdown's selected value can drive conditions (equals/notEquals) on operations and assets just like any other parameter." />
+                    </StackPanel>
+
+                    <TextBlock Classes="sub-title" Text="Conditional parameter visibility (visibleWhen)" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  Add an optional 'visibleWhen' condition to any parameter to show/hide its control on the Plugins page based on the current value of other parameters." />
+                        <TextBlock Classes="bullet" Text="•  'visibleWhen' uses the same condition shapes as operation/asset conditions (parameterKey + equals/notEquals, or all/any/not)." />
+                        <TextBlock Classes="bullet" Text="•  Visibility updates live as the user changes a dropdown or checkbox the condition references; it is purely a UI concern and never affects saving, condition evaluation, or apply." />
+                        <TextBlock Classes="bullet" Text="•  Missing 'visibleWhen' means the parameter is always shown." />
                     </StackPanel>
 
                     <TextBlock Classes="sub-title" Text="Parameter groups (display only)" />
