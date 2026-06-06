@@ -1,7 +1,13 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia;
+using Microsoft.Extensions.DependencyInjection;
+using ReimaginedLauncher.HttpClients;
+using ReimaginedLauncher.HttpClients.Models;
 using AvaloniaEdit.TextMate;
 using AvaloniaEdit;
 using Avalonia.Controls;
@@ -44,6 +50,7 @@ public partial class PluginsView : UserControl
         {
             await Task.Yield();
             var catalog = await PluginsService.GetCatalogAsync();
+            await ApplyPluginUpdatesAsync(catalog);
             PluginsItemsControl.ItemsSource = catalog;
             EmptyStatePanel.IsVisible = catalog.Count == 0;
             if (!string.IsNullOrWhiteSpace(_selectedPluginId) &&
@@ -59,6 +66,41 @@ public partial class PluginsView : UserControl
         finally
         {
             SetLoadingState(false);
+        }
+    }
+
+    // Marks user-sourced plugins whose discussion advertises a different plug version than the
+    // installed one, so the Installed view can surface a "latest" badge. Reads from the cached
+    // user-plugins list (non-forced); failures (e.g. offline) leave all items without an update.
+    private static async Task ApplyPluginUpdatesAsync(IEnumerable<PluginCatalogItem> catalog)
+    {
+        var userPlugins = catalog.Where(p => p.IsUserPlugin && p.HasUserPluginVersion).ToList();
+        if (userPlugins.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var client = Program.ServiceProvider.GetRequiredService<GitHubDiscussionPluginsHttpClient>();
+            var entries = await client.GetUserPluginsAsync();
+
+            foreach (var plugin in userPlugins)
+            {
+                var source = entries.FirstOrDefault(entry =>
+                    string.Equals(entry.DiscussionUrl, plugin.DiscussionUrl, StringComparison.OrdinalIgnoreCase));
+
+                var latest = source?.PluginVersion?.Trim();
+                plugin.LatestPluginVersion =
+                    !string.IsNullOrWhiteSpace(latest) &&
+                    !string.Equals(latest, plugin.UserPluginVersion?.Trim(), StringComparison.OrdinalIgnoreCase)
+                        ? latest
+                        : null;
+            }
+        }
+        catch (Exception)
+        {
+            // Leave items without an update marker when the discussions list is unavailable.
         }
     }
 
@@ -206,6 +248,88 @@ public partial class PluginsView : UserControl
         catch (Exception ex)
         {
             Notifications.SendNotification($"Plugin import failed: {ex.Message}", "Warning");
+        }
+    }
+
+    private void OnViewUserPluginOnGitHubClicked(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: PluginCatalogItem plugin } ||
+            string.IsNullOrWhiteSpace(plugin.DiscussionUrl))
+        {
+            return;
+        }
+
+        try
+        {
+            using var process = new Process();
+            process.StartInfo = new ProcessStartInfo
+            {
+                FileName = plugin.DiscussionUrl,
+                UseShellExecute = true
+            };
+            process.Start();
+        }
+        catch (Exception)
+        {
+            // Keep launcher stable if the shell cannot open the URL.
+        }
+    }
+
+    private async void OnUpdateUserPluginClicked(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: PluginCatalogItem plugin } ||
+            string.IsNullOrWhiteSpace(plugin.DiscussionUrl))
+        {
+            return;
+        }
+
+        string? tempZipPath = null;
+
+        try
+        {
+            var client = Program.ServiceProvider.GetRequiredService<GitHubDiscussionPluginsHttpClient>();
+            var userPlugins = await client.GetUserPluginsAsync();
+            var source = userPlugins.FirstOrDefault(entry =>
+                string.Equals(entry.DiscussionUrl, plugin.DiscussionUrl, StringComparison.OrdinalIgnoreCase));
+
+            if (source == null)
+            {
+                Notifications.SendNotification(
+                    $"'{plugin.Name}' could not be found on the discussions board to update.",
+                    "Warning");
+                return;
+            }
+
+            Notifications.SendNotification($"Updating '{plugin.Name}'...", "Info");
+
+            tempZipPath = await client.DownloadZipToTempAsync(source.ZipUrl);
+            await PluginsService.ImportPluginAsync(tempZipPath, plugin.Id, source.DiscussionUrl, source.PluginVersion);
+
+            if (string.Equals(_selectedPluginId, plugin.Id, StringComparison.Ordinal))
+            {
+                ClearEditorSelection();
+            }
+
+            await RefreshPluginsStateAsync();
+            Notifications.SendNotification($"User plugin '{plugin.Name}' updated successfully.", "Success");
+        }
+        catch (Exception ex)
+        {
+            Notifications.SendNotification($"User plugin update failed: {ex.Message}", "Warning");
+        }
+        finally
+        {
+            if (tempZipPath != null && File.Exists(tempZipPath))
+            {
+                try
+                {
+                    File.Delete(tempZipPath);
+                }
+                catch
+                {
+                    // Ignore cleanup failures.
+                }
+            }
         }
     }
 

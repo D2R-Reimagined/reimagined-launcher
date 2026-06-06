@@ -48,12 +48,23 @@
             <StackPanel x:Name="ContentPanel"
                         Spacing="18"
                         HorizontalAlignment="Stretch">
-            <StackPanel Spacing="4">
-                <TextBlock Classes="view-title"
-                           Text="Plugins" />
-                <TextBlock Classes="muted"
-                           Text="Import zip-based plugins, control execution order, and edit the JSON files that drive launcher-side patching." />
-            </StackPanel>
+            <Grid ColumnDefinitions="*,Auto"
+                  ColumnSpacing="12">
+                <StackPanel Grid.Column="0"
+                            Spacing="4">
+                    <TextBlock Classes="view-title"
+                               Text="Plugins" />
+                    <TextBlock Classes="muted"
+                               Text="Import zip-based plugins, control execution order, and edit the JSON files that drive launcher-side patching." />
+                </StackPanel>
+                <Button x:Name="DryRunButton"
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        HorizontalAlignment="Right"
+                        Content="Dry Run (Apply Without Launch)"
+                        ToolTip.Tip="Applies all mod tweaks and enabled plugins exactly as a launch would, but does not start the game. All buttons and navigation are disabled until it finishes."
+                        Click="OnDryRunClicked" />
+            </Grid>
 
             <Border Classes="panel"
                     Padding="20"
@@ -85,10 +96,6 @@
                         <Button Classes="accent"
                                 Content="Import Plugin Zip"
                                 Click="OnImportPluginClicked" />
-                        <Button x:Name="DryRunButton"
-                                Content="Dry Run (Apply Without Launch)"
-                                ToolTip.Tip="Applies all mod tweaks and enabled plugins exactly as a launch would, but does not start the game. All buttons and navigation are disabled until it finishes."
-                                Click="OnDryRunClicked" />
                     </WrapPanel>
 
                     <StackPanel x:Name="EmptyStatePanel"
@@ -145,13 +152,20 @@
                                                            Text="{Binding Order, StringFormat=Execution order {0}}" />
                                             </StackPanel>
 
-                                            <TextBlock Grid.Column="2"
-                                                       Grid.Row="0"
-                                                       Foreground="{StaticResource GoldTextBrush}"
-                                                       FontWeight="SemiBold"
-                                                       VerticalAlignment="Center"
-                                                       HorizontalAlignment="Right"
-                                                       Text="{Binding StatusText}" />
+                                            <StackPanel Grid.Column="2"
+                                                        Grid.Row="0"
+                                                        VerticalAlignment="Center"
+                                                        HorizontalAlignment="Right"
+                                                        Spacing="3">
+                                                <TextBlock Foreground="{StaticResource GoldTextBrush}"
+                                                           FontWeight="SemiBold"
+                                                           HorizontalAlignment="Right"
+                                                           Text="{Binding StatusText}" />
+                                                <TextBlock Classes="muted"
+                                                           HorizontalAlignment="Right"
+                                                           Text="{Binding LatestPluginVersion, StringFormat=Latest: {0}}"
+                                                           IsVisible="{Binding HasPluginUpdate}" />
+                                            </StackPanel>
 
                                             <WrapPanel Grid.Column="1"
                                                        Grid.Row="1"
@@ -167,6 +181,12 @@
                                                         ToolTip.Tip="Move down one slot. Hold Shift while clicking to jump to the bottom of the list."
                                                         PointerPressed="OnMovePluginButtonPointerPressed"
                                                         Click="OnMovePluginDownClicked" />
+                                                <Button Content="View on GitHub"
+                                                        IsVisible="{Binding IsUserPlugin}"
+                                                        Click="OnViewUserPluginOnGitHubClicked" />
+                                                <Button Content="Update"
+                                                        IsVisible="{Binding HasUserPluginVersion}"
+                                                        Click="OnUpdateUserPluginClicked" />
                                                 <Button Content="Delete"
                                                         Click="OnDeletePluginClicked" />
                                             </WrapPanel>

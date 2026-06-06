@@ -18,6 +18,13 @@ public sealed class PluginCatalogItem : INotifyPropertyChanged
     public string Description { get; init; } = string.Empty;
     public bool IsEnabled { get; init; }
     public int Order { get; init; }
+    public string? DiscussionUrl { get; init; }
+    public string? UserPluginVersion { get; init; }
+    public string? LatestPluginVersion { get; set; }
+    public bool IsUserPlugin => !string.IsNullOrWhiteSpace(DiscussionUrl);
+    public bool HasUserPluginVersion => !string.IsNullOrWhiteSpace(UserPluginVersion);
+    // True when the discussion advertises a plug version newer/different than the installed one.
+    public bool HasPluginUpdate => !string.IsNullOrWhiteSpace(LatestPluginVersion);
 
     // Setting the parameter list wires up live visibility: each parameter's IsVisible is recomputed
     // from its VisibleWhen condition whenever any sibling parameter's Value changes, so dropdowns and

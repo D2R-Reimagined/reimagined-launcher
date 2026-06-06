@@ -912,6 +912,10 @@ public partial class MainWindow : Window
 
     public async Task NavigateToPluginsViewAsync()
     {
+        // Warm the user-plugins cache (non-forced) so opening the User Plugins panel
+        // reads from cache instead of issuing a fresh query each time.
+        _ = Program.ServiceProvider.GetRequiredService<GitHubDiscussionPluginsHttpClient>().GetUserPluginsAsync();
+
         PluginsView? pluginsView = null;
 
         await Dispatcher.UIThread.InvokeAsync(() =>

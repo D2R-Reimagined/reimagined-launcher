@@ -182,6 +182,8 @@ public static class PluginsService
                 Description = pluginState.Description,
                 IsEnabled = registration.IsEnabled,
                 Order = index + 1,
+                DiscussionUrl = registration.DiscussionUrl,
+                UserPluginVersion = registration.UserPluginVersion,
                 Parameters = pluginState.Parameters,
                 Files = pluginState.Files,
                 Errors = pluginState.Errors,
@@ -319,7 +321,8 @@ public static class PluginsService
         return null;
     }
 
-    public static async Task ImportPluginAsync(string zipPath, string? replacePluginId = null)
+    public static async Task ImportPluginAsync(string zipPath, string? replacePluginId = null,
+        string? discussionUrl = null, string? userPluginVersion = null)
     {
         if (!File.Exists(zipPath))
         {
@@ -376,6 +379,12 @@ public static class PluginsService
                 }
 
                 await CopyDirectoryAsync(pluginRootDirectory, destDirectory);
+                if (!string.IsNullOrWhiteSpace(discussionUrl))
+                {
+                    registration.DiscussionUrl = discussionUrl;
+                    registration.UserPluginVersion = userPluginVersion;
+                }
+
                 await SettingsManager.SaveAsync(MainWindow.Settings);
                 return;
             }
@@ -389,7 +398,9 @@ public static class PluginsService
             {
                 Id = Guid.NewGuid().ToString("N"),
                 FolderName = destinationFolderName,
-                IsEnabled = false
+                IsEnabled = false,
+                DiscussionUrl = string.IsNullOrWhiteSpace(discussionUrl) ? null : discussionUrl,
+                UserPluginVersion = string.IsNullOrWhiteSpace(discussionUrl) ? null : userPluginVersion
             });
 
             await SettingsManager.SaveAsync(MainWindow.Settings);
