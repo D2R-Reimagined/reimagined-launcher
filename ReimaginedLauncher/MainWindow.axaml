@@ -15,6 +15,11 @@
 >
     <Window.Styles>
         <materialIcons:MaterialIconStyles />
+        <Style Selector="NotificationCard">
+            <!-- ~50px wider than the Fluent default (400) so long messages aren't cut off. -->
+            <Setter Property="MinWidth" Value="450" />
+            <Setter Property="MaxWidth" Value="450" />
+        </Style>
         <Style Selector="NotificationCard TextBlock">
             <Setter Property="TextWrapping" Value="Wrap" />
             <Setter Property="TextTrimming" Value="None" />
