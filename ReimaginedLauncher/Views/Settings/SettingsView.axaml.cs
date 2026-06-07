@@ -1,5 +1,11 @@
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Threading.Tasks;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Platform.Storage;
 using ReimaginedLauncher.Utilities;
 
 namespace ReimaginedLauncher.Views.Settings;
@@ -8,9 +14,29 @@ public partial class SettingsView : UserControl
 {
     private bool _isRefreshingSettings;
 
+    // Set by the tunnelling PointerPressed handler just before a folder button's
+    // Click fires, so the handler knows whether Ctrl was held (force picker).
+    private bool _forceFolderPicker;
+
+    private enum FolderTarget
+    {
+        Game,
+        Save,
+        LauncherSettings,
+        LauncherInstall
+    }
+
     public SettingsView()
     {
         InitializeComponent();
+
+        // Capture the Ctrl modifier before the Button consumes the pointer press.
+        // Tunnelling handlers run ahead of the Button's own (bubbling) handling.
+        foreach (var button in new[] { GameFolderButton, SaveFolderButton, SettingsFolderButton, LauncherFolderButton })
+        {
+            button.AddHandler(InputElement.PointerPressedEvent, OnFolderButtonPointerPressed, RoutingStrategies.Tunnel);
+        }
+
         RefreshSettingsState();
     }
 
@@ -130,5 +156,184 @@ public partial class SettingsView : UserControl
         }
 
         await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private void OnFolderButtonPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        _forceFolderPicker = e.KeyModifiers.HasFlag(KeyModifiers.Control);
+    }
+
+    private async void OnGameFolderClicked(object? sender, RoutedEventArgs e)
+        => await OpenOrPickFolderAsync(FolderTarget.Game);
+
+    private async void OnSaveFolderClicked(object? sender, RoutedEventArgs e)
+        => await OpenOrPickFolderAsync(FolderTarget.Save);
+
+    private async void OnSettingsFolderClicked(object? sender, RoutedEventArgs e)
+        => await OpenOrPickFolderAsync(FolderTarget.LauncherSettings);
+
+    private async void OnLauncherFolderClicked(object? sender, RoutedEventArgs e)
+        => await OpenOrPickFolderAsync(FolderTarget.LauncherInstall);
+
+    private async Task OpenOrPickFolderAsync(FolderTarget target)
+    {
+        // Ctrl+Click always forces the picker; reset the flag so a later
+        // keyboard-activated click doesn't inherit a stale value.
+        var forcePicker = _forceFolderPicker;
+        _forceFolderPicker = false;
+
+        var path = forcePicker ? null : ResolveExistingFolder(target);
+
+        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+        {
+            var picked = await PromptForFolderAsync(GetPickerTitle(target));
+            if (string.IsNullOrWhiteSpace(picked))
+            {
+                return;
+            }
+
+            await SaveFolderOverrideAsync(target, picked);
+            path = picked;
+        }
+
+        OpenFolder(path);
+    }
+
+    private static string? ResolveExistingFolder(FolderTarget target)
+    {
+        var settings = MainWindow.Settings;
+        var profile = settings.CurrentProfile;
+
+        switch (target)
+        {
+            case FolderTarget.Game:
+                if (!string.IsNullOrWhiteSpace(profile.ReimaginedModFolderOverride) &&
+                    Directory.Exists(profile.ReimaginedModFolderOverride))
+                {
+                    return profile.ReimaginedModFolderOverride;
+                }
+
+                return ResolveGameModFolder();
+
+            case FolderTarget.Save:
+                var savePath = BackupService.GetResolvedSaveDirectory();
+                return string.IsNullOrWhiteSpace(savePath) ? null : savePath;
+
+            case FolderTarget.LauncherSettings:
+                if (!string.IsNullOrWhiteSpace(settings.LauncherSettingsFolderOverride) &&
+                    Directory.Exists(settings.LauncherSettingsFolderOverride))
+                {
+                    return settings.LauncherSettingsFolderOverride;
+                }
+
+                Directory.CreateDirectory(SettingsManager.AppDirectoryPath);
+                return SettingsManager.AppDirectoryPath;
+
+            case FolderTarget.LauncherInstall:
+                if (!string.IsNullOrWhiteSpace(settings.LauncherInstallFolderOverride) &&
+                    Directory.Exists(settings.LauncherInstallFolderOverride))
+                {
+                    return settings.LauncherInstallFolderOverride;
+                }
+
+                return AppContext.BaseDirectory;
+
+            default:
+                return null;
+        }
+    }
+
+    private static string? ResolveGameModFolder()
+    {
+        var installDirectory = MainWindow.Settings.CurrentProfile.InstallDirectory;
+        if (string.IsNullOrWhiteSpace(installDirectory))
+        {
+            return null;
+        }
+
+        var modsPath = SaveFileService.ResolveDirectoryCaseInsensitive(installDirectory, "mods");
+        if (modsPath == null)
+        {
+            return null;
+        }
+
+        var reimaginedPath = SaveFileService.ResolveDirectoryCaseInsensitive(modsPath, "Reimagined");
+        if (reimaginedPath == null)
+        {
+            return null;
+        }
+
+        return SaveFileService.ResolveDirectoryCaseInsensitive(reimaginedPath, "Reimagined.mpq");
+    }
+
+    private static async Task SaveFolderOverrideAsync(FolderTarget target, string path)
+    {
+        var settings = MainWindow.Settings;
+
+        switch (target)
+        {
+            case FolderTarget.Game:
+                settings.CurrentProfile.ReimaginedModFolderOverride = path;
+                break;
+            case FolderTarget.Save:
+                settings.CurrentProfile.SaveDirectory = path;
+                break;
+            case FolderTarget.LauncherSettings:
+                settings.LauncherSettingsFolderOverride = path;
+                break;
+            case FolderTarget.LauncherInstall:
+                settings.LauncherInstallFolderOverride = path;
+                break;
+        }
+
+        await SettingsManager.SaveAsync(settings);
+    }
+
+    private async Task<string?> PromptForFolderAsync(string title)
+    {
+        if (TopLevel.GetTopLevel(this) is not Window window)
+        {
+            return null;
+        }
+
+        var folders = await window.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = title,
+            AllowMultiple = false
+        });
+
+        return folders.Count > 0 ? folders[0].Path.LocalPath : null;
+    }
+
+    private static string GetPickerTitle(FolderTarget target) => target switch
+    {
+        FolderTarget.Game => "Locate the Reimagined.mpq game mod folder",
+        FolderTarget.Save => "Locate the save folder",
+        FolderTarget.LauncherSettings => "Locate the launcher settings folder",
+        FolderTarget.LauncherInstall => "Locate the launcher installation folder",
+        _ => "Select a folder"
+    };
+
+    private static void OpenFolder(string path)
+    {
+        try
+        {
+            if (OperatingSystem.IsLinux())
+            {
+                Process.Start(new ProcessStartInfo { FileName = "xdg-open", Arguments = $"\"{path}\"", UseShellExecute = false });
+            }
+            else if (OperatingSystem.IsMacOS())
+            {
+                Process.Start(new ProcessStartInfo { FileName = "open", Arguments = $"\"{path}\"", UseShellExecute = false });
+            }
+            else
+            {
+                Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+            }
+        }
+        catch (Exception ex)
+        {
+            Notifications.SendNotification($"Could not open folder: {ex.Message}", "Warning");
+        }
     }
 }
