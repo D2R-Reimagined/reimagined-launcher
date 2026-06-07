@@ -735,6 +735,17 @@ public partial class MainWindow : Window
         }
     }
 
+    // Play shortcut on the Launch navigation item: runs the same sequence as the
+    // Start Game button without leaving the current view. If the Launch view is
+    // already showing we reuse it (so its status UI updates); otherwise we drive a
+    // transient instance, which still launches because StartGameAsync resolves the
+    // window via MainWindow.Instance rather than its own visual tree.
+    private async void OnLaunchNavPlayClicked(object? sender, RoutedEventArgs e)
+    {
+        var launchView = ContentArea.Content as LaunchView ?? new LaunchView();
+        await launchView.StartGameAsync();
+    }
+
     private void SetUpdateState(
         bool isUpdateAvailable,
         bool canInstallOrUpdate,
