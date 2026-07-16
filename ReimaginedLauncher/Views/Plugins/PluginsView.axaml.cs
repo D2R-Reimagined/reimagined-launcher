@@ -364,13 +364,18 @@ public partial class PluginsView : UserControl
             return;
         }
 
+        var isEnabled = checkBox.IsChecked == true;
+        var wasEnabled = plugin.IsEnabled;
+
         try
         {
-            await PluginsService.SetPluginEnabledAsync(plugin.Id, checkBox.IsChecked == true);
-            await RefreshPluginsStateAsync();
+            await PluginsService.SetPluginEnabledAsync(plugin.Id, isEnabled);
+            plugin.IsEnabled = isEnabled;
         }
         catch (Exception ex)
         {
+            plugin.IsEnabled = wasEnabled;
+            checkBox.IsChecked = wasEnabled;
             Notifications.SendNotification($"Plugin update failed: {ex.Message}", "Warning");
         }
     }

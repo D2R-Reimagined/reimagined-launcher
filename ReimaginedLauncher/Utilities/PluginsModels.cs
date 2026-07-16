@@ -7,6 +7,7 @@ namespace ReimaginedLauncher.Utilities;
 
 public sealed class PluginCatalogItem : INotifyPropertyChanged
 {
+    private bool _isEnabled;
     private bool _isParametersExpanded;
     private IReadOnlyList<PluginParameterItem> _parameters = [];
 
@@ -16,7 +17,18 @@ public sealed class PluginCatalogItem : INotifyPropertyChanged
     public string ModVersion { get; init; } = string.Empty;
     public string Author { get; init; } = string.Empty;
     public string Description { get; init; } = string.Empty;
-    public bool IsEnabled { get; init; }
+    public bool IsEnabled
+    {
+        get => _isEnabled;
+        set
+        {
+            if (_isEnabled == value) return;
+
+            _isEnabled = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(StatusText));
+        }
+    }
     public int Order { get; init; }
     public string? DiscussionUrl { get; init; }
     public string? UserPluginVersion { get; init; }
