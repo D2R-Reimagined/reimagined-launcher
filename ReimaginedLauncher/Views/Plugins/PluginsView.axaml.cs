@@ -16,7 +16,6 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
-using Avalonia.Threading;
 using ReimaginedLauncher.Utilities;
 using TextMateSharp.Grammars;
 using ReimaginedLauncher;
@@ -47,11 +46,6 @@ public partial class PluginsView : UserControl
     {
         SetLoadingState(true);
 
-        // Preserve the current scroll position across the catalog rebuild. Reassigning ItemsSource
-        // to a fresh list otherwise resets the scroll to the top, which is jarring when toggling a
-        // plugin or editing a parameter mid-list. Restored after layout settles.
-        var previousOffset = RootScrollViewer.Offset;
-
         try
         {
             await Task.Yield();
@@ -59,7 +53,6 @@ public partial class PluginsView : UserControl
             await ApplyPluginUpdatesAsync(catalog);
             PluginsItemsControl.ItemsSource = catalog;
             EmptyStatePanel.IsVisible = catalog.Count == 0;
-            Dispatcher.UIThread.Post(() => RootScrollViewer.Offset = previousOffset, DispatcherPriority.Loaded);
             if (!string.IsNullOrWhiteSpace(_selectedPluginId) &&
                 !catalog.Any(plugin => plugin.Id.Equals(_selectedPluginId, StringComparison.Ordinal)))
             {
