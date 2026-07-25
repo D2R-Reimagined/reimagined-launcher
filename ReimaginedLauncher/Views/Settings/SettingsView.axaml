@@ -14,6 +14,41 @@
                            Text="Tune launch flags before you descend into Sanctuary." />
             </StackPanel>
 
+            <UniformGrid Columns="4">
+                <Button x:Name="GameFolderButton"
+                        Classes="accent"
+                        Margin="0,0,4,0"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center"
+                        Content="Game Folder"
+                        Click="OnGameFolderClicked"
+                        ToolTip.Tip="Open the Reimagined.mpq game mod folder. Ctrl+Click to choose a different folder." />
+                <Button x:Name="SaveFolderButton"
+                        Classes="accent"
+                        Margin="4,0"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center"
+                        Content="Save Folder"
+                        Click="OnSaveFolderClicked"
+                        ToolTip.Tip="Open the save folder (mods/reimaginedthree). Ctrl+Click to choose a different folder." />
+                <Button x:Name="LauncherFolderButton"
+                        Classes="accent"
+                        Margin="4,0"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center"
+                        Content="Launcher Folder"
+                        Click="OnLauncherFolderClicked"
+                        ToolTip.Tip="Open the launcher installation folder. Ctrl+Click to choose a different folder." />
+                <Button x:Name="SettingsFolderButton"
+                        Classes="accent"
+                        Margin="4,0,0,0"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center"
+                        Content="Settings Folder"
+                        Click="OnSettingsFolderClicked"
+                        ToolTip.Tip="Open the launcher settings folder. Ctrl+Click to choose a different folder." />
+            </UniformGrid>
+
             <Border Classes="panel"
                     Padding="20">
                 <StackPanel Spacing="14">
@@ -158,6 +193,23 @@
                                    Margin="28,0,0,0"
                                    TextWrapping="Wrap"
                                    Text="When enabled, the parameters section for each plugin in the Plugins tab starts expanded instead of collapsed." />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="14">
+                    <TextBlock Classes="section-title"
+                               Text="Launcher Updates" />
+                    <StackPanel Spacing="4">
+                        <CheckBox x:Name="DisableLauncherUpdatesCheckBox"
+                                  Content="Disable automatic launcher updates"
+                                  IsCheckedChanged="OnDisableLauncherUpdatesChanged"/>
+                        <TextBlock Classes="muted"
+                                   Margin="28,0,0,0"
+                                   TextWrapping="Wrap"
+                                   Text="Stops the launcher from checking for, downloading, reminding about, or installing its own updates, including the version-label update check. Uncheck this to allow updates again." />
                     </StackPanel>
                 </StackPanel>
             </Border>

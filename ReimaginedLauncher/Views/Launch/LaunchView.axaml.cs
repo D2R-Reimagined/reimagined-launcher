@@ -262,6 +262,14 @@ public partial class LaunchView : UserControl
 
     private async void OnRunClick(object? sender, RoutedEventArgs e)
     {
+        await StartGameAsync();
+    }
+
+    // Runs the same prepare-backup-launch sequence as the Start Game button.
+    // Exposed so callers outside this view (e.g. the navigation Play shortcut)
+    // can trigger a launch directly.
+    public async Task StartGameAsync()
+    {
         LaunchDiagnostics.ResetSession();
         LaunchDiagnostics.Log("Launch/Install button clicked.");
 
@@ -289,7 +297,7 @@ public partial class LaunchView : UserControl
                 "D2R Reimagined mod not detected",
                 "Install the mod in the selected directory before launching/installing.");
 
-            if (TopLevel.GetTopLevel(this) is MainWindow mainWindow)
+            if (MainWindow.Instance is { } mainWindow)
             {
                 await mainWindow.PromptInstallForMissingModAsync();
             }
@@ -343,7 +351,7 @@ public partial class LaunchView : UserControl
                     LaunchDiagnostics.Log("GameLauncherService.LaunchGame returned without throwing.");
                     SetLaunchStatus($"{actionName} command sent.");
 
-                    if (gameProcess != null && MainWindow.Settings.MinimizeToTray && TopLevel.GetTopLevel(this) is MainWindow mainWindow)
+                    if (gameProcess != null && MainWindow.Settings.MinimizeToTray && MainWindow.Instance is { } mainWindow)
                     {
                         // For Steam launches, pass the actual D2R.exe path so the launcher
                         // waits for the game process rather than the Steam bootstrapper.

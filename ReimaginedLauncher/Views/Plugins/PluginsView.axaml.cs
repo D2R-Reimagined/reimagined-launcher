@@ -1,8 +1,13 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia;
-using Avalonia.Threading;
+using Microsoft.Extensions.DependencyInjection;
+using ReimaginedLauncher.HttpClients;
+using ReimaginedLauncher.HttpClients.Models;
 using AvaloniaEdit.TextMate;
 using AvaloniaEdit;
 using Avalonia.Controls;
@@ -14,6 +19,7 @@ using Avalonia.Platform.Storage;
 using ReimaginedLauncher.Utilities;
 using ReimaginedLauncher.Utilities.Casc;
 using TextMateSharp.Grammars;
+using ReimaginedLauncher;
 
 namespace ReimaginedLauncher.Views.Plugins;
 
@@ -26,6 +32,7 @@ public partial class PluginsView : UserControl
     private string _originalEditorContent = string.Empty;
     private bool _isUpdatingEditorState;
     private bool _isLoading;
+    private bool _isDryRunning;
 
     public PluginsView()
     {
@@ -64,6 +71,7 @@ public partial class PluginsView : UserControl
         {
             await Task.Yield();
             var catalog = await PluginsService.GetCatalogAsync();
+            await ApplyPluginUpdatesAsync(catalog);
             PluginsItemsControl.ItemsSource = catalog;
             EmptyStatePanel.IsVisible = catalog.Count == 0;
             if (!string.IsNullOrWhiteSpace(_selectedPluginId) &&
@@ -79,6 +87,41 @@ public partial class PluginsView : UserControl
         finally
         {
             SetLoadingState(false);
+        }
+    }
+
+    // Marks user-sourced plugins whose discussion advertises a different plug version than the
+    // installed one, so the Installed view can surface a "latest" badge. Reads from the cached
+    // user-plugins list (non-forced); failures (e.g. offline) leave all items without an update.
+    private static async Task ApplyPluginUpdatesAsync(IEnumerable<PluginCatalogItem> catalog)
+    {
+        var userPlugins = catalog.Where(p => p.IsUserPlugin && p.HasUserPluginVersion).ToList();
+        if (userPlugins.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var client = Program.ServiceProvider.GetRequiredService<GitHubDiscussionPluginsHttpClient>();
+            var entries = await client.GetUserPluginsAsync();
+
+            foreach (var plugin in userPlugins)
+            {
+                var source = entries.FirstOrDefault(entry =>
+                    string.Equals(entry.DiscussionUrl, plugin.DiscussionUrl, StringComparison.OrdinalIgnoreCase));
+
+                var latest = source?.PluginVersion?.Trim();
+                plugin.LatestPluginVersion =
+                    !string.IsNullOrWhiteSpace(latest) &&
+                    !string.Equals(latest, plugin.UserPluginVersion?.Trim(), StringComparison.OrdinalIgnoreCase)
+                        ? latest
+                        : null;
+            }
+        }
+        catch (Exception)
+        {
+            // Leave items without an update marker when the discussions list is unavailable.
         }
     }
 
@@ -120,6 +163,70 @@ public partial class PluginsView : UserControl
         {
             // Respect the CASC gate when restoring the button state.
             ReapplyPluginsButton.IsEnabled = !CascFastloadOperationState.Instance.IsRunning;
+        }
+    }
+
+    private async void OnDryRunClicked(object? sender, RoutedEventArgs e)
+    {
+        if (_isDryRunning || _isLoading)
+        {
+            return;
+        }
+
+        var profile = MainWindow.Settings.CurrentProfile;
+        if (!profile.IsInstallDirectoryValidated)
+        {
+            Notifications.SendNotification(
+                "Install directory not validated",
+                "Choose the Diablo II: Resurrected folder that contains D2R.exe before running a dry run.");
+            return;
+        }
+
+        if (profile.Type != InstallationType.D2RMM && !MainWindow.IsLocalModDetected)
+        {
+            Notifications.SendNotification(
+                "D2R Reimagined mod not detected",
+                "Install the mod in the selected directory before running a dry run.");
+            return;
+        }
+
+        var mainWindow = TopLevel.GetTopLevel(this) as MainWindow;
+
+        _isDryRunning = true;
+        mainWindow?.SetNavigationEnabled(false);
+        ContentPanel.IsEnabled = false;
+        DryRunStatusText.Text = "Applying all tweaks and enabled plugins without launching the game.";
+        DryRunBanner.IsVisible = true;
+
+        // Progress is created on the UI thread, so its callback marshals back to it.
+        var progress = new Progress<string>(status => DryRunStatusText.Text = status);
+
+        try
+        {
+            var prepared = await Task.Run(() => ModTweaksService.PrepareForLaunchAsync(progress));
+            if (prepared)
+            {
+                Notifications.SendNotification(
+                    "Dry run complete. All tweaks and enabled plugins were applied without launching the game.",
+                    "Success");
+            }
+            else
+            {
+                Notifications.SendNotification(
+                    "Dry run failed. See previous warning for details.",
+                    "Warning");
+            }
+        }
+        catch (Exception ex)
+        {
+            Notifications.SendNotification($"Dry run failed: {ex.Message}", "Warning");
+        }
+        finally
+        {
+            _isDryRunning = false;
+            DryRunBanner.IsVisible = false;
+            ContentPanel.IsEnabled = true;
+            mainWindow?.SetNavigationEnabled(true);
         }
     }
 
@@ -194,6 +301,88 @@ public partial class PluginsView : UserControl
         }
     }
 
+    private void OnViewUserPluginOnGitHubClicked(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: PluginCatalogItem plugin } ||
+            string.IsNullOrWhiteSpace(plugin.DiscussionUrl))
+        {
+            return;
+        }
+
+        try
+        {
+            using var process = new Process();
+            process.StartInfo = new ProcessStartInfo
+            {
+                FileName = plugin.DiscussionUrl,
+                UseShellExecute = true
+            };
+            process.Start();
+        }
+        catch (Exception)
+        {
+            // Keep launcher stable if the shell cannot open the URL.
+        }
+    }
+
+    private async void OnUpdateUserPluginClicked(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: PluginCatalogItem plugin } ||
+            string.IsNullOrWhiteSpace(plugin.DiscussionUrl))
+        {
+            return;
+        }
+
+        string? tempZipPath = null;
+
+        try
+        {
+            var client = Program.ServiceProvider.GetRequiredService<GitHubDiscussionPluginsHttpClient>();
+            var userPlugins = await client.GetUserPluginsAsync();
+            var source = userPlugins.FirstOrDefault(entry =>
+                string.Equals(entry.DiscussionUrl, plugin.DiscussionUrl, StringComparison.OrdinalIgnoreCase));
+
+            if (source == null)
+            {
+                Notifications.SendNotification(
+                    $"'{plugin.Name}' could not be found on the discussions board to update.",
+                    "Warning");
+                return;
+            }
+
+            Notifications.SendNotification($"Updating '{plugin.Name}'...", "Info");
+
+            tempZipPath = await client.DownloadZipToTempAsync(source.ZipUrl);
+            await PluginsService.ImportPluginAsync(tempZipPath, plugin.Id, source.DiscussionUrl, source.PluginVersion);
+
+            if (string.Equals(_selectedPluginId, plugin.Id, StringComparison.Ordinal))
+            {
+                ClearEditorSelection();
+            }
+
+            await RefreshPluginsStateAsync();
+            Notifications.SendNotification($"User plugin '{plugin.Name}' updated successfully.", "Success");
+        }
+        catch (Exception ex)
+        {
+            Notifications.SendNotification($"User plugin update failed: {ex.Message}", "Warning");
+        }
+        finally
+        {
+            if (tempZipPath != null && File.Exists(tempZipPath))
+            {
+                try
+                {
+                    File.Delete(tempZipPath);
+                }
+                catch
+                {
+                    // Ignore cleanup failures.
+                }
+            }
+        }
+    }
+
     private void OnOpenAuthoringGuideClicked(object? sender, RoutedEventArgs e)
     {
         if (TopLevel.GetTopLevel(this) is MainWindow window)
@@ -225,18 +414,18 @@ public partial class PluginsView : UserControl
             return;
         }
 
-        // Preserve scroll position so toggling a plugin checkbox doesn't snap the
-        // ScrollViewer back to the top after the catalog rebuild in RefreshPluginsStateAsync.
-        var scrollOffset = RootScrollViewer.Offset;
+        var isEnabled = checkBox.IsChecked == true;
+        var wasEnabled = plugin.IsEnabled;
 
         try
         {
-            await PluginsService.SetPluginEnabledAsync(plugin.Id, checkBox.IsChecked == true);
-            await RefreshPluginsStateAsync();
-            Dispatcher.UIThread.Post(() => RootScrollViewer.Offset = scrollOffset, DispatcherPriority.Background);
+            await PluginsService.SetPluginEnabledAsync(plugin.Id, isEnabled);
+            plugin.IsEnabled = isEnabled;
         }
         catch (Exception ex)
         {
+            plugin.IsEnabled = wasEnabled;
+            checkBox.IsChecked = wasEnabled;
             Notifications.SendNotification($"Plugin update failed: {ex.Message}", "Warning");
         }
     }
@@ -337,6 +526,15 @@ public partial class PluginsView : UserControl
             return;
         }
 
+        if (TopLevel.GetTopLevel(this) is Window owner)
+        {
+            var confirmed = await ShowEditJsonWarningAsync(owner);
+            if (!confirmed)
+            {
+                return;
+            }
+        }
+
         try
         {
             var document = await PluginsService.LoadEditorDocumentAsync(pluginFile.PluginId, pluginFile.RelativePath);
@@ -362,15 +560,17 @@ public partial class PluginsView : UserControl
             return;
         }
 
+        var value = (textBox.Text ?? string.Empty).Trim();
+
         try
         {
-            var changed = await PluginsService.SaveParameterValueAsync(parameter.PluginId, parameter.Key, textBox.Text ?? string.Empty);
+            var changed = await PluginsService.SaveParameterValueAsync(parameter.PluginId, parameter.Key, value);
             if (!changed)
             {
                 return;
             }
 
-            await RefreshPluginsStateAsync();
+            parameter.UpdateValue(value);
             Notifications.SendNotification("Plugin parameter saved.", "Success");
         }
         catch (Exception ex)
@@ -389,10 +589,46 @@ public partial class PluginsView : UserControl
 
         var serialized = checkBox.IsChecked == true ? "true" : "false";
 
-        // Save quietly (no refresh/toast) so checkbox-heavy plugins don't flicker on every click.
+        // Update the in-memory value first so any parameter whose visibleWhen condition depends on
+        // this checkbox shows/hides immediately, then persist. Intentionally avoid
+        // RefreshPluginsStateAsync() and a success toast here: checkbox-heavy plugins would otherwise
+        // spam notifications and rebuild the catalog on every click, causing flicker, focus loss, and
+        // scroll jumps. Save quietly; only surface failures.
+        parameter.UpdateValue(serialized);
         try
         {
             await PluginsService.SaveParameterValueAsync(parameter.PluginId, parameter.Key, serialized);
+        }
+        catch (Exception ex)
+        {
+            Notifications.SendNotification($"Could not save plugin parameter: {ex.Message}", "Warning");
+        }
+    }
+
+    // Persists dropdown-typed plugin parameters. Mirrors OnParameterCheckedChanged: the in-memory
+    // value is updated first so dependent visibleWhen parameters react live, then the selection is
+    // saved quietly without rebuilding the catalog.
+    private async void OnParameterSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not ComboBox { DataContext: PluginParameterItem parameter } comboBox)
+        {
+            return;
+        }
+
+        if (comboBox.SelectedItem is not string selected)
+        {
+            return;
+        }
+
+        if (string.Equals(parameter.Value, selected, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        parameter.UpdateValue(selected);
+        try
+        {
+            await PluginsService.SaveParameterValueAsync(parameter.PluginId, parameter.Key, selected);
         }
         catch (Exception ex)
         {
@@ -480,6 +716,63 @@ public partial class PluginsView : UserControl
             : isDirty
                 ? "Unsaved changes"
                 : "Saved";
+    }
+
+    public static async Task<bool> ShowEditJsonWarningAsync(Window owner)
+    {
+        var dialog = new Window
+        {
+            Width = 420,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Title = "Edit JSON?"
+        };
+
+        var proceedButton = new Button
+        {
+            Content = "Yes",
+            Classes = { "accent" },
+            MinWidth = 96
+        };
+        var cancelButton = new Button
+        {
+            Content = "No",
+            MinWidth = 96
+        };
+
+        proceedButton.Click += (_, _) => dialog.Close(true);
+        cancelButton.Click += (_, _) => dialog.Close(false);
+
+        dialog.Content = new Border
+        {
+            Padding = new Thickness(20),
+            Child = new StackPanel
+            {
+                Spacing = 14,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "Editing these values can cause instability and crashes and is not recommended unless you are the plugin author. Would you like to proceed?",
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Spacing = 10,
+                        Children =
+                        {
+                            cancelButton,
+                            proceedButton
+                        }
+                    }
+                }
+            }
+        };
+
+        return await dialog.ShowDialog<bool>(owner);
     }
 
     public static async Task<bool> ShowReplacePluginConfirmationAsync(

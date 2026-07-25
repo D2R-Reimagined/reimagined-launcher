@@ -198,6 +198,7 @@ public partial class MainWindow : Window
         await SettingsManager.SaveAsync(Settings);
 
         await RefreshUpdateStateAsync();
+        LauncherUpdateService.AreUpdatesDisabled = Settings.DisableLauncherUpdates;
         _ = LauncherUpdateService.CheckForUpdatesAsync();
         StartLauncherUpdateCheckTimer();
 
@@ -863,6 +864,17 @@ public partial class MainWindow : Window
         }
     }
 
+    // Play shortcut on the Launch navigation item: runs the same sequence as the
+    // Start Game button without leaving the current view. If the Launch view is
+    // already showing we reuse it (so its status UI updates); otherwise we drive a
+    // transient instance, which still launches because StartGameAsync resolves the
+    // window via MainWindow.Instance rather than its own visual tree.
+    private async void OnLaunchNavPlayClicked(object? sender, RoutedEventArgs e)
+    {
+        var launchView = ContentArea.Content as LaunchView ?? new LaunchView();
+        await launchView.StartGameAsync();
+    }
+
     private void SetUpdateState(
         bool isUpdateAvailable,
         bool canInstallOrUpdate,
@@ -939,6 +951,20 @@ public partial class MainWindow : Window
                     updateView.SetLoadingState(false);
                 }
             });
+        }
+    }
+
+    // Enables/disables the left navigation list. Used to lock navigation while a
+    // long-running, state-mutating operation (e.g. a plugin dry run) is in progress.
+    public void SetNavigationEnabled(bool isEnabled)
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            NavigationList.IsEnabled = isEnabled;
+        }
+        else
+        {
+            Dispatcher.UIThread.Post(() => NavigationList.IsEnabled = isEnabled);
         }
     }
 
@@ -1040,6 +1066,10 @@ public partial class MainWindow : Window
 
     public async Task NavigateToPluginsViewAsync()
     {
+        // Warm the user-plugins cache (non-forced) so opening the User Plugins panel
+        // reads from cache instead of issuing a fresh query each time.
+        _ = Program.ServiceProvider.GetRequiredService<GitHubDiscussionPluginsHttpClient>().GetUserPluginsAsync();
+
         PluginsView? pluginsView = null;
 
         await Dispatcher.UIThread.InvokeAsync(() =>
@@ -1303,6 +1333,14 @@ public partial class MainWindow : Window
     // "Launcher v#.#.#" click handler: triggers an immediate update check with a brief notification.
     private async void OnLauncherVersionClicked(object? sender, Avalonia.Input.PointerPressedEventArgs e)
     {
+        if (LauncherUpdateService.AreUpdatesDisabled)
+        {
+            Notifications.SendNotification(
+                "Automatic launcher updates are disabled. Enable them in Settings to check for updates.",
+                "Launcher");
+            return;
+        }
+
         try
         {
             Notifications.SendNotification("Checking for launcher updates...", "Launcher");

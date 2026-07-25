@@ -25,6 +25,10 @@ public class InstallationProfile
     public string? SteamDirectory { get; set; }
     public bool IsInstallDirectoryValidated { get; set; }
     public string? SaveDirectory { get; set; }
+
+    // User-located path to the Reimagined.mpq game mod folder. Only set when the
+    // folder cannot be resolved automatically from the install directory.
+    public string? ReimaginedModFolderOverride { get; set; }
     public string? BackupSaveDirectory { get; set; }
     public bool AutomaticBackupsEnabled { get; set; } = true;
     public int BackupIntervalMinutes { get; set; } = 60;
@@ -63,12 +67,19 @@ public class AppSettings
     public bool MinimizeToTrayOnClose { get; set; }
     public bool EnableInstalledPluginsByDefault { get; set; } = true;
     public bool ExpandPluginParametersByDefault { get; set; }
+    public bool DisableLauncherUpdates { get; set; }
     public double? WindowWidth { get; set; }
     public double? WindowHeight { get; set; }
     public double? WindowX { get; set; }
     public double? WindowY { get; set; }
     public bool IsMaximized { get; set; }
     public int LastReadAnnouncementNumber { get; set; }
+
+    // User-located overrides for the quick-open folder buttons on the Settings
+    // tab. Only populated when the default location is unavailable or the user
+    // forces a folder picker (Ctrl+Click).
+    public string? LauncherSettingsFolderOverride { get; set; }
+    public string? LauncherInstallFolderOverride { get; set; }
 
     [JsonIgnore]
     public string? NexusModsSSOApiKey { get; set; }

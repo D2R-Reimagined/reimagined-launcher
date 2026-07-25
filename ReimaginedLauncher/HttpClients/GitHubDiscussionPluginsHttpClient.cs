@@ -115,6 +115,7 @@ public class GitHubDiscussionPluginsHttpClient
                 Title = entry.Title!.Trim(),
                 Description = entry.Description!.Trim(),
                 ModVersion = entry.ModVersion!.Trim(),
+                PluginVersion = string.IsNullOrWhiteSpace(entry.PluginVersion) ? null : entry.PluginVersion!.Trim(),
                 ZipUrl = entry.ZipUrl!,
                 DiscussionUrl = entry.DiscussionUrl!,
                 PublishedAt = entry.PublishedAt,
@@ -136,6 +137,9 @@ public class GitHubDiscussionPluginsHttpClient
 
         [JsonPropertyName("modVersion")]
         public string? ModVersion { get; set; }
+
+        [JsonPropertyName("pluginVersion")]
+        public string? PluginVersion { get; set; }
 
         [JsonPropertyName("zipUrl")]
         public string? ZipUrl { get; set; }
