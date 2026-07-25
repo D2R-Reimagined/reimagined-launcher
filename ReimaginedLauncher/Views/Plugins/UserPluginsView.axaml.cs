@@ -15,12 +15,25 @@ namespace ReimaginedLauncher.Views.Plugins;
 
 public partial class UserPluginsView : UserControl
 {
+    // Tracks whether the user plugins disclaimer has been shown this session so
+    // it only appears the first time the view is opened.
+    private static bool _disclaimerShown;
+
     private bool _isRefreshing;
     private IReadOnlyList<UserPluginEntry> _allPlugins = [];
 
     public UserPluginsView()
     {
         InitializeComponent();
+
+        if (!_disclaimerShown)
+        {
+            _disclaimerShown = true;
+            Notifications.SendNotification(
+                "These plugins are user submitted and may cause instability and crashes. It is the author's responsibility to ensure mod compatibility. Please post problems on the plugins GitHub discussion as the author may not always use our Discord.",
+                "Info");
+        }
+
         _ = RefreshUserPluginsAsync();
     }
 

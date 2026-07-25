@@ -476,6 +476,15 @@ public partial class PluginsView : UserControl
             return;
         }
 
+        if (TopLevel.GetTopLevel(this) is Window owner)
+        {
+            var confirmed = await ShowEditJsonWarningAsync(owner);
+            if (!confirmed)
+            {
+                return;
+            }
+        }
+
         try
         {
             var document = await PluginsService.LoadEditorDocumentAsync(pluginFile.PluginId, pluginFile.RelativePath);
@@ -659,6 +668,63 @@ public partial class PluginsView : UserControl
             : isDirty
                 ? "Unsaved changes"
                 : "Saved";
+    }
+
+    public static async Task<bool> ShowEditJsonWarningAsync(Window owner)
+    {
+        var dialog = new Window
+        {
+            Width = 420,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Title = "Edit JSON?"
+        };
+
+        var proceedButton = new Button
+        {
+            Content = "Yes",
+            Classes = { "accent" },
+            MinWidth = 96
+        };
+        var cancelButton = new Button
+        {
+            Content = "No",
+            MinWidth = 96
+        };
+
+        proceedButton.Click += (_, _) => dialog.Close(true);
+        cancelButton.Click += (_, _) => dialog.Close(false);
+
+        dialog.Content = new Border
+        {
+            Padding = new Thickness(20),
+            Child = new StackPanel
+            {
+                Spacing = 14,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "Editing these values can cause instability and crashes and is not recommended unless you are the plugin author. Would you like to proceed?",
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Spacing = 10,
+                        Children =
+                        {
+                            cancelButton,
+                            proceedButton
+                        }
+                    }
+                }
+            }
+        };
+
+        return await dialog.ShowDialog<bool>(owner);
     }
 
     public static async Task<bool> ShowReplacePluginConfirmationAsync(
