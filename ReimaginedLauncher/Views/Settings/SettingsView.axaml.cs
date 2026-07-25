@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Threading.Tasks;
 using Avalonia.Controls;
@@ -62,6 +63,7 @@ public partial class SettingsView : UserControl
             ForceDesktopCheckBox.IsChecked = false;
             ResetOfflineMapsCheckBox.IsChecked = false;
             EnableRespecCheckBox.IsChecked = false;
+            CustomMapSeedCheckBox.IsChecked = false;
             PlayersComboBox.SelectedIndex = 0;
         }
         else
@@ -71,10 +73,13 @@ public partial class SettingsView : UserControl
             ForceDesktopCheckBox.IsChecked = profile.ForceDesktop;
             ResetOfflineMapsCheckBox.IsChecked = profile.ResetOfflineMaps;
             EnableRespecCheckBox.IsChecked = profile.EnableRespec;
+            CustomMapSeedCheckBox.IsChecked = profile.CustomMapSeedEnabled;
             PlayersComboBox.SelectedIndex = profile.PlayersCount is >= 2 and <= 8
                 ? profile.PlayersCount.Value - 1
                 : 0;
         }
+
+        CustomMapSeedTextBox.Text = profile.CustomMapSeed.ToString(CultureInfo.InvariantCulture);
 
         MinimizeToTrayCheckBox.IsChecked = MainWindow.Settings.MinimizeToTray;
         MinimizeToTrayOnCloseCheckBox.IsChecked = MainWindow.Settings.MinimizeToTrayOnClose;
@@ -96,6 +101,7 @@ public partial class SettingsView : UserControl
         profile.ForceDesktop = ForceDesktopCheckBox.IsChecked ?? false;
         profile.ResetOfflineMaps = ResetOfflineMapsCheckBox.IsChecked ?? false;
         profile.EnableRespec = EnableRespecCheckBox.IsChecked ?? false;
+        profile.CustomMapSeedEnabled = CustomMapSeedCheckBox.IsChecked ?? false;
         await SettingsManager.SaveAsync(MainWindow.Settings);
     }
 
@@ -113,6 +119,36 @@ public partial class SettingsView : UserControl
         };
 
         await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private async void OnCustomMapSeedChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_isRefreshingSettings)
+        {
+            return;
+        }
+
+        if (!TryApplyCustomMapSeed())
+        {
+            RefreshSettingsState();
+            Notifications.SendNotification(
+                "Custom map seed must be a whole number between 0 and 4294967295.",
+                "Warning");
+            return;
+        }
+
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private bool TryApplyCustomMapSeed()
+    {
+        if (!uint.TryParse(CustomMapSeedTextBox.Text, CultureInfo.InvariantCulture, out var seed))
+        {
+            return false;
+        }
+
+        MainWindow.Settings.CurrentProfile.CustomMapSeed = seed;
+        return true;
     }
 
     private async void OnMinimizeToTrayChanged(object? sender, RoutedEventArgs e)

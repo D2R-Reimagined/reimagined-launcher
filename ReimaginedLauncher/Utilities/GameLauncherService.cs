@@ -412,6 +412,12 @@ public class GameLauncherService
             launchParameters.Add("-nosound");
         }
 
+        if (profile.CustomMapSeedEnabled)
+        {
+            launchParameters.Add("-seed");
+            launchParameters.Add(profile.CustomMapSeed.ToString());
+        }
+
         return string.Join(" ", launchParameters);
     }
 

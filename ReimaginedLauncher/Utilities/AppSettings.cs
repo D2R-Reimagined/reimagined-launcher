@@ -39,6 +39,8 @@ public class InstallationProfile
     public bool ResetOfflineMaps { get; set; }
     public bool EnableRespec { get; set; }
     public int? PlayersCount { get; set; }
+    public bool CustomMapSeedEnabled { get; set; }
+    public uint CustomMapSeed { get; set; }
     public int SkillPointsPerLevel { get; set; } = 1;
     public int AttributesPerLevel { get; set; } = 5;
     public int MaxSkillLevel { get; set; } = 25;
