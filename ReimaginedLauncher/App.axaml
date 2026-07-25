@@ -19,6 +19,8 @@
         <SolidColorBrush x:Key="MutedTextBrush" Color="#C0AAA2" />
         <SolidColorBrush x:Key="GoldBrush" Color="#C89A4B" />
         <SolidColorBrush x:Key="GoldTextBrush" Color="#F3D8A8" />
+        <SolidColorBrush x:Key="SuccessTextBrush" Color="#5CB85C" />
+        <SolidColorBrush x:Key="DangerTextBrush" Color="#E0575F" />
         <LinearGradientBrush x:Key="WindowBackgroundBrush" StartPoint="0,0" EndPoint="1,1">
             <GradientStop Color="#080607" Offset="0" />
             <GradientStop Color="#180809" Offset="0.55" />
@@ -73,6 +75,14 @@
 
         <Style Selector="TextBlock.muted">
             <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+        </Style>
+
+        <Style Selector="TextBlock.plugin-title-up-to-date">
+            <Setter Property="Foreground" Value="{StaticResource SuccessTextBrush}" />
+        </Style>
+
+        <Style Selector="TextBlock.plugin-title-out-of-date">
+            <Setter Property="Foreground" Value="{StaticResource DangerTextBrush}" />
         </Style>
 
         <Style Selector="TextBlock.view-title">

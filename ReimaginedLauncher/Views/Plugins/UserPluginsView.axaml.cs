@@ -130,6 +130,7 @@ public partial class UserPluginsView : UserControl
         }
 
         filtered = ApplySort(filtered);
+        ApplyInstalledState(filtered);
 
         UserPluginsItemsControl.ItemsSource = filtered;
         EmptyStatePanel.IsVisible = filtered.Count == 0;
@@ -146,6 +147,39 @@ public partial class UserPluginsView : UserControl
         {
             UserPluginsSummaryTextBlock.Text =
                 $"{filtered.Count} of {_allPlugins.Count} user plugin(s) match \"{query}\".";
+        }
+    }
+
+    // Marks each discussion entry with the launcher's stored install info by matching on
+    // DiscussionUrl: an entry is installed when a registration shares its discussion, out of
+    // date when the advertised plug version differs from the installed one, and up to date
+    // otherwise. The view re-reads these when rebinding, so no change notification is needed.
+    private static void ApplyInstalledState(IReadOnlyList<UserPluginEntry> entries)
+    {
+        var registrations = MainWindow.Settings.CurrentProfile.Plugins ?? [];
+
+        foreach (var entry in entries)
+        {
+            var match = registrations.FirstOrDefault(registration =>
+                !string.IsNullOrWhiteSpace(registration.DiscussionUrl) &&
+                string.Equals(registration.DiscussionUrl, entry.DiscussionUrl, StringComparison.OrdinalIgnoreCase));
+
+            if (match is null)
+            {
+                entry.IsInstalled = false;
+                entry.InstalledVersion = null;
+                entry.IsOutOfDate = false;
+                continue;
+            }
+
+            var installed = match.UserPluginVersion?.Trim();
+            var available = entry.PluginVersion?.Trim();
+
+            entry.IsInstalled = true;
+            entry.InstalledVersion = string.IsNullOrWhiteSpace(installed) ? null : installed;
+            entry.IsOutOfDate =
+                !string.IsNullOrWhiteSpace(available) &&
+                !string.Equals(available, installed, StringComparison.OrdinalIgnoreCase);
         }
     }
 
@@ -245,6 +279,10 @@ public partial class UserPluginsView : UserControl
                     ? $"User plugin '{plugin.Title}' installed successfully."
                     : $"User plugin '{plugin.Title}' replaced successfully.",
                 "Success");
+
+            // Refresh the list so the just-installed plugin's title colouring and
+            // "Installed:" version update immediately from the stored registration.
+            ApplySearchFilter();
         }
         catch (Exception ex)
         {

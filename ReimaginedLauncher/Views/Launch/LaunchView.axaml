@@ -45,6 +45,9 @@
                                        FontSize="14" />
                         </StackPanel>
                     </StackPanel>
+                    <TextBlock Classes="muted"
+                               TextWrapping="Wrap"
+                               Text="Note: Custom edits must be done in &lt;name&gt;_launcher_clean folders and files for them to apply when the game is launched with the above button. Creating a plugin for the edit is recommended for future mod patch compatibility." />
                 </StackPanel>
             </Border>
 
