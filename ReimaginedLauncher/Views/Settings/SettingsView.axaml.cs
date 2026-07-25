@@ -52,6 +52,7 @@ public partial class SettingsView : UserControl
 
         MinimizeToTrayCheckBox.IsChecked = MainWindow.Settings.MinimizeToTray;
         MinimizeToTrayOnCloseCheckBox.IsChecked = MainWindow.Settings.MinimizeToTrayOnClose;
+        DisableLauncherUpdatesCheckBox.IsChecked = MainWindow.Settings.DisableLauncherUpdates;
 
         _isRefreshingSettings = false;
     }
@@ -107,6 +108,19 @@ public partial class SettingsView : UserControl
         }
 
         MainWindow.Settings.MinimizeToTrayOnClose = MinimizeToTrayOnCloseCheckBox.IsChecked ?? false;
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private async void OnDisableLauncherUpdatesChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_isRefreshingSettings)
+        {
+            return;
+        }
+
+        var disabled = DisableLauncherUpdatesCheckBox.IsChecked ?? false;
+        MainWindow.Settings.DisableLauncherUpdates = disabled;
+        LauncherUpdateService.AreUpdatesDisabled = disabled;
         await SettingsManager.SaveAsync(MainWindow.Settings);
     }
 
