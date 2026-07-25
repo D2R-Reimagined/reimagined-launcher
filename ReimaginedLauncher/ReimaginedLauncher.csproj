@@ -50,8 +50,6 @@
        <None Include="Assets\Vignette\**\*">
          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
        </None>
-       <EmbeddedResource Include="Assets\Tweaks\DisableExtraBloodTargets.txt"
-                         LogicalName="ReimaginedLauncher.DisableExtraBloodTargets.txt" />
      </ItemGroup>
 
 </Project>
