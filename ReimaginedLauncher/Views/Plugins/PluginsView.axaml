@@ -29,15 +29,42 @@
                 </StackPanel>
             </Border>
 
+            <Border x:Name="DryRunBanner"
+                    Classes="panel"
+                    Padding="16"
+                    HorizontalAlignment="Stretch"
+                    IsVisible="False">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="Dry run in progress..."
+                               FontWeight="SemiBold" />
+                    <ProgressBar IsIndeterminate="True"
+                                 Height="8" />
+                    <TextBlock x:Name="DryRunStatusText"
+                               Classes="muted"
+                               Text="Applying all tweaks and enabled plugins without launching the game." />
+                </StackPanel>
+            </Border>
+
             <StackPanel x:Name="ContentPanel"
                         Spacing="18"
                         HorizontalAlignment="Stretch">
-            <StackPanel Spacing="4">
-                <TextBlock Classes="view-title"
-                           Text="Plugins" />
-                <TextBlock Classes="muted"
-                           Text="Import zip-based plugins, control execution order, and edit the JSON files that drive launcher-side patching." />
-            </StackPanel>
+            <Grid ColumnDefinitions="*,Auto"
+                  ColumnSpacing="12">
+                <StackPanel Grid.Column="0"
+                            Spacing="4">
+                    <TextBlock Classes="view-title"
+                               Text="Plugins" />
+                    <TextBlock Classes="muted"
+                               Text="Import zip-based plugins, control execution order, and edit the JSON files that drive launcher-side patching." />
+                </StackPanel>
+                <Button x:Name="DryRunButton"
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        HorizontalAlignment="Right"
+                        Content="Dry Run (Apply Without Launch)"
+                        ToolTip.Tip="Applies all mod tweaks and enabled plugins exactly as a launch would, but does not start the game. All buttons and navigation are disabled until it finishes."
+                        Click="OnDryRunClicked" />
+            </Grid>
 
             <Border Classes="panel"
                     Padding="20"
@@ -125,13 +152,20 @@
                                                            Text="{Binding Order, StringFormat=Execution order {0}}" />
                                             </StackPanel>
 
-                                            <TextBlock Grid.Column="2"
-                                                       Grid.Row="0"
-                                                       Foreground="{StaticResource GoldTextBrush}"
-                                                       FontWeight="SemiBold"
-                                                       VerticalAlignment="Center"
-                                                       HorizontalAlignment="Right"
-                                                       Text="{Binding StatusText}" />
+                                            <StackPanel Grid.Column="2"
+                                                        Grid.Row="0"
+                                                        VerticalAlignment="Center"
+                                                        HorizontalAlignment="Right"
+                                                        Spacing="3">
+                                                <TextBlock Foreground="{StaticResource GoldTextBrush}"
+                                                           FontWeight="SemiBold"
+                                                           HorizontalAlignment="Right"
+                                                           Text="{Binding StatusText}" />
+                                                <TextBlock Classes="muted"
+                                                           HorizontalAlignment="Right"
+                                                           Text="{Binding LatestPluginVersion, StringFormat=Latest: {0}}"
+                                                           IsVisible="{Binding HasPluginUpdate}" />
+                                            </StackPanel>
 
                                             <WrapPanel Grid.Column="1"
                                                        Grid.Row="1"
@@ -147,6 +181,12 @@
                                                         ToolTip.Tip="Move down one slot. Hold Shift while clicking to jump to the bottom of the list."
                                                         PointerPressed="OnMovePluginButtonPointerPressed"
                                                         Click="OnMovePluginDownClicked" />
+                                                <Button Content="View on GitHub"
+                                                        IsVisible="{Binding IsUserPlugin}"
+                                                        Click="OnViewUserPluginOnGitHubClicked" />
+                                                <Button Content="Update"
+                                                        IsVisible="{Binding HasUserPluginVersion}"
+                                                        Click="OnUpdateUserPluginClicked" />
                                                 <Button Content="Delete"
                                                         Click="OnDeletePluginClicked" />
                                             </WrapPanel>
@@ -188,7 +228,17 @@
                                                                 <ItemsControl ItemsSource="{Binding Parameters}">
                                                                     <ItemsControl.ItemTemplate>
                                                                         <DataTemplate x:DataType="plugins:PluginParameterItem">
-                                                                            <StackPanel Margin="0,0,0,8">
+                                                                            <Grid Margin="{Binding ItemMargin}"
+                                                                                  IsVisible="{Binding IsVisible}"
+                                                                                  ColumnDefinitions="Auto,*">
+                                                                                <!-- Accent line + indent (via ItemMargin) mark a parameter as subordinate to the one its visibleWhen references. -->
+                                                                                <Border Grid.Column="0"
+                                                                                        Width="2"
+                                                                                        Margin="0,2,10,2"
+                                                                                        CornerRadius="1"
+                                                                                        Background="{StaticResource GoldTextBrush}"
+                                                                                        IsVisible="{Binding IsSubordinate}" />
+                                                                            <StackPanel Grid.Column="1">
                                                                 <!-- Text parameter layout: title/description on top, full-width TextBox + Default badge below. -->
                                                                 <StackPanel Spacing="6"
                                                                             IsVisible="{Binding IsTextParameter}">
@@ -241,7 +291,33 @@
                                                                                    Text="{Binding DefaultValue, StringFormat=Default {0}}" />
                                                                     </Grid>
                                                                 </Border>
+
+                                                                <!-- Dropdown parameter layout: title/description on top, ComboBox bound to Options + Default badge below. -->
+                                                                <StackPanel Spacing="6"
+                                                                            IsVisible="{Binding IsDropdownParameter}">
+                                                                    <StackPanel Spacing="2">
+                                                                        <TextBlock Text="{Binding DisplayName}"
+                                                                                   FontWeight="SemiBold" />
+                                                                        <TextBlock Classes="muted"
+                                                                                   Text="{Binding Description}"
+                                                                                   TextWrapping="Wrap" />
+                                                                    </StackPanel>
+                                                                    <Grid ColumnDefinitions="*,Auto"
+                                                                          ColumnSpacing="12">
+                                                                        <ComboBox Grid.Column="0"
+                                                                                  HorizontalAlignment="Stretch"
+                                                                                  VerticalAlignment="Center"
+                                                                                  ItemsSource="{Binding Options}"
+                                                                                  SelectedItem="{Binding Value, Mode=OneWay}"
+                                                                                  SelectionChanged="OnParameterSelectionChanged" />
+                                                                        <TextBlock Grid.Column="1"
+                                                                                   Classes="muted"
+                                                                                   VerticalAlignment="Center"
+                                                                                   Text="{Binding DefaultValue, StringFormat=Default {0}}" />
+                                                                    </Grid>
+                                                                </StackPanel>
                                                                             </StackPanel>
+                                                                            </Grid>
                                                                         </DataTemplate>
                                                                     </ItemsControl.ItemTemplate>
                                                                 </ItemsControl>

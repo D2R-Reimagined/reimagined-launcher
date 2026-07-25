@@ -226,7 +226,7 @@ public partial class UserPluginsView : UserControl
                 replacePluginId = existingPlugin.PluginId;
             }
 
-            await PluginsService.ImportPluginAsync(tempZipPath, replacePluginId);
+            await PluginsService.ImportPluginAsync(tempZipPath, replacePluginId, plugin.DiscussionUrl, plugin.PluginVersion);
             Notifications.SendNotification(
                 existingPlugin == null
                     ? $"User plugin '{plugin.Title}' installed successfully."

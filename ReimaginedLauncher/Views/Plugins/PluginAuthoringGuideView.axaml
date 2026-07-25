@@ -38,6 +38,17 @@
                 </StackPanel>
             </Grid>
 
+            <!-- Persistence note -->
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="6">
+                    <TextBlock Classes="section-title"
+                               Text="Note" />
+                    <TextBlock Classes="lead"
+                               Text="When making custom edits to the game files you need to have launched or dry run the plugins at least once and make those changes in launcher_excel_clean and launcher_excel_clean/base for them to persist through game launches via the launcher." />
+                </StackPanel>
+            </Border>
+
             <!-- Quick links / overview -->
             <Border Classes="panel"
                     Padding="20">
@@ -265,7 +276,16 @@
                     <StackPanel Spacing="2">
                         <TextBlock Classes="bullet" Text="•  Missing or 'text' — existing behavior. Rendered as a textbox." />
                         <TextBlock Classes="bullet" Text="•  'checkbox' — rendered as a checkbox/switch. The launcher normalizes the persisted value to 'true' or 'false' (case-insensitive aliases such as 1/0/yes/no/on/off/checked are accepted on read)." />
-                        <TextBlock Classes="bullet" Text="•  Existing parameterKey and {{parameter:key}} substitution behavior is unchanged for both kinds." />
+                        <TextBlock Classes="bullet" Text="•  'dropdown' — rendered as a combobox. Provide an 'options' array of allowed values; 'defaultValue' must be one of them. Only a listed option can be selected/saved, matched case-insensitively and stored in the option's canonical casing." />
+                        <TextBlock Classes="bullet" Text="•  Existing parameterKey and {{parameter:key}} substitution behavior is unchanged for all kinds. A dropdown's selected value can drive conditions (equals/notEquals) on operations and assets just like any other parameter." />
+                    </StackPanel>
+
+                    <TextBlock Classes="sub-title" Text="Conditional parameter visibility (visibleWhen)" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="bullet" Text="•  Add an optional 'visibleWhen' condition to any parameter to show/hide its control on the Plugins page based on the current value of other parameters." />
+                        <TextBlock Classes="bullet" Text="•  'visibleWhen' uses the same condition shapes as operation/asset conditions (parameterKey + equals/notEquals, or all/any/not)." />
+                        <TextBlock Classes="bullet" Text="•  Visibility updates live as the user changes a dropdown or checkbox the condition references; it is purely a UI concern and never affects saving, condition evaluation, or apply." />
+                        <TextBlock Classes="bullet" Text="•  Missing 'visibleWhen' means the parameter is always shown." />
                     </StackPanel>
 
                     <TextBlock Classes="sub-title" Text="Parameter groups (display only)" />
@@ -358,6 +378,7 @@
                         <TextBlock Classes="bullet" Text="•  Title: Your Plugin Name — shown as the plugin title." />
                         <TextBlock Classes="bullet" Text="•  Desc: or Description: — short summary shown under the title." />
                         <TextBlock Classes="bullet" Text="•  Mod:, ModVer: or ModVersion: followed by a version in #.#.# format — shown beside the title. Posts without a valid mod version are skipped." />
+                        <TextBlock Classes="bullet" Text="•  Plug:, PlugVer: or PluginVersion: followed by a version in #.#.# format (optional) — your plugin's own version. When present it is shown beside the title on the User Plugins page, recorded on install, and enables an Update button on the Installed Plugins page so users can re-download the latest zip. Omit it and no plug-version badge or Update button is shown." />
                         <TextBlock Classes="bullet" Text="•  Attach a .zip of your plugin to the post. Posts without a .zip attachment are skipped." />
                     </StackPanel>
                     <TextBlock Classes="muted"

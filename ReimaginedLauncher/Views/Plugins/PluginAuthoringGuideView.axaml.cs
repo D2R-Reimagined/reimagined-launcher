@@ -226,6 +226,27 @@ public partial class PluginAuthoringGuideView : UserControl
                                                    "name": "Enable Tristram Portal",
                                                    "type": "checkbox",
                                                    "defaultValue": "false"
+                                                 },
+                                                 {
+                                                   "key": "swordVariant",
+                                                   "name": "Sword Replacement",
+                                                   "type": "dropdown",
+                                                   "defaultValue": "swordA",
+                                                   "options": [ "swordA", "swordB", "axe" ],
+                                                   "description": "Pick which weapon asset to replace."
+                                                 },
+                                                 {
+                                                   "key": "includeSwordGlow",
+                                                   "name": "Include Sword Glow",
+                                                   "type": "checkbox",
+                                                   "defaultValue": "false",
+                                                   "description": "Only shown when a sword variant is selected.",
+                                                   "visibleWhen": {
+                                                     "any": [
+                                                       { "parameterKey": "swordVariant", "equals": "swordA" },
+                                                       { "parameterKey": "swordVariant", "equals": "swordB" }
+                                                     ]
+                                                   }
                                                  }
                                                ],
                                                "assets": [
@@ -238,6 +259,16 @@ public partial class PluginAuthoringGuideView : UserControl
                                                        { "parameterKey": "enableTristramPortal", "equals": "false" }
                                                      ]
                                                    }
+                                                 },
+                                                 {
+                                                   "source": "assets/swordA.sprite",
+                                                   "target": "data/global/items/weapons/example.sprite",
+                                                   "condition": { "parameterKey": "swordVariant", "equals": "swordA" }
+                                                 },
+                                                 {
+                                                   "source": "assets/sword-glow.sprite",
+                                                   "target": "data/global/items/weapons/example-glow.sprite",
+                                                   "condition": { "parameterKey": "includeSwordGlow", "equals": "true" }
                                                  }
                                                ]
                                              }
