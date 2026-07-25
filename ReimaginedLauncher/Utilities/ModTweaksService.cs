@@ -56,6 +56,8 @@ public static class ModTweaksService
     private const string VisDirectoryName = "vis";
     private const string DesecratedFilePattern = "desecrated";
     private const string CleanVisDirectoryName = "vis_launcher_clean";
+    private const string WeatherDirectoryName = "weather";
+    private const string VisEventMapFileName = "vis_event_map.json";
     private const string SfxDirectoryName = "sfx";
     private const string QuestDirectoryName = "quest";
     private const string DesecratedEnterHdFileName = "desecrated_enter_hd.flac";
@@ -1544,11 +1546,35 @@ public static class ModTweaksService
         }
     }
 
+    private static string? GetVisEventMapFilePath()
+    {
+        var mpqBase = GetMpqBaseDirectory();
+        if (string.IsNullOrWhiteSpace(mpqBase))
+        {
+            return null;
+        }
+
+        return Path.Combine(
+            mpqBase,
+            DataDirectoryName,
+            HdDirectoryName,
+            EnvDirectoryName,
+            WeatherDirectoryName,
+            VisEventMapFileName);
+    }
+
     private static void ApplyTerrorZonePurpleOverlayTweak(bool terrorZonePurpleOverlay)
     {
         if (!terrorZonePurpleOverlay)
         {
             return;
+        }
+
+        var visEventMapFilePath = GetVisEventMapFilePath();
+        if (!string.IsNullOrWhiteSpace(visEventMapFilePath) && File.Exists(visEventMapFilePath))
+        {
+            File.Delete(visEventMapFilePath);
+            LaunchDiagnostics.Log($"Deleted vis event map file: {visEventMapFilePath}");
         }
 
         var visDirectory = GetVisDirectory();
