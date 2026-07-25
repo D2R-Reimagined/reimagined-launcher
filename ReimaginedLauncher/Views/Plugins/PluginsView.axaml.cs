@@ -501,15 +501,17 @@ public partial class PluginsView : UserControl
             return;
         }
 
+        var value = (textBox.Text ?? string.Empty).Trim();
+
         try
         {
-            var changed = await PluginsService.SaveParameterValueAsync(parameter.PluginId, parameter.Key, textBox.Text ?? string.Empty);
+            var changed = await PluginsService.SaveParameterValueAsync(parameter.PluginId, parameter.Key, value);
             if (!changed)
             {
                 return;
             }
 
-            await RefreshPluginsStateAsync();
+            parameter.UpdateValue(value);
             Notifications.SendNotification("Plugin parameter saved.", "Success");
         }
         catch (Exception ex)
