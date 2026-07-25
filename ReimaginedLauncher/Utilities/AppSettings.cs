@@ -49,6 +49,7 @@ public class InstallationProfile
     public int HellResistPenalty { get; set; } = -120;
     public bool RemovePaladinAuraSound { get; set; }
     public bool RemoveSplashVfx { get; set; }
+    public bool DisableExtraBlood { get; set; }
     public List<PluginRegistration> Plugins { get; set; } = [];
     public bool MakeTooltipBackgroundOpaque { get; set; }
     public bool RemoveHelmetVisual { get; set; }
