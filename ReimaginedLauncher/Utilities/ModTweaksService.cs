@@ -42,6 +42,8 @@ public static class ModTweaksService
     private const string VignetteDirectoryName = "vignette";
     private const string VignetteFileName = "vignette.texture";
     private const string BundledVignetteAssetPath = "Assets/Vignette/vignette.texture";
+    internal const string DisableExtraBloodBackupClaimId = "launcher-tweak:disable-extra-blood";
+    private const string DisableExtraBloodManifestResourceName = "ReimaginedLauncher.DisableExtraBloodTargets.txt";
     private const string CharStatsFileName = "charstats.txt";
     private const string DifficultyLevelsFileName = "DifficultyLevels.txt";
     private const string SkillsFileName = "skills.txt";
@@ -60,6 +62,8 @@ public static class ModTweaksService
     private const string QuestDirectoryName = "quest";
     private const string DesecratedEnterHdFileName = "desecrated_enter_hd.flac";
     private const string GeneratedTweaksFolderName = "mod-tweaks";
+    private static readonly Lazy<IReadOnlyList<string>> DisableExtraBloodRelativePaths =
+        new(LoadDisableExtraBloodRelativePaths);
     private static readonly string[] HelmetVisualRelativePaths =
     [
         Path.Combine(HelmetDirectoryName, "assault_helmet.json"),
@@ -254,6 +258,8 @@ public static class ModTweaksService
             ReportProgress(progress, "Applying vignette tweaks...");
             LaunchDiagnostics.Log("Applying vignette tweaks.");
             await ApplyVignetteTweakAsync(profile.RemoveVignette);
+            ReportProgress(progress, "Applying extra blood effects tweak...");
+            await ApplyDisableExtraBloodTweakAsync(modRoot, profile.DisableExtraBlood);
 
             // Restore monsters.json from the launcher's clean copy and pre-stage
             // any plugin asset copies targeting it. monsters.json has no launcher
@@ -1073,6 +1079,76 @@ public static class ModTweaksService
 
         Directory.CreateDirectory(vignetteDirectory);
         await CopyFileAsync(bundledVignetteFile, vignetteFilePath, overwrite: true);
+    }
+
+    private static async Task ApplyDisableExtraBloodTweakAsync(string? modRoot, bool disableExtraBlood)
+    {
+        if (!disableExtraBlood || string.IsNullOrWhiteSpace(modRoot))
+        {
+            return;
+        }
+
+        var removedFileCount = 0;
+        foreach (var relativePath in DisableExtraBloodRelativePaths.Value)
+        {
+            var targetFilePath = ResolveModRelativePath(modRoot, relativePath);
+            if (!File.Exists(targetFilePath))
+            {
+                continue;
+            }
+
+            await PluginAssetBackupService.RegisterReplacementAsync(
+                DisableExtraBloodBackupClaimId,
+                targetFilePath);
+            File.Delete(targetFilePath);
+            removedFileCount++;
+        }
+
+        LaunchDiagnostics.Log($"Disabled extra blood effects by removing {removedFileCount} mod assets.");
+    }
+
+    private static IReadOnlyList<string> LoadDisableExtraBloodRelativePaths()
+    {
+        using var stream = typeof(ModTweaksService).Assembly.GetManifestResourceStream(
+            DisableExtraBloodManifestResourceName);
+        if (stream is null)
+        {
+            throw new FileNotFoundException("Bundled extra blood target manifest was not found.");
+        }
+
+        using var reader = new StreamReader(stream);
+        var relativePaths = new List<string>();
+        while (reader.ReadLine() is { } line)
+        {
+            var relativePath = line.Trim();
+            if (!string.IsNullOrWhiteSpace(relativePath))
+            {
+                relativePaths.Add(relativePath);
+            }
+        }
+
+        return relativePaths;
+    }
+
+    private static string ResolveModRelativePath(string modRoot, string relativePath)
+    {
+        if (Path.IsPathRooted(relativePath))
+        {
+            throw new InvalidDataException($"Extra blood target path must be relative: {relativePath}");
+        }
+
+        var fullModRoot = Path.GetFullPath(modRoot)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var fullTargetPath = Path.GetFullPath(Path.Combine(
+            fullModRoot,
+            relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        var modRootPrefix = fullModRoot + Path.DirectorySeparatorChar;
+        if (!fullTargetPath.StartsWith(modRootPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException($"Extra blood target path escapes the mod directory: {relativePath}");
+        }
+
+        return fullTargetPath;
     }
 
     private static async Task ApplyCharStatsTweaksAsync(
