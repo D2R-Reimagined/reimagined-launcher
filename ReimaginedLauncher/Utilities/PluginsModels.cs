@@ -78,12 +78,7 @@ public sealed class PluginCatalogItem : INotifyPropertyChanged
         }
     }
 
-    // Display-only grouping projection over Parameters. Groups appear in the order they first
-    // occur in Parameters; within a group the original parameter order is preserved. When no
-    // parameter declares a Group, a single ungrouped bucket is produced with HasHeading = false
-    // so the legacy flat layout is rendered. This is purely a UI convenience: parameter lookup,
-    // condition evaluation, saving, and apply behavior all continue to use the flat Parameters
-    // list.
+    // UI-only grouping projection over Parameters; the flat Parameters list is the source of truth.
     public IReadOnlyList<PluginParameterGroup> ParameterGroups
     {
         get
@@ -258,10 +253,7 @@ public sealed class PluginParameterItem : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 
-    // Optional display-only group label from plugininfo.json. When set, the parameter is
-    // rendered under a section heading in the Plugins page; this does not affect parameter
-    // lookup, condition evaluation, saving, or plugin application. Empty/null/whitespace
-    // means the parameter is ungrouped and renders in the default flat area.
+    // Optional display-only group label from plugininfo.json; does not affect lookup or apply.
     public string Group { get; init; } = string.Empty;
 
     // True when the parameter should render as a checkbox/switch and persist "true"/"false".

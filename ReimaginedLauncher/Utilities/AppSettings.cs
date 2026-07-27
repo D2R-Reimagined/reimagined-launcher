@@ -68,6 +68,8 @@ public class AppSettings
     public double UiScale { get; set; } = 1.0;
     public bool MinimizeToTray { get; set; }
     public bool MinimizeToTrayOnClose { get; set; }
+    public bool EnableInstalledPluginsByDefault { get; set; } = true;
+    public bool ExpandPluginParametersByDefault { get; set; }
     public bool DisableLauncherUpdates { get; set; }
     public double? WindowWidth { get; set; }
     public double? WindowHeight { get; set; }

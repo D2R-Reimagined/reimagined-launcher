@@ -10,6 +10,8 @@ using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using ReimaginedLauncher.Utilities;
+using ReimaginedLauncher.Utilities.Casc;
+using ReimaginedLauncher.Utilities.Json;
 
 namespace ReimaginedLauncher.Views.Update;
 
@@ -21,6 +23,25 @@ public partial class UpdateView : UserControl
     {
         InitializeComponent();
         RefreshUpdateState();
+    }
+
+    private void OnCascStateChanged(object? sender, EventArgs e)
+    {
+        // Re-evaluate gated install/update buttons when a CASC fastload op starts/stops.
+        RefreshUpdateState();
+    }
+
+    protected override void OnAttachedToVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        CascFastloadOperationState.Instance.StateChanged += OnCascStateChanged;
+        RefreshUpdateState();
+    }
+
+    protected override void OnDetachedFromVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)
+    {
+        CascFastloadOperationState.Instance.StateChanged -= OnCascStateChanged;
+        base.OnDetachedFromVisualTree(e);
     }
 
     public void RefreshUpdateState()
@@ -41,17 +62,22 @@ public partial class UpdateView : UserControl
         StatusMessageText.Text = MainWindow.UpdateStatusMessage;
         CurrentVersionText.Text = MainWindow.UpdateCurrentVersion;
         LatestVersionText.Text = MainWindow.UpdateLatestVersion;
+        // Block install/update activity while a CASC fastload op is running —
+        // they touch overlapping paths under <install>/data and <install>/mods.
+        var cascBusy = CascFastloadOperationState.Instance.IsRunning;
         InstallOrUpdateButton.IsEnabled = !_isLoading &&
+                                          !cascBusy &&
                                           MainWindow.CanInstallOrUpdate &&
                                           !MainWindow.IsInstallInProgress &&
                                           isAuthenticated &&
                                           canDownload;
         SelectZipManuallyButton.IsEnabled = !_isLoading &&
+                                            !cascBusy &&
                                             !MainWindow.IsInstallInProgress &&
                                             MainWindow.Settings.CurrentProfile.IsInstallDirectoryValidated &&
                                             !string.IsNullOrWhiteSpace(MainWindow.Settings.CurrentProfile.InstallDirectory);
         OpenDownloadPageButton.IsEnabled = !_isLoading && !string.IsNullOrWhiteSpace(MainWindow.UpdateDownloadUrl);
-        RecheckButton.IsEnabled = !_isLoading;
+        RecheckButton.IsEnabled = !_isLoading && !cascBusy;
         InstallOrUpdateButton.Content = MainWindow.UpdateCurrentVersion.Equals("Not detected", StringComparison.OrdinalIgnoreCase)
             ? "Download and Install"
             : "Download and Update";
@@ -375,22 +401,132 @@ public partial class UpdateView : UserControl
         }
         else
         {
-            await Task.Run(() =>
+            // Snapshot the .mpq payload pre-extract so removed paths can be reconciled by
+            // CascOrphanRecoveryService. Relative paths align with CASC manifest keys.
+            var modRoot = Path.Combine(installDirectory, "mods", "Reimagined", "Reimagined.mpq");
+            HashSet<string> oldModPaths;
+            try
             {
-                var modDir = Path.Combine(installDirectory, "mods", "Reimagined");
-                if (Directory.Exists(modDir))
-                {
-                    var backupDir = Path.Combine(installDirectory, "mods", "Reimagined.backup");
-                    if (Directory.Exists(backupDir))
-                    {
-                        Directory.Delete(backupDir, recursive: true);
-                    }
-                    CopyDirectory(modDir, backupDir);
-                    Directory.Delete(modDir, recursive: true);
-                }
+                oldModPaths = EnumerateModRelativePaths(modRoot);
+            }
+            catch (Exception ex)
+            {
+                LaunchDiagnostics.Log($"Failed to snapshot existing mod payload for orphan recovery: {ex.Message}");
+                oldModPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
 
-                ZipFile.ExtractToDirectory(zipPath, installDirectory, overwriteFiles: true);
-            });
+            await ExtractNonD2RmmModAsync(zipPath, installDirectory);
+
+            // Invalidate per-launch "clean" snapshots so they are retaken from the new mod files.
+            try
+            {
+                ModTweaksService.InvalidateCleanSnapshots(installDirectory);
+            }
+            catch (Exception ex)
+            {
+                LaunchDiagnostics.Log($"Failed to invalidate launcher_clean snapshots: {ex.Message}");
+            }
+
+            // Orphan recovery: paths the previous payload shipped but the new one omits are reconciled
+            // against the CASC fastload manifest (fastload-less installs fall through to best-effort delete).
+            HashSet<string> newModPathsForFlip = new(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var newModPaths = EnumerateModRelativePaths(modRoot);
+                newModPathsForFlip = newModPaths;
+                var removed = oldModPaths
+                    .Where(p => !newModPaths.Contains(p))
+                    .ToArray();
+
+                if (removed.Length > 0)
+                {
+                    var manifestService = new CascFastloadManifestService(profile.Type, installDirectory);
+                    var extractionService = new CascExtractionService(new NativeCascLib());
+                    var orphanService = new CascOrphanRecoveryService(extractionService, manifestService);
+
+                    // storage: null — no open CASC handle here; safe default for CASC-less installs.
+                    var result = await orphanService.ReconcileRemovedPathsAsync(
+                        removed,
+                        storage: null,
+                        destinationRoot: modRoot);
+
+                    LaunchDiagnostics.Log(
+                        $"Mod orphan recovery: {removed.Length} removed, " +
+                        $"{result.Deleted} deleted, {result.Restored} restored, " +
+                        $"{result.SourceUpdated} source-updated, {result.NotTracked} not-tracked, " +
+                        $"{result.Failed} failed, {result.DirectoriesPruned} dirs pruned.");
+                }
+            }
+            catch (Exception ex)
+            {
+                LaunchDiagnostics.Log($"Mod orphan recovery failed: {ex.Message}");
+            }
+
+            // Token-flip: paths the new mod zip wrote get "mod" added to their Source so a future delta
+            // doesn't restore the CASC default over them. Also stamp ModVersion from modinfo.json so
+            // stale overlays can be detected without re-reading every modinfo on startup.
+            try
+            {
+                if (newModPathsForFlip.Count > 0)
+                {
+                    var manifestService = new CascFastloadManifestService(profile.Type, installDirectory);
+                    var pre = await manifestService.LoadAsync().ConfigureAwait(false);
+                    if (pre.Files.Count > 0)
+                    {
+                        // Resolve once from the installed payload; null is acceptable (skip the stamp).
+                        var installedVersion = CharacterSelectPanelService.GetModVersion(modRoot);
+
+                        var flipped = 0;
+                        var versionStamped = 0;
+                        await manifestService.UpdateAsync(manifest =>
+                        {
+                            foreach (var entry in manifest.Files)
+                            {
+                                if (!newModPathsForFlip.Contains(entry.Path))
+                                {
+                                    continue;
+                                }
+
+                                var newSource = AddModToken(entry.Source);
+                                if (!string.Equals(newSource, entry.Source, StringComparison.Ordinal))
+                                {
+                                    entry.Source = newSource;
+                                    flipped++;
+                                }
+
+                                if (!string.IsNullOrWhiteSpace(installedVersion) &&
+                                    !string.Equals(entry.ModVersion, installedVersion, StringComparison.Ordinal))
+                                {
+                                    entry.ModVersion = installedVersion;
+                                    versionStamped++;
+                                }
+                            }
+                        }).ConfigureAwait(false);
+
+                        LaunchDiagnostics.Log(
+                            $"CASC manifest token-flip: {flipped} entries now flagged as casc+mod overlays, " +
+                            $"{versionStamped} ModVersion stamps written (version: {installedVersion ?? "<unknown>"}).");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LaunchDiagnostics.Log($"CASC manifest token-flip failed: {ex.Message}");
+            }
+
+            // Migration: remove any leftover mods/Reimagined.backup tree from previous launcher versions.
+            try
+            {
+                var legacyBackupDir = Path.Combine(installDirectory, "mods", "Reimagined.backup");
+                if (Directory.Exists(legacyBackupDir))
+                {
+                    Directory.Delete(legacyBackupDir, recursive: true);
+                }
+            }
+            catch (Exception ex)
+            {
+                LaunchDiagnostics.Log($"Failed to remove legacy mods/Reimagined.backup: {ex.Message}");
+            }
 
             Notifications.SendNotification("Mod installed successfully.", "Success");
         }
@@ -450,11 +586,56 @@ public partial class UpdateView : UserControl
             CopyDirectory(directory, Path.Combine(targetDir, Path.GetFileName(directory)));
     }
 
-    /// <summary>
-    /// Refreshes the currently visible UpdateView if one is active in the content area.
-    /// This allows the install operation to update the UI even when the original view
-    /// instance that started the install has been replaced by tab navigation.
-    /// </summary>
+    /// <summary>Extracts the non-D2RMM mod archive over the install directory using per-file atomic replacement.</summary>
+    private static Task ExtractNonD2RmmModAsync(string zipPath, string installDirectory)
+    {
+        return FileCopyHelper.ExtractZipAsync(zipPath, installDirectory);
+    }
+
+    /// <summary>Returns relative paths under <paramref name="modRoot"/> in CASC-style backslash form.</summary>
+    private static HashSet<string> EnumerateModRelativePaths(string modRoot)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(modRoot) || !Directory.Exists(modRoot))
+        {
+            return set;
+        }
+
+        foreach (var fullPath in Directory.EnumerateFiles(modRoot, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(modRoot, fullPath);
+            // Manifest paths use backslashes regardless of platform.
+            if (Path.DirectorySeparatorChar != '\\')
+            {
+                relative = relative.Replace(Path.DirectorySeparatorChar, '\\');
+            }
+            set.Add(relative);
+        }
+
+        return set;
+    }
+
+    /// <summary>Returns <paramref name="source"/> with the <c>mod</c> token added if not already present.</summary>
+    private static string AddModToken(string? source)
+    {
+        if (string.IsNullOrEmpty(source))
+        {
+            return CascFastloadEntry.SourceTokens.Mod;
+        }
+
+        // Rebuild in canonical casc/mod/plugin order.
+        var parts = source.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var hasCasc = parts.Any(p => p.Equals(CascFastloadEntry.SourceTokens.Casc, StringComparison.OrdinalIgnoreCase));
+        var hasPlugin = parts.Any(p => p.Equals(CascFastloadEntry.SourceTokens.Plugin, StringComparison.OrdinalIgnoreCase));
+
+        var rebuilt = new List<string>(3);
+        if (hasCasc) rebuilt.Add(CascFastloadEntry.SourceTokens.Casc);
+        rebuilt.Add(CascFastloadEntry.SourceTokens.Mod);
+        if (hasPlugin) rebuilt.Add(CascFastloadEntry.SourceTokens.Plugin);
+        return string.Join('+', rebuilt);
+    }
+
+    /// <summary>Refreshes the active UpdateView so installs surface UI updates after tab navigation replaces the original instance.</summary>
     private static void RefreshVisibleUpdateView()
     {
         Dispatcher.UIThread.Post(() =>

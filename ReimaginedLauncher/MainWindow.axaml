@@ -24,6 +24,14 @@
             <Setter Property="TextWrapping" Value="Wrap" />
             <Setter Property="TextTrimming" Value="None" />
         </Style>
+        <!-- Fluent theme caps FlyoutPresenter at MaxWidth=456 / MaxHeight=758 via
+             FlyoutThemeMaxWidth / FlyoutThemeMaxHeight, which clips wide flyouts
+             regardless of any inner Border width. Override per-flyout via class. -->
+        <Style Selector="FlyoutPresenter.session-log-flyout">
+            <Setter Property="MaxWidth" Value="960" />
+            <Setter Property="MaxHeight" Value="720" />
+            <Setter Property="Padding" Value="0" />
+        </Style>
     </Window.Styles>
     <LayoutTransformControl x:Name="RootScaleControl">
         <Grid x:Name="RootGrid"
@@ -108,6 +116,7 @@
                         </ListBoxItem>
                         <ListBoxItem x:Name="UpdateNavItem" Tag="Update" Content="Install/Update" />
                         <ListBoxItem x:Name="BackupsNavItem" Tag="Backups" Content="Backups" />
+                        <ListBoxItem x:Name="CascFastloadNavItem" Tag="CascFastload" Content="CASC Fastload" />
                         <ListBoxItem x:Name="SettingsNavItem" Tag="Settings" Content="Settings" />
                         <ListBoxItem x:Name="ModTweaksNavItem" Tag="ModTweaks" Content="Mod Tweaks" />
                         <ListBoxItem x:Name="PluginsNavItem" Tag="Plugins" Content="Plugins" />
@@ -230,11 +239,20 @@
                                         ToolTip.Tip="Session Log"
                                         VerticalAlignment="Center">
                                     <Button.Flyout>
-                                        <Flyout Placement="BottomEdgeAlignedRight">
-                                            <Border Width="400" MaxHeight="500" Padding="12">
+                                        <Flyout Placement="BottomEdgeAlignedRight"
+                                                FlyoutPresenterClasses="session-log-flyout">
+                                            <Border Width="900"
+                                                    Padding="16">
                                                 <Grid RowDefinitions="Auto,*">
-                                                    <TextBlock Grid.Row="0" Text="Session Log" FontWeight="Bold" FontSize="16" Margin="0,0,0,10" Foreground="{StaticResource GoldBrush}"/>
-                                                    <ScrollViewer Grid.Row="1">
+                                                    <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
+                                                        <TextBlock Grid.Column="0" Text="Session Log" FontWeight="Bold" FontSize="16" Foreground="{StaticResource GoldBrush}" VerticalAlignment="Center"/>
+                                                        <Button Grid.Column="1"
+                                                                Classes="link-button"
+                                                                Content="{materialIcons:MaterialIconTextExt Text=Copy, Kind=ContentCopy, IconPlacement=Left}"
+                                                                ToolTip.Tip="Copy the entire session log to the clipboard"
+                                                                Click="OnCopySessionLogClicked" />
+                                                    </Grid>
+                                                    <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
                                                         <ItemsControl ItemsSource="{Binding SessionLog.Entries}">
                                                             <ItemsControl.ItemTemplate>
                                                                 <DataTemplate>
@@ -244,8 +262,8 @@
                                                                                                         Kind="{Binding Type, Converter={StaticResource LogTypeToIconConverter}}" 
                                                                                                         Foreground="{Binding Type, Converter={StaticResource LogTypeToBrushConverter}}"
                                                                                                         Width="16" Height="16" Margin="0,2,8,0" VerticalAlignment="Top"/>
-                                                                            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap" FontSize="13"/>
-                                                                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Timestamp, StringFormat=\{0:HH:mm:ss\}}" Classes="muted" FontSize="11" Margin="0,4,0,0"/>
+                                                                            <SelectableTextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap" FontSize="13"/>
+                                                                            <SelectableTextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Timestamp, StringFormat=\{0:HH:mm:ss\}}" Classes="muted" FontSize="11" Margin="0,4,0,0"/>
                                                                         </Grid>
                                                                     </Border>
                                                                 </DataTemplate>

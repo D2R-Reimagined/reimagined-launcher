@@ -17,6 +17,7 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using ReimaginedLauncher.Utilities;
+using ReimaginedLauncher.Utilities.Casc;
 using TextMateSharp.Grammars;
 using ReimaginedLauncher;
 
@@ -40,6 +41,26 @@ public partial class PluginsView : UserControl
         SupportedTargetsTextBlock.Text = PluginsService.GetSupportedTargetsSummary();
         SetEditorState(fileSelected: false, isDirty: false);
         SetLoadingState(false);
+    }
+
+    private void OnCascStateChanged(object? sender, EventArgs e)
+    {
+        // Reapply Now drives the same ModTweaks pipeline that fights with a
+        // running CASC fastload op for the install/data tree.
+        ReapplyPluginsButton.IsEnabled = !_isLoading && !CascFastloadOperationState.Instance.IsRunning;
+    }
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        CascFastloadOperationState.Instance.StateChanged += OnCascStateChanged;
+        OnCascStateChanged(this, EventArgs.Empty);
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        CascFastloadOperationState.Instance.StateChanged -= OnCascStateChanged;
+        base.OnDetachedFromVisualTree(e);
     }
 
     public async Task RefreshPluginsStateAsync()
@@ -109,11 +130,40 @@ public partial class PluginsView : UserControl
         _isLoading = isLoading;
         LoadingBanner.IsVisible = isLoading;
         ContentPanel.IsVisible = !isLoading;
+        // Reapply Now's enable gate depends on _isLoading; refresh it here so the
+        // button doesn't get stuck disabled when the view is attached mid-load.
+        OnCascStateChanged(this, EventArgs.Empty);
     }
 
     private async void OnRefreshClicked(object? sender, RoutedEventArgs e)
     {
         await RefreshPluginsStateAsync();
+    }
+
+    private async void OnReapplyPluginsClicked(object? sender, RoutedEventArgs e)
+    {
+        ReapplyPluginsButton.IsEnabled = false;
+        try
+        {
+            var progress = new Progress<string>(message => LaunchDiagnostics.Log(message));
+            var ok = await ModTweaksService.PrepareForLaunchAsync(progress);
+            Notifications.SendNotification(
+                ok
+                    ? "Mod tweaks reapplied: clean snapshots restored and enabled plugins applied."
+                    : "Reapply finished with errors. Check the launch diagnostics log for details.",
+                ok ? "Success" : "Warning");
+
+            await RefreshPluginsStateAsync();
+        }
+        catch (Exception ex)
+        {
+            Notifications.SendNotification($"Reapply failed: {ex.Message}", "Warning");
+        }
+        finally
+        {
+            // Respect the CASC gate when restoring the button state.
+            ReapplyPluginsButton.IsEnabled = !CascFastloadOperationState.Instance.IsRunning;
+        }
     }
 
     private async void OnDryRunClicked(object? sender, RoutedEventArgs e)
@@ -529,9 +579,7 @@ public partial class PluginsView : UserControl
         }
     }
 
-    // Persists checkbox-typed plugin parameters as the canonical "true"/"false" string. Uses the
-    // same SaveParameterValueAsync entry point as the text editor so plugin authors only need to
-    // round-trip through one serialization path.
+    // Persists checkbox parameters as canonical "true"/"false" via SaveParameterValueAsync.
     private async void OnParameterCheckedChanged(object? sender, RoutedEventArgs e)
     {
         if (sender is not CheckBox { DataContext: PluginParameterItem parameter } checkBox)

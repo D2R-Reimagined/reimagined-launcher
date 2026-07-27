@@ -7,6 +7,7 @@ using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using ReimaginedLauncher.Utilities;
+using ReimaginedLauncher.Utilities.Casc;
 
 namespace ReimaginedLauncher.Views.Launch;
 
@@ -22,9 +23,32 @@ public partial class LaunchView : UserControl
         RefreshInstallDirectoryState();
     }
 
+    private void OnCascStateChanged(object? sender, EventArgs e)
+    {
+        // CASC fastload activity can race with mod-tweak prep + game launch.
+        // Re-evaluate the gated controls so they disable for the duration.
+        RefreshInstallDirectoryState();
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        CascFastloadOperationState.Instance.StateChanged -= OnCascStateChanged;
+        base.OnDetachedFromVisualTree(e);
+    }
+
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
+
+        CascFastloadOperationState.Instance.StateChanged += OnCascStateChanged;
+
+        // Re-evaluate disk-side mod detection on every visit; other flows can mutate mods\Reimagined\.
+        if (TopLevel.GetTopLevel(this) is MainWindow mwAttach)
+        {
+            mwAttach.RefreshLocalModState();
+        }
+
+        RefreshInstallDirectoryState();
 
         if (MainWindow.Settings is not null && !LauncherService.IsDetecting)
         {
@@ -76,6 +100,11 @@ public partial class LaunchView : UserControl
         var settings = MainWindow.Settings;
         var profile = settings.CurrentProfile;
 
+        // Disable mutating controls while a CASC fastload op is running.
+        var cascBusy = CascFastloadOperationState.Instance.IsRunning;
+        InstallationTypeComboBox.IsEnabled = !cascBusy;
+        BrowseInstallDirectoryButton.IsEnabled = !cascBusy;
+
         InstallationTypeComboBox.SelectedIndex = (int)profile.Type;
         DirectoryTextBox.Text = profile.InstallDirectory ?? string.Empty;
         DetectionLoadingIndicator.IsVisible = LauncherService.IsDetecting;
@@ -98,7 +127,7 @@ public partial class LaunchView : UserControl
             }
             else
             {
-                LocateSteamButton.IsEnabled = true;
+                LocateSteamButton.IsEnabled = !cascBusy;
             }
         }
 
@@ -132,13 +161,13 @@ public partial class LaunchView : UserControl
         {
             StartGameButton.Content = "Install Tweaks";
             StartGameDescription.Text = "Clicking 'Install Tweaks' will apply tweaks and adjustments to the files in your D2RMM/mods/Reimagined/data directory.";
-            StartGameButton.IsEnabled = !_isLaunching && isValidated && isModDetected;
+            StartGameButton.IsEnabled = !_isLaunching && !cascBusy && isValidated && isModDetected;
         }
         else
         {
             StartGameButton.Content = "Start Game";
             StartGameDescription.Text = "The button stays available here and will enable once the install directory is valid and the mod is detected.";
-            StartGameButton.IsEnabled = !_isLaunching && isValidated && isModDetected;
+            StartGameButton.IsEnabled = !_isLaunching && !cascBusy && isValidated && isModDetected;
 
             if (profile.Type == InstallationType.Steam && string.IsNullOrWhiteSpace(profile.SteamDirectory))
             {

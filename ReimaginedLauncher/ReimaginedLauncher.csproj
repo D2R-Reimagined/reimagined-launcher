@@ -9,7 +9,7 @@
         <ApplicationManifest>app.manifest</ApplicationManifest>
         <ApplicationIcon>Assets\ReimaginedLauncher.ico</ApplicationIcon>
         <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
-        <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+        <RuntimeIdentifiers>win-x64;linux-x64</RuntimeIdentifiers>
     </PropertyGroup>
 
     <PropertyGroup Condition="'$(Configuration)' == 'Production'">
@@ -49,6 +49,37 @@
        </None>
        <None Include="Assets\Vignette\**\*">
          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+       </None>
+     </ItemGroup>
+
+     <!--
+        CascLib native binaries (MIT, Ladislav Zezula).
+        Windows: CascLib.dll is copied to the output root so default P/Invoke
+        resolution finds it without any custom resolver, on either a
+        framework-dependent or self-contained publish
+        (IncludeNativeLibrariesForSelfExtract=true).
+        Linux: libcasc.so is copied to runtimes/linux-x64/native/ in the output
+        tree, where the NativeLibrary.SetDllImportResolver in NativeCascLib.cs
+        loads it from on Linux.
+        See runtimes/README.md for attribution and update procedure.
+     -->
+     <ItemGroup>
+       <!-- Windows: copy DLL to output root so default P/Invoke resolution finds it. -->
+       <None Include="runtimes\win-x64\native\CascLib.dll" Condition="Exists('runtimes\win-x64\native\CascLib.dll')">
+         <Link>CascLib.dll</Link>
+         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+         <Pack>false</Pack>
+       </None>
+       <!-- Linux: copy .so to runtimes/linux-x64/native/ where the custom resolver looks. -->
+       <None Include="runtimes\linux-x64\native\libcasc.so" Condition="Exists('runtimes\linux-x64\native\libcasc.so')">
+         <Link>runtimes\linux-x64\native\libcasc.so</Link>
+         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+         <Pack>false</Pack>
+       </None>
+       <None Include="runtimes\CascLib.LICENSE" Condition="Exists('runtimes\CascLib.LICENSE')">
+         <Link>CascLib.LICENSE</Link>
+         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+         <Pack>false</Pack>
        </None>
      </ItemGroup>
 

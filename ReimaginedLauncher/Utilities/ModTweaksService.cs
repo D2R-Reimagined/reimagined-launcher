@@ -776,6 +776,78 @@ public static class ModTweaksService
         }
     }
 
+
+    /// <summary>
+    /// Removes every <c>*_launcher_clean</c> directory or file under the
+    /// Reimagined mod's <c>data</c> tree for the given non-D2RMM install.
+    /// Intended to be called at the end of a successful mod install/update
+    /// so the next launch retakes the snapshots from the new base files.
+    /// </summary>
+    public static void InvalidateCleanSnapshots(string installDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(installDirectory))
+        {
+            return;
+        }
+
+        var mpqBase = Path.Combine(installDirectory, "mods", ModDirectoryName, $"{ModDirectoryName}.mpq");
+        var dataRoot = Path.Combine(mpqBase, DataDirectoryName);
+        if (!Directory.Exists(dataRoot))
+        {
+            // Either the mod isn't installed yet or it's a D2RMM layout (which
+            // we deliberately do not touch in Phase 0 — see #3b in the design).
+            return;
+        }
+
+        InvalidateCleanSnapshotsUnder(dataRoot);
+    }
+
+    private static void InvalidateCleanSnapshotsUnder(string root)
+    {
+        IEnumerable<string> EnumerateSafely(Func<IEnumerable<string>> enumerator)
+        {
+            try
+            {
+                return enumerator();
+            }
+            catch
+            {
+                return [];
+            }
+        }
+
+        // Directory-shaped snapshots (excel_launcher_clean, armor_launcher_clean,
+        // vis_launcher_clean, plus any future *_launcher_clean siblings).
+        foreach (var directory in EnumerateSafely(() =>
+                     Directory.EnumerateDirectories(root, "*_launcher_clean", SearchOption.AllDirectories)))
+        {
+            try
+            {
+                Directory.Delete(directory, recursive: true);
+                LaunchDiagnostics.Log($"Invalidated launcher_clean directory: {directory}");
+            }
+            catch (Exception ex)
+            {
+                LaunchDiagnostics.Log($"Failed to delete launcher_clean directory '{directory}': {ex.Message}");
+            }
+        }
+
+        // File-shaped snapshots + sidecars (.missing markers).
+        foreach (var file in EnumerateSafely(() =>
+                     Directory.EnumerateFiles(root, "*_launcher_clean*", SearchOption.AllDirectories)))
+        {
+            try
+            {
+                File.Delete(file);
+                LaunchDiagnostics.Log($"Invalidated launcher_clean file: {file}");
+            }
+            catch (Exception ex)
+            {
+                LaunchDiagnostics.Log($"Failed to delete launcher_clean file '{file}': {ex.Message}");
+            }
+        }
+    }
+
     private static string? GetMpqBaseDirectory()
     {
         var profile = MainWindow.Settings.CurrentProfile;
@@ -920,8 +992,21 @@ public static class ModTweaksService
         return Path.Combine(parentDirectory, CleanExcelDirectoryName);
     }
 
+    // The clean snapshot is treated as authoritative once captured. It is
+    // intentionally NOT re-derived from the live mod files on every launch:
+    // by the time the second launch runs, the live excel directory contains
+    // launcher tweaks and plugin output from the previous launch, so a
+    // hash-based freshness check would silently promote that polluted state
+    // into the new "clean" baseline. The snapshot is refreshed only when
+    // <see cref="InvalidateCleanSnapshots"/> deletes it after a mod
+    // install/update, which is the sole legitimate way the base files change.
     private static async Task EnsureCleanExcelCopyAsync(string excelDirectory, string cleanExcelDirectory)
     {
+        if (!Directory.Exists(excelDirectory))
+        {
+            return;
+        }
+
         if (Directory.Exists(cleanExcelDirectory))
         {
             return;
@@ -946,6 +1031,8 @@ public static class ModTweaksService
         return Path.Combine(missilesDirectory, CleanMissilesFileName);
     }
 
+    // See EnsureCleanExcelCopyAsync for the rationale: the clean snapshot is
+    // captured once and only refreshed by InvalidateCleanSnapshots.
     private static async Task EnsureCleanMissilesCopyAsync(string? missilesFilePath, string cleanMissilesFilePath)
     {
         if (File.Exists(cleanMissilesFilePath))
@@ -1039,6 +1126,8 @@ public static class ModTweaksService
         return Path.Combine(layoutsDirectory, CleanLayoutsProfileHdFileName);
     }
 
+    // See EnsureCleanExcelCopyAsync for the rationale: the clean snapshot is
+    // captured once and only refreshed by InvalidateCleanSnapshots.
     private static async Task EnsureCleanLayoutsProfileHdCopyAsync(string? layoutsProfileHdFilePath, string cleanLayoutsProfileHdFilePath)
     {
         if (File.Exists(cleanLayoutsProfileHdFilePath))
@@ -1064,6 +1153,8 @@ public static class ModTweaksService
         return Path.Combine(armorDirectory, CleanArmorTweaksDirectoryName);
     }
 
+    // See EnsureCleanExcelCopyAsync for the rationale: the clean snapshot is
+    // captured once and only refreshed by InvalidateCleanSnapshots.
     private static async Task EnsureCleanArmorTweaksCopyAsync(string? armorDirectory, string cleanArmorTweaksDirectory)
     {
         if (string.IsNullOrWhiteSpace(armorDirectory) || !Directory.Exists(armorDirectory))
@@ -1112,6 +1203,8 @@ public static class ModTweaksService
         return Path.Combine(desecratedZonesDirectory, CleanDesecratedZonesFileName);
     }
 
+    // See EnsureCleanExcelCopyAsync for the rationale: the clean snapshot is
+    // captured once and only refreshed by InvalidateCleanSnapshots.
     private static async Task EnsureCleanDesecratedZonesCopyAsync(string? desecratedZonesFilePath, string cleanDesecratedZonesFilePath)
     {
         if (File.Exists(cleanDesecratedZonesFilePath))
@@ -1451,20 +1544,9 @@ public static class ModTweaksService
                 continue;
             }
 
-            // Neither a clean copy nor a ".missing" marker is present for this
-            // entry. This happens when the on-disk armor_launcher_clean folder
-            // was created (or partially shipped) by a different version of the
-            // launcher / mod than the one that owns the current
-            // HelmetVisualRelativePaths list -- typically right after a mod
-            // install or update, where the freshly-extracted mod tree includes
-            // a stale clean folder that doesn't cover every helmet path the
-            // launcher now tweaks. The mod doesn't ship these helmet JSONs as
-            // baseline files (the launcher only tweaks them into place), so
-            // the safe interpretation is "this file is absent from the mod's
-            // baseline", which is exactly the semantics of a ".missing"
-            // marker. Treat it as such instead of failing the entire launch,
-            // and reseed the marker so subsequent launches don't re-trigger
-            // the diagnostic.
+            // No clean copy or ".missing" marker exists for this entry — the
+            // mod doesn't ship helmet JSONs as baseline, so treat it as absent
+            // and reseed the marker instead of failing the launch.
             LaunchDiagnostics.Log(
                 $"Clean helmet visual state missing for {relativePath}; treating as absent baseline and reseeding marker.");
 
@@ -2000,6 +2082,8 @@ public static class ModTweaksService
         return Path.Combine(parentDirectory, CleanVisDirectoryName);
     }
 
+    // See EnsureCleanExcelCopyAsync for the rationale: the clean snapshot is
+    // captured once and only refreshed by InvalidateCleanSnapshots.
     private static async Task EnsureCleanVisCopyAsync()
     {
         var visDirectory = GetVisDirectory();
@@ -2010,6 +2094,7 @@ public static class ModTweaksService
         }
 
         var cleanVisDirectory = GetCleanVisDirectory(visDirectory);
+
         if (Directory.Exists(cleanVisDirectory))
         {
             return;
@@ -2017,6 +2102,7 @@ public static class ModTweaksService
 
         var desecratedFiles = Directory.GetFiles(visDirectory, "*.json")
             .Where(f => Path.GetFileName(f).Contains(DesecratedFilePattern, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(p => p, StringComparer.Ordinal)
             .ToList();
 
         if (desecratedFiles.Count == 0)

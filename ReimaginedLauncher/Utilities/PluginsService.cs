@@ -46,10 +46,7 @@ public static class PluginsService
     private static readonly JsonSerializerOptions JsonOptions = SerializerOptions.PropertyNameCaseInsensitive;
     private static readonly Regex ParameterTokenRegex = new(@"\{\{\s*parameter:([a-zA-Z0-9_\-]+)\s*\}\}", RegexOptions.Compiled);
     private static readonly Regex ModVersionRegex = new(@"^\d+\.\d+\.\d+$", RegexOptions.Compiled);
-    // Matches a numeric row-index range in the form "start-end" (inclusive), e.g. "50-100".
-    // Whitespace around the numbers and the dash is allowed so plugins can be formatted loosely.
-    // Accepts common Unicode dash variants (hyphen-minus, non-breaking hyphen, figure dash,
-    // en dash, em dash, horizontal bar, minus sign) because some editors auto-replace "-".
+    // Matches inclusive numeric row-index range "start-end"; tolerates Unicode dash variants.
     private static readonly Regex RowRangeRegex = new(@"^\s*(\d+)\s*[-\u2010-\u2015\u2212]\s*(\d+)\s*$", RegexOptions.Compiled);
 
     private static readonly Dictionary<string, FileParserRegistration> ParserRegistry =
@@ -187,7 +184,8 @@ public static class PluginsService
                 Parameters = pluginState.Parameters,
                 Files = pluginState.Files,
                 Errors = pluginState.Errors,
-                Warnings = pluginState.Warnings
+                Warnings = pluginState.Warnings,
+                IsParametersExpanded = MainWindow.Settings.ExpandPluginParametersByDefault
             });
         }
 
@@ -221,16 +219,17 @@ public static class PluginsService
             await CopyDirectoryAsync(sourceDirectory, destinationDirectory);
         }
 
+        var enableByDefault = MainWindow.Settings.EnableInstalledPluginsByDefault;
         if (registration == null)
         {
             MainWindow.Settings.CurrentProfile.Plugins.Add(new PluginRegistration
             {
                 Id = Guid.NewGuid().ToString("N"),
                 FolderName = folderName,
-                IsEnabled = true
+                IsEnabled = enableByDefault
             });
         }
-        else
+        else if (enableByDefault)
         {
             registration.IsEnabled = true;
         }
@@ -398,7 +397,7 @@ public static class PluginsService
             {
                 Id = Guid.NewGuid().ToString("N"),
                 FolderName = destinationFolderName,
-                IsEnabled = false,
+                IsEnabled = MainWindow.Settings.EnableInstalledPluginsByDefault,
                 DiscussionUrl = string.IsNullOrWhiteSpace(discussionUrl) ? null : discussionUrl,
                 UserPluginVersion = string.IsNullOrWhiteSpace(discussionUrl) ? null : userPluginVersion
             });
@@ -1203,17 +1202,13 @@ public static class PluginsService
         // Resolve the mod root once; every asset is validated against it.
         var modRootFull = Path.GetFullPath(modRoot);
 
-        // Asset conditions are evaluated against the same effective parameter map used by
-        // operations, so authors can drive both excel edits and asset replacements from the same
-        // checkbox(es).
+        // Asset conditions reuse the same parameter map as operations.
         var parameterValues = pluginState.Parameters.ToDictionary(
             parameter => parameter.Key,
             parameter => parameter.Value,
             StringComparer.OrdinalIgnoreCase);
 
-        // Track which of the animdata.d2 / exanimdata.d2 pair were successfully
-        // written by this plugin's assets so we can mirror a single-sided edit
-        // onto its twin once the regular asset loop finishes.
+        // Track animdata.d2 / exanimdata.d2 writes so a single-sided edit can be mirrored.
         var animDataWritten = false;
         var exAnimDataWritten = false;
 
@@ -1293,12 +1288,8 @@ public static class PluginsService
         return string.Equals(normalizedActual, expectedRelativePath, StringComparison.OrdinalIgnoreCase);
     }
 
-    // animdata.d2 and exanimdata.d2 are the same kind of binary table read by
-    // D2R as a pair; if a plugin only replaces one of them the game can end up
-    // with mismatched animation entries. When exactly one of the pair was
-    // written by this plugin's assets, mirror the written file onto its twin
-    // so both sides stay aligned. The pre-existing twin is registered with the
-    // backup service first so it can be restored when the plugin is disabled.
+    // Mirror a single-sided animdata.d2 / exanimdata.d2 edit onto its twin so the pair stays aligned.
+    // The pre-existing twin is registered with the backup service first.
     private static async Task SyncAnimDataPairAsync(
         string modRootFull,
         string pluginId,
@@ -1506,9 +1497,7 @@ public static class PluginsService
         }
     }
 
-    // Picks the value to write for a missiles operation: prefer an explicit updatedValue, otherwise
-    // resolve a parameterKey against the plugin's parameters. Both forms support {{parameter:key}}
-    // tokens so missile values can be parameterized.
+    // Resolves a missiles value: explicit updatedValue or parameterKey lookup; supports {{parameter:key}} tokens.
     private static string ResolveMissileValue(
         PluginJsonOperation operation,
         IReadOnlyDictionary<string, string> parameters)
@@ -1544,10 +1533,7 @@ public static class PluginsService
     }
 
 
-    // Replace-by-key and addRow dispatcher for monsters.json. Mirrors ApplyMissilesOperationsAsync:
-    // monsters.json shares the missiles.json layout (flat key->asset string map with a leading
-    // 'dependencies' object), so edits are routed through MonstersFileParser to keep the original
-    // property order and surrounding entries intact on disk.
+    // Replace-by-key and addRow dispatcher for monsters.json (same shape as missiles.json).
     private static async Task ApplyMonstersOperationsAsync(
         string monstersFilePath,
         IReadOnlyList<PluginJsonOperation> operations,
@@ -1595,9 +1581,7 @@ public static class PluginsService
         }
     }
 
-    // Picks the value to write for a monsters operation: prefer an explicit updatedValue, otherwise
-    // resolve a parameterKey against the plugin's parameters. Both forms support {{parameter:key}}
-    // tokens so monster values can be parameterized. Mirrors ResolveMissileValue.
+    // Resolves a monsters value: explicit updatedValue or parameterKey lookup; supports {{parameter:key}} tokens.
     private static string ResolveMonsterValue(
         PluginJsonOperation operation,
         IReadOnlyDictionary<string, string> parameters)
@@ -1713,9 +1697,7 @@ public static class PluginsService
             return false;
         }
 
-        // missiles.json lives under data/hd/missiles and monsters.json under data/hd/character;
-        // both use their own flat-map JSON layout, so route them to the dedicated dispatchers
-        // instead of treating them as strings translation files.
+        // missiles.json/monsters.json have their own dispatchers; they are not strings files.
         if (IsMissilesTargetFile(fileName) || IsMonstersTargetFile(fileName))
         {
             return false;
@@ -1799,8 +1781,7 @@ public static class PluginsService
                 }
                 else
                 {
-                    // "add" mode (default): always appends the cloned row to the end of the file.
-                    // Insertion at a specific index is not supported; rowIdentifier must be omitted.
+                    // "add" mode (default): always appends the cloned row; rowIdentifier must be omitted.
                     if (!string.IsNullOrWhiteSpace(operation.RowIdentifier))
                     {
                         throw new InvalidDataException(
@@ -1811,8 +1792,7 @@ public static class PluginsService
                     targetIndex = entries.Count - 1;
                 }
 
-                // Apply column overrides on top of the cloned row, mirroring addRow's per-column
-                // pipeline so authors get the standard replace/append/multiplyExisting operators.
+                // Apply column overrides via the addRow per-column pipeline.
                 var cloneParent = operation with { Operation = null };
                 foreach (var assignment in assignments)
                 {
@@ -1862,9 +1842,7 @@ public static class PluginsService
 
                 (entries[indexA], entries[indexB]) = (entries[indexB], entries[indexA]);
 
-                // After the swap, "columns" (the standard assignments) target the row now at indexA
-                // (originally at indexB) and "swapColumns" target the row now at indexB. This makes
-                // the post-swap intent explicit per the row at that final position.
+                // "columns" target the row now at indexA; "swapColumns" target the row now at indexB.
                 var swapParent = operation with { Operation = null };
                 foreach (var assignment in assignments)
                 {
@@ -1911,10 +1889,7 @@ public static class PluginsService
                 }
 
                 var newEntry = new TEntry();
-                // For addRow, each column assignment is materialized into the new row via the
-                // standard value-resolution pipeline. The parent's Operation ("addRow") is not a
-                // value-producing operation, so we strip it before building per-column ops; this
-                // lets per-assignment Operation overrides win and otherwise falls back to "replace".
+                // Strip the parent Operation before per-column ops so per-assignment overrides win.
                 var addRowParent = operation with { Operation = null };
                 foreach (var assignment in assignments)
                 {
@@ -1965,11 +1940,8 @@ public static class PluginsService
 
             if (operation.RowMatchers is { Count: > 0 } rowMatchers)
             {
-                // Array form: each element is OR-ed into the final row set, scalar elements use
-                // the same parsing rules as a single-string rowIdentifier (range, numeric index on
-                // usesRowId files, or default identifier-column equality), and object elements
-                // delegate to the multi-column AND matcher. Indices are de-duplicated so a row
-                // matched by two elements is still updated only once per assignment.
+                // Array form: elements are OR-ed; objects delegate to the multi-column AND matcher.
+                // Indices are de-duplicated so a row matched twice is still updated only once.
                 matchingIndices = ResolveRowMatcherIndices(
                     entries,
                     rowMatchers,
@@ -1981,9 +1953,7 @@ public static class PluginsService
             }
             else if (operation.RowIdentifiers is { Count: > 0 } identifierMap)
             {
-                // Multi-column identifier override: a row matches only when every listed
-                // column equals the supplied value (case-insensitive). This bypasses the
-                // file's default identifier column and any usesRowId numeric requirement.
+                // Multi-column AND match (case-insensitive); bypasses the default identifier column.
                 matchingIndices = Enumerable.Range(0, entries.Count)
                     .Where(i => MatchesAllRowIdentifiers(entries[i], identifierMap, resolveColumn))
                     .ToList();
@@ -2058,9 +2028,8 @@ public static class PluginsService
         await SaveGeneratedEntriesAsync(entries, filePath, saveEntriesAsync);
     }
 
-    // Returns the effective list of column assignments for an operation. When a 'columns' array is
-    // provided it is used as-is; otherwise the operation's top-level column/updatedValue/parameterKey
-    // become a single implicit assignment. The list will be empty when neither is supplied.
+    // Effective column assignments: 'columns' as-is, else a single implicit assignment from the
+    // top-level column/updatedValue/parameterKey, else empty.
     private static IReadOnlyList<PluginJsonColumnAssignment> GetColumnAssignments(PluginJsonOperation operation)
     {
         if (operation.Columns is { Count: > 0 } columns)
@@ -2076,9 +2045,7 @@ public static class PluginsService
         return Array.Empty<PluginJsonColumnAssignment>();
     }
 
-    // Produces an effective single-column PluginJsonOperation by overlaying a column assignment on
-    // top of its parent operation, so the existing ResolveOperationValue/UpdateRecord helpers can be
-    // reused unchanged for multi-column and addRow execution paths.
+    // Overlays a column assignment on top of its parent operation to reuse the per-column helpers.
     private static PluginJsonOperation BuildPerColumnOperation(
         PluginJsonOperation parent,
         PluginJsonColumnAssignment assignment,
@@ -2098,9 +2065,7 @@ public static class PluginsService
         };
     }
 
-    // Returns true when every key/value pair in the supplied identifier map matches the entry's
-    // corresponding column (case-insensitive). Unknown columns or missing values fail the match
-    // so authors get a clear "row not found" error rather than a false positive.
+    // True when every key/value matches the entry's column (case-insensitive); unknown columns fail.
     private static bool MatchesAllRowIdentifiers<TEntry>(
         TEntry entry,
         IReadOnlyDictionary<string, string> identifiers,
@@ -2131,13 +2096,8 @@ public static class PluginsService
         return true;
     }
 
-    // Resolves the canonical "array form" of rowIdentifier into a deduplicated list of row
-    // indices. Each matcher is evaluated independently (string matchers reuse the same
-    // range / usesRowId / default-column rules as the legacy scalar path; object matchers
-    // delegate to MatchesAllRowIdentifiers) and the union of their results is returned in the
-    // order matchers were declared, so authors get predictable apply ordering. Throws when an
-    // individual matcher resolves to zero rows or when the union ends up empty, mirroring the
-    // single-rowIdentifier behavior so authoring mistakes surface loudly.
+    // Array form of rowIdentifier: union of matchers in declaration order, deduplicated.
+    // Throws when any individual matcher or the union resolves to zero rows.
     private static List<int> ResolveRowMatcherIndices<TEntry>(
         IList<TEntry> entries,
         IReadOnlyList<PluginRowMatcher> matchers,
@@ -2234,11 +2194,8 @@ public static class PluginsService
         return ordered;
     }
 
-    // Resolves a single-row identifier supplied to cloneRow/swapRow. Accepts either a numeric
-    // 0-based row index, or a value matched (case-insensitive) against the file's default
-    // rowIdentifier column. Throws when zero or multiple rows would match so authors get a clear
-    // error before any in-place mutation runs. The 'fieldName' is used in error messages so authors
-    // can tell which JSON field (e.g. "sourceRowIdentifier", "swapRowIdentifier") is at fault.
+    // Resolves a single-row identifier (numeric index or default-column match) for cloneRow/swapRow;
+    // throws on zero/multiple matches. 'fieldName' identifies the JSON field for error messages.
     private static int ResolveSingleRowIndex<TEntry>(
         IList<TEntry> entries,
         string identifier,
@@ -2282,9 +2239,7 @@ public static class PluginsService
         return matches[0];
     }
 
-    // Parses a plugin rowIdentifier of the form "start-end" (e.g. "50-100") into inclusive numeric
-    // row-index bounds. Returns false when the identifier is null/empty or not a range, allowing the
-    // caller to fall back to exact row-ID or identifier-column matching.
+    // Parses "start-end" into inclusive numeric bounds; returns false when not a range.
     private static bool TryParseRowRange(string? rowIdentifier, out int start, out int end)
     {
         start = 0;
@@ -2929,9 +2884,7 @@ public static class PluginsService
 
             if (supportedTarget.IsMissilesTarget || supportedTarget.IsMonstersTarget)
             {
-                // missiles.json and monsters.json take a flat {file, key, updatedValue|parameterKey,
-                // [operation]} shape: replace by Key (default) or addRow to append a new key/value
-                // pair. Both files share the same validation rules.
+                // missiles.json/monsters.json: flat {file, key, updatedValue|parameterKey, [operation]}.
                 if (string.IsNullOrWhiteSpace(operation.Key))
                 {
                     errors.Add($"'{pluginFileName}' contains a {supportedTarget.FileName} entry with no Key.");
@@ -3044,10 +2997,7 @@ public static class PluginsService
             }
             else if (operation.RowMatchers is { Count: > 0 } arrayMatchers)
             {
-                // Array-form rowIdentifier (only honored on updateRow): validate each element using
-                // the same rules the runtime applies. Scalar string elements must either be a valid
-                // numeric index / "start-end" range on rowID-keyed files, or a non-empty default
-                // identifier-column value otherwise. Object elements must reference real columns.
+                // Array-form rowIdentifier (updateRow only): validate each element with runtime rules.
                 for (var index = 0; index < arrayMatchers.Count; index++)
                 {
                     var matcher = arrayMatchers[index];
@@ -3198,10 +3148,7 @@ public static class PluginsService
         }
     }
 
-    // Validates a declarative plugin condition tree. Each node must use exactly one shape:
-    // a parameterKey leaf with equals/notEquals, or one of the all/any/not combinators. Unknown
-    // parameter keys and malformed shapes are reported as plugin validation errors so authors get
-    // a clear message instead of a silent skip at apply-time.
+    // Validates a condition tree: exactly one shape per node (parameterKey/all/any/not).
     private static void ValidateCondition(
         PluginJsonCondition condition,
         IReadOnlyList<PluginParameterItem> parameters,
@@ -3295,11 +3242,8 @@ public static class PluginsService
         ValidateCondition(condition.Not!, parameters, location, errors);
     }
 
-    // Pure-data evaluator: walks the condition tree and reports whether the action should run.
-    // Comparisons are case-insensitive string equality on the effective parameter value (Value
-    // when set, otherwise DefaultValue). Returns true for null/empty-shaped conditions so a
-    // missing condition means "always apply"; missing parameter keys evaluate to false (validation
-    // already surfaces this as an error before apply-time).
+    // Walks the condition tree (case-insensitive equality on the effective parameter value).
+    // Null/empty-shaped condition means "always apply"; missing parameter keys evaluate to false.
     private static bool EvaluateCondition(
         PluginJsonCondition? condition,
         IReadOnlyDictionary<string, string> parameters)
@@ -3347,9 +3291,7 @@ public static class PluginsService
         return false;
     }
 
-    // Lenient boolean parser used by checkbox parameters. Accepts the common string forms used in
-    // existing plugininfo.json files (true/false/1/0/yes/no/on/off/checked) so authors who hand-
-    // edit defaults still get a valid normalized value persisted back to disk.
+    // Lenient boolean parser for checkbox parameters: accepts true/false/1/0/yes/no/on/off/checked.
     private static string NormalizeCheckboxValue(string? rawValue)
     {
         if (string.IsNullOrWhiteSpace(rawValue))
@@ -3748,9 +3690,8 @@ public static class PluginsService
 
     private static PluginJsonOperation DeserializeOperationElement(JsonElement element)
     {
-        // Excel (.txt) targets use the standard {file, rowIdentifier, column, operation, ...} schema.
-        // Strings (.json) targets use a flat d2rr-style layout: {file, Key, enUS, zhTW, ...}
-        // where every known language field present on the object is applied as a direct replacement.
+        // Excel (.txt): {file, rowIdentifier, column, operation, ...}.
+        // Strings (.json): flat {file, Key, enUS, zhTW, ...} d2rr-style layout.
         var file = element.TryGetProperty("file", out var fileProperty) && fileProperty.ValueKind == JsonValueKind.String
             ? fileProperty.GetString()
             : null;
@@ -3806,13 +3747,8 @@ public static class PluginsService
                 LanguageValues: languageValues);
         }
 
-        // Allow rowIdentifier to be a string (default), an object declaring one or more identifier
-        // columns ({"key1":"col1","key2":"col2"}), or an array whose elements are any mix of those
-        // two scalar shapes (the array form unions the matched rows; only updateRow honors it).
-        // A dedicated "rowIdentifiers" property is also accepted as a plural alias for the object
-        // form. Whenever the property is non-string we strip it from the element before
-        // deserialization so the standard string-typed RowIdentifier remains valid, then re-attach
-        // the parsed structure.
+        // rowIdentifier may be a string, an object (multi-column AND), or an array (union of matchers).
+        // Non-string forms are stripped, parsed, then re-attached so the string-typed property stays valid.
         var rowMatchers = TryReadRowMatcherList(element, "rowIdentifier");
         var rowIdentifiers = rowMatchers != null
             ? null
@@ -3864,12 +3800,8 @@ public static class PluginsService
         return operation;
     }
 
-    // Reads an array-shaped rowIdentifier into a canonical list of matchers. Each element is
-    // either a scalar (string/number/bool — coerced to its invariant string form) or an object of
-    // {column: expectedValue} pairs (same shape as the legacy object-form rowIdentifier). Returns
-    // null when the property is missing or is not an array, so callers can fall back to the
-    // string- or object-form parsers. Throws InvalidDataException with a clear element index when
-    // an element is neither a scalar nor an object.
+    // Reads array-shaped rowIdentifier into matchers (scalar or {column:value}); returns null when
+    // the property is missing or not an array. Throws on unsupported element kinds.
     private static IReadOnlyList<PluginRowMatcher>? TryReadRowMatcherList(JsonElement element, string propertyName)
     {
         if (!element.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.Array)
@@ -3934,9 +3866,7 @@ public static class PluginsService
         return matchers.Count == 0 ? null : matchers;
     }
 
-    // Reads an object-shaped rowIdentifier override into a column-name -> expected-value dictionary.
-    // Returns null when the property is missing or not an object so callers can fall back to the
-    // legacy string-typed rowIdentifier path.
+    // Reads object-shaped rowIdentifier into a column->value map; null when missing or not an object.
     private static IReadOnlyDictionary<string, string>? TryReadRowIdentifierMap(JsonElement element, string propertyName)
     {
         if (!element.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.Object)
@@ -4397,11 +4327,7 @@ public static class PluginsService
     }
 
     /// <summary>
-    /// Builds a column-name resolver for the given parser type by reflecting its protected
-    /// <c>PropertyColumnAliases</c> member. Mirrors the lookup logic of
-    /// <c>HeaderMappedTextFileParser.GetOrBuildPropertyMap</c> so that raw D2R column headers
-    /// (e.g. <c>dsc2calca1</c>) resolve to the corresponding <see cref="PropertyInfo"/>
-    /// (e.g. <c>Dsc2CalculationA1</c>) without requiring library-side API additions.
+    /// Builds a column-name resolver by reflecting <c>PropertyColumnAliases</c> on <typeparamref name="TParser"/>; mirrors <c>GetOrBuildPropertyMap</c> so raw D2R headers map to their <see cref="PropertyInfo"/>.
     /// </summary>
     private static Func<string, PropertyInfo?> BuildColumnResolver<TEntry, TParser>()
         where TEntry : class
@@ -4550,9 +4476,7 @@ public static class PluginsService
         public string Source { get; set; } = string.Empty;
         public string Target { get; set; } = string.Empty;
 
-        // Optional declarative condition controlling whether the asset is copied during apply.
-        // When omitted (default), the asset is always applied. See PluginJsonCondition for the
-        // supported shapes: {parameterKey, equals|notEquals}, {all:[...]}, {any:[...]}, {not:...}.
+        // Optional condition; omitted means "always apply". See PluginJsonCondition for shapes.
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public PluginJsonCondition? Condition { get; set; }
     }
@@ -4581,10 +4505,7 @@ public static class PluginsService
 
         public string? Description { get; set; }
 
-        // Optional display-only group label. UI renders parameters that share the same group
-        // under a single heading; missing/null/empty means the parameter is ungrouped. This
-        // metadata never participates in parameterKey lookups, condition evaluation, saving,
-        // or plugin application; preserved across SavePluginInfoAsync round-trips.
+        // Optional display-only group label; never affects lookup/condition/save/apply.
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? Group { get; set; }
 
@@ -4592,9 +4513,7 @@ public static class PluginsService
         public string Value { get; set; } = string.Empty;
     }
 
-    // Declarative condition used by operations and asset replacements. Pure data; never executed
-    // as code. Exactly one shape per node: a parameterKey leaf with equals/notEquals, or one of
-    // the all/any/not combinators wrapping further conditions.
+    // Declarative condition tree: parameterKey leaf with equals/notEquals, or all/any/not combinator.
     private sealed class PluginJsonCondition
     {
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -4620,11 +4539,7 @@ public static class PluginsService
         public PluginJsonCondition? Not { get; set; }
     }
 
-    // A single rowIdentifier matcher. Set Value for a scalar string match (default identifier
-    // column, numeric index, or "start-end" range, depending on the file); set Columns for a
-    // multi-column AND match (same semantics as the legacy object-form rowIdentifier). Authors
-    // never write this type directly — it is the canonical shape produced by the JSON parser
-    // for the array form of rowIdentifier (e.g. ["amazonjavazon", {"Class":"skeleton"}]).
+    // Single rowIdentifier matcher: scalar Value or multi-column AND map (Columns).
     private sealed record PluginRowMatcher(
         string? Value,
         IReadOnlyDictionary<string, string>? Columns);
@@ -4639,43 +4554,26 @@ public static class PluginsService
         string? Key = null,
         IReadOnlyDictionary<string, string>? LanguageValues = null,
         IReadOnlyList<PluginJsonColumnAssignment>? Columns = null,
-        // Optional override of the default rowIdentifier matching: when present, a row is considered
-        // a match only when every key/value pair (column-name -> expected-value) matches the entry's
-        // corresponding column. Authors can supply this either as an object literal under the
-        // "rowIdentifier" property (e.g. {"key1":"col1","key2":"col2"}) or via a dedicated
-        // "rowIdentifiers" property.
+        // Multi-column rowIdentifier override (object form); accepts "rowIdentifier" or "rowIdentifiers".
         IReadOnlyDictionary<string, string>? RowIdentifiers = null,
-        // Canonical list of rowIdentifier matchers produced by the JSON parser when the author
-        // supplied an *array* under "rowIdentifier" (e.g. ["a", "b", {"Col":"v"}]). Each element is
-        // either a scalar string (parsed exactly like a top-level string rowIdentifier — supports
-        // numeric index, "start-end" range, or default-column value) or a multi-column AND map.
-        // Matched indices are OR-combined and de-duplicated. Only honored by updateRow operations;
-        // addRow / cloneRow / swapRow reject this shape because they target a single row.
+        // Array form of rowIdentifier; OR-unioned. updateRow only.
         [property: JsonIgnore]
         IReadOnlyList<PluginRowMatcher>? RowMatchers = null,
         // cloneRow: identifies the row to copy from. Accepts a numeric 0-based index or a value
         // matched against the file's default rowIdentifier column (case-insensitive).
         string? SourceRowIdentifier = null,
-        // cloneRow: "add" (default) appends the cloned row to the end of the file (rowIdentifier
-        // must be omitted; insertion at a specific index is not supported). "replace" overwrites
-        // the row whose identifier (numeric index or default rowIdentifier column value) matches
-        // rowIdentifier.
+        // cloneRow: "add" (default) appends; "replace" overwrites the row matching rowIdentifier.
         string? Mode = null,
         // swapRow: identifies the second row to exchange with the row referenced by rowIdentifier.
         // Accepts a numeric 0-based index or a default rowIdentifier column value.
         string? SwapRowIdentifier = null,
-        // swapRow: optional column overrides applied to the row at SwapRowIdentifier *after* the
-        // swap (the row originally at rowIdentifier). The standard "columns"/"column" assignments
-        // apply post-swap to the row at rowIdentifier (originally at SwapRowIdentifier).
+        // swapRow: post-swap overrides for the row at SwapRowIdentifier (originally at rowIdentifier).
         IReadOnlyList<PluginJsonColumnAssignment>? SwapColumns = null,
         // Optional declarative condition controlling whether the operation is applied. When
         // omitted (default), the operation is always applied. See PluginJsonCondition.
         PluginJsonCondition? Condition = null);
 
-    // Per-column assignment used either for multi-column updates that share a single rowIdentifier,
-    // or to specify the column/value pairs of a new row produced by the addRow operation.
-    // When a per-column field is null/empty, the parent operation's matching field is used as the
-    // fallback (Operation defaults to the parent's Operation, "replace" semantics for addRow).
+    // Per-column assignment for multi-column updates and addRow; null fields fall back to the parent.
     private sealed record PluginJsonColumnAssignment(
         string? Column,
         string? UpdatedValue = null,

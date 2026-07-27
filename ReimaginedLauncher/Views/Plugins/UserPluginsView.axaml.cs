@@ -92,9 +92,7 @@ public partial class UserPluginsView : UserControl
 
     private IReadOnlyList<UserPluginEntry> ApplySort(IReadOnlyList<UserPluginEntry> source)
     {
-        // Index 0 = Last Updated (default), 1 = Date Created.
-        // For unknown timestamps fall back to PublishedAt so plugins without
-        // the new fields still show up in a stable, sensible order.
+        // Index 0 = Last Updated (default), 1 = Date Created; fall back to PublishedAt when unknown.
         var index = SortComboBox?.SelectedIndex ?? 0;
         return index switch
         {
@@ -109,9 +107,7 @@ public partial class UserPluginsView : UserControl
 
     private void ApplySearchFilter()
     {
-        // The ComboBox's SelectionChanged fires during XAML EndInit (because of
-        // SelectedIndex="0"), which runs before later named controls in the
-        // tree are assigned. Bail out until the view is fully initialized.
+        // SelectionChanged fires during XAML EndInit before later named controls exist; bail until ready.
         if (UserPluginsItemsControl is null ||
             EmptyStatePanel is null ||
             UserPluginsSummaryTextBlock is null)

@@ -51,9 +51,7 @@ public class GitHubDiscussionPluginsHttpClient
             }
             catch (Exception ex)
             {
-                // On failure, fall back to any previously cached result so we
-                // don't hammer the proxy on transient errors and so users keep
-                // seeing the last known good list.
+                // Fall back to last cached result on transient failures.
                 LaunchDiagnostics.LogException("Failed to fetch user plugins from proxy", ex);
                 return _cachedPlugins ?? [];
             }

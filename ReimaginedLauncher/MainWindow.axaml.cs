@@ -11,6 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Controls.Notifications;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
@@ -21,10 +22,12 @@ using ReimaginedLauncher.Generators;
 using ReimaginedLauncher.HttpClients;
 using ReimaginedLauncher.HttpClients.Models;
 using ReimaginedLauncher.Utilities;
+using ReimaginedLauncher.Utilities.Casc;
 using ReimaginedLauncher.Utilities.Json;
 using ReimaginedLauncher.Utilities.ViewModels;
 using Avalonia;
 using ReimaginedLauncher.Views.Backups;
+using ReimaginedLauncher.Views.CascFastload;
 using ReimaginedLauncher.Views.Launch;
 using ReimaginedLauncher.Views.ModTweaks;
 using ReimaginedLauncher.Views.NewsAnnouncements;
@@ -210,6 +213,160 @@ public partial class MainWindow : Window
                 await PromptInstallForMissingModAsync();
             }
         }
+
+        // If a fastload manifest exists, check for a build mismatch and offer a delta update.
+        _ = PromptCascFastloadUpdateIfMismatchedAsync();
+    }
+
+    /// <summary>
+    /// Compares the live CASC build against the persisted fastload manifest and offers a one-click delta update on mismatch; silent no-op when fastload is disabled or unavailable.
+    /// </summary>
+    public async Task PromptCascFastloadUpdateIfMismatchedAsync()
+    {
+        try
+        {
+            var installDir = Settings.CurrentProfile?.InstallDirectory;
+            if (string.IsNullOrWhiteSpace(installDir) || !Directory.Exists(installDir))
+            {
+                return;
+            }
+
+            var manifestService = new CascFastloadManifestService(Settings.CurrentProfile!.Type, installDir);
+            if (!manifestService.Exists)
+            {
+                return;
+            }
+
+            var manifest = await manifestService.LoadAsync().ConfigureAwait(false);
+            if (manifest.Files.Count == 0)
+            {
+                // Empty manifest file = fresh slate; remove it so the on-disk state matches.
+                TryDeleteEmptyFastloadManifest(manifestService);
+                return;
+            }
+
+            var native = new NativeCascLib();
+            if (!native.IsAvailable)
+            {
+                return;
+            }
+
+            var extraction = new CascExtractionService(native);
+            using var storage = extraction.OpenLocal(installDir);
+            if (storage is null || storage.IsInvalid)
+            {
+                return;
+            }
+
+            var product = extraction.GetProduct(storage);
+            if (product is null)
+            {
+                return;
+            }
+
+            if (CascFastloadManifestService.BuildMatches(manifest, product))
+            {
+                return;
+            }
+
+            // Mismatch — prompt the user.
+            var oldDescriptor = string.IsNullOrWhiteSpace(manifest.BuildName)
+                ? $"#{manifest.BuildNumber}"
+                : $"{manifest.BuildName} (#{manifest.BuildNumber})";
+            var newDescriptor = string.IsNullOrWhiteSpace(product.CodeName)
+                ? $"#{product.BuildNumber}"
+                : $"{product.CodeName} (#{product.BuildNumber})";
+
+            var accepted = await Dispatcher.UIThread.InvokeAsync(
+                () => ShowFastloadUpdatePromptAsync(oldDescriptor, newDescriptor));
+
+            if (!accepted)
+            {
+                return;
+            }
+
+            await NavigateToCascFastloadViewAsync().ConfigureAwait(false);
+
+            // Delegate to the view's public entry point so the op is owned by CascFastloadOperationState.
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (ContentArea.Content is CascFastloadView fastloadView)
+                {
+                    _ = fastloadView.StartExtractAsync(installDir);
+                }
+            });
+        }
+        catch
+        {
+            // Never let the prompt block startup. Silent failure is correct
+            // here — the user can always run Extract manually from the view.
+        }
+    }
+
+    /// <summary>Removes a zero-entry manifest so observable state matches "never extracted".</summary>
+    private static void TryDeleteEmptyFastloadManifest(CascFastloadManifestService manifestService)
+    {
+        try
+        {
+            if (File.Exists(manifestService.ManifestPath))
+            {
+                File.Delete(manifestService.ManifestPath);
+            }
+        }
+        catch
+        {
+            // Cleanup-only path; ignore I/O / permission failures.
+        }
+    }
+
+    private async Task<bool> ShowFastloadUpdatePromptAsync(string oldBuild, string newBuild)
+    {
+        var dialog = new Window
+        {
+            Width = 460,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Title = "D2R patched — update CASC fastload?"
+        };
+
+        var updateButton = new Button { Content = "Update Now", Classes = { "accent" }, MinWidth = 110 };
+        var laterButton = new Button { Content = "Later", MinWidth = 96 };
+
+        updateButton.Click += (_, _) => dialog.Close(true);
+        laterButton.Click += (_, _) => dialog.Close(false);
+
+        dialog.Content = new Border
+        {
+            Padding = new Avalonia.Thickness(20),
+            Child = new StackPanel
+            {
+                Spacing = 14,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "D2R appears to have patched since your last CASC fastload extraction.",
+                        FontWeight = FontWeight.SemiBold,
+                        TextWrapping = Avalonia.Media.TextWrapping.Wrap
+                    },
+                    new TextBlock
+                    {
+                        Text = $"Last extracted build: {oldBuild}{Environment.NewLine}Current CASC build: {newBuild}{Environment.NewLine}{Environment.NewLine}Run a delta update now to refresh only the changed files?",
+                        TextWrapping = Avalonia.Media.TextWrapping.Wrap
+                    },
+                    new StackPanel
+                    {
+                        Orientation = Avalonia.Layout.Orientation.Horizontal,
+                        HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                        Spacing = 10,
+                        Children = { laterButton, updateButton }
+                    }
+                }
+            }
+        };
+
+        return await dialog.ShowDialog<bool>(this);
     }
 
     public void ApplyUiScale()
@@ -505,17 +662,11 @@ public partial class MainWindow : Window
                 var modPath = InstallDirectoryValidator.ResolveD2RmmModFolder(profile.InstallDirectory);
                 IsLocalModDetected = modPath != null;
 
-                var modInfoPath = modPath != null ? Path.Combine(modPath, "modinfo.json") : string.Empty;
-                var layoutsDir = modPath != null ? Path.Combine(modPath, "data", "global", "ui", "layouts") : string.Empty;
-
-                var panel = CharacterSelectPanelService.FromJson(layoutsDir);
-                var panelVersion = panel?.GetModVersion();
-                var modInfoVersion = TryGetVersionFromModInfo(modInfoPath);
-                _localModVersion = !string.IsNullOrWhiteSpace(panelVersion) && !panelVersion.Equals("Unknown", StringComparison.OrdinalIgnoreCase)
-                    ? panelVersion
-                    : !string.IsNullOrWhiteSpace(modInfoVersion)
-                        ? modInfoVersion
-                        : "Unknown";
+                // modinfo.json is the canonical version source (see CharacterSelectPanelService).
+                var modInfoVersion = CharacterSelectPanelService.GetModVersion(modPath);
+                _localModVersion = !string.IsNullOrWhiteSpace(modInfoVersion)
+                    ? modInfoVersion
+                    : "Unknown";
             }
         }
         else
@@ -526,21 +677,19 @@ public partial class MainWindow : Window
                 var modRootDirectory = Path.Combine(installDir, "mods", "Reimagined");
                 var modInfoPath = Path.Combine(modRootDirectory, "modinfo.json");
                 var modInfoPathInMpq = Path.Combine(modRootDirectory, "Reimagined.mpq", "modinfo.json");
-                var layoutsDir = Path.Combine(
-                    modRootDirectory,
-                    "Reimagined.mpq", "data", "global", "ui", "layouts"
-                );
 
-                var panel = CharacterSelectPanelService.FromJson(layoutsDir);
-                var panelVersion = panel?.GetModVersion();
-                var modInfoVersion = TryGetVersionFromModInfo(modInfoPath) ?? TryGetVersionFromModInfo(modInfoPathInMpq);
-                _localModVersion = !string.IsNullOrWhiteSpace(panelVersion) && !panelVersion.Equals("Unknown", StringComparison.OrdinalIgnoreCase)
-                    ? panelVersion
-                    : !string.IsNullOrWhiteSpace(modInfoVersion)
-                        ? modInfoVersion
-                        : "Unknown";
+                // modinfo.json is the single source of truth for the installed mod version;
+                // also stamped onto mod-source manifest entries for stale-overlay detection.
+                var modInfoVersion =
+                    CharacterSelectPanelService.GetModVersionFromFile(modInfoPath)
+                    ?? CharacterSelectPanelService.GetModVersionFromFile(modInfoPathInMpq);
+                _localModVersion = !string.IsNullOrWhiteSpace(modInfoVersion)
+                    ? modInfoVersion
+                    : "Unknown";
 
-                IsLocalModDetected = Directory.Exists(modRootDirectory) || File.Exists(modInfoPath) || File.Exists(modInfoPathInMpq);
+                // Detection requires modinfo.json; directory existence alone is the bootstrapped
+                // "mod uninstalled" state and must not enable the launch button.
+                IsLocalModDetected = File.Exists(modInfoPath) || File.Exists(modInfoPathInMpq);
             }
         }
 
@@ -564,30 +713,6 @@ public partial class MainWindow : Window
         });
     }
 
-    private static string? TryGetVersionFromModInfo(string modInfoPath)
-    {
-        if (!File.Exists(modInfoPath))
-            return null;
-
-        try
-        {
-            using var document = JsonDocument.Parse(File.ReadAllText(modInfoPath));
-            if (document.RootElement.ValueKind != JsonValueKind.Object)
-                return null;
-
-            if (document.RootElement.TryGetProperty("version", out var versionElement) &&
-                versionElement.ValueKind == JsonValueKind.String)
-            {
-                return versionElement.GetString();
-            }
-
-            return null;
-        }
-        catch
-        {
-            return null;
-        }
-    }
 
     private async Task<NexusModsFileResponse?> GetLatestModFileAsync()
     {
@@ -715,6 +840,9 @@ public partial class MainWindow : Window
                     break;
                 case "Backups":
                     _ = NavigateToBackupsViewAsync();
+                    break;
+                case "CascFastload":
+                    _ = NavigateToCascFastloadViewAsync();
                     break;
                 case "Plugins":
                     _ = NavigateToPluginsViewAsync();
@@ -920,6 +1048,20 @@ public partial class MainWindow : Window
                 }
             });
         }
+    }
+
+    public async Task NavigateToCascFastloadViewAsync()
+    {
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            var view = new CascFastloadView();
+            ContentArea.Content = view;
+
+            if (CascFastloadNavItem != null && NavigationList.SelectedItem != CascFastloadNavItem)
+            {
+                NavigationList.SelectedItem = CascFastloadNavItem;
+            }
+        });
     }
 
     public async Task NavigateToPluginsViewAsync()
@@ -1179,9 +1321,7 @@ public partial class MainWindow : Window
         LauncherUpdateService.ApplyUpdateAndRestart();
     }
 
-    // Starts (or restarts) the hourly background check that pings the launcher update endpoint
-    // even when the user never leaves the launcher open across sessions. Idempotent: re-entry
-    // simply replaces the previous timer instance.
+    // Starts/restarts the hourly background launcher-update check; idempotent.
     private void StartLauncherUpdateCheckTimer()
     {
         _launcherUpdateCheckTimer?.Stop();
@@ -1190,9 +1330,7 @@ public partial class MainWindow : Window
         _launcherUpdateCheckTimer.Start();
     }
 
-    // Click handler for the "Launcher v#.#.#" label: lets the user trigger an immediate update
-    // check on demand without waiting for the hourly poll. We surface a brief notification so the
-    // click feels acknowledged regardless of whether an update is available.
+    // "Launcher v#.#.#" click handler: triggers an immediate update check with a brief notification.
     private async void OnLauncherVersionClicked(object? sender, Avalonia.Input.PointerPressedEventArgs e)
     {
         if (LauncherUpdateService.AreUpdatesDisabled)
@@ -1218,6 +1356,41 @@ public partial class MainWindow : Window
         }
     }
 
+
+    private async void OnCopySessionLogClicked(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+            if (clipboard == null)
+            {
+                return;
+            }
+
+            var entries = SessionLogService.Entries;
+            if (entries.Count == 0)
+            {
+                await clipboard.SetTextAsync(string.Empty);
+                Notifications.SendNotification("Session log is empty.", "Info");
+                return;
+            }
+
+            var builder = new System.Text.StringBuilder();
+            foreach (var entry in entries)
+            {
+                builder.Append('[').Append(entry.Timestamp.ToString("HH:mm:ss")).Append("] ");
+                builder.Append(entry.Type).Append(": ");
+                builder.AppendLine(entry.Message);
+            }
+
+            await clipboard.SetTextAsync(builder.ToString());
+            Notifications.SendNotification($"Copied {entries.Count} session log entries to the clipboard.", "Success");
+        }
+        catch (Exception ex)
+        {
+            Notifications.SendNotification($"Failed to copy session log: {ex.Message}", "Error");
+        }
+    }
 
     private async void OnLogoutClicked(object? sender, RoutedEventArgs e)
     {
