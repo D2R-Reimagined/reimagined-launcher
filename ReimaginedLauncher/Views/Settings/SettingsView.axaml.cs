@@ -7,6 +7,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using ReimaginedLauncher.Utilities;
 
 namespace ReimaginedLauncher.Views.Settings;
@@ -14,6 +15,7 @@ namespace ReimaginedLauncher.Views.Settings;
 public partial class SettingsView : UserControl
 {
     private bool _isRefreshingSettings;
+    private bool _releaseSeedFocusAfterPointerRelease;
 
     // Set by the tunnelling PointerPressed handler just before a folder button's
     // Click fires, so the handler knows whether Ctrl was held (force picker).
@@ -37,6 +39,9 @@ public partial class SettingsView : UserControl
         {
             button.AddHandler(InputElement.PointerPressedEvent, OnFolderButtonPointerPressed, RoutingStrategies.Tunnel);
         }
+
+        RootScrollViewer.AddHandler(InputElement.PointerPressedEvent, OnSettingsPointerPressed, RoutingStrategies.Tunnel);
+        RootScrollViewer.AddHandler(InputElement.PointerReleasedEvent, OnSettingsPointerReleased, RoutingStrategies.Tunnel);
 
         RefreshSettingsState();
     }
@@ -80,6 +85,7 @@ public partial class SettingsView : UserControl
         }
 
         CustomMapSeedTextBox.Text = profile.CustomMapSeed.ToString(CultureInfo.InvariantCulture);
+        CustomMapSeedValidationText.IsVisible = false;
 
         MinimizeToTrayCheckBox.IsChecked = MainWindow.Settings.MinimizeToTray;
         MinimizeToTrayOnCloseCheckBox.IsChecked = MainWindow.Settings.MinimizeToTrayOnClose;
@@ -128,27 +134,87 @@ public partial class SettingsView : UserControl
             return;
         }
 
-        if (!TryApplyCustomMapSeed())
+        await ApplyCustomMapSeedAsync();
+    }
+
+    private async void OnCustomMapSeedKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (_isRefreshingSettings || e.Key != Key.Enter)
         {
-            RefreshSettingsState();
-            Notifications.SendNotification(
-                "Custom map seed must be a whole number between 0 and 4294967295.",
-                "Warning");
             return;
         }
 
-        await SettingsManager.SaveAsync(MainWindow.Settings);
+        e.Handled = true;
+        if (await ApplyCustomMapSeedAsync())
+        {
+            RootScrollViewer.Focus();
+        }
     }
 
-    private bool TryApplyCustomMapSeed()
+    private void OnCustomMapSeedTextChanged(object? sender, TextChangedEventArgs e)
     {
+        CustomMapSeedValidationText.IsVisible = !_isRefreshingSettings && !IsCustomMapSeedValid();
+    }
+
+    private async Task<bool> ApplyCustomMapSeedAsync()
+    {
+        if (!TryApplyCustomMapSeed(out var changed))
+        {
+            return false;
+        }
+
+        if (changed)
+        {
+            await SettingsManager.SaveAsync(MainWindow.Settings);
+        }
+
+        return true;
+    }
+
+    private bool TryApplyCustomMapSeed(out bool changed)
+    {
+        changed = false;
+
         if (!uint.TryParse(CustomMapSeedTextBox.Text, CultureInfo.InvariantCulture, out var seed))
         {
             return false;
         }
 
-        MainWindow.Settings.CurrentProfile.CustomMapSeed = seed;
+        var profile = MainWindow.Settings.CurrentProfile;
+        changed = profile.CustomMapSeed != seed;
+        profile.CustomMapSeed = seed;
         return true;
+    }
+
+    private bool IsCustomMapSeedValid()
+        => uint.TryParse(CustomMapSeedTextBox.Text, CultureInfo.InvariantCulture, out _);
+
+    private async void OnSettingsPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!CustomMapSeedTextBox.IsFocused || CustomMapSeedTextBox.IsPointerOver)
+        {
+            return;
+        }
+
+        _releaseSeedFocusAfterPointerRelease = true;
+        await ApplyCustomMapSeedAsync();
+    }
+
+    private void OnSettingsPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (!_releaseSeedFocusAfterPointerRelease)
+        {
+            return;
+        }
+
+        _releaseSeedFocusAfterPointerRelease = false;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (CustomMapSeedTextBox.IsFocused)
+            {
+                RootScrollViewer.Focus();
+            }
+        });
     }
 
     private async void OnMinimizeToTrayChanged(object? sender, RoutedEventArgs e)
