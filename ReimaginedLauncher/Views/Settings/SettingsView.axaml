@@ -4,8 +4,10 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
              x:Class="ReimaginedLauncher.Views.Settings.SettingsView">
-    <ScrollViewer HorizontalScrollBarVisibility="Disabled"
-                  VerticalScrollBarVisibility="Auto">
+    <ScrollViewer x:Name="RootScrollViewer"
+                  HorizontalScrollBarVisibility="Disabled"
+                  VerticalScrollBarVisibility="Auto"
+                  Focusable="True">
         <StackPanel Spacing="18">
             <StackPanel Spacing="4">
                 <TextBlock Classes="view-title"
@@ -140,7 +142,14 @@
                                      Margin="28,4,0,0"
                                      HorizontalAlignment="Left"
                                      PlaceholderText="0 - 4294967295"
-                                     LostFocus="OnCustomMapSeedChanged"/>
+                                     LostFocus="OnCustomMapSeedChanged"
+                                     KeyDown="OnCustomMapSeedKeyDown"
+                                     TextChanged="OnCustomMapSeedTextChanged"/>
+                            <TextBlock x:Name="CustomMapSeedValidationText"
+                                       Margin="28,0,0,0"
+                                       Foreground="{StaticResource DangerTextBrush}"
+                                       IsVisible="False"
+                                       Text="Enter a whole number from 0 to 4294967295." />
                         </StackPanel>
                     </StackPanel>
                 </StackPanel>
