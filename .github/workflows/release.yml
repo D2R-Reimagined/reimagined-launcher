@@ -87,42 +87,84 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - name: Restore solution
+      - name: Restore Windows target
         run: dotnet restore ReimaginedLauncher.sln -p:Configuration=Production -r win-x64
 
-      - name: Build solution
-        run: dotnet build ReimaginedLauncher.sln --configuration Production --no-restore
+      - name: Build Windows target
+        run: dotnet build ReimaginedLauncher/ReimaginedLauncher.csproj --configuration Production --runtime win-x64 --no-restore
 
-      - name: Publish production bundle
+      - name: Publish Windows production bundle
         run: >
           dotnet publish ReimaginedLauncher/ReimaginedLauncher.csproj
           --configuration Production
           --no-build
           -r win-x64
-          --output "${{ github.workspace }}\artifacts\ReimaginedLauncher"
+          --output "${{ github.workspace }}\artifacts\ReimaginedLauncher\win-x64"
 
-      - name: Download previous Velopack releases
+      - name: Restore Linux target
+        run: dotnet restore ReimaginedLauncher.sln -p:Configuration=Production -r linux-x64
+
+      - name: Build Linux target
+        run: dotnet build ReimaginedLauncher/ReimaginedLauncher.csproj --configuration Production --runtime linux-x64 --no-restore
+
+      - name: Publish Linux production bundle
+        run: >
+          dotnet publish ReimaginedLauncher/ReimaginedLauncher.csproj
+          --configuration Production
+          --no-build
+          -r linux-x64
+          --output "${{ github.workspace }}\artifacts\ReimaginedLauncher\linux-x64"
+
+      - name: Download previous Windows Velopack releases
         continue-on-error: true
         shell: pwsh
         run: |
-          dnx --yes vpk --version "${{ steps.velopack_version.outputs.version }}" download github `
+          dnx "vpk@${{ steps.velopack_version.outputs.version }}" --allow-roll-forward -- --yes download github `
+            --channel "win" `
             --repoUrl "https://github.com/${{ github.repository }}" `
             --token "${{ steps.app_token.outputs.token }}" `
-            --outputDir "${{ github.workspace }}\artifacts\velopack"
+            --outputDir "${{ github.workspace }}\artifacts\velopack\win-x64"
 
-      - name: Package Velopack release
+      - name: Download previous Linux Velopack releases
+        continue-on-error: true
         shell: pwsh
         run: |
-          dnx --yes vpk --version "${{ steps.velopack_version.outputs.version }}" pack `
+          dnx "vpk@${{ steps.velopack_version.outputs.version }}" --allow-roll-forward -- '[linux]' --yes download github `
+            --channel "linux" `
+            --repoUrl "https://github.com/${{ github.repository }}" `
+            --token "${{ steps.app_token.outputs.token }}" `
+            --outputDir "${{ github.workspace }}\artifacts\velopack\linux-x64"
+
+      - name: Package Windows Velopack release
+        shell: pwsh
+        run: |
+          dnx "vpk@${{ steps.velopack_version.outputs.version }}" --allow-roll-forward -- --yes pack `
             --packId "D2RReimagined.ReimaginedLauncher" `
             --packVersion "${{ steps.release_version.outputs.version }}" `
-            --packDir "${{ github.workspace }}\artifacts\ReimaginedLauncher" `
+            --packDir "${{ github.workspace }}\artifacts\ReimaginedLauncher\win-x64" `
             --mainExe "ReimaginedLauncher.exe" `
             --packTitle "D2R Reimagined Launcher" `
             --packAuthors "D2R Reimagined" `
             --icon "ReimaginedLauncher/Assets/ReimaginedLauncher.ico" `
             --runtime "win-x64" `
-            --outputDir "${{ github.workspace }}\artifacts\velopack"
+            --channel "win" `
+            --outputDir "${{ github.workspace }}\artifacts\velopack\win-x64"
+
+      - name: Package Linux Velopack release
+        shell: pwsh
+        run: |
+          dnx "vpk@${{ steps.velopack_version.outputs.version }}" --allow-roll-forward -- '[linux]' --yes pack `
+            --packId "D2RReimagined.ReimaginedLauncher" `
+            --packVersion "${{ steps.release_version.outputs.version }}" `
+            --packDir "${{ github.workspace }}\artifacts\ReimaginedLauncher\linux-x64" `
+            --mainExe "ReimaginedLauncher" `
+            --packTitle "D2R Reimagined Launcher" `
+            --packAuthors "D2R Reimagined" `
+            --icon "ReimaginedLauncher/Assets/ReimaginedLauncher.png" `
+            --runtime "linux-x64" `
+            --channel "linux" `
+            --categories "Game;Utility" `
+            --outputDir "${{ github.workspace }}\artifacts\velopack\linux-x64"
 
       - name: Commit version update
         if: github.event_name == 'workflow_dispatch'
@@ -158,7 +200,7 @@ jobs:
         shell: pwsh
         run: |
           Compress-Archive `
-            -Path "${{ github.workspace }}\artifacts\ReimaginedLauncher\*" `
+            -Path "${{ github.workspace }}\artifacts\ReimaginedLauncher\win-x64\*" `
             -DestinationPath "${{ github.workspace }}\artifacts\ReimaginedLauncher-${{ steps.release_version.outputs.tag }}-win-x64.zip" `
             -Force
 
@@ -180,23 +222,37 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ReimaginedLauncher-${{ steps.release_version.outputs.tag }}-win-x64
-          path: ${{ github.workspace }}\artifacts\ReimaginedLauncher
+          path: ${{ github.workspace }}\artifacts\ReimaginedLauncher\win-x64
 
-      - name: Upload Velopack artifact
+      - name: Upload Linux release artifact
         uses: actions/upload-artifact@v7
         with:
-          name: ReimaginedLauncher-${{ steps.release_version.outputs.tag }}-velopack
-          path: ${{ github.workspace }}\artifacts\velopack
+          name: ReimaginedLauncher-${{ steps.release_version.outputs.tag }}-linux-x64
+          path: ${{ github.workspace }}\artifacts\ReimaginedLauncher\linux-x64
 
-      - name: Upload Velopack release assets
+      - name: Upload Windows Velopack artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ReimaginedLauncher-${{ steps.release_version.outputs.tag }}-velopack-win-x64
+          path: ${{ github.workspace }}\artifacts\velopack\win-x64
+
+      - name: Upload Linux Velopack artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ReimaginedLauncher-${{ steps.release_version.outputs.tag }}-velopack-linux-x64
+          path: ${{ github.workspace }}\artifacts\velopack\linux-x64
+
+      - name: Upload Windows Velopack release assets
         shell: pwsh
         run: |
           $arguments = @(
+            'vpk@${{ steps.velopack_version.outputs.version }}',
+            '--allow-roll-forward',
+            '--',
             '--yes',
-            'vpk',
-            '--version', '${{ steps.velopack_version.outputs.version }}',
             'upload', 'github',
-            '--outputDir', '${{ github.workspace }}\artifacts\velopack',
+            '--channel', 'win',
+            '--outputDir', '${{ github.workspace }}\artifacts\velopack\win-x64',
             '--repoUrl', 'https://github.com/${{ github.repository }}',
             '--token', '${{ steps.app_token.outputs.token }}',
             '--publish',
@@ -207,7 +263,29 @@ jobs:
 
           & dnx @arguments
 
-      - name: Upload zip to GitHub release
+      - name: Upload Linux Velopack release assets
+        shell: pwsh
+        run: |
+          $arguments = @(
+            'vpk@${{ steps.velopack_version.outputs.version }}',
+            '--allow-roll-forward',
+            '--',
+            '[linux]',
+            '--yes',
+            'upload', 'github',
+            '--channel', 'linux',
+            '--outputDir', '${{ github.workspace }}\artifacts\velopack\linux-x64',
+            '--repoUrl', 'https://github.com/${{ github.repository }}',
+            '--token', '${{ steps.app_token.outputs.token }}',
+            '--publish',
+            '--merge',
+            '--releaseName', '${{ steps.release_version.outputs.tag }}',
+            '--tag', '${{ steps.release_version.outputs.tag }}'
+          )
+
+          & dnx @arguments
+
+      - name: Upload downloads to GitHub release
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ steps.app_token.outputs.token }}
@@ -215,4 +293,6 @@ jobs:
           name: ${{ steps.release_version.outputs.tag }}
           body: ${{ steps.release_notes.outputs.body }}
           overwrite_files: true
-          files: ${{ github.workspace }}\artifacts\ReimaginedLauncher-${{ steps.release_version.outputs.tag }}-win-x64.zip
+          files: |
+            ${{ github.workspace }}\artifacts\ReimaginedLauncher-${{ steps.release_version.outputs.tag }}-win-x64.zip
+            ${{ github.workspace }}\artifacts\velopack\linux-x64\*.AppImage

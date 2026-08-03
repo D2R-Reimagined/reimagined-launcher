@@ -4,16 +4,16 @@
         <TargetFramework>net10.0</TargetFramework>
         <Nullable>enable</Nullable>
         <Version>0.9.1</Version>
-        <VelopackVersion>0.0.1298</VelopackVersion>
+        <VelopackVersion>1.2.0</VelopackVersion>
         <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
         <ApplicationManifest>app.manifest</ApplicationManifest>
         <ApplicationIcon>Assets\ReimaginedLauncher.ico</ApplicationIcon>
         <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
-        <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+        <RuntimeIdentifiers>win-x64;linux-x64</RuntimeIdentifiers>
     </PropertyGroup>
 
     <PropertyGroup Condition="'$(Configuration)' == 'Production'">
-        <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+        <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
         <SelfContained>true</SelfContained>
         <PublishSingleFile>true</PublishSingleFile>
         <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
@@ -23,20 +23,20 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Avalonia" Version="12.0.3" />
+        <PackageReference Include="Avalonia" Version="12.1.1" />
         <PackageReference Include="Avalonia.AvaloniaEdit" Version="12.0.0" />
-        <PackageReference Include="Avalonia.Desktop" Version="12.0.3" />
-        <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.3" />
-        <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.3" />
+        <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
+        <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
+        <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.1" />
         <PackageReference Include="AvaloniaEdit.TextMate" Version="12.0.0" />
-        <PackageReference Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.1">
+        <PackageReference Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.3">
             <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
             <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
         </PackageReference>
         <PackageReference Include="D2RReimaginedTools.FileExtensions" Version="0.6.1" />
         <PackageReference Include="Material.Icons.Avalonia" Version="3.0.2" />
-        <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.8" />
-        <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.8" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.10" />
+        <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.10" />
         <PackageReference Include="Velopack" Version="$(VelopackVersion)" />
     </ItemGroup>
 
