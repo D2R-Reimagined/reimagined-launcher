@@ -115,10 +115,10 @@
                                  IsReadOnly="True"
                                  Width="563"
                                  HorizontalAlignment="Left"
-                                 PlaceholderText="Steam.exe Path" />
+                                 PlaceholderText="Steam executable path" />
                         <Button x:Name="LocateSteamButton"
                                 Grid.Column="1"
-                                Content="Locate Steam.exe"
+                                Content="Locate Steam"
                                 Click="OnLocateSteamClick"
                                 VerticalContentAlignment="Center" />
                     </Grid>

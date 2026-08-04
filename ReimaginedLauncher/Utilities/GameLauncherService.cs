@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -11,11 +12,9 @@ namespace ReimaginedLauncher.Utilities;
 
 public class GameLauncherService
 {
-    private static readonly string[] DefaultInstallPaths =
-    [
-        @"C:\Program Files (x86)\Diablo II Resurrected\D2R.exe",
-        @"C:\Program Files (x86)\Steam\steamapps\common\Diablo II Resurrected\D2R.exe"
-    ];
+    private const string SteamAppId = "2536520";
+    private const string GameExecutableName = "D2R.exe";
+    private static readonly string[] DefaultInstallPaths = GetDefaultInstallPaths();
     private CancellationTokenSource? _detectionCts;
     public bool IsDetecting { get; private set; }
     public string? GamePathOverride { get; set; } = string.Empty;
@@ -181,7 +180,7 @@ public class GameLauncherService
             if (!File.Exists(path)) continue;
 
             var dir = Path.GetDirectoryName(path);
-            if (path.Contains("steamapps\\common", StringComparison.OrdinalIgnoreCase))
+            if (IsSteamLibraryPath(path))
                 steam = dir;
             else
                 bnet = dir;
@@ -245,7 +244,7 @@ public class GameLauncherService
 
     public InstallationType DetectInstallationType(string path)
     {
-        if (path.Contains("steamapps\\common", StringComparison.OrdinalIgnoreCase))
+        if (IsSteamLibraryPath(path))
         {
             return InstallationType.Steam;
         }
@@ -255,7 +254,21 @@ public class GameLauncherService
     public string? FindSteamExecutable(string? d2rDir = null)
     {
         var targetD2rDir = d2rDir ?? MainWindow.Settings.CurrentProfile.InstallDirectory;
-        if (!string.IsNullOrEmpty(targetD2rDir) && targetD2rDir.Contains("steamapps\\common", StringComparison.OrdinalIgnoreCase))
+
+        if (OperatingSystem.IsLinux())
+        {
+            var isFlatpakInstall = !string.IsNullOrWhiteSpace(targetD2rDir) &&
+                                   NormalizePathSeparators(targetD2rDir)
+                                       .Contains("/.var/app/com.valvesoftware.Steam/", StringComparison.Ordinal);
+            if (isFlatpakInstall)
+            {
+                return FindExecutableOnPath("flatpak");
+            }
+
+            return FindExecutableOnPath("steam") ?? FindExecutableOnPath("flatpak");
+        }
+
+        if (!string.IsNullOrEmpty(targetD2rDir) && IsSteamLibraryPath(targetD2rDir))
         {
             try
             {
@@ -300,6 +313,11 @@ public class GameLauncherService
             {
                 return path;
             }
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            return null;
         }
 
         // Iterate through all fixed drives
@@ -435,11 +453,20 @@ public class GameLauncherService
 
         if (profile.Type == InstallationType.Steam)
         {
-            var steamPath = profile.SteamDirectory ?? @"C:\Program Files (x86)\Steam\steam.exe";
-            return $"\"{steamPath}\" -silent -applaunch 2536520 {launchParameters}";
+            var steamPath = profile.SteamDirectory ?? FindSteamExecutable(profile.InstallDirectory) ?? GetDefaultSteamCommand();
+            var steamPrefix = GetSteamArgumentPrefix(steamPath);
+            return $"\"{steamPath}\" {steamPrefix}-silent -applaunch {SteamAppId} {launchParameters}";
         }
 
         var executablePath = ResolveExecutablePath(gamePathOverride) ?? "D2R.exe";
+        if (OperatingSystem.IsLinux())
+        {
+            var winePath = FindExecutableOnPath("wine") ?? "wine";
+            var winePrefix = FindWinePrefix(executablePath);
+            var prefix = winePrefix is null ? string.Empty : $"WINEPREFIX=\"{winePrefix}\" ";
+            return $"{prefix}\"{winePath}\" \"{executablePath}\" {launchParameters}";
+        }
+
         return $"\"{executablePath}\" {launchParameters}";
     }
 
@@ -461,27 +488,46 @@ public class GameLauncherService
 
         string executablePath;
         string finalArgs;
+        string? winePrefix = null;
 
         if (profile.Type == InstallationType.Steam)
         {
-            executablePath = profile.SteamDirectory ?? @"C:\Program Files (x86)\Steam\steam.exe";
-            finalArgs = $"-silent -applaunch 2536520 {launchParameters}";
+            executablePath = profile.SteamDirectory ?? FindSteamExecutable(profile.InstallDirectory) ?? string.Empty;
+            var steamPrefix = GetSteamArgumentPrefix(executablePath);
+            finalArgs = $"{steamPrefix}-silent -applaunch {SteamAppId} {launchParameters}";
             
-            if (!File.Exists(executablePath))
+            if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
             {
-                Notifications.SendNotification($"Steam.exe not found at {executablePath}. Please locate it in the Install Directory section.");
+                Notifications.SendNotification("Steam was not found. Please locate its executable in the Install Directory section.");
                 return null;
             }
         }
         else
         {
-            executablePath = ResolveExecutablePath(GamePathOverride) ?? string.Empty;
-            finalArgs = launchParameters;
+            var gameExecutablePath = ResolveExecutablePath(GamePathOverride) ?? string.Empty;
             
-            if (string.IsNullOrWhiteSpace(executablePath))
+            if (string.IsNullOrWhiteSpace(gameExecutablePath))
             {
                 Notifications.SendNotification("No valid game path found. Please set the game path in settings.");
                 return null;
+            }
+
+            if (OperatingSystem.IsLinux())
+            {
+                executablePath = FindExecutableOnPath("wine") ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(executablePath))
+                {
+                    Notifications.SendNotification("Wine was not found. Install Wine or use the Steam installation type.", "Warning");
+                    return null;
+                }
+
+                winePrefix = FindWinePrefix(gameExecutablePath);
+                finalArgs = $"\"{gameExecutablePath}\" {launchParameters}";
+            }
+            else
+            {
+                executablePath = gameExecutablePath;
+                finalArgs = launchParameters;
             }
         }
 
@@ -490,9 +536,14 @@ public class GameLauncherService
 
         var processStartInfo = new ProcessStartInfo(executablePath)
         {
-            UseShellExecute = true,
+            UseShellExecute = !OperatingSystem.IsLinux(),
             Arguments = finalArgs
         };
+
+        if (!string.IsNullOrWhiteSpace(winePrefix))
+        {
+            processStartInfo.Environment["WINEPREFIX"] = winePrefix;
+        }
 
         try
         {
@@ -523,5 +574,153 @@ public class GameLauncherService
         }
 
         return InstallDirectoryValidator.GetExecutablePath(MainWindow.Settings.CurrentProfile.InstallDirectory);
+    }
+
+    private static string[] GetDefaultInstallPaths()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return
+            [
+                @"C:\Program Files (x86)\Diablo II Resurrected\D2R.exe",
+                @"C:\Program Files (x86)\Steam\steamapps\common\Diablo II Resurrected\D2R.exe"
+            ];
+        }
+
+        if (!OperatingSystem.IsLinux())
+        {
+            return [];
+        }
+
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(home))
+        {
+            return [];
+        }
+
+        var steamRoots = new HashSet<string>(StringComparer.Ordinal)
+        {
+            Path.Combine(home, ".local", "share", "Steam"),
+            Path.Combine(home, ".steam", "steam"),
+            Path.Combine(home, ".var", "app", "com.valvesoftware.Steam", "data", "Steam")
+        };
+
+        foreach (var steamRoot in steamRoots.ToArray())
+        {
+            AddConfiguredSteamLibraries(steamRoot, steamRoots);
+        }
+
+        var paths = steamRoots
+            .Select(root => Path.Combine(root, "steamapps", "common", "Diablo II Resurrected", GameExecutableName))
+            .ToList();
+        paths.Add(Path.Combine(
+            home,
+            ".wine", "drive_c", "Program Files (x86)", "Diablo II Resurrected", GameExecutableName));
+
+        return paths.ToArray();
+    }
+
+    private static void AddConfiguredSteamLibraries(string steamRoot, ISet<string> steamRoots)
+    {
+        var libraryFoldersPath = Path.Combine(steamRoot, "steamapps", "libraryfolders.vdf");
+        if (!File.Exists(libraryFoldersPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var content = File.ReadAllText(libraryFoldersPath);
+            foreach (Match match in Regex.Matches(content, "\\\"path\\\"\\s+\\\"(?<path>[^\\\"]+)\\\""))
+            {
+                var libraryPath = match.Groups["path"].Value.Replace("\\\\", "\\");
+                if (!string.IsNullOrWhiteSpace(libraryPath))
+                {
+                    steamRoots.Add(libraryPath);
+                }
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private static bool IsSteamLibraryPath(string path)
+    {
+        return NormalizePathSeparators(path)
+            .Contains("/steamapps/common/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizePathSeparators(string path)
+    {
+        return path.Replace('\\', '/');
+    }
+
+    private static string? FindExecutableOnPath(string executableName)
+    {
+        var pathValue = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrWhiteSpace(pathValue))
+        {
+            return null;
+        }
+
+        foreach (var directory in pathValue.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            try
+            {
+                var candidate = Path.Combine(directory, executableName);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+            catch (ArgumentException)
+            {
+            }
+        }
+
+        return null;
+    }
+
+    private static string GetDefaultSteamCommand()
+    {
+        return OperatingSystem.IsWindows()
+            ? @"C:\Program Files (x86)\Steam\steam.exe"
+            : "steam";
+    }
+
+    private static string GetSteamArgumentPrefix(string steamExecutable)
+    {
+        if (!OperatingSystem.IsLinux() ||
+            !string.Equals(Path.GetFileName(steamExecutable), "flatpak", StringComparison.Ordinal))
+        {
+            return string.Empty;
+        }
+
+        return "run com.valvesoftware.Steam ";
+    }
+
+    private static string? FindWinePrefix(string executablePath)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return null;
+        }
+
+        var directory = new DirectoryInfo(Path.GetDirectoryName(executablePath) ?? string.Empty);
+        while (directory is not null)
+        {
+            if (string.Equals(directory.Name, "drive_c", StringComparison.OrdinalIgnoreCase))
+            {
+                return directory.Parent?.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        return null;
     }
 }

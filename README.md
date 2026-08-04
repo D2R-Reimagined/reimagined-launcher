@@ -18,6 +18,10 @@ Source code for the mod can be found here: [https://github.com/D2R-Reimagined/d2
 * Modify sounds of the game. Such as removing aura sounds
 * Launcher Auto-Update
 
+## Downloads
+
+Windows x64 and Linux x64 downloads are published on the [GitHub Releases](https://github.com/D2R-Reimagined/reimagined-launcher/releases) page. Linux users should download the AppImage and follow the short setup instructions in [LINUX.md](LINUX.md).
+
 ## Contributing
 This is a .NET project and utilizes our D2RReimagined.FileExtensions Nuget. Contributing can be done on either repo.
 1) Fork the Repo

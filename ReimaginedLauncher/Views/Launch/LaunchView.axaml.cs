@@ -82,6 +82,8 @@ public partial class LaunchView : UserControl
 
         SteamExtraPanel.IsVisible = profile.Type == InstallationType.Steam;
         SteamPathTextBox.Text = profile.SteamDirectory ?? string.Empty;
+        SteamPathTextBox.PlaceholderText = OperatingSystem.IsLinux() ? "Steam or Flatpak executable" : "Steam.exe Path";
+        LocateSteamButton.Content = OperatingSystem.IsLinux() ? "Locate Steam" : "Locate Steam.exe";
 
         // Auto-detect Steam path if not set or if it's currently Steam type
         if (profile.Type == InstallationType.Steam)
@@ -208,9 +210,15 @@ public partial class LaunchView : UserControl
         {
             var files = await window.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
             {
-                Title = "Locate Steam.exe",
+                Title = OperatingSystem.IsLinux() ? "Locate Steam or Flatpak executable" : "Locate Steam.exe",
                 AllowMultiple = false,
-                FileTypeFilter = [new FilePickerFileType("Steam Executable") { Patterns = ["Steam.exe"] }]
+                FileTypeFilter =
+                [
+                    new FilePickerFileType("Steam Executable")
+                    {
+                        Patterns = OperatingSystem.IsLinux() ? ["steam", "flatpak"] : ["Steam.exe"]
+                    }
+                ]
             });
 
             if (files.Count > 0)

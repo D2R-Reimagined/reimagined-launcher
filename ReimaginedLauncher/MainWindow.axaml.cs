@@ -1423,7 +1423,11 @@ public partial class MainWindow : Window
         {
             try
             {
-                foreach (var proc in Process.GetProcessesByName(processName))
+                var candidateProcesses = OperatingSystem.IsLinux()
+                    ? Process.GetProcesses()
+                    : Process.GetProcessesByName(processName);
+
+                foreach (var proc in candidateProcesses)
                 {
                     try
                     {
@@ -1432,6 +1436,19 @@ public partial class MainWindow : Window
                             string.Equals(Path.GetFullPath(mainModule.FileName), normalizedTarget, StringComparison.OrdinalIgnoreCase))
                         {
                             return proc;
+                        }
+
+                        if (OperatingSystem.IsLinux())
+                        {
+                            var commandLinePath = $"/proc/{proc.Id}/cmdline";
+                            var commandLine = File.Exists(commandLinePath)
+                                ? File.ReadAllText(commandLinePath).Replace('\0', ' ')
+                                : string.Empty;
+                            if (commandLine.Contains(normalizedTarget, StringComparison.Ordinal) ||
+                                commandLine.Contains(Path.GetFileName(exePath), StringComparison.OrdinalIgnoreCase))
+                            {
+                                return proc;
+                            }
                         }
                     }
                     catch

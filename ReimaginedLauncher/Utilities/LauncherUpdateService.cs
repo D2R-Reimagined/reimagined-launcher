@@ -30,7 +30,7 @@ public static class LauncherUpdateService
 
     public static async Task CheckForUpdatesAsync()
     {
-        if (AreUpdatesDisabled || _hasCheckedForUpdates || !OperatingSystem.IsWindows())
+        if (AreUpdatesDisabled || _hasCheckedForUpdates)
         {
             return;
         }
