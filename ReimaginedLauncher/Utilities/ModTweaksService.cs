@@ -43,6 +43,7 @@ public static class ModTweaksService
     private const string VignetteFileName = "vignette.texture";
     private const string BundledVignetteAssetPath = "Assets/Vignette/vignette.texture";
     internal const string DisableExtraBloodBackupClaimId = "launcher-tweak:disable-extra-blood";
+    internal const string RemoveItemLightBeamsBackupClaimId = "launcher-tweak:remove-item-light-beams";
     private const string CharStatsFileName = "charstats.txt";
     private const string DifficultyLevelsFileName = "DifficultyLevels.txt";
     private const string SkillsFileName = "skills.txt";
@@ -63,6 +64,68 @@ public static class ModTweaksService
     private const string QuestDirectoryName = "quest";
     private const string DesecratedEnterHdFileName = "desecrated_enter_hd.flac";
     private const string GeneratedTweaksFolderName = "mod-tweaks";
+    private static readonly string[] ItemLightBeamVfxPaths =
+    [
+        "data/hd/vfx/particles/overlays/object/horadric_light/fx_horadric_light.particles",
+        "data/hd/vfx/particles/overlays/paladin/aura_fanatic/aura_fanatic.particles",
+        "data/hd/vfx/particles/overlays/common/valkyriestart/valkriestart_overlay.particles"
+    ];
+    private static readonly string[] ItemLightBeamRelativePaths =
+    [
+        "data/hd/items/misc/gem/jewels.json",
+        "data/hd/items/misc/grabbers/grabber_tool.json",
+        "data/hd/items/misc/key/destruction_key.json",
+        "data/hd/items/misc/key/hate_key.json",
+        "data/hd/items/misc/key/terror_key.json",
+        "data/hd/items/misc/powerorbs/orbofassemblage.json",
+        "data/hd/items/misc/powerorbs/orbofassemblage_stacked.json",
+        "data/hd/items/misc/powerorbs/orbofconversion.json",
+        "data/hd/items/misc/powerorbs/orbofconversion_stacked.json",
+        "data/hd/items/misc/powerorbs/orbofcorruption.json",
+        "data/hd/items/misc/powerorbs/orbofcorruption_stacked.json",
+        "data/hd/items/misc/powerorbs/orbofinfusion.json",
+        "data/hd/items/misc/powerorbs/orbofinfusion_stacked.json",
+        "data/hd/items/misc/powerorbs/orbofrenewal.json",
+        "data/hd/items/misc/powerorbs/orbofrenewal_stacked.json",
+        "data/hd/items/misc/powerorbs/orbofshadows.json",
+        "data/hd/items/misc/powerorbs/orbofshadows_stacked.json",
+        "data/hd/items/misc/powerorbs/orbofsocketing.json",
+        "data/hd/items/misc/powerorbs/orbofsocketing_stacked.json",
+        "data/hd/items/misc/quest/baal_calamity.json",
+        "data/hd/items/misc/quest/diablo_ire.json",
+        "data/hd/items/misc/quest/mephisto_animus.json",
+        "data/hd/items/misc/rune/lem_rune.json",
+        "data/hd/items/misc/rune/lem_rune_stacked.json",
+        "data/hd/items/misc/rune/pul_rune.json",
+        "data/hd/items/misc/rune/pul_rune_stacked.json",
+        "data/hd/items/misc/rune/um_rune.json",
+        "data/hd/items/misc/rune/um_rune_stacked.json",
+        "data/hd/items/misc/rune/mal_rune.json",
+        "data/hd/items/misc/rune/mal_rune_stacked.json",
+        "data/hd/items/misc/rune/ist_rune.json",
+        "data/hd/items/misc/rune/ist_rune_stacked.json",
+        "data/hd/items/misc/rune/gul_rune.json",
+        "data/hd/items/misc/rune/gul_rune_stacked.json",
+        "data/hd/items/misc/rune/vex_rune.json",
+        "data/hd/items/misc/rune/vex_rune_stacked.json",
+        "data/hd/items/misc/rune/ohm_rune.json",
+        "data/hd/items/misc/rune/ohm_rune_stacked.json",
+        "data/hd/items/misc/rune/lo_rune.json",
+        "data/hd/items/misc/rune/lo_rune_stacked.json",
+        "data/hd/items/misc/rune/sur_rune.json",
+        "data/hd/items/misc/rune/sur_rune_stacked.json",
+        "data/hd/items/misc/rune/ber_rune.json",
+        "data/hd/items/misc/rune/ber_rune_stacked.json",
+        "data/hd/items/misc/rune/jah_rune.json",
+        "data/hd/items/misc/rune/jah_rune_stacked.json",
+        "data/hd/items/misc/rune/cham_rune.json",
+        "data/hd/items/misc/rune/cham_rune_stacked.json",
+        "data/hd/items/misc/rune/zod_rune.json",
+        "data/hd/items/misc/rune/zod_rune_stacked.json",
+        "data/hd/items/misc/storage/gem_cluster.json",
+        "data/hd/items/misc/storage/storage1.json",
+        "data/hd/items/misc/storage/storage2.json"
+    ];
     private static readonly string[] DisableExtraBloodRelativePaths =
     [
         "data/hd/character/enemy/arach1/animation/combined.timelines",
@@ -724,6 +787,8 @@ public static class ModTweaksService
             await ApplyVignetteTweakAsync(profile.RemoveVignette);
             ReportProgress(progress, "Applying extra blood effects tweak...");
             await ApplyDisableExtraBloodTweakAsync(modRoot, profile.DisableExtraBlood);
+            ReportProgress(progress, "Applying item light beam tweak...");
+            await ApplyRemoveItemLightBeamsTweakAsync(modRoot, profile.RemoveItemLightBeams);
 
             // Restore monsters.json from the launcher's clean copy and pre-stage
             // any plugin asset copies targeting it. monsters.json has no launcher
@@ -1571,11 +1636,49 @@ public static class ModTweaksService
         LaunchDiagnostics.Log($"Disabled extra blood effects by removing {removedFileCount} mod assets.");
     }
 
+    private static async Task ApplyRemoveItemLightBeamsTweakAsync(string? modRoot, bool removeItemLightBeams)
+    {
+        if (!removeItemLightBeams || string.IsNullOrWhiteSpace(modRoot))
+        {
+            return;
+        }
+
+        var updatedFileCount = 0;
+        foreach (var relativePath in ItemLightBeamRelativePaths)
+        {
+            var targetFilePath = ResolveModRelativePath(modRoot, relativePath);
+            if (!File.Exists(targetFilePath))
+            {
+                continue;
+            }
+
+            var json = await File.ReadAllTextAsync(targetFilePath);
+            var updatedJson = json;
+            foreach (var vfxPath in ItemLightBeamVfxPaths)
+            {
+                updatedJson = updatedJson.Replace(vfxPath, string.Empty, StringComparison.Ordinal);
+            }
+
+            if (updatedJson == json)
+            {
+                continue;
+            }
+
+            await PluginAssetBackupService.RegisterReplacementAsync(
+                RemoveItemLightBeamsBackupClaimId,
+                targetFilePath);
+            await File.WriteAllTextAsync(targetFilePath, updatedJson);
+            updatedFileCount++;
+        }
+
+        LaunchDiagnostics.Log($"Removed item light beams from {updatedFileCount} mod assets.");
+    }
+
     private static string ResolveModRelativePath(string modRoot, string relativePath)
     {
         if (Path.IsPathRooted(relativePath))
         {
-            throw new InvalidDataException($"Extra blood target path must be relative: {relativePath}");
+            throw new InvalidDataException($"Mod target path must be relative: {relativePath}");
         }
 
         var fullModRoot = Path.GetFullPath(modRoot)
@@ -1586,7 +1689,7 @@ public static class ModTweaksService
         var modRootPrefix = fullModRoot + Path.DirectorySeparatorChar;
         if (!fullTargetPath.StartsWith(modRootPrefix, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidDataException($"Extra blood target path escapes the mod directory: {relativePath}");
+            throw new InvalidDataException($"Mod target path escapes the mod directory: {relativePath}");
         }
 
         return fullTargetPath;
