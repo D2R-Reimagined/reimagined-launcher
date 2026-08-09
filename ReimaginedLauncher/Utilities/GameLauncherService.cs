@@ -705,12 +705,18 @@ public class GameLauncherService
 
     private static string? FindWinePrefix(string executablePath)
     {
-        if (!OperatingSystem.IsLinux())
+        if (!OperatingSystem.IsLinux() || string.IsNullOrWhiteSpace(executablePath))
         {
             return null;
         }
 
-        var directory = new DirectoryInfo(Path.GetDirectoryName(executablePath) ?? string.Empty);
+        var dir = Path.GetDirectoryName(executablePath);
+        if (string.IsNullOrWhiteSpace(dir))
+        {
+            return null;
+        }
+
+        var directory = new DirectoryInfo(dir);
         while (directory is not null)
         {
             if (string.Equals(directory.Name, "drive_c", StringComparison.OrdinalIgnoreCase))
