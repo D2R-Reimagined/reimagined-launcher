@@ -3,7 +3,7 @@
         <OutputType>WinExe</OutputType>
         <TargetFramework>net10.0</TargetFramework>
         <Nullable>enable</Nullable>
-        <Version>0.10.0</Version>
+        <Version>0.10.1</Version>
         <VelopackVersion>1.2.0</VelopackVersion>
         <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
         <ApplicationManifest>app.manifest</ApplicationManifest>
@@ -53,6 +53,7 @@
      </ItemGroup>
 
 </Project>
+
 
 
 
