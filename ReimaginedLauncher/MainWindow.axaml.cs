@@ -93,7 +93,8 @@ public partial class MainWindow : Window
             Position = NotificationPosition.BottomRight,
             MaxItems = 3
         };
-        LogoImage.Source = new Bitmap("Assets/ReimaginedLauncher.ico");
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "ReimaginedLauncher.ico");
+        LogoImage.Source = new Bitmap(iconPath);
         LauncherVersionTextBlock.Text = $"Launcher v{LauncherVersion}";
         LauncherUpdateService.UpdateDownloaded += (s, e) => RefreshLauncherUpdateUI();
         LauncherUpdateService.UpdateStateChanged += (s, e) => RefreshLauncherUpdateUI();
@@ -107,7 +108,7 @@ public partial class MainWindow : Window
         _ = NavigateToLaunchViewAsync();
         
         // Set the window icon
-        Icon = new WindowIcon("Assets/ReimaginedLauncher.ico");
+        Icon = new WindowIcon(iconPath);
         InitializeTrayIcon();
         _saveWindowStateTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _saveWindowStateTimer.Tick += async (_, _) =>
@@ -145,17 +146,12 @@ public partial class MainWindow : Window
         profile.InstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(profile.InstallDirectory);
         profile.IsInstallDirectoryValidated = InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory);
         BackupService.ApplyDefaultSettings();
-        var openedUnreadAnnouncements = await RefreshAnnouncementsStateAsync(openUnreadAnnouncements: true);
-        ApplyUiScale();
-        
-        if (!string.IsNullOrWhiteSpace(Settings.NexusModsSSOApiKey))
-        {
-            User = await _nexusModsHttpClient.ValidateApiKeyAsync();
-            UserViewModel.User = User;
-        }
-        
+
+        // Resolve local mod state and refresh the current view immediately,
+        // before any potentially-slow network calls.
         var installDir = Settings.CurrentProfile.InstallDirectory;
         RefreshLocalModState(installDir);
+        ApplyUiScale();
         PluginsView? pluginsViewToRefresh = null;
 
         await Dispatcher.UIThread.InvokeAsync(() =>
@@ -193,6 +189,15 @@ public partial class MainWindow : Window
 
         BackupService.UpdateSchedule();
         await SettingsManager.SaveAsync(Settings);
+
+        // Network calls (can be slow; don't block UI setup)
+        var openedUnreadAnnouncements = await RefreshAnnouncementsStateAsync(openUnreadAnnouncements: true);
+
+        if (!string.IsNullOrWhiteSpace(Settings.NexusModsSSOApiKey))
+        {
+            User = await _nexusModsHttpClient.ValidateApiKeyAsync();
+            UserViewModel.User = User;
+        }
 
         await RefreshUpdateStateAsync();
         LauncherUpdateService.AreUpdatesDisabled = Settings.DisableLauncherUpdates;
