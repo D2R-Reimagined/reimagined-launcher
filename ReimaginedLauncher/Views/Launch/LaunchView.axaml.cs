@@ -1,9 +1,12 @@
 using System.Threading.Tasks;
 using System;
+using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using ReimaginedLauncher.Utilities;
@@ -14,6 +17,7 @@ public partial class LaunchView : UserControl
 {
     public GameLauncherService LauncherService = new();
     private bool _isLaunching;
+    private D2RLoaderInventory? _loaderInventory;
 
     public LaunchView()
     {
@@ -75,6 +79,7 @@ public partial class LaunchView : UserControl
     {
         var settings = MainWindow.Settings;
         var profile = settings.CurrentProfile;
+        var isOnlineExperience = profile.LaunchExperience == LaunchExperience.Online;
 
         InstallationTypeComboBox.SelectedIndex = (int)profile.Type;
         DirectoryTextBox.Text = profile.InstallDirectory ?? string.Empty;
@@ -130,6 +135,15 @@ public partial class LaunchView : UserControl
 
         profile.IsInstallDirectoryValidated = isValidated;
 
+        OfflineExperienceButton.Classes.Set("selected", !isOnlineExperience);
+        OnlineExperienceButton.Classes.Set("selected", isOnlineExperience);
+        OnlineExperienceButton.IsEnabled = profile.Type != InstallationType.D2RMM;
+        OnlineExperiencePanel.IsVisible = isOnlineExperience && profile.Type != InstallationType.D2RMM;
+
+        _loaderInventory = D2RLoaderService.Discover(profile.InstallDirectory);
+        RefreshD2RLoaderState(profile, _loaderInventory);
+        var onlineAvailable = D2RLoaderService.CanUseOnlineExperience(profile, out var onlineUnavailableReason);
+
         if (profile.Type == InstallationType.D2RMM)
         {
             StartGameButton.Content = "Install Tweaks";
@@ -138,17 +152,26 @@ public partial class LaunchView : UserControl
         }
         else
         {
-            StartGameButton.Content = "Start Game";
-            StartGameDescription.Text = "The button stays available here and will enable once the install directory is valid and the mod is detected.";
-            StartGameButton.IsEnabled = !_isLaunching && isValidated && isModDetected;
+            StartGameButton.Content = isOnlineExperience ? "Start Online" : "Start Offline";
+            StartGameDescription.Text = isOnlineExperience
+                ? "Starts D2RLoader with Reimagined selected. Choose TCP/IP in-game to host or join; this does not connect to Battle.net."
+                : "Starts the standard Reimagined offline experience with your saved launch options.";
+            StartGameButton.IsEnabled = !_isLaunching
+                                        && isValidated
+                                        && isModDetected
+                                        && (!isOnlineExperience || onlineAvailable);
 
-            if (profile.Type == InstallationType.Steam && string.IsNullOrWhiteSpace(profile.SteamDirectory))
+            if (!isOnlineExperience
+                && profile.Type == InstallationType.Steam
+                && string.IsNullOrWhiteSpace(profile.SteamDirectory))
             {
                 StartGameButton.IsEnabled = false;
             }
         }
 
-        ValidationBanner.IsVisible = !isValidated || !isModDetected;
+        ValidationBanner.IsVisible = !isValidated
+                                     || !isModDetected
+                                     || isOnlineExperience && !onlineAvailable;
         
         if (profile.Type == InstallationType.D2RMM)
         {
@@ -162,7 +185,9 @@ public partial class LaunchView : UserControl
         }
         else
         {
-            ValidationBannerText.Text = !isValidated
+            ValidationBannerText.Text = isOnlineExperience && isValidated && isModDetected && !onlineAvailable
+                ? onlineUnavailableReason ?? "D2RLoader is unavailable for this profile."
+                : !isValidated
                 ? string.IsNullOrWhiteSpace(profile.InstallDirectory)
                     ? "Enter your Diablo II: Resurrected install directory before using the launcher."
                     : profile.Type == InstallationType.Steam
@@ -180,6 +205,106 @@ public partial class LaunchView : UserControl
             : "Auto-Backup Interval: N/A";
     }
 
+    private void RefreshD2RLoaderState(InstallationProfile profile, D2RLoaderInventory inventory)
+    {
+        LoaderPluginsItemsControl.ItemsSource = inventory.Plugins;
+        LoaderPatchesItemsControl.ItemsSource = inventory.Patches;
+        LoaderPluginCountText.Text = inventory.Plugins.Count.ToString();
+        LoaderPatchCountText.Text = inventory.Patches.Count.ToString();
+        NoLoaderPluginsText.IsVisible = inventory.Plugins.Count == 0;
+        NoLoaderPatchesText.IsVisible = inventory.Patches.Count == 0;
+
+        LoaderStatusBadge.Background = new SolidColorBrush(Color.Parse(inventory.IsInstalled ? "#17351D" : "#3A1818"));
+        LoaderStatusBadgeText.Foreground = new SolidColorBrush(Color.Parse(inventory.IsInstalled ? "#86D88F" : "#E98B91"));
+        LoaderStatusBadgeText.Text = inventory.IsInstalled ? "READY" : "NOT FOUND";
+        LoaderStatusText.Text = inventory.IsInstalled
+            ? $"D2RLoader {inventory.Version ?? "unknown version"} detected beside D2R.exe. "
+              + $"Found {inventory.Plugins.Count} plugin{(inventory.Plugins.Count == 1 ? string.Empty : "s")} and "
+              + $"{inventory.Patches.Count} patch manifest{(inventory.Patches.Count == 1 ? string.Empty : "s")}."
+            : "Place D2RLoader.exe in the same folder as D2R.exe to enable this experience.";
+
+        var disabledScopes = new[]
+            {
+                inventory.AllowGlobalExtensions ? null : "global extensions",
+                inventory.AllowModExtensions ? null : "Reimagined extensions"
+            }
+            .Where(value => value is not null)
+            .ToArray();
+        LoaderExtensionPolicyText.Text = disabledScopes.Length == 0
+            ? "Global and Reimagined extension loading are enabled in d2rloader.toml."
+            : $"Disabled by d2rloader.toml: {string.Join(", ", disabledScopes!)}.";
+
+        var canUseOnline = D2RLoaderService.CanUseOnlineExperience(profile, out var reason);
+        LoaderWarningBanner.IsVisible = !canUseOnline;
+        LoaderWarningText.Text = reason ?? string.Empty;
+        OpenLoaderFolderButton.IsEnabled = Directory.Exists(inventory.GlobalRoot);
+        OpenModLoaderFolderButton.IsEnabled = Directory.Exists(inventory.ModRoot)
+                                                || Directory.Exists(Path.GetDirectoryName(inventory.ModRoot));
+    }
+
+    private async void OnOfflineExperienceClick(object? sender, RoutedEventArgs e)
+    {
+        await SetLaunchExperienceAsync(LaunchExperience.Offline);
+    }
+
+    private async void OnOnlineExperienceClick(object? sender, RoutedEventArgs e)
+    {
+        await SetLaunchExperienceAsync(LaunchExperience.Online);
+    }
+
+    private async Task SetLaunchExperienceAsync(LaunchExperience experience)
+    {
+        var profile = MainWindow.Settings.CurrentProfile;
+        if (profile.Type == InstallationType.D2RMM || profile.LaunchExperience == experience)
+        {
+            return;
+        }
+
+        profile.LaunchExperience = experience;
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+        RefreshInstallDirectoryState();
+    }
+
+    private void OnRefreshLoaderClick(object? sender, RoutedEventArgs e)
+    {
+        RefreshInstallDirectoryState();
+    }
+
+    private void OnOpenLoaderFolderClick(object? sender, RoutedEventArgs e)
+    {
+        OpenFolder(_loaderInventory?.GlobalRoot);
+    }
+
+    private void OnOpenModLoaderFolderClick(object? sender, RoutedEventArgs e)
+    {
+        var path = _loaderInventory?.ModRoot;
+        OpenFolder(Directory.Exists(path) ? path : Path.GetDirectoryName(path));
+    }
+
+    private static void OpenFolder(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            var startInfo = OperatingSystem.IsWindows()
+                ? new ProcessStartInfo("explorer.exe") { UseShellExecute = false }
+                : OperatingSystem.IsMacOS()
+                    ? new ProcessStartInfo("open") { UseShellExecute = false }
+                    : new ProcessStartInfo("xdg-open") { UseShellExecute = false };
+
+            startInfo.ArgumentList.Add(path);
+            Process.Start(startInfo);
+        }
+        catch (Exception ex)
+        {
+            Notifications.SendNotification($"Could not open folder: {ex.Message}", "Warning");
+        }
+    }
+
     private async void OnInstallationTypeChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (InstallationTypeComboBox == null) return;
@@ -192,6 +317,10 @@ public partial class LaunchView : UserControl
 
         // Switch profile
         MainWindow.Settings.SelectedProfileIndex = selectedIndex;
+        if (MainWindow.Settings.CurrentProfile.Type == InstallationType.D2RMM)
+        {
+            MainWindow.Settings.CurrentProfile.LaunchExperience = LaunchExperience.Offline;
+        }
         BackupService.ApplyDefaultSettings();
         await SettingsManager.SaveAsync(MainWindow.Settings);
 
@@ -284,6 +413,14 @@ public partial class LaunchView : UserControl
             return;
         }
 
+        if (profile.LaunchExperience == LaunchExperience.Online
+            && !D2RLoaderService.CanUseOnlineExperience(profile, out var onlineUnavailableReason))
+        {
+            LaunchDiagnostics.Log($"Online launch blocked: {onlineUnavailableReason}");
+            Notifications.SendNotification(onlineUnavailableReason ?? "D2RLoader is unavailable.", "Warning");
+            return;
+        }
+
 
         _isLaunching = true;
         StartGameButton.IsEnabled = false;
@@ -325,19 +462,26 @@ public partial class LaunchView : UserControl
                 else
                 {
                     LaunchDiagnostics.Log("Calling GameLauncherService.LaunchGame.");
-                    SetLaunchStatus("Starting Diablo II: Resurrected...");
+                    SetLaunchStatus(profile.LaunchExperience == LaunchExperience.Online
+                        ? "Starting D2RLoader..."
+                        : "Starting Diablo II: Resurrected...");
                     var gameProcess = LauncherService.LaunchGame();
+                    if (gameProcess == null)
+                    {
+                        LaunchDiagnostics.Log("GameLauncherService.LaunchGame did not start a process.");
+                        SetLaunchStatus("Launch failed.");
+                        return;
+                    }
                     LaunchDiagnostics.Log("GameLauncherService.LaunchGame returned without throwing.");
                     SetLaunchStatus($"{actionName} command sent.");
 
-                    if (gameProcess != null && MainWindow.Settings.MinimizeToTray && MainWindow.Instance is { } mainWindow)
+                    if (MainWindow.Settings.MinimizeToTray && MainWindow.Instance is { } mainWindow)
                     {
-                        // For Steam launches, pass the actual D2R.exe path so the launcher
-                        // waits for the game process rather than the Steam bootstrapper.
                         string? expectedExePath = null;
-                        if (profile.Type == InstallationType.Steam)
+                        if (profile.Type == InstallationType.Steam
+                            || profile.LaunchExperience == LaunchExperience.Online)
                         {
-                            expectedExePath = InstallDirectoryValidator.GetExecutablePath(profile.InstallDirectory);
+                            expectedExePath = LauncherService.GetExpectedGameExecutablePath();
                         }
 
                         _ = mainWindow.MinimizeToTrayAndWaitForExitAsync(gameProcess, expectedExePath);

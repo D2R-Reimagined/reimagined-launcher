@@ -389,6 +389,9 @@ public class GameLauncherService
 
 
     public string BuildLaunchParameters()
+        => BuildLaunchParameters(MainWindow.Settings.CurrentProfile);
+
+    public static string BuildLaunchParameters(InstallationProfile profile)
     {
         var launchParameters = new List<string>
         {
@@ -397,19 +400,19 @@ public class GameLauncherService
             "-txt"
         };
 
-        var profile = MainWindow.Settings.CurrentProfile;
+        var isOfflineExperience = profile.LaunchExperience == LaunchExperience.Offline;
 
-        if (profile.EnableRespec)
+        if (isOfflineExperience && profile.EnableRespec)
         {
             launchParameters.Add("-enablerespec");
         }
 
-        if (profile.ResetOfflineMaps)
+        if (isOfflineExperience && profile.ResetOfflineMaps)
         {
             launchParameters.Add("-resetofflinemaps");
         }
 
-        if (profile.PlayersCount is >= 2 and <= 8)
+        if (isOfflineExperience && profile.PlayersCount is >= 2 and <= 8)
         {
             launchParameters.Add("-players");
             launchParameters.Add(profile.PlayersCount.Value.ToString());
@@ -430,7 +433,7 @@ public class GameLauncherService
             launchParameters.Add("-nosound");
         }
 
-        if (profile.CustomMapSeedEnabled)
+        if (isOfflineExperience && profile.CustomMapSeedEnabled)
         {
             launchParameters.Add("-seed");
             launchParameters.Add(profile.CustomMapSeed.ToString());
@@ -450,6 +453,16 @@ public class GameLauncherService
         var launchParameters = string.IsNullOrWhiteSpace(launchParamOverride)
             ? LaunchParameters
             : launchParamOverride;
+
+        if (profile.LaunchExperience == LaunchExperience.Online)
+        {
+            if (!D2RLoaderService.CanUseOnlineExperience(profile, out var reason))
+            {
+                return $"Online unavailable: {reason}";
+            }
+
+            return $"\"{D2RLoaderService.GetLoaderPath(profile.InstallDirectory)}\" {launchParameters}";
+        }
 
         if (profile.Type == InstallationType.Steam)
         {
@@ -489,8 +502,21 @@ public class GameLauncherService
         string executablePath;
         string finalArgs;
         string? winePrefix = null;
+        string? workingDirectory = null;
 
-        if (profile.Type == InstallationType.Steam)
+        if (profile.LaunchExperience == LaunchExperience.Online)
+        {
+            if (!D2RLoaderService.CanUseOnlineExperience(profile, out var reason))
+            {
+                Notifications.SendNotification(reason ?? "D2RLoader is not available.", "Warning");
+                return null;
+            }
+
+            executablePath = D2RLoaderService.GetLoaderPath(profile.InstallDirectory)!;
+            finalArgs = launchParameters;
+            workingDirectory = profile.InstallDirectory;
+        }
+        else if (profile.Type == InstallationType.Steam)
         {
             executablePath = profile.SteamDirectory ?? FindSteamExecutable(profile.InstallDirectory) ?? string.Empty;
             var steamPrefix = GetSteamArgumentPrefix(executablePath);
@@ -537,7 +563,8 @@ public class GameLauncherService
         var processStartInfo = new ProcessStartInfo(executablePath)
         {
             UseShellExecute = !OperatingSystem.IsLinux(),
-            Arguments = finalArgs
+            Arguments = finalArgs,
+            WorkingDirectory = workingDirectory ?? string.Empty
         };
 
         if (!string.IsNullOrWhiteSpace(winePrefix))
@@ -575,6 +602,9 @@ public class GameLauncherService
 
         return InstallDirectoryValidator.GetExecutablePath(MainWindow.Settings.CurrentProfile.InstallDirectory);
     }
+
+    public string? GetExpectedGameExecutablePath()
+        => InstallDirectoryValidator.GetExecutablePath(MainWindow.Settings.CurrentProfile.InstallDirectory);
 
     private static string[] GetDefaultInstallPaths()
     {

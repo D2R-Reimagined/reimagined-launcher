@@ -10,6 +10,12 @@ public enum InstallationType
     D2RMM
 }
 
+public enum LaunchExperience
+{
+    Offline,
+    Online
+}
+
 public enum StackDropOption
 {
     Default,
@@ -21,6 +27,7 @@ public enum StackDropOption
 public class InstallationProfile
 {
     public InstallationType Type { get; set; }
+    public LaunchExperience LaunchExperience { get; set; }
     public string? InstallDirectory { get; set; }
     public string? SteamDirectory { get; set; }
     public bool IsInstallDirectoryValidated { get; set; }
