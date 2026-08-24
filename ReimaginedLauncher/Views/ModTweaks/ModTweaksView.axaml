@@ -6,6 +6,11 @@
              x:Class="ReimaginedLauncher.Views.ModTweaks.ModTweaksView">
     <Grid RowDefinitions="Auto,*"
           RowSpacing="16">
+        <Border x:Name="LadderLockBanner" Grid.Row="0" Classes="warning-banner"
+                Padding="14" IsVisible="False">
+            <TextBlock Foreground="{StaticResource GoldTextBrush}" TextWrapping="Wrap"
+                       Text="Ladder mode uses the clean Reimagined base files. Character, gameplay, difficulty, sound, and visual tweaks are disabled; your saved non-ladder choices are preserved." />
+        </Border>
         <ScrollViewer x:Name="RootScrollViewer"
                       Grid.Row="1"
                       HorizontalScrollBarVisibility="Disabled"
@@ -13,7 +18,7 @@
                       HorizontalAlignment="Stretch"
                       Focusable="True"
                       PointerPressed="OnBackgroundPointerPressed">
-            <StackPanel Spacing="16"
+            <StackPanel x:Name="TweaksContentPanel" Spacing="16"
                         HorizontalAlignment="Stretch">
                 <DockPanel>
                     <Button Content="Reset Tweaks"

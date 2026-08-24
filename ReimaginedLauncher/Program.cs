@@ -24,6 +24,7 @@ class Program
         services.AddHttpClient<GitHubAnnouncementsHttpClient>();
         services.AddHttpClient<GitHubDiscussionPluginsHttpClient>();
         services.AddHttpClient<NexusModsHttpClient>();
+        services.AddHttpClient<ReimaginedApiHttpClient>();
         
         ServiceProvider = services.BuildServiceProvider();
 

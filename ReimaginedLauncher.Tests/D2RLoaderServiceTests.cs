@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Security.Cryptography;
 using ReimaginedLauncher.Utilities;
 using Xunit;
 
@@ -104,6 +105,91 @@ public sealed class D2RLoaderServiceTests : IDisposable
         Assert.Contains("-resetofflinemaps", parameters);
         Assert.Contains("-players 3", parameters);
         Assert.Contains("-seed 456", parameters);
+    }
+
+    [Fact]
+    public void LadderLaunchParametersOmitOfflineOnlyOptions()
+    {
+        var profile = new InstallationProfile
+        {
+            LaunchExperience = LaunchExperience.Ladder,
+            EnableRespec = true,
+            ResetOfflineMaps = true,
+            PlayersCount = 8,
+            CustomMapSeedEnabled = true,
+            CustomMapSeed = 123,
+            NoSound = true
+        };
+
+        var parameters = GameLauncherService.BuildLaunchParameters(profile);
+
+        Assert.Equal("-mod Reimagined -txt -nosound", parameters);
+    }
+
+    [Fact]
+    public async Task LadderPolicyKeepsSelectedApprovedExtensionsAndRestoresMovedFiles()
+    {
+        File.WriteAllBytes(CreatePath("D2RLoader.exe"), [0]);
+        var approvedPluginPath = CreatePath("d2rloader", "plugins", "approved.dll");
+        var unapprovedPluginPath = CreatePath("d2rloader", "plugins", "unapproved.dll");
+        var approvedPatchPath = CreatePath("mods", "Reimagined", "d2rloader", "patches", "approved.json");
+        File.WriteAllBytes(approvedPluginPath, [1, 2, 3]);
+        File.WriteAllBytes(unapprovedPluginPath, [4, 5, 6]);
+        File.WriteAllText(approvedPatchPath, "{\"name\":\"Approved Patch\",\"patches\":[]}");
+
+        var pluginApprovalId = Guid.NewGuid();
+        var patchApprovalId = Guid.NewGuid();
+        var approvals = new[]
+        {
+            new LadderExtensionApproval(
+                pluginApprovalId,
+                "Approved Plugin",
+                "approved.dll",
+                ComputeSha256(approvedPluginPath),
+                D2RLoaderExtensionKind.Plugin),
+            new LadderExtensionApproval(
+                patchApprovalId,
+                "Approved Patch",
+                "approved.json",
+                ComputeSha256(approvedPatchPath),
+                D2RLoaderExtensionKind.Patch),
+            new LadderExtensionApproval(
+                Guid.NewGuid(),
+                "Wrong Hash Plugin",
+                "unapproved.dll",
+                new string('0', 64),
+                D2RLoaderExtensionKind.Plugin)
+        };
+
+        var result = await D2RLoaderService.ApplyLadderPolicyAsync(
+            _installDirectory,
+            approvals,
+            new HashSet<Guid> { pluginApprovalId });
+
+        Assert.True(File.Exists(approvedPluginPath));
+        Assert.False(File.Exists(unapprovedPluginPath));
+        Assert.False(File.Exists(approvedPatchPath));
+        Assert.True(File.Exists(CreatePath("d2rloader", "ladder-disabled", "plugins", "unapproved.dll")));
+        Assert.True(File.Exists(CreatePath(
+            "mods", "Reimagined", "d2rloader", "ladder-disabled", "patches", "approved.json")));
+        Assert.Single(result.UnapprovedMoved);
+        Assert.Single(result.UnselectedMoved);
+
+        var preview = await D2RLoaderService.PreviewLadderPolicyAsync(_installDirectory, approvals);
+        Assert.Contains(preview.ApprovedExtensions, state =>
+            state.Approval.Id == patchApprovalId && state.IsInstalled && state.IsLadderDisabled);
+        Assert.Contains(preview.UnapprovedExtensions, extension => extension.FileName == "unapproved.dll");
+
+        var restored = D2RLoaderService.RestoreLadderDisabledExtensions(_installDirectory);
+
+        Assert.Equal(2, restored);
+        Assert.True(File.Exists(unapprovedPluginPath));
+        Assert.True(File.Exists(approvedPatchPath));
+    }
+
+    private static string ComputeSha256(string path)
+    {
+        return Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
     }
 
     private string CreatePath(params string[] parts)

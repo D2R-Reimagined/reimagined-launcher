@@ -32,6 +32,7 @@ public sealed class D2RLoaderExtensionInfo
     public string? Description { get; init; }
     public int PatchCount { get; init; }
     public string? Error { get; init; }
+    public bool IsLadderDisabled { get; init; }
 
     public string ScopeLabel => Scope == D2RLoaderExtensionScope.Global ? "GLOBAL" : "REIMAGINED";
     public string VersionLabel => string.IsNullOrWhiteSpace(Version) ? string.Empty : $"v{Version}";
@@ -154,14 +155,15 @@ public static partial class D2RLoaderService
     private static void AddExtensions(
         List<D2RLoaderExtensionInfo> extensions,
         string root,
-        D2RLoaderExtensionScope scope)
+        D2RLoaderExtensionScope scope,
+        bool isLadderDisabled = false)
     {
         var pluginsDirectory = Path.Combine(root, "plugins");
         if (Directory.Exists(pluginsDirectory))
         {
             foreach (var file in EnumerateFilesSafe(pluginsDirectory, "*.dll"))
             {
-                extensions.Add(ReadPlugin(file, scope));
+                extensions.Add(ReadPlugin(file, scope, isLadderDisabled));
             }
         }
 
@@ -170,7 +172,7 @@ public static partial class D2RLoaderService
         {
             foreach (var file in EnumerateFilesSafe(patchesDirectory, "*.json"))
             {
-                extensions.Add(ReadPatch(file, scope));
+                extensions.Add(ReadPatch(file, scope, isLadderDisabled));
             }
         }
     }
@@ -187,7 +189,10 @@ public static partial class D2RLoaderService
         }
     }
 
-    private static D2RLoaderExtensionInfo ReadPlugin(string path, D2RLoaderExtensionScope scope)
+    private static D2RLoaderExtensionInfo ReadPlugin(
+        string path,
+        D2RLoaderExtensionScope scope,
+        bool isLadderDisabled = false)
     {
         var fileName = Path.GetFileName(path);
         try
@@ -206,6 +211,7 @@ public static partial class D2RLoaderService
                 FilePath = path,
                 Kind = D2RLoaderExtensionKind.Plugin,
                 Scope = scope,
+                IsLadderDisabled = isLadderDisabled,
                 Version = NormalizeVersion(versionInfo.FileVersion),
                 Description = versionInfo.FileDescription
             };
@@ -219,12 +225,16 @@ public static partial class D2RLoaderService
                 FilePath = path,
                 Kind = D2RLoaderExtensionKind.Plugin,
                 Scope = scope,
+                IsLadderDisabled = isLadderDisabled,
                 Error = $"Could not read file metadata: {ex.Message}"
             };
         }
     }
 
-    private static D2RLoaderExtensionInfo ReadPatch(string path, D2RLoaderExtensionScope scope)
+    private static D2RLoaderExtensionInfo ReadPatch(
+        string path,
+        D2RLoaderExtensionScope scope,
+        bool isLadderDisabled = false)
     {
         try
         {
@@ -246,6 +256,7 @@ public static partial class D2RLoaderService
                 FilePath = path,
                 Kind = D2RLoaderExtensionKind.Patch,
                 Scope = scope,
+                IsLadderDisabled = isLadderDisabled,
                 Version = version,
                 Description = GetString(root, "description"),
                 PatchCount = patchCount
@@ -260,6 +271,7 @@ public static partial class D2RLoaderService
                 FilePath = path,
                 Kind = D2RLoaderExtensionKind.Patch,
                 Scope = scope,
+                IsLadderDisabled = isLadderDisabled,
                 Error = $"Could not read manifest: {ex.Message}"
             };
         }

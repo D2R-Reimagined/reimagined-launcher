@@ -2,6 +2,7 @@ using System.Threading.Tasks;
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Collections.Generic;
 using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
@@ -9,6 +10,9 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Microsoft.Extensions.DependencyInjection;
+using ReimaginedLauncher.HttpClients;
+using ReimaginedLauncher.HttpClients.Models;
 using ReimaginedLauncher.Utilities;
 
 namespace ReimaginedLauncher.Views.Launch;
@@ -16,12 +20,21 @@ namespace ReimaginedLauncher.Views.Launch;
 public partial class LaunchView : UserControl
 {
     public GameLauncherService LauncherService = new();
+    private readonly ReimaginedApiHttpClient _apiHttpClient;
     private bool _isLaunching;
+    private bool _isRefreshingLadders;
+    private bool _isRefreshingLadderControls;
+    private bool _ladderStatusLoaded;
+    private bool _ladderPolicyVerified;
+    private string? _ladderLoadError;
+    private IReadOnlyList<LadderResponse> _activeLadders = [];
+    private IReadOnlyList<LadderExtensionChoice> _ladderExtensionChoices = [];
     private D2RLoaderInventory? _loaderInventory;
 
     public LaunchView()
     {
         InitializeComponent();
+        _apiHttpClient = Program.ServiceProvider.GetRequiredService<ReimaginedApiHttpClient>();
 
         RefreshInstallDirectoryState();
     }
@@ -73,6 +86,8 @@ public partial class LaunchView : UserControl
 
             RefreshInstallDirectoryState();
         }
+
+        _ = RefreshLadderStateAsync();
     }
 
     public void RefreshInstallDirectoryState()
@@ -80,6 +95,8 @@ public partial class LaunchView : UserControl
         var settings = MainWindow.Settings;
         var profile = settings.CurrentProfile;
         var isOnlineExperience = profile.LaunchExperience == LaunchExperience.Online;
+        var isLadderExperience = profile.LaunchExperience == LaunchExperience.Ladder;
+        var ladderAvailable = HasActiveLadder;
 
         InstallationTypeComboBox.SelectedIndex = (int)profile.Type;
         DirectoryTextBox.Text = profile.InstallDirectory ?? string.Empty;
@@ -135,14 +152,17 @@ public partial class LaunchView : UserControl
 
         profile.IsInstallDirectoryValidated = isValidated;
 
-        OfflineExperienceButton.Classes.Set("selected", !isOnlineExperience);
-        OnlineExperienceButton.Classes.Set("selected", isOnlineExperience);
-        OnlineExperienceButton.IsEnabled = profile.Type != InstallationType.D2RMM;
-        OnlineExperiencePanel.IsVisible = isOnlineExperience && profile.Type != InstallationType.D2RMM;
-
         _loaderInventory = D2RLoaderService.Discover(profile.InstallDirectory);
         RefreshD2RLoaderState(profile, _loaderInventory);
-        var onlineAvailable = D2RLoaderService.CanUseOnlineExperience(profile, out var onlineUnavailableReason);
+        var loaderAvailable = D2RLoaderService.CanUseOnlineExperience(profile, out var loaderUnavailableReason);
+
+        OfflineExperienceButton.Classes.Set("selected", profile.LaunchExperience == LaunchExperience.Offline);
+        OnlineExperienceButton.Classes.Set("selected", isOnlineExperience);
+        LadderExperienceButton.Classes.Set("selected", isLadderExperience);
+        OnlineExperienceButton.IsEnabled = profile.Type != InstallationType.D2RMM;
+        LadderExperienceButton.IsEnabled = profile.Type != InstallationType.D2RMM && ladderAvailable;
+        OnlineExperiencePanel.IsVisible = isOnlineExperience && profile.Type != InstallationType.D2RMM;
+        LadderPolicyPanel.IsVisible = isLadderExperience && profile.Type != InstallationType.D2RMM;
 
         if (profile.Type == InstallationType.D2RMM)
         {
@@ -152,16 +172,24 @@ public partial class LaunchView : UserControl
         }
         else
         {
-            StartGameButton.Content = isOnlineExperience ? "Start Online" : "Start Offline";
+            StartGameButton.Content = isOnlineExperience
+                ? "Start Online"
+                : isLadderExperience
+                    ? "Start Ladder"
+                    : "Start Offline";
             StartGameDescription.Text = isOnlineExperience
                 ? "Starts D2RLoader with Reimagined selected. Choose TCP/IP in-game to host or join; this does not connect to Battle.net."
-                : "Starts the standard Reimagined offline experience with your saved launch options.";
+                : isLadderExperience
+                    ? "Restores clean base files, enforces the ladder extension allowlist, and starts Reimagined through D2RLoader."
+                    : "Starts the standard Reimagined offline experience with your saved launch options.";
             StartGameButton.IsEnabled = !_isLaunching
                                         && isValidated
                                         && isModDetected
-                                        && (!isOnlineExperience || onlineAvailable);
+                                        && (!isOnlineExperience || loaderAvailable)
+                                        && (!isLadderExperience || ladderAvailable && loaderAvailable && _ladderPolicyVerified);
 
             if (!isOnlineExperience
+                && !isLadderExperience
                 && profile.Type == InstallationType.Steam
                 && string.IsNullOrWhiteSpace(profile.SteamDirectory))
             {
@@ -171,7 +199,8 @@ public partial class LaunchView : UserControl
 
         ValidationBanner.IsVisible = !isValidated
                                      || !isModDetected
-                                     || isOnlineExperience && !onlineAvailable;
+                                     || isOnlineExperience && !loaderAvailable
+                                     || isLadderExperience && (!ladderAvailable || !loaderAvailable || !_ladderPolicyVerified);
         
         if (profile.Type == InstallationType.D2RMM)
         {
@@ -185,8 +214,15 @@ public partial class LaunchView : UserControl
         }
         else
         {
-            ValidationBannerText.Text = isOnlineExperience && isValidated && isModDetected && !onlineAvailable
-                ? onlineUnavailableReason ?? "D2RLoader is unavailable for this profile."
+            ValidationBannerText.Text = isLadderExperience
+                                        && isValidated
+                                        && isModDetected
+                                        && (!ladderAvailable || !loaderAvailable || !_ladderPolicyVerified)
+                ? !_ladderPolicyVerified && ladderAvailable && loaderAvailable
+                    ? "Installed D2RLoader extensions have not been verified against the ladder allowlist."
+                    : GetLadderUnavailableMessage(loaderAvailable ? null : loaderUnavailableReason)
+                : isOnlineExperience && isValidated && isModDetected && !loaderAvailable
+                ? loaderUnavailableReason ?? "D2RLoader is unavailable for this profile."
                 : !isValidated
                 ? string.IsNullOrWhiteSpace(profile.InstallDirectory)
                     ? "Enter your Diablo II: Resurrected install directory before using the launcher."
@@ -252,6 +288,14 @@ public partial class LaunchView : UserControl
         await SetLaunchExperienceAsync(LaunchExperience.Online);
     }
 
+    private async void OnLadderExperienceClick(object? sender, RoutedEventArgs e)
+    {
+        if (HasActiveLadder)
+        {
+            await SetLaunchExperienceAsync(LaunchExperience.Ladder);
+        }
+    }
+
     private async Task SetLaunchExperienceAsync(LaunchExperience experience)
     {
         var profile = MainWindow.Settings.CurrentProfile;
@@ -268,6 +312,238 @@ public partial class LaunchView : UserControl
     private void OnRefreshLoaderClick(object? sender, RoutedEventArgs e)
     {
         RefreshInstallDirectoryState();
+    }
+
+    private bool HasActiveLadder => _activeLadders.Any(ladder =>
+        ladder.StartDateUtc <= DateTimeOffset.UtcNow && ladder.EndDateUtc >= DateTimeOffset.UtcNow);
+
+    private LadderResponse? SelectedLadder
+    {
+        get
+        {
+            var selectedId = MainWindow.Settings.CurrentProfile.SelectedLadderId;
+            return _activeLadders.FirstOrDefault(ladder => ladder.Id == selectedId)
+                   ?? _activeLadders.FirstOrDefault(ladder =>
+                       ladder.StartDateUtc <= DateTimeOffset.UtcNow
+                       && ladder.EndDateUtc >= DateTimeOffset.UtcNow);
+        }
+    }
+
+    private async Task RefreshLadderStateAsync()
+    {
+        if (_isRefreshingLadders)
+        {
+            return;
+        }
+
+        _isRefreshingLadders = true;
+        _ladderStatusLoaded = false;
+        _ladderLoadError = null;
+        LadderStatusText.Text = "Checking for active ladders...";
+        LadderExtensionPolicyStatusText.Text = "Checking installed D2RLoader extensions...";
+        _ladderPolicyVerified = false;
+        ActiveLaddersItemsControl.ItemsSource = null;
+        RefreshInstallDirectoryState();
+
+        try
+        {
+            _activeLadders = await _apiHttpClient.GetActiveLaddersAsync();
+            ActiveLaddersItemsControl.ItemsSource = _activeLadders;
+            EnsureSelectedLadder();
+            _isRefreshingLadderControls = true;
+            ActiveLadderComboBox.ItemsSource = _activeLadders;
+            ActiveLadderComboBox.SelectedItem = SelectedLadder;
+            _isRefreshingLadderControls = false;
+            LadderStatusText.Text = _activeLadders.Count == 0
+                ? "No active ladders right now."
+                : _activeLadders.Count == 1
+                    ? "Active ladder:"
+                    : "Active ladders:";
+        }
+        catch (Exception ex)
+        {
+            _activeLadders = [];
+            _ladderExtensionChoices = [];
+            _ladderLoadError = "Ladder status is temporarily unavailable.";
+            LadderStatusText.Text = _ladderLoadError;
+            LadderExtensionPolicyStatusText.Text = _ladderLoadError;
+            ActiveLadderComboBox.ItemsSource = null;
+            AllowedLadderPluginsItemsControl.ItemsSource = null;
+            AllowedLadderPatchesItemsControl.ItemsSource = null;
+            UnapprovedLadderExtensionsBanner.IsVisible = false;
+            LaunchDiagnostics.LogException("Failed to fetch active ladders", ex);
+        }
+        finally
+        {
+            _ladderStatusLoaded = true;
+            _isRefreshingLadders = false;
+            RefreshInstallDirectoryState();
+        }
+
+        if (_ladderLoadError is null)
+        {
+            await RefreshLadderExtensionPolicyAsync();
+        }
+    }
+
+    private string GetLadderUnavailableMessage(string? loaderUnavailableReason = null)
+    {
+        if (!_ladderStatusLoaded)
+        {
+            return "Checking the Reimagined API for an active ladder.";
+        }
+
+        if (!string.IsNullOrWhiteSpace(loaderUnavailableReason))
+        {
+            return loaderUnavailableReason;
+        }
+
+        return _ladderLoadError ?? "No active Reimagined ladder is available right now.";
+    }
+
+    private void EnsureSelectedLadder()
+    {
+        var selectedLadder = SelectedLadder;
+        MainWindow.Settings.CurrentProfile.SelectedLadderId = selectedLadder?.Id;
+    }
+
+    private async Task RefreshLadderExtensionPolicyAsync()
+    {
+        _ladderPolicyVerified = false;
+        var ladder = SelectedLadder;
+        if (ladder is null)
+        {
+            _ladderExtensionChoices = [];
+            AllowedLadderPluginsItemsControl.ItemsSource = null;
+            AllowedLadderPatchesItemsControl.ItemsSource = null;
+            LadderExtensionPolicyStatusText.Text = "No active ladder extension policy is available.";
+            UnapprovedLadderExtensionsBanner.IsVisible = false;
+            return;
+        }
+
+        LadderExtensionPolicyStatusText.Text = "Checking installed D2RLoader extensions...";
+        try
+        {
+            var approvals = MapApprovals(ladder);
+            var preview = await D2RLoaderService.PreviewLadderPolicyAsync(
+                MainWindow.Settings.CurrentProfile.InstallDirectory,
+                approvals);
+            var selectedIds = GetSelectedLadderExtensionIds(ladder.Id);
+            _ladderExtensionChoices = preview.ApprovedExtensions
+                .Select(state => new LadderExtensionChoice
+                {
+                    ApprovalId = state.Approval.Id,
+                    Name = state.Approval.Name,
+                    FileName = state.Approval.FileName,
+                    Kind = state.Approval.Kind,
+                    IsInstalled = state.IsInstalled,
+                    IsLadderDisabled = state.IsLadderDisabled,
+                    IsSelected = state.IsInstalled && selectedIds.Contains(state.Approval.Id)
+                })
+                .ToArray();
+            AllowedLadderPluginsItemsControl.ItemsSource = _ladderExtensionChoices
+                .Where(choice => choice.Kind == D2RLoaderExtensionKind.Plugin)
+                .ToArray();
+            AllowedLadderPatchesItemsControl.ItemsSource = _ladderExtensionChoices
+                .Where(choice => choice.Kind == D2RLoaderExtensionKind.Patch)
+                .ToArray();
+
+            LadderExtensionPolicyStatusText.Text = approvals.Count == 0
+                ? "No D2RLoader plugins or patches are approved for this ladder. All installed extensions will be disabled."
+                : $"{approvals.Count} approved extension(s). They are disabled by default; select only the ones you want to use.";
+            UnapprovedLadderExtensionsBanner.IsVisible = preview.UnapprovedExtensions.Count > 0;
+            var pendingUnapproved = preview.UnapprovedExtensions
+                .Where(extension => !extension.IsLadderDisabled)
+                .Select(extension => extension.FileName)
+                .ToArray();
+            var alreadyDisabled = preview.UnapprovedExtensions
+                .Where(extension => extension.IsLadderDisabled)
+                .Select(extension => extension.FileName)
+                .ToArray();
+            UnapprovedLadderExtensionsText.Text = string.Join(
+                " ",
+                new[]
+                {
+                    pendingUnapproved.Length == 0
+                        ? null
+                        : "Not approved and will be moved before launch: " + string.Join(", ", pendingUnapproved) + ".",
+                    alreadyDisabled.Length == 0
+                        ? null
+                        : "Already ladder-disabled: " + string.Join(", ", alreadyDisabled) + "."
+                }.OfType<string>());
+            _ladderPolicyVerified = true;
+        }
+        catch (Exception ex)
+        {
+            _ladderExtensionChoices = [];
+            AllowedLadderPluginsItemsControl.ItemsSource = null;
+            AllowedLadderPatchesItemsControl.ItemsSource = null;
+            LadderExtensionPolicyStatusText.Text = "Could not verify installed D2RLoader extensions.";
+            UnapprovedLadderExtensionsBanner.IsVisible = true;
+            UnapprovedLadderExtensionsText.Text =
+                "Ladder launch will remain blocked until installed extensions can be verified.";
+            LaunchDiagnostics.LogException("Failed to preview ladder extension policy", ex);
+        }
+
+        RefreshInstallDirectoryState();
+    }
+
+    private async void OnActiveLadderSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_isRefreshingLadderControls || ActiveLadderComboBox.SelectedItem is not LadderResponse ladder)
+        {
+            return;
+        }
+
+        MainWindow.Settings.CurrentProfile.SelectedLadderId = ladder.Id;
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+        await RefreshLadderExtensionPolicyAsync();
+        RefreshInstallDirectoryState();
+    }
+
+    private async void OnLadderExtensionSelectionChanged(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not CheckBox { DataContext: LadderExtensionChoice choice } checkBox
+            || !choice.IsInstalled
+            || SelectedLadder is not { } ladder)
+        {
+            return;
+        }
+
+        choice.IsSelected = checkBox.IsChecked ?? false;
+        var selectedIds = GetSelectedLadderExtensionIds(ladder.Id);
+        if (choice.IsSelected)
+        {
+            selectedIds.Add(choice.ApprovalId);
+        }
+        else
+        {
+            selectedIds.Remove(choice.ApprovalId);
+        }
+
+        MainWindow.Settings.CurrentProfile.SelectedLadderExtensions ??= [];
+        MainWindow.Settings.CurrentProfile.SelectedLadderExtensions[ladder.Id.ToString("N")] = selectedIds.ToList();
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private static IReadOnlyList<LadderExtensionApproval> MapApprovals(LadderResponse ladder)
+    {
+        return (ladder.AllowedExtensions ?? [])
+            .Select(extension => new LadderExtensionApproval(
+                extension.Id,
+                extension.Name,
+                extension.FileName,
+                extension.Sha256,
+                extension.Kind))
+            .ToArray();
+    }
+
+    private static HashSet<Guid> GetSelectedLadderExtensionIds(Guid ladderId)
+    {
+        var selections = MainWindow.Settings.CurrentProfile.SelectedLadderExtensions ??= [];
+        return selections.TryGetValue(ladderId.ToString("N"), out var selected)
+            ? selected.ToHashSet()
+            : [];
     }
 
     private void OnOpenLoaderFolderClick(object? sender, RoutedEventArgs e)
@@ -389,6 +665,12 @@ public partial class LaunchView : UserControl
 
         var profile = MainWindow.Settings.CurrentProfile;
 
+        if (profile.LaunchExperience == LaunchExperience.Ladder
+            && (!_ladderStatusLoaded || !_ladderPolicyVerified))
+        {
+            await RefreshLadderStateAsync();
+        }
+
         if (!profile.IsInstallDirectoryValidated)
         {
             LaunchDiagnostics.Log("Action blocked because install directory is not validated.");
@@ -413,11 +695,27 @@ public partial class LaunchView : UserControl
             return;
         }
 
-        if (profile.LaunchExperience == LaunchExperience.Online
-            && !D2RLoaderService.CanUseOnlineExperience(profile, out var onlineUnavailableReason))
+        if (profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder
+            && !D2RLoaderService.CanUseOnlineExperience(profile, out var loaderUnavailableReason))
         {
-            LaunchDiagnostics.Log($"Online launch blocked: {onlineUnavailableReason}");
-            Notifications.SendNotification(onlineUnavailableReason ?? "D2RLoader is unavailable.", "Warning");
+            LaunchDiagnostics.Log($"D2RLoader launch blocked: {loaderUnavailableReason}");
+            Notifications.SendNotification(loaderUnavailableReason ?? "D2RLoader is unavailable.", "Warning");
+            return;
+        }
+
+        if (profile.LaunchExperience == LaunchExperience.Ladder && !HasActiveLadder)
+        {
+            var unavailableMessage = GetLadderUnavailableMessage();
+            LaunchDiagnostics.Log($"Ladder launch blocked: {unavailableMessage}");
+            Notifications.SendNotification(unavailableMessage, "Warning");
+            return;
+        }
+
+        if (profile.LaunchExperience == LaunchExperience.Ladder && !_ladderPolicyVerified)
+        {
+            const string message = "Installed D2RLoader extensions have not been verified against the ladder allowlist.";
+            LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
+            Notifications.SendNotification(message, "Warning");
             return;
         }
 
@@ -430,6 +728,12 @@ public partial class LaunchView : UserControl
 
         try
         {
+            if (!await PrepareD2RLoaderExtensionsAsync(profile, progress))
+            {
+                SetLaunchStatus($"{actionName} preparation failed.");
+                return;
+            }
+
             LaunchDiagnostics.Log("Starting mod tweak preparation.");
             var prepared = await Task.Run(() => ModTweaksService.PrepareForLaunchAsync(progress));
             if (!prepared)
@@ -462,7 +766,7 @@ public partial class LaunchView : UserControl
                 else
                 {
                     LaunchDiagnostics.Log("Calling GameLauncherService.LaunchGame.");
-                    SetLaunchStatus(profile.LaunchExperience == LaunchExperience.Online
+                    SetLaunchStatus(profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder
                         ? "Starting D2RLoader..."
                         : "Starting Diablo II: Resurrected...");
                     var gameProcess = LauncherService.LaunchGame();
@@ -479,7 +783,7 @@ public partial class LaunchView : UserControl
                     {
                         string? expectedExePath = null;
                         if (profile.Type == InstallationType.Steam
-                            || profile.LaunchExperience == LaunchExperience.Online)
+                            || profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder)
                         {
                             expectedExePath = LauncherService.GetExpectedGameExecutablePath();
                         }
@@ -511,6 +815,65 @@ public partial class LaunchView : UserControl
                 }
             });
             RefreshInstallDirectoryState();
+        }
+    }
+
+    private async Task<bool> PrepareD2RLoaderExtensionsAsync(
+        InstallationProfile profile,
+        IProgress<string> progress)
+    {
+        try
+        {
+            if (profile.Type == InstallationType.D2RMM)
+            {
+                return true;
+            }
+
+            if (profile.LaunchExperience != LaunchExperience.Ladder)
+            {
+                var restoredCount = await Task.Run(() =>
+                    D2RLoaderService.RestoreLadderDisabledExtensions(profile.InstallDirectory));
+                if (restoredCount > 0)
+                {
+                    LaunchDiagnostics.Log($"Restored {restoredCount} extension(s) disabled by the previous ladder launch.");
+                }
+
+                return true;
+            }
+
+            var ladder = SelectedLadder;
+            if (ladder is null)
+            {
+                Notifications.SendNotification("The selected active ladder could not be resolved.", "Warning");
+                return false;
+            }
+
+            progress.Report("Enforcing ladder D2RLoader extension policy...");
+            var approvals = MapApprovals(ladder);
+            var selectedIds = GetSelectedLadderExtensionIds(ladder.Id);
+            var result = await Task.Run(() => D2RLoaderService.ApplyLadderPolicyAsync(
+                profile.InstallDirectory,
+                approvals,
+                selectedIds));
+
+            LaunchDiagnostics.Log(
+                $"Ladder extension policy: {result.UnapprovedMoved.Count} unapproved and "
+                + $"{result.UnselectedMoved.Count} unselected extension(s) moved; "
+                + $"{result.RestoredCount} previously disabled extension(s) restored for re-evaluation.");
+            if (result.UnapprovedMoved.Count > 0)
+            {
+                Notifications.SendNotification(
+                    $"Moved {result.UnapprovedMoved.Count} unapproved D2RLoader extension(s) to their ladder-disabled folders.",
+                    "Warning");
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LaunchDiagnostics.LogException("Failed to enforce D2RLoader ladder policy", ex);
+            Notifications.SendNotification($"Could not enforce the ladder extension policy: {ex.Message}", "Warning");
+            return false;
         }
     }
 

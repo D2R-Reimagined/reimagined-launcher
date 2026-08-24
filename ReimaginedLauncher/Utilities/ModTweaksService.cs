@@ -62,6 +62,7 @@ public static class ModTweaksService
     private const string SfxDirectoryName = "sfx";
     private const string QuestDirectoryName = "quest";
     private const string DesecratedEnterHdFileName = "desecrated_enter_hd.flac";
+    private const string TerrorZoneFanfareBackupClaimId = "launcher:tweak:terror-zone-fanfare";
     private const string GeneratedTweaksFolderName = "mod-tweaks";
     private static readonly string[] DisableExtraBloodRelativePaths =
     [
@@ -591,6 +592,7 @@ public static class ModTweaksService
         var cleanArmorTweaksDirectory = GetCleanArmorTweaksDirectory(armorDirectory);
         var cleanDesecratedZonesFilePath = GetCleanDesecratedZonesFilePath(desecratedZonesFilePath);
         var excelDirectories = GetExcelDirectories(excelDirectory).ToList();
+        var isLadderLaunch = MainWindow.Settings.CurrentProfile.LaunchExperience == LaunchExperience.Ladder;
         LaunchDiagnostics.Log($"Resolved missiles file path: {missilesFilePath ?? "<null>"}");
         LaunchDiagnostics.Log($"Resolved monsters file path: {monstersFilePath ?? "<null>"}");
         LaunchDiagnostics.Log($"Resolved strings directory path: {stringsDirectory ?? "<null>"}");
@@ -614,7 +616,7 @@ public static class ModTweaksService
             // ApplyEnabledPluginsModRootAsync runs. Last-writer-wins semantics
             // are preserved; this only tells the user that a silent override
             // is happening so they can adjust load order if it was unintended.
-            if (!string.IsNullOrWhiteSpace(modRoot))
+            if (!isLadderLaunch && !string.IsNullOrWhiteSpace(modRoot))
             {
                 await PluginsService.WarnAssetCollisionsAsync(modRoot, progress);
             }
@@ -643,6 +645,33 @@ public static class ModTweaksService
             ReportProgress(progress, "Preparing clean vis copy...");
             LaunchDiagnostics.Log("Ensuring clean vis directory copy.");
             await EnsureCleanVisCopyAsync();
+
+            if (isLadderLaunch)
+            {
+                ReportProgress(progress, "Restoring clean ladder files...");
+                foreach (var targetExcelDirectory in excelDirectories)
+                {
+                    var sourceExcelDirectory = GetCleanVariantDirectory(
+                        targetExcelDirectory,
+                        excelDirectory,
+                        cleanExcelDirectory);
+                    await ValidateExcelFilesAsync(sourceExcelDirectory);
+                    await CopyDirectoryAsync(sourceExcelDirectory, targetExcelDirectory, overwrite: true);
+                }
+
+                await RestoreMissilesFileAsync(cleanMissilesFilePath, missilesFilePath);
+                await RestoreMonstersFileAsync(cleanMonstersFilePath, monstersFilePath);
+                await RestoreStringsFromCleanCopyAsync(stringsDirectory, cleanStringsDirectory);
+                await RestoreLayoutsProfileHdFileAsync(cleanLayoutsProfileHdFilePath, layoutsProfileHdFilePath);
+                await RestoreArmorTweaksAsync(armorDirectory, cleanArmorTweaksDirectory);
+                await RestoreDesecratedZonesFileAsync(cleanDesecratedZonesFilePath, desecratedZonesFilePath);
+                await RestoreVisFilesAsync();
+                await ApplyVignetteTweakAsync(removeVignette: false);
+
+                LaunchDiagnostics.Log(
+                    "Ladder preparation restored clean base files and skipped all launcher tweaks and plugins.");
+                return true;
+            }
 
             foreach (var targetExcelDirectory in excelDirectories)
             {
@@ -718,7 +747,7 @@ public static class ModTweaksService
             ApplyTerrorZonePurpleOverlayTweak(profile.TerrorZonePurpleOverlay);
             ReportProgress(progress, "Applying terror zone fanfare tweaks...");
             LaunchDiagnostics.Log("Applying terror zone fanfare tweaks.");
-            ApplyTerrorZoneFanfareTweak(profile.RestoreTerrorZoneFanfare);
+            await ApplyTerrorZoneFanfareTweakAsync(profile.RestoreTerrorZoneFanfare);
             ReportProgress(progress, "Applying vignette tweaks...");
             LaunchDiagnostics.Log("Applying vignette tweaks.");
             await ApplyVignetteTweakAsync(profile.RemoveVignette);
@@ -2130,7 +2159,7 @@ public static class ModTweaksService
             DesecratedEnterHdFileName);
     }
 
-    private static void ApplyTerrorZoneFanfareTweak(bool restoreTerrorZoneFanfare)
+    private static async Task ApplyTerrorZoneFanfareTweakAsync(bool restoreTerrorZoneFanfare)
     {
         if (restoreTerrorZoneFanfare)
         {
@@ -2144,6 +2173,9 @@ public static class ModTweaksService
             return;
         }
 
+        await PluginAssetBackupService.RegisterReplacementAsync(
+            TerrorZoneFanfareBackupClaimId,
+            fanfareFilePath);
         File.Delete(fanfareFilePath);
         LaunchDiagnostics.Log($"Deleted terror zone fanfare file: {fanfareFilePath}");
     }

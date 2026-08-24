@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System;
 using System.Text.Json.Serialization;
 
 namespace ReimaginedLauncher.Utilities;
@@ -13,7 +14,8 @@ public enum InstallationType
 public enum LaunchExperience
 {
     Offline,
-    Online
+    Online,
+    Ladder
 }
 
 public enum StackDropOption
@@ -28,6 +30,8 @@ public class InstallationProfile
 {
     public InstallationType Type { get; set; }
     public LaunchExperience LaunchExperience { get; set; }
+    public Guid? SelectedLadderId { get; set; }
+    public Dictionary<string, List<Guid>> SelectedLadderExtensions { get; set; } = [];
     public string? InstallDirectory { get; set; }
     public string? SteamDirectory { get; set; }
     public bool IsInstallDirectoryValidated { get; set; }

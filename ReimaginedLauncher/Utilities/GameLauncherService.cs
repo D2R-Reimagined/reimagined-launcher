@@ -454,11 +454,11 @@ public class GameLauncherService
             ? LaunchParameters
             : launchParamOverride;
 
-        if (profile.LaunchExperience == LaunchExperience.Online)
+        if (UsesD2RLoader(profile))
         {
             if (!D2RLoaderService.CanUseOnlineExperience(profile, out var reason))
             {
-                return $"Online unavailable: {reason}";
+                return $"D2RLoader unavailable: {reason}";
             }
 
             return $"\"{D2RLoaderService.GetLoaderPath(profile.InstallDirectory)}\" {launchParameters}";
@@ -504,7 +504,7 @@ public class GameLauncherService
         string? winePrefix = null;
         string? workingDirectory = null;
 
-        if (profile.LaunchExperience == LaunchExperience.Online)
+        if (UsesD2RLoader(profile))
         {
             if (!D2RLoaderService.CanUseOnlineExperience(profile, out var reason))
             {
@@ -601,6 +601,11 @@ public class GameLauncherService
         }
 
         return InstallDirectoryValidator.GetExecutablePath(MainWindow.Settings.CurrentProfile.InstallDirectory);
+    }
+
+    private static bool UsesD2RLoader(InstallationProfile profile)
+    {
+        return profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder;
     }
 
     public string? GetExpectedGameExecutablePath()
