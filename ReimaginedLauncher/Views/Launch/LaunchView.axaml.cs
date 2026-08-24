@@ -811,7 +811,10 @@ public partial class LaunchView : UserControl
             }
 
             LaunchDiagnostics.Log("Starting mod tweak preparation.");
-            var prepared = await Task.Run(() => ModTweaksService.PrepareForLaunchAsync(progress));
+            var ladderDisplay = profile.LaunchExperience == LaunchExperience.Ladder && SelectedLadder is { } activeLadder
+                ? new LadderDisplayInfo(activeLadder.Name, activeLadder.StartDateUtc, activeLadder.EndDateUtc)
+                : null;
+            var prepared = await Task.Run(() => ModTweaksService.PrepareForLaunchAsync(progress, ladderDisplay));
             if (!prepared)
             {
                 LaunchDiagnostics.Log("Mod tweak preparation returned false.");
