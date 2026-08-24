@@ -12,6 +12,7 @@
             <Setter Property="BorderBrush" Value="#3A1719" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Padding" Value="18" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="MinHeight" Value="112" />
         </Style>
@@ -43,7 +44,6 @@
     <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
         <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto"
               RowSpacing="18"
-              MaxWidth="1200"
               HorizontalAlignment="Stretch">
             <StackPanel Spacing="4">
                 <TextBlock Classes="view-title" Text="Sanctuary Awaits" />
@@ -58,7 +58,7 @@
                         <TextBlock Classes="muted" TextWrapping="Wrap"
                                    Text="Your choice is saved separately for each Battle.Net or Steam installation." />
                     </StackPanel>
-                    <Grid ColumnDefinitions="*,*,*" ColumnSpacing="12">
+                    <Grid x:Name="ExperienceGrid" ColumnDefinitions="*,*,*" ColumnSpacing="12">
                         <Button x:Name="OfflineExperienceButton" Classes="experience-card" Click="OnOfflineExperienceClick">
                             <Grid ColumnDefinitions="Auto,*" ColumnSpacing="14">
                                 <Border Width="42" Height="42" CornerRadius="21" Background="#3A1719" VerticalAlignment="Top">
@@ -100,7 +100,12 @@
                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
                                 <StackPanel Grid.Column="1" Spacing="5">
-                                    <TextBlock Text="Ladder" FontFamily="Georgia" FontSize="19" FontWeight="SemiBold" />
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="Ladder" FontFamily="Georgia" FontSize="19" FontWeight="SemiBold" />
+                                        <Border Background="#342313" CornerRadius="10" Padding="8,3">
+                                            <TextBlock Text="D2RLOADER" Classes="scope-label" />
+                                        </Border>
+                                    </StackPanel>
                                     <TextBlock x:Name="LadderStatusText" Classes="muted" TextWrapping="Wrap"
                                                Text="Checking for active ladders..." />
                                     <ItemsControl x:Name="ActiveLaddersItemsControl">
@@ -143,8 +148,8 @@
                                 <TextBlock x:Name="UnapprovedLadderExtensionsText"
                                            Foreground="{StaticResource GoldTextBrush}" TextWrapping="Wrap" />
                             </Border>
-                            <Grid ColumnDefinitions="*,*" ColumnSpacing="14">
-                                <Border Classes="extension-card">
+                            <Grid x:Name="LadderExtensionsGrid" ColumnDefinitions="*,*" ColumnSpacing="14">
+                                <Border x:Name="AllowedLadderPluginsPanel" Classes="extension-card">
                                     <StackPanel Spacing="8">
                                         <TextBlock Text="Allowed Plugins" FontFamily="Georgia" FontSize="17" FontWeight="SemiBold" />
                                         <ItemsControl x:Name="AllowedLadderPluginsItemsControl">
@@ -163,7 +168,7 @@
                                         </ItemsControl>
                                     </StackPanel>
                                 </Border>
-                                <Border Grid.Column="1" Classes="extension-card">
+                                <Border x:Name="AllowedLadderPatchesPanel" Grid.Column="1" Classes="extension-card">
                                     <StackPanel Spacing="8">
                                         <TextBlock Text="Allowed Patches" FontFamily="Georgia" FontSize="17" FontWeight="SemiBold" />
                                         <ItemsControl x:Name="AllowedLadderPatchesItemsControl">
@@ -192,7 +197,7 @@
                 <StackPanel Spacing="12">
                     <TextBlock Classes="section-title" Text="Launch" />
                     <TextBlock x:Name="StartGameDescription" Classes="muted" TextWrapping="Wrap" />
-                    <StackPanel Orientation="Horizontal" Spacing="16">
+                    <StackPanel x:Name="LaunchActionsPanel" Orientation="Horizontal" Spacing="16">
                         <Button x:Name="StartGameButton" Classes="accent" Content="Start Game" Click="OnRunClick"
                                 Width="220" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                                 MinHeight="48" IsEnabled="False" />
@@ -243,7 +248,7 @@
 
             <Border x:Name="OnlineExperiencePanel" Grid.Row="4" Classes="panel" Padding="20" IsVisible="False">
                 <StackPanel Spacing="16">
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                    <Grid x:Name="LoaderHeaderGrid" ColumnDefinitions="*,Auto" ColumnSpacing="16">
                         <StackPanel Spacing="5">
                             <StackPanel Orientation="Horizontal" Spacing="10">
                                 <TextBlock Classes="section-title" Text="D2RLoader Extensions" />
@@ -254,7 +259,7 @@
                             <TextBlock x:Name="LoaderStatusText" Classes="muted" TextWrapping="Wrap" />
                             <TextBlock x:Name="LoaderExtensionPolicyText" Classes="muted" FontSize="12" TextWrapping="Wrap" />
                         </StackPanel>
-                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
+                        <StackPanel x:Name="LoaderActionsPanel" Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
                             <Button Content="Refresh" Click="OnRefreshLoaderClick" />
                             <Button x:Name="OpenLoaderFolderButton" Content="Open Global" Click="OnOpenLoaderFolderClick" />
                             <Button x:Name="OpenModLoaderFolderButton" Content="Open Reimagined" Click="OnOpenModLoaderFolderClick" />
@@ -263,8 +268,8 @@
                     <Border x:Name="LoaderWarningBanner" Classes="warning-banner" Padding="12" IsVisible="False">
                         <TextBlock x:Name="LoaderWarningText" Foreground="{StaticResource GoldTextBrush}" TextWrapping="Wrap" />
                     </Border>
-                    <Grid ColumnDefinitions="*,*" ColumnSpacing="14">
-                        <Border Background="#0B0808" BorderBrush="#2D1516" BorderThickness="1" CornerRadius="11" Padding="14">
+                    <Grid x:Name="LoaderExtensionsGrid" ColumnDefinitions="*,*" ColumnSpacing="14">
+                        <Border x:Name="LoaderPluginsPanel" Background="#0B0808" BorderBrush="#2D1516" BorderThickness="1" CornerRadius="11" Padding="14">
                             <StackPanel Spacing="10">
                                 <Grid ColumnDefinitions="*,Auto">
                                     <TextBlock Text="Plugins" FontFamily="Georgia" FontSize="18" FontWeight="SemiBold" />
@@ -291,7 +296,7 @@
                                 </ItemsControl>
                             </StackPanel>
                         </Border>
-                        <Border Grid.Column="1" Background="#0B0808" BorderBrush="#2D1516" BorderThickness="1" CornerRadius="11" Padding="14">
+                        <Border x:Name="LoaderPatchesPanel" Grid.Column="1" Background="#0B0808" BorderBrush="#2D1516" BorderThickness="1" CornerRadius="11" Padding="14">
                             <StackPanel Spacing="10">
                                 <Grid ColumnDefinitions="*,Auto">
                                     <TextBlock Text="Patches" FontFamily="Georgia" FontSize="18" FontWeight="SemiBold" />

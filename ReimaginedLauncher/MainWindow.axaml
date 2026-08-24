@@ -10,8 +10,8 @@
     x:Class="ReimaginedLauncher.MainWindow"
     x:DataType="reimaginedLauncher1:NexusUserViewModel"
     Title="D2R Reimagined Launcher"
-    MinWidth="1180"
-    MinHeight="760"
+    MinWidth="960"
+    MinHeight="640"
 >
     <Window.Styles>
         <materialIcons:MaterialIconStyles />
@@ -27,9 +27,12 @@
     </Window.Styles>
     <LayoutTransformControl x:Name="RootScaleControl">
         <Grid x:Name="RootGrid"
-              ColumnDefinitions="300,*"
               Margin="20"
               ColumnSpacing="18">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="300" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
             <Border Grid.Column="0"
                     Classes="panel"
                     Padding="20">
@@ -56,9 +59,6 @@
                             <TextBlock Text="Launcher"
                                        FontWeight="SemiBold"
                                        Foreground="{StaticResource GoldBrush}" />
-                            <TextBlock Classes="muted"
-                                       Text="A darker control surface for launching, updating, and safeguarding your install."
-                                       TextWrapping="Wrap" />
                         </StackPanel>
 
                         <Border Grid.Row="1"

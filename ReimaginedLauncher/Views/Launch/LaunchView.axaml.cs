@@ -7,6 +7,7 @@ using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
@@ -30,11 +31,13 @@ public partial class LaunchView : UserControl
     private IReadOnlyList<LadderResponse> _activeLadders = [];
     private IReadOnlyList<LadderExtensionChoice> _ladderExtensionChoices = [];
     private D2RLoaderInventory? _loaderInventory;
+    private bool? _isCompactLayout;
 
     public LaunchView()
     {
         InitializeComponent();
         _apiHttpClient = Program.ServiceProvider.GetRequiredService<ReimaginedApiHttpClient>();
+        SizeChanged += (_, _) => UpdateResponsiveLayout();
 
         RefreshInstallDirectoryState();
     }
@@ -42,6 +45,7 @@ public partial class LaunchView : UserControl
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
+        UpdateResponsiveLayout();
 
         if (MainWindow.Settings is not null && !LauncherService.IsDetecting)
         {
@@ -88,6 +92,78 @@ public partial class LaunchView : UserControl
         }
 
         _ = RefreshLadderStateAsync();
+    }
+
+    private void UpdateResponsiveLayout()
+    {
+        if (Bounds.Width <= 0)
+        {
+            return;
+        }
+
+        var isCompact = Bounds.Width < 960;
+        if (_isCompactLayout == isCompact)
+        {
+            return;
+        }
+
+        _isCompactLayout = isCompact;
+
+        ConfigureGrid(ExperienceGrid, isCompact ? 1 : 3, isCompact ? 3 : 1);
+        ExperienceGrid.ColumnSpacing = isCompact ? 0 : 12;
+        ExperienceGrid.RowSpacing = isCompact ? 12 : 0;
+        PositionGridChild(OfflineExperienceButton, 0, 0);
+        PositionGridChild(OnlineExperienceButton, isCompact ? 0 : 1, isCompact ? 1 : 0);
+        PositionGridChild(LadderExperienceButton, isCompact ? 0 : 2, isCompact ? 2 : 0);
+
+        ConfigureTwoPanelGrid(
+            LadderExtensionsGrid,
+            AllowedLadderPluginsPanel,
+            AllowedLadderPatchesPanel,
+            isCompact);
+        ConfigureTwoPanelGrid(
+            LoaderExtensionsGrid,
+            LoaderPluginsPanel,
+            LoaderPatchesPanel,
+            isCompact);
+
+        ConfigureGrid(LoaderHeaderGrid, isCompact ? 1 : 2, isCompact ? 2 : 1, secondColumnAuto: true);
+        LoaderHeaderGrid.ColumnSpacing = isCompact ? 0 : 16;
+        LoaderHeaderGrid.RowSpacing = isCompact ? 12 : 0;
+        PositionGridChild(LoaderActionsPanel, isCompact ? 0 : 1, isCompact ? 1 : 0);
+
+        LaunchActionsPanel.Orientation = isCompact ? Orientation.Vertical : Orientation.Horizontal;
+    }
+
+    private static void ConfigureTwoPanelGrid(Grid grid, Control first, Control second, bool isCompact)
+    {
+        ConfigureGrid(grid, isCompact ? 1 : 2, isCompact ? 2 : 1);
+        grid.ColumnSpacing = isCompact ? 0 : 14;
+        grid.RowSpacing = isCompact ? 14 : 0;
+        PositionGridChild(first, 0, 0);
+        PositionGridChild(second, isCompact ? 0 : 1, isCompact ? 1 : 0);
+    }
+
+    private static void ConfigureGrid(Grid grid, int columnCount, int rowCount, bool secondColumnAuto = false)
+    {
+        grid.ColumnDefinitions.Clear();
+        for (var index = 0; index < columnCount; index++)
+        {
+            var width = secondColumnAuto && index == 1 ? GridLength.Auto : GridLength.Star;
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = width });
+        }
+
+        grid.RowDefinitions.Clear();
+        for (var index = 0; index < rowCount; index++)
+        {
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        }
+    }
+
+    private static void PositionGridChild(Control control, int column, int row)
+    {
+        Grid.SetColumn(control, column);
+        Grid.SetRow(control, row);
     }
 
     public void RefreshInstallDirectoryState()

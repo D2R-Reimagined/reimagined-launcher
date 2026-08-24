@@ -229,9 +229,15 @@ public partial class MainWindow : Window
         var bounds = RootScaleControl.Bounds;
         if (bounds.Width > 0 && bounds.Height > 0 && _currentScale > 0)
         {
+            var logicalWidth = bounds.Width / _currentScale;
+            var useCompactShell = logicalWidth < 1200;
+            RootGrid.Margin = useCompactShell ? new Thickness(12) : new Thickness(20);
+            RootGrid.ColumnSpacing = useCompactShell ? 12 : 18;
+            RootGrid.ColumnDefinitions[0].Width = new GridLength(useCompactShell ? 250 : 300);
+
             var horizontalMargin = RootGrid.Margin.Left + RootGrid.Margin.Right;
             var verticalMargin = RootGrid.Margin.Top + RootGrid.Margin.Bottom;
-            RootGrid.Width = (bounds.Width / _currentScale) - horizontalMargin;
+            RootGrid.Width = logicalWidth - horizontalMargin;
             RootGrid.Height = (bounds.Height / _currentScale) - verticalMargin;
         }
     }
