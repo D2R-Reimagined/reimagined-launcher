@@ -119,6 +119,12 @@ public partial class LaunchView : UserControl
         PositionGridChild(LadderExperienceButton, isCompact ? 0 : 2, isCompact ? 2 : 0);
 
         ConfigureTwoPanelGrid(
+            LaunchSetupGrid,
+            LaunchPanel,
+            InstallDirectoryPanel,
+            isCompact);
+
+        ConfigureTwoPanelGrid(
             LadderExtensionsGrid,
             AllowedLadderPluginsPanel,
             AllowedLadderPatchesPanel,
@@ -341,9 +347,6 @@ public partial class LaunchView : UserControl
     private void RefreshLadderAuthenticationState()
     {
         var user = _launcherAuthenticationService.CurrentUser;
-        LadderAccountStatusText.Text = user is null
-            ? "Sign in through the D2R Reimagined website to associate ladder characters and saves with your account."
-            : $"Signed in as {user.DisplayName}. Ladder characters and saves will use this account.";
         LadderSignInButton.IsVisible = user is null;
         LadderSignInButton.IsEnabled = user is null;
     }
@@ -494,6 +497,7 @@ public partial class LaunchView : UserControl
             AllowedLadderPluginsItemsControl.ItemsSource = null;
             AllowedLadderPatchesItemsControl.ItemsSource = null;
             UnapprovedLadderExtensionsBanner.IsVisible = false;
+            UnapprovedLadderExtensionsSummaryBanner.IsVisible = false;
             LaunchDiagnostics.LogException("Failed to fetch active ladders", ex);
         }
         finally
@@ -541,6 +545,7 @@ public partial class LaunchView : UserControl
             AllowedLadderPatchesItemsControl.ItemsSource = null;
             LadderExtensionPolicyStatusText.Text = "No active ladder extension policy is available.";
             UnapprovedLadderExtensionsBanner.IsVisible = false;
+            UnapprovedLadderExtensionsSummaryBanner.IsVisible = false;
             return;
         }
 
@@ -574,7 +579,15 @@ public partial class LaunchView : UserControl
             LadderExtensionPolicyStatusText.Text = approvals.Count == 0
                 ? "No D2RLoader plugins or patches are approved for this ladder. All installed extensions will be disabled."
                 : $"{approvals.Count} approved extension(s). They are disabled by default; select only the ones you want to use.";
-            UnapprovedLadderExtensionsBanner.IsVisible = preview.UnapprovedExtensions.Count > 0;
+            var hasUnapprovedExtensions = preview.UnapprovedExtensions.Count > 0;
+            UnapprovedLadderExtensionsBanner.IsVisible = hasUnapprovedExtensions;
+            UnapprovedLadderExtensionsSummaryBanner.IsVisible = hasUnapprovedExtensions;
+            if (hasUnapprovedExtensions)
+            {
+                var extensionLabel = preview.UnapprovedExtensions.Count == 1 ? "extension is" : "extensions are";
+                UnapprovedLadderExtensionsSummaryText.Text =
+                    $"{preview.UnapprovedExtensions.Count} installed {extensionLabel} not approved for this ladder and will be disabled for launch. Expand the policy details to review them.";
+            }
             var pendingUnapproved = preview.UnapprovedExtensions
                 .Where(extension => !extension.IsLadderDisabled)
                 .Select(extension => extension.FileName)
@@ -603,6 +616,9 @@ public partial class LaunchView : UserControl
             AllowedLadderPatchesItemsControl.ItemsSource = null;
             LadderExtensionPolicyStatusText.Text = "Could not verify installed D2RLoader extensions.";
             UnapprovedLadderExtensionsBanner.IsVisible = true;
+            UnapprovedLadderExtensionsSummaryBanner.IsVisible = true;
+            UnapprovedLadderExtensionsSummaryText.Text =
+                "Extension verification failed. Ladder launch remains blocked until the installed extensions can be checked.";
             UnapprovedLadderExtensionsText.Text =
                 "Ladder launch will remain blocked until installed extensions can be verified.";
             LaunchDiagnostics.LogException("Failed to preview ladder extension policy", ex);

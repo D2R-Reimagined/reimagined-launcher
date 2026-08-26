@@ -27,15 +27,15 @@
     </Window.Styles>
     <LayoutTransformControl x:Name="RootScaleControl">
         <Grid x:Name="RootGrid"
-              Margin="20"
-              ColumnSpacing="18">
+              Margin="16"
+              ColumnSpacing="14">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="300" />
+                <ColumnDefinition Width="260" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
             <Border Grid.Column="0"
                     Classes="panel"
-                    Padding="20">
+                    Padding="16">
             <Grid RowDefinitions="Auto,*,Auto" RowSpacing="18">
                 <Border Grid.Row="0"
                         Classes="hero-panel"
@@ -163,8 +163,8 @@
             </Grid>
         </Border>
 
-            <Grid Grid.Column="1" RowDefinitions="Auto,*" RowSpacing="18">
-                <StackPanel Grid.Row="0" Spacing="18">
+            <Grid Grid.Column="1" RowDefinitions="Auto,*" RowSpacing="14">
+                <StackPanel Grid.Row="0" Spacing="14">
                     <Border x:Name="UpdateBanner"
                             IsVisible="False"
                             Classes="warning-banner"
@@ -196,7 +196,7 @@
                     </Border>
 
                     <Border Classes="panel"
-                            Padding="20,16">
+                            Padding="18,14">
                         <Grid ColumnDefinitions="*,Auto"
                               ColumnSpacing="16">
                             <StackPanel Spacing="3">
@@ -265,7 +265,7 @@
                                             Click="OnReimaginedSignInClicked"
                                             VerticalAlignment="Center" />
                                     <Button x:Name="ReimaginedUserMenuButton"
-                                            Classes="accent"
+                                            Classes="link-button"
                                             Click="OnUserMenuClick"
                                             VerticalAlignment="Center"
                                             FontWeight="Bold"
@@ -279,13 +279,13 @@
                                 </Grid>
 
                                 <Grid VerticalAlignment="Center">
-                                    <Button Classes="accent"
+                                    <Button Classes="link-button"
                                             Content="Login with Nexus Mods"
                                             Click="OnNexusLoginClicked"
                                             IsVisible="{Binding IsLoggedIn, Converter={StaticResource InverseBooleanConverter}}"
                                             VerticalAlignment="Center" />
                                     <Button x:Name="UserMenuButton"
-                                            Classes="accent"
+                                            Classes="link-button"
                                             Content="{Binding Name}"
                                             Click="OnUserMenuClick"
                                             VerticalAlignment="Center"
@@ -304,8 +304,8 @@
                 </StackPanel>
 
                 <Border Grid.Row="1"
-                        Classes="panel"
-                        Padding="24">
+                        Background="Transparent"
+                        Padding="0">
                     <ContentControl x:Name="ContentArea"
                                     HorizontalContentAlignment="Stretch"
                                     VerticalContentAlignment="Stretch" />
