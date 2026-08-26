@@ -22,6 +22,7 @@ public partial class LaunchView : UserControl
 {
     public GameLauncherService LauncherService = new();
     private readonly ReimaginedApiHttpClient _apiHttpClient;
+    private readonly LauncherAuthenticationService _launcherAuthenticationService;
     private bool _isLaunching;
     private bool _isRefreshingLadders;
     private bool _isRefreshingLadderControls;
@@ -37,6 +38,7 @@ public partial class LaunchView : UserControl
     {
         InitializeComponent();
         _apiHttpClient = Program.ServiceProvider.GetRequiredService<ReimaginedApiHttpClient>();
+        _launcherAuthenticationService = Program.ServiceProvider.GetRequiredService<LauncherAuthenticationService>();
         SizeChanged += (_, _) => UpdateResponsiveLayout();
 
         RefreshInstallDirectoryState();
@@ -173,6 +175,7 @@ public partial class LaunchView : UserControl
         var isOnlineExperience = profile.LaunchExperience == LaunchExperience.Online;
         var isLadderExperience = profile.LaunchExperience == LaunchExperience.Ladder;
         var ladderAvailable = HasActiveLadder;
+        var isReimaginedSignedIn = _launcherAuthenticationService.IsSignedIn;
 
         InstallationTypeComboBox.SelectedIndex = (int)profile.Type;
         DirectoryTextBox.Text = profile.InstallDirectory ?? string.Empty;
@@ -239,6 +242,8 @@ public partial class LaunchView : UserControl
         LadderExperienceButton.IsEnabled = profile.Type != InstallationType.D2RMM && ladderAvailable;
         OnlineExperiencePanel.IsVisible = isOnlineExperience && profile.Type != InstallationType.D2RMM;
         LadderPolicyPanel.IsVisible = isLadderExperience && profile.Type != InstallationType.D2RMM;
+        LadderAuthenticationWarningBanner.IsVisible = isLadderExperience && !isReimaginedSignedIn;
+        RefreshLadderAuthenticationState();
 
         if (profile.Type == InstallationType.D2RMM)
         {
@@ -256,13 +261,19 @@ public partial class LaunchView : UserControl
             StartGameDescription.Text = isOnlineExperience
                 ? "Starts D2RLoader with Reimagined selected. Choose TCP/IP in-game to host or join; this does not connect to Battle.net."
                 : isLadderExperience
-                    ? "Restores clean base files, enforces the ladder extension allowlist, and starts Reimagined through D2RLoader."
+                    ? isReimaginedSignedIn
+                        ? "Restores clean base files, enforces the ladder extension allowlist, and starts Reimagined through D2RLoader."
+                        : "Sign in with your D2R Reimagined website account before starting a ladder character."
                     : "Starts the standard Reimagined offline experience with your saved launch options.";
             StartGameButton.IsEnabled = !_isLaunching
                                         && isValidated
                                         && isModDetected
                                         && (!isOnlineExperience || loaderAvailable)
-                                        && (!isLadderExperience || ladderAvailable && loaderAvailable && _ladderPolicyVerified);
+                                        && (!isLadderExperience
+                                            || isReimaginedSignedIn
+                                            && ladderAvailable
+                                            && loaderAvailable
+                                            && _ladderPolicyVerified);
 
             if (!isOnlineExperience
                 && !isLadderExperience
@@ -276,7 +287,10 @@ public partial class LaunchView : UserControl
         ValidationBanner.IsVisible = !isValidated
                                      || !isModDetected
                                      || isOnlineExperience && !loaderAvailable
-                                     || isLadderExperience && (!ladderAvailable || !loaderAvailable || !_ladderPolicyVerified);
+                                     || isLadderExperience
+                                     && (!ladderAvailable
+                                         || !loaderAvailable
+                                         || !_ladderPolicyVerified);
         
         if (profile.Type == InstallationType.D2RMM)
         {
@@ -293,7 +307,9 @@ public partial class LaunchView : UserControl
             ValidationBannerText.Text = isLadderExperience
                                         && isValidated
                                         && isModDetected
-                                        && (!ladderAvailable || !loaderAvailable || !_ladderPolicyVerified)
+                                        && (!ladderAvailable
+                                            || !loaderAvailable
+                                            || !_ladderPolicyVerified)
                 ? !_ladderPolicyVerified && ladderAvailable && loaderAvailable
                     ? "Installed D2RLoader extensions have not been verified against the ladder allowlist."
                     : GetLadderUnavailableMessage(loaderAvailable ? null : loaderUnavailableReason)
@@ -315,6 +331,37 @@ public partial class LaunchView : UserControl
         BackupIntervalSummary.Text = profile.AutomaticBackupsEnabled
             ? $"Auto-Backup Interval: {profile.BackupIntervalMinutes} min"
             : "Auto-Backup Interval: N/A";
+    }
+
+    public void RefreshAuthenticationState()
+    {
+        RefreshInstallDirectoryState();
+    }
+
+    private void RefreshLadderAuthenticationState()
+    {
+        var user = _launcherAuthenticationService.CurrentUser;
+        LadderAccountStatusText.Text = user is null
+            ? "Sign in through the D2R Reimagined website to associate ladder characters and saves with your account."
+            : $"Signed in as {user.DisplayName}. Ladder characters and saves will use this account.";
+        LadderSignInButton.IsVisible = user is null;
+        LadderSignInButton.IsEnabled = user is null;
+    }
+
+    private async void OnLadderSignInClick(object? sender, RoutedEventArgs e)
+    {
+        LadderSignInButton.IsEnabled = false;
+        try
+        {
+            if (MainWindow.Instance is { } mainWindow)
+            {
+                await mainWindow.SignInToReimaginedAsync();
+            }
+        }
+        finally
+        {
+            RefreshInstallDirectoryState();
+        }
     }
 
     private void RefreshD2RLoaderState(InstallationProfile profile, D2RLoaderInventory inventory)
@@ -742,6 +789,12 @@ public partial class LaunchView : UserControl
         var profile = MainWindow.Settings.CurrentProfile;
 
         if (profile.LaunchExperience == LaunchExperience.Ladder
+            && !await EnsureLadderAuthenticationAsync())
+        {
+            return;
+        }
+
+        if (profile.LaunchExperience == LaunchExperience.Ladder
             && (!_ladderStatusLoaded || !_ladderPolicyVerified))
         {
             await RefreshLadderStateAsync();
@@ -895,6 +948,38 @@ public partial class LaunchView : UserControl
             });
             RefreshInstallDirectoryState();
         }
+    }
+
+    private async Task<bool> EnsureLadderAuthenticationAsync()
+    {
+        try
+        {
+            if (await _launcherAuthenticationService.GetAccessTokenAsync() is not null)
+            {
+                return true;
+            }
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.LogException("Could not validate the Reimagined API session", exception);
+            Notifications.SendNotification(
+                "The launcher could not validate your D2R Reimagined login. Check your connection and try again.",
+                "Ladder login required");
+            return false;
+        }
+
+        LaunchDiagnostics.Log("Ladder launch blocked because no D2R Reimagined account is signed in.");
+        Notifications.SendNotification(
+            "Sign in with your D2R Reimagined website account before playing on the ladder.",
+            "Ladder login required");
+
+        if (MainWindow.Instance is not { } mainWindow
+            || !await mainWindow.SignInToReimaginedAsync())
+        {
+            return false;
+        }
+
+        return await _launcherAuthenticationService.GetAccessTokenAsync() is not null;
     }
 
     private async Task<bool> PrepareD2RLoaderExtensionsAsync(

@@ -106,6 +106,16 @@ public class AppSettings
         set => NexusModsSSOApiKey = SecretProtector.Unprotect(value);
     }
 
+    [JsonIgnore]
+    public string? D2RReimaginedRefreshToken { get; set; }
+
+    [JsonPropertyName("D2RReimaginedRefreshToken")]
+    public string? D2RReimaginedRefreshTokenEncrypted
+    {
+        get => SecretProtector.Protect(D2RReimaginedRefreshToken);
+        set => D2RReimaginedRefreshToken = SecretProtector.Unprotect(value);
+    }
+
     public bool? NexusPremiumDownloadAccess { get; set; }
     
     public List<InstallationProfile> Profiles { get; set; } = [];

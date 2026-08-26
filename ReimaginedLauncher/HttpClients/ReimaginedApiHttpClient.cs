@@ -41,6 +41,60 @@ public sealed class ReimaginedApiHttpClient
             cancellationToken) ?? [];
     }
 
+    public async Task<LauncherTokenResponse?> ExchangeLauncherCodeAsync(
+        string code,
+        string codeVerifier,
+        string redirectUri,
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _httpClient.PostAsJsonAsync(
+            "auth/launcher/token",
+            new { code, codeVerifier, redirectUri },
+            JsonOptions,
+            cancellationToken);
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            return null;
+        }
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<LauncherTokenResponse>(
+            JsonOptions,
+            cancellationToken);
+    }
+
+    public async Task<LauncherTokenResponse?> RefreshLauncherSessionAsync(
+        string refreshToken,
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _httpClient.PostAsJsonAsync(
+            "auth/launcher/refresh",
+            new { refreshToken },
+            JsonOptions,
+            cancellationToken);
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            return null;
+        }
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<LauncherTokenResponse>(
+            JsonOptions,
+            cancellationToken);
+    }
+
+    public async Task RevokeLauncherSessionAsync(
+        string refreshToken,
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _httpClient.PostAsJsonAsync(
+            "auth/launcher/revoke",
+            new { refreshToken },
+            JsonOptions,
+            cancellationToken);
+        response.EnsureSuccessStatusCode();
+    }
+
     private static JsonSerializerOptions CreateJsonOptions()
     {
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);

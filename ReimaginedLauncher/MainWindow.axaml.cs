@@ -48,6 +48,7 @@ public partial class MainWindow : Window
     private static readonly string LauncherVersion = ResolveLauncherVersion();
     private readonly GitHubAnnouncementsHttpClient _gitHubAnnouncementsHttpClient;
     private readonly INexusModsHttpClient _nexusModsHttpClient;
+    private readonly LauncherAuthenticationService _launcherAuthenticationService;
     public NexusModsValidateResponse? User { get; set; }
     public static NexusUserViewModel UserViewModel { get; } = new();
     
@@ -86,6 +87,7 @@ public partial class MainWindow : Window
         Instance = this;
         _gitHubAnnouncementsHttpClient = Program.ServiceProvider.GetRequiredService<GitHubAnnouncementsHttpClient>();
         _nexusModsHttpClient = Program.ServiceProvider.GetRequiredService<NexusModsHttpClient>();;
+        _launcherAuthenticationService = Program.ServiceProvider.GetRequiredService<LauncherAuthenticationService>();
         Opacity = 0;
         InitializeComponent();
         NotificationManager = new WindowNotificationManager(this)
@@ -189,6 +191,16 @@ public partial class MainWindow : Window
 
         BackupService.UpdateSchedule();
         await SettingsManager.SaveAsync(Settings);
+
+        try
+        {
+            await _launcherAuthenticationService.InitializeAsync(Settings);
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.Log($"Could not restore the Reimagined API session: {exception.Message}");
+        }
+        RefreshReimaginedAccountUI();
 
         // Network calls (can be slow; don't block UI setup)
         var openedUnreadAnnouncements = await RefreshAnnouncementsStateAsync(openUnreadAnnouncements: true);
@@ -1127,6 +1139,72 @@ public partial class MainWindow : Window
         };
 
         await _nexusSSO.ConnectAsync();
+    }
+
+    private async void OnReimaginedSignInClicked(object? sender, RoutedEventArgs e)
+    {
+        await SignInToReimaginedAsync();
+    }
+
+    public async Task<bool> SignInToReimaginedAsync()
+    {
+        if (_launcherAuthenticationService.IsSignedIn)
+        {
+            RefreshReimaginedAccountUI();
+            return true;
+        }
+
+        ReimaginedSignInButton.IsEnabled = false;
+        try
+        {
+            var user = await _launcherAuthenticationService.SignInAsync();
+            Notifications.SendNotification($"Signed in as {user.DisplayName}.", "Success");
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Notifications.SendNotification(exception.Message, "Sign-in failed");
+            return false;
+        }
+        finally
+        {
+            ReimaginedSignInButton.IsEnabled = true;
+            RefreshReimaginedAccountUI();
+        }
+    }
+
+    private async void OnReimaginedLogoutClicked(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await _launcherAuthenticationService.SignOutAsync();
+            Notifications.SendNotification("Signed out of D2R Reimagined.", "Success");
+        }
+        catch (Exception exception)
+        {
+            Notifications.SendNotification(
+                $"Signed out locally, but the server session could not be revoked: {exception.Message}",
+                "Warning");
+        }
+        finally
+        {
+            RefreshReimaginedAccountUI();
+        }
+    }
+
+    private void RefreshReimaginedAccountUI()
+    {
+        var user = _launcherAuthenticationService.CurrentUser;
+        ReimaginedSignInButton.IsVisible = user is null;
+        ReimaginedUserMenuButton.IsVisible = user is not null;
+        ReimaginedUserMenuButton.Content = user?.DisplayName ?? string.Empty;
+        ToolTip.SetTip(
+            ReimaginedUserMenuButton,
+            user is null ? null : $"D2R Reimagined account: {user.DisplayName}");
+        if (ContentArea.Content is LaunchView launchView)
+        {
+            launchView.RefreshAuthenticationState();
+        }
     }
 
     private void OnUserMenuClick(object? sender, RoutedEventArgs e)

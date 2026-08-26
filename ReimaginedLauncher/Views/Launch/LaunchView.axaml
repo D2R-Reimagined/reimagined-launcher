@@ -130,6 +130,25 @@
                                 <TextBlock Classes="muted" TextWrapping="Wrap"
                                            Text="Ladder launches use clean base files. All launcher tweaks and launcher plugins are disabled. Only hash-verified D2RLoader extensions approved for the selected ladder can be enabled." />
                             </StackPanel>
+                            <Border Classes="extension-card" Padding="12">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="14">
+                                    <StackPanel Spacing="3">
+                                        <TextBlock Text="D2R Reimagined Account"
+                                                   FontFamily="Georgia"
+                                                   FontSize="17"
+                                                   FontWeight="SemiBold" />
+                                        <TextBlock x:Name="LadderAccountStatusText"
+                                                   Classes="muted"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <Button x:Name="LadderSignInButton"
+                                            Grid.Column="1"
+                                            Classes="accent"
+                                            Content="Sign in"
+                                            VerticalAlignment="Center"
+                                            Click="OnLadderSignInClick" />
+                                </Grid>
+                            </Border>
                             <StackPanel Orientation="Horizontal" Spacing="10">
                                 <TextBlock Text="Active Ladder:" Classes="muted" VerticalAlignment="Center" />
                                 <ComboBox x:Name="ActiveLadderComboBox" MinWidth="260"
@@ -197,6 +216,14 @@
                 <StackPanel Spacing="12">
                     <TextBlock Classes="section-title" Text="Launch" />
                     <TextBlock x:Name="StartGameDescription" Classes="muted" TextWrapping="Wrap" />
+                    <Border x:Name="LadderAuthenticationWarningBanner"
+                            Classes="warning-banner"
+                            Padding="12"
+                            IsVisible="False">
+                        <TextBlock Foreground="{StaticResource GoldTextBrush}"
+                                   Text="Sign in with your D2R Reimagined website account to play on the ladder."
+                                   TextWrapping="Wrap" />
+                    </Border>
                     <StackPanel x:Name="LaunchActionsPanel" Orientation="Horizontal" Spacing="16">
                         <Button x:Name="StartGameButton" Classes="accent" Content="Start Game" Click="OnRunClick"
                                 Width="220" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"

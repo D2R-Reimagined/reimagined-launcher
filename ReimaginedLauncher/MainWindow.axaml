@@ -259,6 +259,26 @@
                                 </Button>
 
                                 <Grid VerticalAlignment="Center">
+                                    <Button x:Name="ReimaginedSignInButton"
+                                            Classes="accent"
+                                            Content="Sign in to Reimagined"
+                                            Click="OnReimaginedSignInClicked"
+                                            VerticalAlignment="Center" />
+                                    <Button x:Name="ReimaginedUserMenuButton"
+                                            Classes="accent"
+                                            Click="OnUserMenuClick"
+                                            VerticalAlignment="Center"
+                                            FontWeight="Bold"
+                                            IsVisible="False">
+                                        <Button.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="Sign out of Reimagined" Click="OnReimaginedLogoutClicked"/>
+                                            </ContextMenu>
+                                        </Button.ContextMenu>
+                                    </Button>
+                                </Grid>
+
+                                <Grid VerticalAlignment="Center">
                                     <Button Classes="accent"
                                             Content="Login with Nexus Mods"
                                             Click="OnNexusLoginClicked"
@@ -273,7 +293,7 @@
                                             IsVisible="{Binding IsLoggedIn}">
                                         <Button.ContextMenu>
                                             <ContextMenu>
-                                                <MenuItem Header="Logout" Click="OnLogoutClicked"/>
+                                                <MenuItem Header="Logout of Nexus Mods" Click="OnLogoutClicked"/>
                                             </ContextMenu>
                                         </Button.ContextMenu>
                                     </Button>

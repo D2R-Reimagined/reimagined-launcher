@@ -9,6 +9,7 @@ Source code for the mod can be found here: [https://github.com/D2R-Reimagined/d2
 
 ## Features
 * Login with Nexus Mods
+* Sign in to the D2R Reimagined API through the website
 * 1-click Install for Premium NM Users (2 click install for non-premium NM users)
 * Easy Launch Parameter Editing
 * Per-installation Offline, Online (D2RLoader TCP/IP), and active Ladder experiences
@@ -33,11 +34,13 @@ The Launch page inventories extensions from both supported scopes without loadin
 
 The mod source remains the canonical Reimagined content source. D2RLoader compatibility assets can be packaged beneath the mod-local `d2rloader` folder when they are required; a separate copy of the full mod is not required.
 
-Ladder launches also use D2RLoader, but restore the launcher-managed clean Reimagined files and skip all launcher tweaks and launcher plugins. D2RLoader plugins and patches must match the active ladder's API allowlist by kind, filename, and SHA-256. Approved extensions are unchecked by default; unapproved or unchecked files are moved into `ladder-disabled/plugins` or `ladder-disabled/patches` under their existing global or Reimagined D2RLoader root. The launcher restores those files before the next non-ladder launch.
+Ladder launches require a signed-in D2R Reimagined website account so ladder characters and saves can be associated with the correct API identity. They also use D2RLoader, restore the launcher-managed clean Reimagined files, and skip all launcher tweaks and launcher plugins. D2RLoader plugins and patches must match the active ladder's API allowlist by kind, filename, and SHA-256. Approved extensions are unchecked by default; unapproved or unchecked files are moved into `ladder-disabled/plugins` or `ladder-disabled/patches` under their existing global or Reimagined D2RLoader root. The launcher restores those files before the next non-ladder launch.
 
 ## API configuration
 
 Debug builds query the local Reimagined API at `http://localhost:5000/`. Other builds query `https://api.d2r-reimagined.com/`. Set `D2R_REIMAGINED_API_BASE_URL` to an absolute HTTP or HTTPS URL to override either default; for example, `$env:D2R_REIMAGINED_API_BASE_URL = "http://localhost:5000/"` in PowerShell before starting the launcher.
+
+Launcher account sign-in opens the website in the system browser and returns through a random loopback port using a one-use PKCE authorization code. Debug builds open `http://localhost:9500/`; other builds open `https://www.d2r-reimagined.com/`. Set `D2R_REIMAGINED_WEBSITE_BASE_URL` to override the website origin during local integration testing.
 
 ## Downloads
 
