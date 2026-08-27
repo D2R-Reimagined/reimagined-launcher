@@ -892,6 +892,12 @@ public partial class LaunchView : UserControl
                 return;
             }
 
+            if (!await PrepareServerSavesAsync(profile))
+            {
+                SetLaunchStatus($"{actionName} preparation failed.");
+                return;
+            }
+
             if (profile.AutomaticBackupsEnabled)
             {
                 LaunchDiagnostics.Log("Starting backup.");
@@ -998,6 +1004,112 @@ public partial class LaunchView : UserControl
         return await _launcherAuthenticationService.GetAccessTokenAsync() is not null;
     }
 
+    /// <summary>
+    /// Points the server-saves plugin at the API for a ladder launch, and turns
+    /// it off for every other launch. A stale token left enabled would keep
+    /// hiding the player's own characters outside the ladder.
+    /// </summary>
+    private async Task<bool> PrepareServerSavesAsync(InstallationProfile profile)
+    {
+        var isLadderLaunch = profile.Type != InstallationType.D2RMM
+                             && profile.LaunchExperience == LaunchExperience.Ladder;
+
+        try
+        {
+            if (!isLadderLaunch)
+            {
+                await ServerSavesConfigService.DisableAsync(profile.InstallDirectory);
+                await LadderSaveDirectoryService.RestoreAsync(profile.InstallDirectory);
+                return true;
+            }
+
+            // PrepareD2RLoaderExtensionsAsync already installed the plugin and ran
+            // the ladder's extension policy against it. If it is not here now,
+            // that ladder has not approved it (or the player left it unchecked)
+            // - a legitimate outcome, not a failure, so the launch proceeds on
+            // local characters exactly as it would for a ladder with no server
+            // saves at all.
+            //
+            // The save folder is only redirected once server saves are certain to
+            // run. Redirecting without the plugin would drop the player into an
+            // empty folder where any character they made would never sync.
+            if (!ServerSavesConfigService.IsPluginInstalled(profile.InstallDirectory))
+            {
+                LaunchDiagnostics.Log("server-saves plugin is not approved for this ladder; this launch uses local characters.");
+                await LadderSaveDirectoryService.RestoreAsync(profile.InstallDirectory);
+                return true;
+            }
+
+            var ladder = SelectedLadder;
+            if (ladder is null)
+            {
+                const string message = "The selected active ladder could not be resolved.";
+                LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
+                Notifications.SendNotification(message, "Warning");
+                return false;
+            }
+
+            var accessToken = await _launcherAuthenticationService.GetAccessTokenAsync();
+            if (string.IsNullOrWhiteSpace(accessToken))
+            {
+                const string message = "Sign in to your Reimagined account to play on the ladder - your characters are stored on the server.";
+                LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
+                Notifications.SendNotification(message, "Warning");
+                await LadderSaveDirectoryService.RestoreAsync(profile.InstallDirectory);
+                return false;
+            }
+
+            var settings = new ServerSavesLaunchSettings(
+                _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority),
+                accessToken,
+                ladder.Id);
+            if (!await ServerSavesConfigService.EnableAsync(profile.InstallDirectory, settings))
+            {
+                const string message = "The server-saves plugin configuration could not be written.";
+                LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
+                Notifications.SendNotification(message, "Warning");
+                await LadderSaveDirectoryService.RestoreAsync(profile.InstallDirectory);
+                return false;
+            }
+
+            // Only now, with the plugin present and configured, is it safe to send
+            // D2R at this ladder's own save folder.
+            var ladderDirectory = await LadderSaveDirectoryService.PrepareAsync(
+                profile.InstallDirectory,
+                ladder.Id,
+                ladder.Name);
+            if (ladderDirectory is null)
+            {
+                const string message = "The ladder save folder could not be prepared.";
+                LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
+                Notifications.SendNotification(message, "Warning");
+                await LadderSaveDirectoryService.RestoreAsync(profile.InstallDirectory);
+                return false;
+            }
+
+            LaunchDiagnostics.Log($"server-saves configured for ladder {ladder.Id} at \"{ladderDirectory}\".");
+            return true;
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.LogException("server-saves preparation failed", exception);
+            Notifications.SendNotification($"Server save preparation failed: {exception.Message}", "Warning");
+
+            // Never leave the mod pointed at a ladder folder after a failure -
+            // the player would find their own characters missing.
+            try
+            {
+                await LadderSaveDirectoryService.RestoreAsync(profile.InstallDirectory);
+            }
+            catch (Exception restoreException)
+            {
+                LaunchDiagnostics.LogException("ladder save folder restore failed", restoreException);
+            }
+
+            return !isLadderLaunch;
+        }
+    }
+
     private async Task<bool> PrepareD2RLoaderExtensionsAsync(
         InstallationProfile profile,
         IProgress<string> progress)
@@ -1025,6 +1137,19 @@ public partial class LaunchView : UserControl
             if (ladder is null)
             {
                 Notifications.SendNotification("The selected active ladder could not be resolved.", "Warning");
+                return false;
+            }
+
+            // Install our own bundled plugin before the ladder policy below
+            // decides what stays and what moves to ladder-disabled - a player
+            // should never have to source this DLL themselves. This can only
+            // fail on a real I/O problem; whether the ladder actually approves
+            // the plugin is decided separately, by the policy step that follows.
+            if (!await ServerSavesConfigService.EnsureInstalledAsync(profile.InstallDirectory))
+            {
+                const string message = "The Server Saves plugin could not be installed.";
+                LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
+                Notifications.SendNotification(message, "Warning");
                 return false;
             }
 

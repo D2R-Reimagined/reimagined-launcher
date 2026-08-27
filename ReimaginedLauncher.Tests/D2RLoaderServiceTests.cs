@@ -187,6 +187,63 @@ public sealed class D2RLoaderServiceTests : IDisposable
         Assert.True(File.Exists(approvedPatchPath));
     }
 
+    [Fact]
+    public void LadderPolicyDoesNotRestoreADisabledExtensionWhenItIsActiveInTheOtherScope()
+    {
+        File.WriteAllBytes(CreatePath("D2RLoader.exe"), [0]);
+        var disabledPluginPath = CreatePath(
+            "d2rloader", "ladder-disabled", "plugins", "d2rl-server-saves.dll");
+        var activeModPluginPath = CreatePath(
+            "mods", "Reimagined", "d2rloader", "plugins", "d2rl-server-saves.dll");
+        File.WriteAllBytes(disabledPluginPath, [1, 2, 3]);
+        File.WriteAllBytes(activeModPluginPath, [1, 2, 3]);
+
+        var restored = D2RLoaderService.RestoreLadderDisabledExtensions(_installDirectory);
+
+        Assert.Equal(0, restored);
+        Assert.True(File.Exists(disabledPluginPath));
+        Assert.True(File.Exists(activeModPluginPath));
+        Assert.False(File.Exists(CreatePath("d2rloader", "plugins", "d2rl-server-saves.dll")));
+    }
+
+    [Fact]
+    public void LadderPolicyDoesNotRestoreADisabledExtensionWhenItIsActiveInTheSameScope()
+    {
+        File.WriteAllBytes(CreatePath("D2RLoader.exe"), [0]);
+        var disabledPluginPath = CreatePath(
+            "d2rloader", "ladder-disabled", "plugins", "d2rl-server-saves.dll");
+        var activePluginPath = CreatePath(
+            "d2rloader", "plugins", "d2rl-server-saves.dll");
+        File.WriteAllBytes(disabledPluginPath, [1, 2, 3]);
+        File.WriteAllBytes(activePluginPath, [1, 2, 3]);
+
+        var restored = D2RLoaderService.RestoreLadderDisabledExtensions(_installDirectory);
+
+        Assert.Equal(0, restored);
+        Assert.True(File.Exists(disabledPluginPath));
+        Assert.True(File.Exists(activePluginPath));
+    }
+
+    [Fact]
+    public async Task LadderPolicyReplacesAStaleDisabledCopyWithTheActiveExtension()
+    {
+        File.WriteAllBytes(CreatePath("D2RLoader.exe"), [0]);
+        var activePluginPath = CreatePath("d2rloader", "plugins", "d2rl-server-saves.dll");
+        var disabledPluginPath = CreatePath(
+            "d2rloader", "ladder-disabled", "plugins", "d2rl-server-saves.dll");
+        File.WriteAllBytes(activePluginPath, [1, 2, 3]);
+        File.WriteAllBytes(disabledPluginPath, [4, 5, 6]);
+
+        var result = await D2RLoaderService.ApplyLadderPolicyAsync(
+            _installDirectory,
+            [],
+            new HashSet<Guid>());
+
+        Assert.False(File.Exists(activePluginPath));
+        Assert.Equal(new byte[] { 1, 2, 3 }, File.ReadAllBytes(disabledPluginPath));
+        Assert.Single(result.UnapprovedMoved);
+    }
+
     private static string ComputeSha256(string path)
     {
         return Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));

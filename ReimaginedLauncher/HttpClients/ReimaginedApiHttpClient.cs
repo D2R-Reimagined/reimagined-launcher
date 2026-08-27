@@ -32,6 +32,9 @@ public sealed class ReimaginedApiHttpClient
         LaunchDiagnostics.Log($"Reimagined API base address: {_httpClient.BaseAddress}");
     }
 
+    /// <summary>The resolved API origin, for components that talk to it outside this client.</summary>
+    public Uri BaseAddress => _httpClient.BaseAddress!;
+
     public async Task<IReadOnlyList<LadderResponse>> GetActiveLaddersAsync(
         CancellationToken cancellationToken = default)
     {

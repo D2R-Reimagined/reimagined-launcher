@@ -100,7 +100,8 @@ public static partial class D2RLoaderService
     public static int RestoreLadderDisabledExtensions(string? installDirectory)
     {
         var inventory = Discover(installDirectory);
-        return RestoreDisabledRoot(inventory.GlobalRoot) + RestoreDisabledRoot(inventory.ModRoot);
+        return RestoreDisabledRoot(inventory.GlobalRoot, inventory.ModRoot)
+               + RestoreDisabledRoot(inventory.ModRoot, inventory.GlobalRoot);
     }
 
     private static D2RLoaderInventory DiscoverForLadderPolicy(string? installDirectory)
@@ -180,24 +181,22 @@ public static partial class D2RLoaderService
         var destination = Path.Combine(disabledDirectory, extension.FileName);
 
         Directory.CreateDirectory(disabledDirectory);
-        if (File.Exists(destination))
-        {
-            throw new IOException($"Cannot disable '{extension.FileName}' because a ladder-disabled copy already exists.");
-        }
-
-        File.Move(extension.FilePath, destination);
+        // The active copy is authoritative. A held copy can be left behind by an
+        // interrupted policy change or by moving the extension between scopes.
+        File.Move(extension.FilePath, destination, overwrite: true);
     }
 
-    private static int RestoreDisabledRoot(string root)
+    private static int RestoreDisabledRoot(string root, string alternateActiveRoot)
     {
         var disabledRoot = Path.Combine(root, LadderDisabledFolderName);
-        return RestoreDisabledKind(disabledRoot, root, "plugins", "*.dll")
-               + RestoreDisabledKind(disabledRoot, root, "patches", "*.json");
+        return RestoreDisabledKind(disabledRoot, root, alternateActiveRoot, "plugins", "*.dll")
+               + RestoreDisabledKind(disabledRoot, root, alternateActiveRoot, "patches", "*.json");
     }
 
     private static int RestoreDisabledKind(
         string disabledRoot,
         string activeRoot,
+        string alternateActiveRoot,
         string kindFolder,
         string pattern)
     {
@@ -211,11 +210,20 @@ public static partial class D2RLoaderService
         var restoredCount = 0;
         foreach (var source in Directory.GetFiles(sourceDirectory, pattern, SearchOption.TopDirectoryOnly))
         {
-            var destination = Path.Combine(destinationDirectory, Path.GetFileName(source));
+            var fileName = Path.GetFileName(source);
+            var destination = Path.Combine(destinationDirectory, fileName);
             if (File.Exists(destination))
             {
-                throw new IOException(
-                    $"Cannot restore ladder-disabled '{Path.GetFileName(source)}' because an active copy already exists.");
+                continue;
+            }
+
+            // D2RLoader loads extensions from both its global folder and the Reimagined
+            // mod folder. If the same extension is already active in the other scope,
+            // it is already available and must not be restored as a duplicate.
+            var alternateDestination = Path.Combine(alternateActiveRoot, kindFolder, fileName);
+            if (File.Exists(alternateDestination))
+            {
+                continue;
             }
 
             Directory.CreateDirectory(destinationDirectory);

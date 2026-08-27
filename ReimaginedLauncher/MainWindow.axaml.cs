@@ -49,6 +49,8 @@ public partial class MainWindow : Window
     private readonly GitHubAnnouncementsHttpClient _gitHubAnnouncementsHttpClient;
     private readonly INexusModsHttpClient _nexusModsHttpClient;
     private readonly LauncherAuthenticationService _launcherAuthenticationService;
+    private readonly object _reimaginedSignInLock = new();
+    private CancellationTokenSource? _reimaginedSignInCancellationTokenSource;
     public NexusModsValidateResponse? User { get; set; }
     public static NexusUserViewModel UserViewModel { get; } = new();
     
@@ -1154,12 +1156,27 @@ public partial class MainWindow : Window
             return true;
         }
 
-        ReimaginedSignInButton.IsEnabled = false;
+        var cancellationTokenSource = new CancellationTokenSource();
+        CancellationTokenSource? previousCancellationTokenSource;
+        lock (_reimaginedSignInLock)
+        {
+            previousCancellationTokenSource = _reimaginedSignInCancellationTokenSource;
+            _reimaginedSignInCancellationTokenSource = cancellationTokenSource;
+        }
+
+        // A closed browser tab cannot notify the launcher. Treat another click as
+        // a retry by cancelling the abandoned callback listener immediately.
+        previousCancellationTokenSource?.Cancel();
+
         try
         {
-            var user = await _launcherAuthenticationService.SignInAsync();
+            var user = await _launcherAuthenticationService.SignInAsync(cancellationTokenSource.Token);
             Notifications.SendNotification($"Signed in as {user.DisplayName}.", "Success");
             return true;
+        }
+        catch (OperationCanceledException) when (cancellationTokenSource.IsCancellationRequested)
+        {
+            return false;
         }
         catch (Exception exception)
         {
@@ -1168,7 +1185,15 @@ public partial class MainWindow : Window
         }
         finally
         {
-            ReimaginedSignInButton.IsEnabled = true;
+            lock (_reimaginedSignInLock)
+            {
+                if (ReferenceEquals(_reimaginedSignInCancellationTokenSource, cancellationTokenSource))
+                {
+                    _reimaginedSignInCancellationTokenSource = null;
+                }
+            }
+
+            cancellationTokenSource.Dispose();
             RefreshReimaginedAccountUI();
         }
     }
