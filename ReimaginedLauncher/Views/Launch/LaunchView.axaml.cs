@@ -23,7 +23,9 @@ public partial class LaunchView : UserControl
     public GameLauncherService LauncherService = new();
     private readonly ReimaginedApiHttpClient _apiHttpClient;
     private readonly LauncherAuthenticationService _launcherAuthenticationService;
+    private readonly D2RLoaderInstallerService _d2rLoaderInstallerService;
     private bool _isLaunching;
+    private bool _isLoaderInstallPromptOpen;
     private bool _isRefreshingLadders;
     private bool _isRefreshingLadderControls;
     private bool _ladderStatusLoaded;
@@ -39,6 +41,7 @@ public partial class LaunchView : UserControl
         InitializeComponent();
         _apiHttpClient = Program.ServiceProvider.GetRequiredService<ReimaginedApiHttpClient>();
         _launcherAuthenticationService = Program.ServiceProvider.GetRequiredService<LauncherAuthenticationService>();
+        _d2rLoaderInstallerService = Program.ServiceProvider.GetRequiredService<D2RLoaderInstallerService>();
         SizeChanged += (_, _) => UpdateResponsiveLayout();
 
         RefreshInstallDirectoryState();
@@ -425,14 +428,199 @@ public partial class LaunchView : UserControl
     private async Task SetLaunchExperienceAsync(LaunchExperience experience)
     {
         var profile = MainWindow.Settings.CurrentProfile;
-        if (profile.Type == InstallationType.D2RMM || profile.LaunchExperience == experience)
+        if (profile.Type == InstallationType.D2RMM)
         {
             return;
         }
 
-        profile.LaunchExperience = experience;
-        await SettingsManager.SaveAsync(MainWindow.Settings);
-        RefreshInstallDirectoryState();
+        if (profile.LaunchExperience != experience)
+        {
+            profile.LaunchExperience = experience;
+            await SettingsManager.SaveAsync(MainWindow.Settings);
+            RefreshInstallDirectoryState();
+        }
+
+        if (experience is LaunchExperience.Online or LaunchExperience.Ladder)
+        {
+            await PromptInstallD2RLoaderAsync(profile);
+        }
+    }
+
+    private async Task PromptInstallD2RLoaderAsync(InstallationProfile profile)
+    {
+        if (_isLoaderInstallPromptOpen
+            || D2RLoaderService.IsInstalled(profile.InstallDirectory)
+            || !OperatingSystem.IsWindows()
+            || !InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory)
+            || TopLevel.GetTopLevel(this) is not Window owner)
+        {
+            return;
+        }
+
+        _isLoaderInstallPromptOpen = true;
+        try
+        {
+            var installed = await ShowD2RLoaderInstallDialogAsync(owner, profile.InstallDirectory!);
+            if (!installed)
+            {
+                return;
+            }
+
+            LaunchDiagnostics.Log($"D2RLoader installed to {profile.InstallDirectory}.");
+            Notifications.SendNotification(
+                "D2RLoader installed. Online and Ladder modes are now ready to use.",
+                "Success");
+            RefreshInstallDirectoryState();
+            await RefreshLadderStateAsync();
+        }
+        finally
+        {
+            _isLoaderInstallPromptOpen = false;
+        }
+    }
+
+    private async Task<bool> ShowD2RLoaderInstallDialogAsync(Window owner, string installDirectory)
+    {
+        var dialog = new Window
+        {
+            Width = 520,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Title = "Install D2RLoader?"
+        };
+
+        var statusText = new TextBlock
+        {
+            IsVisible = false,
+            TextWrapping = TextWrapping.Wrap
+        };
+        var progressBar = new ProgressBar
+        {
+            IsVisible = false,
+            IsIndeterminate = true,
+            Minimum = 0,
+            Maximum = 100
+        };
+        var installButton = new Button
+        {
+            Content = "Download and Install",
+            Classes = { "accent" },
+            MinWidth = 156
+        };
+        var cancelButton = new Button
+        {
+            Content = "Not Now",
+            MinWidth = 96
+        };
+        var isInstalling = false;
+        var isInstalled = false;
+
+        installButton.Click += async (_, _) =>
+        {
+            if (isInstalled)
+            {
+                dialog.Close(true);
+                return;
+            }
+
+            isInstalling = true;
+            installButton.IsEnabled = false;
+            cancelButton.IsEnabled = false;
+            statusText.IsVisible = true;
+            statusText.Foreground = new SolidColorBrush(Color.Parse("#F7F1E3"));
+            progressBar.IsVisible = true;
+
+            var progress = new Progress<D2RLoaderInstallProgress>(update =>
+            {
+                statusText.Text = update.Message;
+                progressBar.IsIndeterminate = !update.Percentage.HasValue;
+                if (update.Percentage.HasValue)
+                {
+                    progressBar.Value = update.Percentage.Value;
+                }
+            });
+
+            try
+            {
+                await _d2rLoaderInstallerService.InstallAsync(installDirectory, progress);
+                isInstalled = true;
+                statusText.Text = "D2RLoader installed successfully.";
+                statusText.Foreground = new SolidColorBrush(Color.Parse("#86D88F"));
+                progressBar.IsIndeterminate = false;
+                progressBar.Value = 100;
+                installButton.Content = "Close";
+                installButton.IsEnabled = true;
+                cancelButton.IsVisible = false;
+            }
+            catch (Exception exception)
+            {
+                LaunchDiagnostics.LogException("D2RLoader installation failed", exception);
+                statusText.Text = $"Installation failed: {exception.Message}";
+                statusText.Foreground = new SolidColorBrush(Color.Parse("#E98B91"));
+                progressBar.IsVisible = false;
+                installButton.IsEnabled = true;
+                cancelButton.IsEnabled = true;
+                cancelButton.Content = "Close";
+            }
+            finally
+            {
+                isInstalling = false;
+            }
+        };
+
+        cancelButton.Click += (_, _) => dialog.Close(false);
+        dialog.Closing += (_, args) =>
+        {
+            if (isInstalling)
+            {
+                args.Cancel = true;
+            }
+        };
+
+        dialog.Content = new Border
+        {
+            Padding = new Thickness(22),
+            Child = new StackPanel
+            {
+                Spacing = 14,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "D2RLoader is required for Online and Ladder modes, but it was not found beside D2R.exe.",
+                        FontWeight = FontWeight.SemiBold,
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    new TextBlock
+                    {
+                        Text = "Would you like the launcher to download D2RLoader and extract it into your Diablo II: Resurrected installation?",
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    new TextBlock
+                    {
+                        Text = installDirectory,
+                        Classes = { "muted" },
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    statusText,
+                    progressBar,
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Spacing = 10,
+                        Children =
+                        {
+                            cancelButton,
+                            installButton
+                        }
+                    }
+                }
+            }
+        };
+
+        return await dialog.ShowDialog<bool>(owner);
     }
 
     private void OnRefreshLoaderClick(object? sender, RoutedEventArgs e)
@@ -838,6 +1026,12 @@ public partial class LaunchView : UserControl
             }
 
             return;
+        }
+
+        if (profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder
+            && !D2RLoaderService.IsInstalled(profile.InstallDirectory))
+        {
+            await PromptInstallD2RLoaderAsync(profile);
         }
 
         if (profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder

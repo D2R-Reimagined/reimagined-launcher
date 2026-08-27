@@ -25,6 +25,7 @@ class Program
         services.AddHttpClient<GitHubDiscussionPluginsHttpClient>();
         services.AddHttpClient<NexusModsHttpClient>();
         services.AddHttpClient<ReimaginedApiHttpClient>();
+        services.AddHttpClient<D2RLoaderInstallerService>();
         services.AddSingleton<LauncherAuthenticationService>();
         
         ServiceProvider = services.BuildServiceProvider();
