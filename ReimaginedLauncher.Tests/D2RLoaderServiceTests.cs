@@ -188,6 +188,50 @@ public sealed class D2RLoaderServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task LadderPolicyKeepsARequiredExtensionWhenItIsNotSelected()
+    {
+        File.WriteAllBytes(CreatePath("D2RLoader.exe"), [0]);
+        var requiredPluginPath = CreatePath("d2rloader", "plugins", "required.dll");
+        File.WriteAllBytes(requiredPluginPath, [1, 2, 3]);
+        var approval = new LadderExtensionApproval(
+            Guid.NewGuid(),
+            "Required Plugin",
+            "required.dll",
+            ComputeSha256(requiredPluginPath),
+            D2RLoaderExtensionKind.Plugin,
+            IsRequired: true);
+
+        var result = await D2RLoaderService.ApplyLadderPolicyAsync(
+            _installDirectory,
+            [approval],
+            new HashSet<Guid>());
+
+        Assert.True(File.Exists(requiredPluginPath));
+        Assert.Empty(result.UnselectedMoved);
+    }
+
+    [Fact]
+    public async Task LadderPolicyRejectsLaunchWhenARequiredExtensionIsMissing()
+    {
+        File.WriteAllBytes(CreatePath("D2RLoader.exe"), [0]);
+        var approval = new LadderExtensionApproval(
+            Guid.NewGuid(),
+            "Required Plugin",
+            "required.dll",
+            new string('0', 64),
+            D2RLoaderExtensionKind.Plugin,
+            IsRequired: true);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            D2RLoaderService.ApplyLadderPolicyAsync(
+                _installDirectory,
+                [approval],
+                new HashSet<Guid>()));
+
+        Assert.Contains("Required Plugin", exception.Message);
+    }
+
+    [Fact]
     public void LadderPolicyDoesNotRestoreADisabledExtensionWhenItIsActiveInTheOtherScope()
     {
         File.WriteAllBytes(CreatePath("D2RLoader.exe"), [0]);

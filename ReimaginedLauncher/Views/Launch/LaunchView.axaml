@@ -251,15 +251,20 @@
                             <Grid x:Name="LadderExtensionsGrid" ColumnDefinitions="*,*" ColumnSpacing="14">
                                 <Border x:Name="AllowedLadderPluginsPanel" Classes="extension-card">
                                     <StackPanel Spacing="8">
-                                        <TextBlock Text="Allowed Plugins" FontFamily="Georgia" FontSize="17" FontWeight="SemiBold" />
+                                        <TextBlock Text="Ladder Plugins" FontFamily="Georgia" FontSize="17" FontWeight="SemiBold" />
                                         <ItemsControl x:Name="AllowedLadderPluginsItemsControl">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate x:DataType="httpModels:LadderExtensionChoice">
                                                     <CheckBox IsChecked="{Binding IsSelected, Mode=OneWay}"
-                                                              IsEnabled="{Binding IsInstalled}"
+                                                              IsEnabled="{Binding CanToggle}"
                                                               Click="OnLadderExtensionSelectionChanged">
                                                         <StackPanel Spacing="2">
-                                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                                <Border IsVisible="{Binding IsRequired}" Background="#4A241C" CornerRadius="8" Padding="6,2">
+                                                                    <TextBlock Text="REQUIRED" Classes="scope-label" />
+                                                                </Border>
+                                                            </StackPanel>
                                                             <TextBlock Text="{Binding Detail}" Classes="muted" FontSize="11" />
                                                         </StackPanel>
                                                     </CheckBox>
@@ -270,15 +275,20 @@
                                 </Border>
                                 <Border x:Name="AllowedLadderPatchesPanel" Grid.Column="1" Classes="extension-card">
                                     <StackPanel Spacing="8">
-                                        <TextBlock Text="Allowed Patches" FontFamily="Georgia" FontSize="17" FontWeight="SemiBold" />
+                                        <TextBlock Text="Ladder Patches" FontFamily="Georgia" FontSize="17" FontWeight="SemiBold" />
                                         <ItemsControl x:Name="AllowedLadderPatchesItemsControl">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate x:DataType="httpModels:LadderExtensionChoice">
                                                     <CheckBox IsChecked="{Binding IsSelected, Mode=OneWay}"
-                                                              IsEnabled="{Binding IsInstalled}"
+                                                              IsEnabled="{Binding CanToggle}"
                                                               Click="OnLadderExtensionSelectionChanged">
                                                         <StackPanel Spacing="2">
-                                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                                <Border IsVisible="{Binding IsRequired}" Background="#4A241C" CornerRadius="8" Padding="6,2">
+                                                                    <TextBlock Text="REQUIRED" Classes="scope-label" />
+                                                                </Border>
+                                                            </StackPanel>
                                                             <TextBlock Text="{Binding Detail}" Classes="muted" FontSize="11" />
                                                         </StackPanel>
                                                     </CheckBox>

@@ -20,4 +20,5 @@ public sealed record LadderAllowedExtensionResponse(
     string Name,
     string FileName,
     string Sha256,
-    D2RLoaderExtensionKind Kind);
+    D2RLoaderExtensionKind Kind,
+    bool IsRequired);

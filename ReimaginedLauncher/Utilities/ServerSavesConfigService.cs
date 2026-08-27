@@ -44,6 +44,31 @@ public static class ServerSavesConfigService
         return ResolveInstalledRoots(installDirectory).Count > 0;
     }
 
+    internal static bool CanSupplyApprovedPlugin(
+        string fileName,
+        string sha256,
+        string? bundledPluginPath = null)
+    {
+        if (!string.Equals(fileName, PluginFileName, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var source = bundledPluginPath ?? BundledPluginPath;
+        try
+        {
+            return File.Exists(source)
+                   && string.Equals(
+                       Convert.ToHexString(Sha256Of(source)),
+                       sha256.Trim(),
+                       StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>
     /// Copies the launcher's bundled plugin into the mod's plugin folder if it
     /// is missing or out of date, so players never have to source the DLL

@@ -13,7 +13,8 @@ public sealed record LadderExtensionApproval(
     string Name,
     string FileName,
     string Sha256,
-    D2RLoaderExtensionKind Kind);
+    D2RLoaderExtensionKind Kind,
+    bool IsRequired = false);
 
 public sealed record LadderApprovedExtensionState(
     LadderExtensionApproval Approval,
@@ -75,6 +76,19 @@ public static partial class D2RLoaderService
             match => match.Extension.FilePath,
             match => match.Approval,
             StringComparer.OrdinalIgnoreCase);
+        var matchedApprovalIds = matches
+            .Select(match => match.Approval.Id)
+            .ToHashSet();
+        var missingRequired = approvals
+            .Where(approval => approval.IsRequired && !matchedApprovalIds.Contains(approval.Id))
+            .Select(approval => approval.Name)
+            .ToArray();
+        if (missingRequired.Length > 0)
+        {
+            throw new InvalidOperationException(
+                $"Required ladder extension(s) are not installed or do not match the approved hash: {string.Join(", ", missingRequired)}.");
+        }
+
         var unapprovedMoved = new List<D2RLoaderExtensionInfo>();
         var unselectedMoved = new List<D2RLoaderExtensionInfo>();
 
@@ -87,7 +101,7 @@ public static partial class D2RLoaderService
                 MoveToLadderDisabledFolder(inventory, extension);
                 unapprovedMoved.Add(extension);
             }
-            else if (!selectedApprovalIds.Contains(approval.Id))
+            else if (!approval.IsRequired && !selectedApprovalIds.Contains(approval.Id))
             {
                 MoveToLadderDisabledFolder(inventory, extension);
                 unselectedMoved.Add(extension);

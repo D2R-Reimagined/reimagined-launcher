@@ -9,12 +9,22 @@ public sealed class LadderExtensionChoice
     public required string Name { get; init; }
     public required string FileName { get; init; }
     public required D2RLoaderExtensionKind Kind { get; init; }
+    public bool IsRequired { get; init; }
     public bool IsInstalled { get; init; }
+    public bool IsProvidedByLauncher { get; init; }
     public bool IsLadderDisabled { get; init; }
     public bool IsSelected { get; set; }
-    public string Detail => !IsInstalled
-        ? $"{FileName} (not installed)"
+    public bool IsAvailable => IsInstalled || IsProvidedByLauncher;
+    public bool CanToggle => IsInstalled && !IsRequired;
+    public string Detail => IsProvidedByLauncher
+        ? $"{FileName} (required, bundled with launcher)"
+        : !IsInstalled
+        ? IsRequired
+            ? $"{FileName} (required, not installed or hash mismatch)"
+            : $"{FileName} (not installed)"
         : IsLadderDisabled
-            ? $"{FileName} (currently ladder-disabled)"
+            ? IsRequired
+                ? $"{FileName} (required, will be enabled at launch)"
+                : $"{FileName} (currently ladder-disabled)"
             : FileName;
 }

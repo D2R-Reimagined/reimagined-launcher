@@ -1,4 +1,5 @@
 using ReimaginedLauncher.Utilities;
+using System.Security.Cryptography;
 using Xunit;
 
 namespace ReimaginedLauncher.Tests;
@@ -79,6 +80,26 @@ public sealed class ServerSavesConfigServiceTests : IDisposable
 
         Assert.True(File.Exists(InstalledPluginPath));
         Assert.False(File.Exists(Path.Combine(_installDirectory, "d2rloader", "plugins", ServerSavesConfigService.PluginFileName)));
+    }
+
+    [Fact]
+    public void BundledPluginOnlySatisfiesAnApprovalWithTheExactFileNameAndHash()
+    {
+        var bundled = CreateBundledPlugin([0x4D, 0x5A, 0x05]);
+        var sha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(bundled)));
+
+        Assert.True(ServerSavesConfigService.CanSupplyApprovedPlugin(
+            ServerSavesConfigService.PluginFileName,
+            sha256,
+            bundled));
+        Assert.False(ServerSavesConfigService.CanSupplyApprovedPlugin(
+            "another-plugin.dll",
+            sha256,
+            bundled));
+        Assert.False(ServerSavesConfigService.CanSupplyApprovedPlugin(
+            ServerSavesConfigService.PluginFileName,
+            new string('0', 64),
+            bundled));
     }
 
     private string CreateBundledPlugin(byte[] content)

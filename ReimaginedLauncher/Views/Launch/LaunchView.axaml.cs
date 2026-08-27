@@ -31,6 +31,7 @@ public partial class LaunchView : UserControl
     private bool _ladderStatusLoaded;
     private bool _ladderPolicyVerified;
     private string? _ladderLoadError;
+    private IReadOnlyList<string> _missingRequiredLadderExtensions = [];
     private IReadOnlyList<LadderResponse> _activeLadders = [];
     private IReadOnlyList<LadderExtensionChoice> _ladderExtensionChoices = [];
     private D2RLoaderInventory? _loaderInventory;
@@ -320,7 +321,7 @@ public partial class LaunchView : UserControl
                                             || !loaderAvailable
                                             || !_ladderPolicyVerified)
                 ? !_ladderPolicyVerified && ladderAvailable && loaderAvailable
-                    ? "Installed D2RLoader extensions have not been verified against the ladder allowlist."
+                    ? GetLadderPolicyUnavailableMessage()
                     : GetLadderUnavailableMessage(loaderAvailable ? null : loaderUnavailableReason)
                 : isOnlineExperience && isValidated && isModDetected && !loaderAvailable
                 ? loaderUnavailableReason ?? "D2RLoader is unavailable for this profile."
@@ -716,6 +717,13 @@ public partial class LaunchView : UserControl
         return _ladderLoadError ?? "No active Reimagined ladder is available right now.";
     }
 
+    private string GetLadderPolicyUnavailableMessage()
+    {
+        return _missingRequiredLadderExtensions.Count > 0
+            ? $"Required ladder extension(s) are missing or do not match the approved hash: {string.Join(", ", _missingRequiredLadderExtensions)}."
+            : "Installed D2RLoader extensions have not been verified against the ladder policy.";
+    }
+
     private void EnsureSelectedLadder()
     {
         var selectedLadder = SelectedLadder;
@@ -725,10 +733,12 @@ public partial class LaunchView : UserControl
     private async Task RefreshLadderExtensionPolicyAsync()
     {
         _ladderPolicyVerified = false;
+        _missingRequiredLadderExtensions = [];
         var ladder = SelectedLadder;
         if (ladder is null)
         {
             _ladderExtensionChoices = [];
+            _missingRequiredLadderExtensions = [];
             AllowedLadderPluginsItemsControl.ItemsSource = null;
             AllowedLadderPatchesItemsControl.ItemsSource = null;
             LadderExtensionPolicyStatusText.Text = "No active ladder extension policy is available.";
@@ -744,17 +754,29 @@ public partial class LaunchView : UserControl
             var preview = await D2RLoaderService.PreviewLadderPolicyAsync(
                 MainWindow.Settings.CurrentProfile.InstallDirectory,
                 approvals);
-            var selectedIds = GetSelectedLadderExtensionIds(ladder.Id);
+            var selectedIds = GetEffectiveSelectedLadderExtensionIds(ladder);
             _ladderExtensionChoices = preview.ApprovedExtensions
-                .Select(state => new LadderExtensionChoice
+                .Select(state =>
                 {
-                    ApprovalId = state.Approval.Id,
-                    Name = state.Approval.Name,
-                    FileName = state.Approval.FileName,
-                    Kind = state.Approval.Kind,
-                    IsInstalled = state.IsInstalled,
-                    IsLadderDisabled = state.IsLadderDisabled,
-                    IsSelected = state.IsInstalled && selectedIds.Contains(state.Approval.Id)
+                    var isProvidedByLauncher = !state.IsInstalled
+                                               && state.Approval.IsRequired
+                                               && state.Approval.Kind == D2RLoaderExtensionKind.Plugin
+                                               && ServerSavesConfigService.CanSupplyApprovedPlugin(
+                                                   state.Approval.FileName,
+                                                   state.Approval.Sha256);
+                    return new LadderExtensionChoice
+                    {
+                        ApprovalId = state.Approval.Id,
+                        Name = state.Approval.Name,
+                        FileName = state.Approval.FileName,
+                        Kind = state.Approval.Kind,
+                        IsRequired = state.Approval.IsRequired,
+                        IsInstalled = state.IsInstalled,
+                        IsProvidedByLauncher = isProvidedByLauncher,
+                        IsLadderDisabled = state.IsLadderDisabled,
+                        IsSelected = (state.IsInstalled || isProvidedByLauncher)
+                                     && selectedIds.Contains(state.Approval.Id)
+                    };
                 })
                 .ToArray();
             AllowedLadderPluginsItemsControl.ItemsSource = _ladderExtensionChoices
@@ -764,18 +786,34 @@ public partial class LaunchView : UserControl
                 .Where(choice => choice.Kind == D2RLoaderExtensionKind.Patch)
                 .ToArray();
 
+            _missingRequiredLadderExtensions = _ladderExtensionChoices
+                .Where(choice => choice.IsRequired && !choice.IsAvailable)
+                .Select(choice => choice.Name)
+                .ToArray();
+            var requiredCount = approvals.Count(approval => approval.IsRequired);
+            var optionalCount = approvals.Count - requiredCount;
             LadderExtensionPolicyStatusText.Text = approvals.Count == 0
                 ? "No D2RLoader plugins or patches are approved for this ladder. All installed extensions will be disabled."
-                : $"{approvals.Count} approved extension(s). They are disabled by default; select only the ones you want to use.";
+                : _missingRequiredLadderExtensions.Count > 0
+                    ? $"Ladder launch is blocked. Required extension(s) missing or hash-mismatched: {string.Join(", ", _missingRequiredLadderExtensions)}."
+                    : $"{requiredCount} required and {optionalCount} optional extension(s). Required extensions are enabled automatically; select any optional extensions you want to use.";
             var hasUnapprovedExtensions = preview.UnapprovedExtensions.Count > 0;
             UnapprovedLadderExtensionsBanner.IsVisible = hasUnapprovedExtensions;
-            UnapprovedLadderExtensionsSummaryBanner.IsVisible = hasUnapprovedExtensions;
+            var policyWarnings = new List<string>();
+            if (_missingRequiredLadderExtensions.Count > 0)
+            {
+                policyWarnings.Add(
+                    $"Install the exact required extension file(s) before launching: {string.Join(", ", _missingRequiredLadderExtensions)}.");
+            }
+
             if (hasUnapprovedExtensions)
             {
                 var extensionLabel = preview.UnapprovedExtensions.Count == 1 ? "extension is" : "extensions are";
-                UnapprovedLadderExtensionsSummaryText.Text =
-                    $"{preview.UnapprovedExtensions.Count} installed {extensionLabel} not approved for this ladder and will be disabled for launch. Expand the policy details to review them.";
+                policyWarnings.Add(
+                    $"{preview.UnapprovedExtensions.Count} installed {extensionLabel} not approved for this ladder and will be disabled for launch. Expand the policy details to review them.");
             }
+            UnapprovedLadderExtensionsSummaryBanner.IsVisible = policyWarnings.Count > 0;
+            UnapprovedLadderExtensionsSummaryText.Text = string.Join(" ", policyWarnings);
             var pendingUnapproved = preview.UnapprovedExtensions
                 .Where(extension => !extension.IsLadderDisabled)
                 .Select(extension => extension.FileName)
@@ -795,11 +833,12 @@ public partial class LaunchView : UserControl
                         ? null
                         : "Already ladder-disabled: " + string.Join(", ", alreadyDisabled) + "."
                 }.OfType<string>());
-            _ladderPolicyVerified = true;
+            _ladderPolicyVerified = _missingRequiredLadderExtensions.Count == 0;
         }
         catch (Exception ex)
         {
             _ladderExtensionChoices = [];
+            _missingRequiredLadderExtensions = [];
             AllowedLadderPluginsItemsControl.ItemsSource = null;
             AllowedLadderPatchesItemsControl.ItemsSource = null;
             LadderExtensionPolicyStatusText.Text = "Could not verify installed D2RLoader extensions.";
@@ -837,6 +876,12 @@ public partial class LaunchView : UserControl
             return;
         }
 
+        if (choice.IsRequired)
+        {
+            checkBox.IsChecked = true;
+            return;
+        }
+
         choice.IsSelected = checkBox.IsChecked ?? false;
         var selectedIds = GetSelectedLadderExtensionIds(ladder.Id);
         if (choice.IsSelected)
@@ -861,8 +906,18 @@ public partial class LaunchView : UserControl
                 extension.Name,
                 extension.FileName,
                 extension.Sha256,
-                extension.Kind))
+                extension.Kind,
+                extension.IsRequired))
             .ToArray();
+    }
+
+    private static HashSet<Guid> GetEffectiveSelectedLadderExtensionIds(LadderResponse ladder)
+    {
+        var selectedIds = GetSelectedLadderExtensionIds(ladder.Id);
+        selectedIds.UnionWith((ladder.AllowedExtensions ?? [])
+            .Where(extension => extension.IsRequired)
+            .Select(extension => extension.Id));
+        return selectedIds;
     }
 
     private static HashSet<Guid> GetSelectedLadderExtensionIds(Guid ladderId)
@@ -1052,7 +1107,7 @@ public partial class LaunchView : UserControl
 
         if (profile.LaunchExperience == LaunchExperience.Ladder && !_ladderPolicyVerified)
         {
-            const string message = "Installed D2RLoader extensions have not been verified against the ladder allowlist.";
+            var message = GetLadderPolicyUnavailableMessage();
             LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
             Notifications.SendNotification(message, "Warning");
             return;
@@ -1349,7 +1404,7 @@ public partial class LaunchView : UserControl
 
             progress.Report("Enforcing ladder D2RLoader extension policy...");
             var approvals = MapApprovals(ladder);
-            var selectedIds = GetSelectedLadderExtensionIds(ladder.Id);
+            var selectedIds = GetEffectiveSelectedLadderExtensionIds(ladder);
             var result = await Task.Run(() => D2RLoaderService.ApplyLadderPolicyAsync(
                 profile.InstallDirectory,
                 approvals,
