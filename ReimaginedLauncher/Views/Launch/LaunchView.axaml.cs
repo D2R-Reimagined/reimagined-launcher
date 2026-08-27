@@ -761,9 +761,12 @@ public partial class LaunchView : UserControl
                     var isProvidedByLauncher = !state.IsInstalled
                                                && state.Approval.IsRequired
                                                && state.Approval.Kind == D2RLoaderExtensionKind.Plugin
-                                               && ServerSavesConfigService.CanSupplyApprovedPlugin(
-                                                   state.Approval.FileName,
-                                                   state.Approval.Sha256);
+                                               && (ServerSavesConfigService.CanSupplyApprovedPlugin(
+                                                       state.Approval.FileName,
+                                                       state.Approval.Sha256)
+                                                   || ChatRelayConfigService.CanSupplyApprovedPlugin(
+                                                       state.Approval.FileName,
+                                                       state.Approval.Sha256));
                     return new LadderExtensionChoice
                     {
                         ApprovalId = state.Approval.Id,
@@ -1254,6 +1257,48 @@ public partial class LaunchView : UserControl
     }
 
     /// <summary>
+    /// Points the chat-relay plugin at the API for a ladder launch.
+    /// </summary>
+    /// <remarks>
+    /// Never blocks the launch. Chat not reaching Discord costs a convenience;
+    /// refusing to start the game over it would cost the session. Every failure
+    /// here leaves the plugin disabled and says so in the log.
+    ///
+    /// The token decides whose name Discord shows against the messages, because
+    /// the API reads the sender from the token rather than the payload - so this
+    /// writes the same signed-in account's token that server-saves just used.
+    /// </remarks>
+    private async Task ConfigureChatRelayAsync(InstallationProfile profile, string accessToken)
+    {
+        try
+        {
+            // Not approved for this ladder, or the player left it unchecked.
+            // A legitimate outcome: the launch proceeds without the bridge.
+            if (!ChatRelayConfigService.IsPluginInstalled(profile.InstallDirectory))
+            {
+                await ChatRelayConfigService.DisableAsync(profile.InstallDirectory);
+                LaunchDiagnostics.Log("chat-relay is not approved for this ladder; this launch has no Discord chat bridge.");
+                return;
+            }
+
+            var settings = new ChatRelayLaunchSettings(
+                _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority),
+                accessToken);
+            if (!await ChatRelayConfigService.EnableAsync(profile.InstallDirectory, settings))
+            {
+                LaunchDiagnostics.Log("chat-relay: the plugin configuration could not be written; the Discord chat bridge is off for this launch.");
+                return;
+            }
+
+            LaunchDiagnostics.Log("chat-relay configured for the Discord chat bridge.");
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.Log($"chat-relay: configuration failed ({exception.Message}); the Discord chat bridge is off for this launch.");
+        }
+    }
+
+    /// <summary>
     /// Points the server-saves plugin at the API for a ladder launch, and turns
     /// it off for every other launch. A stale token left enabled would keep
     /// hiding the player's own characters outside the ladder.
@@ -1268,6 +1313,7 @@ public partial class LaunchView : UserControl
             if (!isLadderLaunch)
             {
                 await ServerSavesConfigService.DisableAsync(profile.InstallDirectory);
+                await ChatRelayConfigService.DisableAsync(profile.InstallDirectory);
                 await LadderSaveDirectoryService.RestoreAsync(profile.InstallDirectory);
                 return true;
             }
@@ -1337,6 +1383,8 @@ public partial class LaunchView : UserControl
             }
 
             LaunchDiagnostics.Log($"server-saves configured for ladder {ladder.Id} at \"{ladderDirectory}\".");
+
+            await ConfigureChatRelayAsync(profile, accessToken);
             return true;
         }
         catch (Exception exception)
@@ -1400,6 +1448,15 @@ public partial class LaunchView : UserControl
                 LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
                 Notifications.SendNotification(message, "Warning");
                 return false;
+            }
+
+            // Chat relay is a convenience, not a requirement: if it cannot be
+            // installed the ladder still plays correctly, only without the
+            // Discord bridge. Blocking the launch over it would be the wrong
+            // trade, so this only records why.
+            if (!await ChatRelayConfigService.EnsureInstalledAsync(profile.InstallDirectory))
+            {
+                LaunchDiagnostics.Log("chat-relay: the plugin could not be installed; this launch has no Discord chat bridge.");
             }
 
             progress.Report("Enforcing ladder D2RLoader extension policy...");
