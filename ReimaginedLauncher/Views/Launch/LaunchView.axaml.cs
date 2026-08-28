@@ -37,9 +37,22 @@ public partial class LaunchView : UserControl
     private D2RLoaderInventory? _loaderInventory;
     private bool? _isCompactLayout;
 
+    private static bool IsLadderExperienceEnabled
+    {
+        get
+        {
+#if DEBUG
+            return true;
+#else
+            return false;
+#endif
+        }
+    }
+
     public LaunchView()
     {
         InitializeComponent();
+        LadderExperienceButton.IsVisible = IsLadderExperienceEnabled;
         _apiHttpClient = Program.ServiceProvider.GetRequiredService<ReimaginedApiHttpClient>();
         _launcherAuthenticationService = Program.ServiceProvider.GetRequiredService<LauncherAuthenticationService>();
         _d2rLoaderInstallerService = Program.ServiceProvider.GetRequiredService<D2RLoaderInstallerService>();
@@ -97,7 +110,10 @@ public partial class LaunchView : UserControl
             RefreshInstallDirectoryState();
         }
 
-        _ = RefreshLadderStateAsync();
+        if (IsLadderExperienceEnabled)
+        {
+            _ = RefreshLadderStateAsync();
+        }
     }
 
     private void UpdateResponsiveLayout()
@@ -115,12 +131,16 @@ public partial class LaunchView : UserControl
 
         _isCompactLayout = isCompact;
 
-        ConfigureGrid(ExperienceGrid, isCompact ? 1 : 3, isCompact ? 3 : 1);
+        var experienceCount = IsLadderExperienceEnabled ? 3 : 2;
+        ConfigureGrid(ExperienceGrid, isCompact ? 1 : experienceCount, isCompact ? experienceCount : 1);
         ExperienceGrid.ColumnSpacing = isCompact ? 0 : 12;
         ExperienceGrid.RowSpacing = isCompact ? 12 : 0;
         PositionGridChild(OfflineExperienceButton, 0, 0);
         PositionGridChild(OnlineExperienceButton, isCompact ? 0 : 1, isCompact ? 1 : 0);
-        PositionGridChild(LadderExperienceButton, isCompact ? 0 : 2, isCompact ? 2 : 0);
+        if (IsLadderExperienceEnabled)
+        {
+            PositionGridChild(LadderExperienceButton, isCompact ? 0 : 2, isCompact ? 2 : 0);
+        }
 
         ConfigureTwoPanelGrid(
             LaunchSetupGrid,
@@ -182,6 +202,11 @@ public partial class LaunchView : UserControl
     {
         var settings = MainWindow.Settings;
         var profile = settings.CurrentProfile;
+        if (!IsLadderExperienceEnabled && profile.LaunchExperience == LaunchExperience.Ladder)
+        {
+            profile.LaunchExperience = LaunchExperience.Online;
+        }
+
         var isOnlineExperience = profile.LaunchExperience == LaunchExperience.Online;
         var isLadderExperience = profile.LaunchExperience == LaunchExperience.Ladder;
         var ladderAvailable = HasActiveLadder;
@@ -420,7 +445,7 @@ public partial class LaunchView : UserControl
 
     private async void OnLadderExperienceClick(object? sender, RoutedEventArgs e)
     {
-        if (HasActiveLadder)
+        if (IsLadderExperienceEnabled && HasActiveLadder)
         {
             await SetLaunchExperienceAsync(LaunchExperience.Ladder);
         }
