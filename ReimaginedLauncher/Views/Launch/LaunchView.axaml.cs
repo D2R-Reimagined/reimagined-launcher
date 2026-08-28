@@ -141,6 +141,10 @@ public partial class LaunchView : UserControl
         {
             PositionGridChild(LadderExperienceButton, isCompact ? 0 : 2, isCompact ? 2 : 0);
         }
+        else
+        {
+            PositionGridChild(LadderExperienceButton, 0, 0);
+        }
 
         ConfigureTwoPanelGrid(
             LaunchSetupGrid,
@@ -294,7 +298,7 @@ public partial class LaunchView : UserControl
                     ? "Start Ladder"
                     : "Start Offline";
             StartGameDescription.Text = isOnlineExperience
-                ? "Starts D2RLoader with Reimagined selected. Choose TCP/IP in-game to host or join; this does not connect to Battle.net."
+                ? "Starts D2RLoader with Reimagined selected. Choose multiplayer in-game to host or join; this does not connect to Battle.net."
                 : isLadderExperience
                     ? isReimaginedSignedIn
                         ? "Restores clean base files, enforces the ladder extension allowlist, and starts Reimagined through D2RLoader."
