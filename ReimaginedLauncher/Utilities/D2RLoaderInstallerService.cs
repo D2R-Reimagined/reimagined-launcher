@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -23,10 +24,18 @@ public sealed class D2RLoaderInstallerService
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("D2R-Reimagined-Launcher");
     }
 
+    /// <summary>
+    /// Downloads and installs D2RLoader. Pass <paramref name="minimumVersion"/>
+    /// to also upgrade an install that is already present but older than a
+    /// ladder requires - without it an existing install is always left alone.
+    /// Only the latest published build can be fetched, so an install that is
+    /// still too old afterwards is reported rather than retried.
+    /// </summary>
     public async Task InstallAsync(
         string? installDirectory,
         IProgress<D2RLoaderInstallProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? minimumVersion = null)
     {
         var normalized = InstallDirectoryValidator.NormalizeInstallDirectory(installDirectory);
         if (!InstallDirectoryValidator.IsValidInstallDirectory(normalized))
@@ -35,7 +44,7 @@ public sealed class D2RLoaderInstallerService
                 "Select the Diablo II: Resurrected folder that contains D2R.exe before installing D2RLoader.");
         }
 
-        if (D2RLoaderService.IsInstalled(normalized))
+        if (D2RLoaderService.IsInstalled(normalized) && SatisfiesMinimum(normalized!, minimumVersion))
         {
             return;
         }
@@ -97,6 +106,11 @@ public sealed class D2RLoaderInstallerService
             {
                 throw new InvalidDataException("The downloaded archive did not install D2RLoader.exe.");
             }
+            if (!SatisfiesMinimum(normalized!, minimumVersion))
+            {
+                throw new InvalidDataException(
+                    $"The latest published D2RLoader is older than the {minimumVersion} this ladder requires.");
+            }
 
             progress?.Report(new D2RLoaderInstallProgress("D2RLoader installed.", 100));
         }
@@ -104,6 +118,24 @@ public sealed class D2RLoaderInstallerService
         {
             TryDeleteDirectory(tempDirectory);
         }
+    }
+
+    private static bool SatisfiesMinimum(string installDirectory, string? minimumVersion)
+    {
+        if (string.IsNullOrWhiteSpace(minimumVersion)
+            || !LadderBundleService.TryParseVersionCore(minimumVersion, out var minimum))
+        {
+            return true;
+        }
+
+        var loaderPath = Path.Combine(installDirectory, LoaderExecutableName);
+        if (!File.Exists(loaderPath))
+        {
+            return false;
+        }
+
+        var installed = FileVersionInfo.GetVersionInfo(loaderPath).FileVersion;
+        return LadderBundleService.TryParseVersionCore(installed, out var current) && current >= minimum;
     }
 
     internal static void ExtractArchive(

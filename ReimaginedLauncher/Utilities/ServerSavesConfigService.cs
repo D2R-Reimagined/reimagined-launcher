@@ -5,7 +5,11 @@ using System.Threading.Tasks;
 
 namespace ReimaginedLauncher.Utilities;
 
-public sealed record ServerSavesLaunchSettings(string ApiBaseUrl, string AccessToken, Guid? LadderId);
+public sealed record ServerSavesLaunchSettings(
+    string ApiBaseUrl,
+    string AccessToken,
+    Guid? LadderId,
+    string LadderLaunchTicket);
 
 /// <summary>
 /// Installs the server-saves D2RLoader plugin from the launcher's own bundled
@@ -27,8 +31,9 @@ public static class ServerSavesConfigService
     private const string ManagedHeader =
         "# server-saves - launcher-managed settings.\n"
         + "#\n"
-        + "# The Reimagined launcher rewrites enabled, api_base_url, access_token and\n"
-        + "# ladder_id every launch. Anything else you set here is preserved, and any\n"
+        + "# The Reimagined launcher rewrites enabled, api_base_url, access_token,\n"
+        + "# ladder_id and ladder_launch_ticket every launch. Anything else you set\n"
+        + "# here is preserved, and any\n"
         + "# setting left out uses the plugin's built-in default.\n"
         + "\n";
 
@@ -75,13 +80,19 @@ public static class ServerSavesConfigService
             LaunchDiagnostics.Log("server-saves: refusing to enable without an API address and access token.");
             return false;
         }
+        if (settings.LadderId is not null && string.IsNullOrWhiteSpace(settings.LadderLaunchTicket))
+        {
+            LaunchDiagnostics.Log("server-saves: refusing to enable for a ladder without a signed launch ticket.");
+            return false;
+        }
 
         var values = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["enabled"] = "true",
             ["api_base_url"] = D2RLoaderPluginPackage.Quote(D2RLoaderPluginPackage.NormalizeBaseUrl(settings.ApiBaseUrl)),
             ["access_token"] = D2RLoaderPluginPackage.Quote(settings.AccessToken),
-            ["ladder_id"] = D2RLoaderPluginPackage.Quote(settings.LadderId is { } ladderId ? ladderId.ToString() : string.Empty)
+            ["ladder_id"] = D2RLoaderPluginPackage.Quote(settings.LadderId is { } ladderId ? ladderId.ToString() : string.Empty),
+            ["ladder_launch_ticket"] = D2RLoaderPluginPackage.Quote(settings.LadderLaunchTicket)
         };
 
         return await Package.WriteAsync(installDirectory, values, requireInstalled: true, cancellationToken);
@@ -100,7 +111,8 @@ public static class ServerSavesConfigService
         {
             ["enabled"] = "false",
             ["access_token"] = "\"\"",
-            ["ladder_id"] = "\"\""
+            ["ladder_id"] = "\"\"",
+            ["ladder_launch_ticket"] = "\"\""
         };
 
         return await Package.WriteAsync(installDirectory, values, requireInstalled: false, cancellationToken);

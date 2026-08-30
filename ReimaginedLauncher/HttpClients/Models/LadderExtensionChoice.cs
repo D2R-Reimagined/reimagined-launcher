@@ -15,9 +15,11 @@ public sealed class LadderExtensionChoice
     public bool IsLadderDisabled { get; init; }
     public bool IsSelected { get; set; }
     public bool IsAvailable => IsInstalled || IsProvidedByLauncher;
-    public bool CanToggle => IsInstalled && !IsRequired;
+    public bool CanToggle => IsAvailable && !IsRequired;
     public string Detail => IsProvidedByLauncher
-        ? $"{FileName} (required, bundled with launcher)"
+        ? IsRequired
+            ? $"{FileName} (required, supplied by signed ladder package)"
+            : $"{FileName} (optional, supplied by signed ladder package)"
         : !IsInstalled
         ? IsRequired
             ? $"{FileName} (required, not installed or hash mismatch)"

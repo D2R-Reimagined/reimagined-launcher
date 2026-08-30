@@ -54,13 +54,15 @@
        <None Include="Assets\D2RLoaderPlugins\**\*">
          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
        </None>
+       <None Include="Assets\LadderBundleSigningKeys\**\*">
+         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+       </None>
        <None Include="Assets\Vignette\**\*">
          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
        </None>
      </ItemGroup>
 
 </Project>
-
 
 
 

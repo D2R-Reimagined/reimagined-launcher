@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
@@ -42,6 +43,72 @@ public sealed class ReimaginedApiHttpClient
             "ladders/active",
             JsonOptions,
             cancellationToken) ?? [];
+    }
+
+    public async Task<byte[]> DownloadLadderBundleAsync(
+        LadderBundleResponse bundle,
+        IProgress<double>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await _httpClient.GetAsync(
+            bundle.DownloadPath.TrimStart('/'),
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var expectedLength = response.Content.Headers.ContentLength ?? bundle.ArtifactSizeBytes;
+        if (expectedLength <= 0 || expectedLength > 64L * 1024 * 1024)
+        {
+            throw new InvalidOperationException("The ladder bundle has an invalid download size.");
+        }
+
+        await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await using var output = new System.IO.MemoryStream((int)expectedLength);
+        var buffer = new byte[81920];
+        long total = 0;
+        while (true)
+        {
+            var read = await input.ReadAsync(buffer, cancellationToken);
+            if (read == 0)
+            {
+                break;
+            }
+
+            total += read;
+            if (total > 64L * 1024 * 1024)
+            {
+                throw new InvalidOperationException("The ladder bundle exceeded the 64 MiB download limit.");
+            }
+
+            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+            progress?.Report(expectedLength > 0 ? total * 100d / expectedLength : 0);
+        }
+
+        return output.ToArray();
+    }
+
+    public async Task<LadderLaunchTicketResponse> CreateLadderLaunchTicketAsync(
+        Guid ladderId,
+        LadderBundleResponse bundle,
+        string launcherVersion,
+        string accessToken,
+        CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"ladders/{ladderId}/launch-ticket")
+        {
+            Content = JsonContent.Create(new
+            {
+                bundleId = bundle.Id,
+                bundleRevision = bundle.Revision,
+                launcherVersion,
+                artifactSha256 = bundle.ArtifactSha256
+            }, options: JsonOptions)
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<LadderLaunchTicketResponse>(JsonOptions, cancellationToken)
+               ?? throw new InvalidOperationException("The API returned an empty ladder launch ticket response.");
     }
 
     public async Task<LauncherTokenResponse?> ExchangeLauncherCodeAsync(

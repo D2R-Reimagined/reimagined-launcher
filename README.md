@@ -112,6 +112,14 @@ Debug builds query the local Reimagined API at `http://localhost:5000/`. Other b
 
 Launcher account sign-in opens the website in the system browser and returns through a random loopback port using a one-use PKCE authorization code. Debug builds open `http://localhost:9500/`; other builds open `https://www.d2r-reimagined.com/`. Set `D2R_REIMAGINED_WEBSITE_BASE_URL` to override the website origin during local integration testing.
 
+Signed ladder packages also require the public half of the API's ECDSA signing key. Production builds can ship it as `Assets/LadderBundleSigningKeys/<key-id>.pem`. For local testing, point the launcher at the generated public PEM before starting it:
+
+```powershell
+$env:D2R_REIMAGINED_BUNDLE_PUBLIC_KEY_PATH = "C:\dev\d2r\reimagined-api\local-keys\local-development.pem"
+```
+
+The launcher rejects packages when the API descriptor, archive SHA-256, signed manifest, compatibility contract, declared file list, or installed file hashes differ. The private signing key must never be placed in this repository.
+
 ## Downloads
 
 Windows x64 and Linux x64 downloads are published on the [GitHub Releases](https://github.com/D2R-Reimagined/reimagined-launcher/releases) page. Linux users should download the AppImage and follow the short setup instructions in [LINUX.md](LINUX.md).

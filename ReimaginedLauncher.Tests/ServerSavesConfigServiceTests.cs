@@ -117,7 +117,7 @@ public sealed class ServerSavesConfigServiceTests : IDisposable
 
         var enabled = await ServerSavesConfigService.EnableAsync(
             _installDirectory,
-            new ServerSavesLaunchSettings("http://localhost:5000/", "token-abc", Ladder));
+            new ServerSavesLaunchSettings("http://localhost:5000/", "token-abc", Ladder, "ticket-abc"));
 
         Assert.True(enabled);
         var toml = await File.ReadAllTextAsync(ModConfigPath);
@@ -125,6 +125,7 @@ public sealed class ServerSavesConfigServiceTests : IDisposable
         Assert.Contains("api_base_url = \"http://localhost:5000\"", toml);
         Assert.Contains("access_token = \"token-abc\"", toml);
         Assert.Contains($"ladder_id = \"{Ladder}\"", toml);
+        Assert.Contains("ladder_launch_ticket = \"ticket-abc\"", toml);
     }
 
     [Fact]
@@ -132,7 +133,7 @@ public sealed class ServerSavesConfigServiceTests : IDisposable
     {
         Assert.False(await ServerSavesConfigService.EnableAsync(
             _installDirectory,
-            new ServerSavesLaunchSettings("http://localhost:5000", "token-abc", Ladder)));
+            new ServerSavesLaunchSettings("http://localhost:5000", "token-abc", Ladder, "ticket-abc")));
         Assert.False(File.Exists(ModConfigPath));
     }
 
@@ -143,7 +144,17 @@ public sealed class ServerSavesConfigServiceTests : IDisposable
 
         Assert.False(await ServerSavesConfigService.EnableAsync(
             _installDirectory,
-            new ServerSavesLaunchSettings("http://localhost:5000", "   ", Ladder)));
+            new ServerSavesLaunchSettings("http://localhost:5000", "   ", Ladder, "ticket-abc")));
+    }
+
+    [Fact]
+    public async Task EnablingIsRefusedWithoutALadderLaunchTicket()
+    {
+        InstallPlugin(ModLoaderRoot);
+
+        Assert.False(await ServerSavesConfigService.EnableAsync(
+            _installDirectory,
+            new ServerSavesLaunchSettings("http://localhost:5000", "token-abc", Ladder, "")));
     }
 
     [Fact]
@@ -152,7 +163,7 @@ public sealed class ServerSavesConfigServiceTests : IDisposable
         InstallPlugin(ModLoaderRoot);
         await ServerSavesConfigService.EnableAsync(
             _installDirectory,
-            new ServerSavesLaunchSettings("http://localhost:5000", "token-abc", Ladder));
+            new ServerSavesLaunchSettings("http://localhost:5000", "token-abc", Ladder, "ticket-abc"));
 
         Assert.True(await ServerSavesConfigService.DisableAsync(_installDirectory));
 
@@ -160,6 +171,7 @@ public sealed class ServerSavesConfigServiceTests : IDisposable
         Assert.Contains("enabled = false", toml);
         Assert.Contains("access_token = \"\"", toml);
         Assert.Contains("ladder_id = \"\"", toml);
+        Assert.Contains("ladder_launch_ticket = \"\"", toml);
         Assert.DoesNotContain("token-abc", toml);
     }
 
@@ -185,7 +197,7 @@ public sealed class ServerSavesConfigServiceTests : IDisposable
 
         await ServerSavesConfigService.EnableAsync(
             _installDirectory,
-            new ServerSavesLaunchSettings("http://localhost:5000", "token-abc", Ladder));
+            new ServerSavesLaunchSettings("http://localhost:5000", "token-abc", Ladder, "ticket-abc"));
 
         var toml = await File.ReadAllTextAsync(ModConfigPath);
         Assert.Contains("# a comment the player wrote", toml);
@@ -204,7 +216,7 @@ public sealed class ServerSavesConfigServiceTests : IDisposable
 
         Assert.True(await ServerSavesConfigService.EnableAsync(
             _installDirectory,
-            new ServerSavesLaunchSettings("http://localhost:5000", "token-abc", Ladder)));
+            new ServerSavesLaunchSettings("http://localhost:5000", "token-abc", Ladder, "ticket-abc")));
 
         Assert.True(File.Exists(Path.Combine(globalRoot, "config", "server-saves.toml")));
         Assert.False(File.Exists(ModConfigPath));
@@ -217,7 +229,7 @@ public sealed class ServerSavesConfigServiceTests : IDisposable
 
         await ServerSavesConfigService.EnableAsync(
             _installDirectory,
-            new ServerSavesLaunchSettings("http://localhost:5000", "token-abc", null));
+            new ServerSavesLaunchSettings("http://localhost:5000", "token-abc", null, ""));
 
         Assert.Contains("ladder_id = \"\"", await File.ReadAllTextAsync(ModConfigPath));
     }
@@ -236,7 +248,7 @@ public sealed class ServerSavesConfigServiceTests : IDisposable
 
         await ServerSavesConfigService.EnableAsync(
             _installDirectory,
-            new ServerSavesLaunchSettings("http://localhost:5000", "token-abc", Ladder));
+            new ServerSavesLaunchSettings("http://localhost:5000", "token-abc", Ladder, "ticket-abc"));
 
         var assignments = (await File.ReadAllLinesAsync(ModConfigPath))
             .Where(line => line.TrimStart().StartsWith("enabled ", StringComparison.Ordinal)

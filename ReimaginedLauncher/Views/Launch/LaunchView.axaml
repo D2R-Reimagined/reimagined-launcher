@@ -220,7 +220,7 @@
                         <StackPanel Spacing="4">
                             <TextBlock Classes="section-title" Text="Ladder Safeguards" />
                             <TextBlock Classes="muted" TextWrapping="Wrap"
-                                       Text="Ladder launches use clean base files. Launcher tweaks and plugins are disabled; only approved D2RLoader extensions may run." />
+                                       Text="Ladder launches use a signed package from the Reimagined API. Every required D2RLoader file is verified before the game starts; unapproved extensions are disabled." />
                         </StackPanel>
                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                             <TextBlock Text="Active Ladder" Classes="muted" VerticalAlignment="Center" />
@@ -234,6 +234,20 @@
                             </ComboBox>
                         </StackPanel>
                     </Grid>
+                    <Border Classes="extension-card" Padding="12">
+                        <StackPanel Spacing="8">
+                            <StackPanel Spacing="3">
+                                <TextBlock Text="Signed Ladder Package" FontWeight="SemiBold" />
+                                <TextBlock x:Name="LadderBundleStatusText" Classes="muted" TextWrapping="Wrap"
+                                           Text="Checking the signed ladder package..." />
+                            </StackPanel>
+                            <StackPanel x:Name="LadderBundleProgressPanel" Spacing="4" IsVisible="False">
+                                <ProgressBar x:Name="LadderBundleProgressBar" Height="6" Minimum="0" Maximum="100" />
+                                <TextBlock x:Name="LadderBundleProgressText" Classes="muted" FontSize="12"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
                     <TextBlock x:Name="LadderExtensionPolicyStatusText" Classes="muted" TextWrapping="Wrap"
                                Text="Checking installed D2RLoader extensions..." />
                     <Border x:Name="UnapprovedLadderExtensionsSummaryBanner" Classes="warning-banner"

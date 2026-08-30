@@ -1,4 +1,4 @@
-using System.Threading.Tasks;
+﻿using System.Threading.Tasks;
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -24,6 +24,7 @@ public partial class LaunchView : UserControl
     private readonly ReimaginedApiHttpClient _apiHttpClient;
     private readonly LauncherAuthenticationService _launcherAuthenticationService;
     private readonly D2RLoaderInstallerService _d2rLoaderInstallerService;
+    private readonly LadderBundleService _ladderBundleService;
     private bool _isLaunching;
     private bool _isLoaderInstallPromptOpen;
     private bool _isRefreshingLadders;
@@ -34,8 +35,24 @@ public partial class LaunchView : UserControl
     private IReadOnlyList<string> _missingRequiredLadderExtensions = [];
     private IReadOnlyList<LadderResponse> _activeLadders = [];
     private IReadOnlyList<LadderExtensionChoice> _ladderExtensionChoices = [];
+    private LadderBundleReadiness? _ladderBundleReadiness;
+    private LadderAction _ladderAction = LadderAction.Blocked;
+    private bool _isRunningLadderAction;
     private D2RLoaderInventory? _loaderInventory;
     private bool? _isCompactLayout;
+
+    /// <summary>
+    /// What the ladder button does right now. Download and Update are setup
+    /// steps that never start the game - the player gets the game only once
+    /// the signed package on disk matches the one the ladder is running.
+    /// </summary>
+    private enum LadderAction
+    {
+        Blocked,
+        Download,
+        Update,
+        Play
+    }
 
     private static bool IsLadderExperienceEnabled
     {
@@ -56,6 +73,7 @@ public partial class LaunchView : UserControl
         _apiHttpClient = Program.ServiceProvider.GetRequiredService<ReimaginedApiHttpClient>();
         _launcherAuthenticationService = Program.ServiceProvider.GetRequiredService<LauncherAuthenticationService>();
         _d2rLoaderInstallerService = Program.ServiceProvider.GetRequiredService<D2RLoaderInstallerService>();
+        _ladderBundleService = Program.ServiceProvider.GetRequiredService<LadderBundleService>();
         SizeChanged += (_, _) => UpdateResponsiveLayout();
 
         RefreshInstallDirectoryState();
@@ -295,24 +313,28 @@ public partial class LaunchView : UserControl
             StartGameButton.Content = isOnlineExperience
                 ? "Start Online"
                 : isLadderExperience
-                    ? "Start Ladder"
+                    ? LadderActionLabel(_ladderAction)
                     : "Start Offline";
             StartGameDescription.Text = isOnlineExperience
                 ? "Starts D2RLoader with Reimagined selected. Choose multiplayer in-game to host or join; this does not connect to Battle.net."
                 : isLadderExperience
                     ? isReimaginedSignedIn
-                        ? "Restores clean base files, enforces the ladder extension allowlist, and starts Reimagined through D2RLoader."
+                        ? LadderActionDescription(_ladderAction)
                         : "Sign in with your D2R Reimagined website account before starting a ladder character."
                     : "Starts the standard Reimagined offline experience with your saved launch options.";
+            // A ladder setup step is allowed to run without the mod present -
+            // installing it is part of what the step does. Play still requires
+            // everything, because by then readiness has confirmed it.
             StartGameButton.IsEnabled = !_isLaunching
+                                        && !_isRunningLadderAction
                                         && isValidated
-                                        && isModDetected
+                                        && (isModDetected || IsLadderSetupAction(isLadderExperience))
                                         && (!isOnlineExperience || loaderAvailable)
                                         && (!isLadderExperience
                                             || isReimaginedSignedIn
                                             && ladderAvailable
                                             && loaderAvailable
-                                            && _ladderPolicyVerified);
+                                            && _ladderAction != LadderAction.Blocked);
 
             if (!isOnlineExperience
                 && !isLadderExperience
@@ -323,13 +345,16 @@ public partial class LaunchView : UserControl
             }
         }
 
+        // A ladder that only needs its Download or Update step run is not a
+        // validation problem - the button already says what to do about it, and
+        // a warning banner beside it just reads as something being wrong.
         ValidationBanner.IsVisible = !isValidated
-                                     || !isModDetected
+                                     || !isModDetected && !IsLadderSetupAction(isLadderExperience)
                                      || isOnlineExperience && !loaderAvailable
                                      || isLadderExperience
                                      && (!ladderAvailable
                                          || !loaderAvailable
-                                         || !_ladderPolicyVerified);
+                                         || _ladderAction == LadderAction.Blocked);
         
         if (profile.Type == InstallationType.D2RMM)
         {
@@ -748,6 +773,11 @@ public partial class LaunchView : UserControl
 
     private string GetLadderPolicyUnavailableMessage()
     {
+        if (_ladderBundleReadiness is { IsReady: false } bundleReadiness)
+        {
+            return bundleReadiness.Status;
+        }
+
         return _missingRequiredLadderExtensions.Count > 0
             ? $"Required ladder extension(s) are missing or do not match the approved hash: {string.Join(", ", _missingRequiredLadderExtensions)}."
             : "Installed D2RLoader extensions have not been verified against the ladder policy.";
@@ -763,6 +793,7 @@ public partial class LaunchView : UserControl
     {
         _ladderPolicyVerified = false;
         _missingRequiredLadderExtensions = [];
+        _ladderBundleReadiness = null;
         var ladder = SelectedLadder;
         if (ladder is null)
         {
@@ -771,14 +802,22 @@ public partial class LaunchView : UserControl
             AllowedLadderPluginsItemsControl.ItemsSource = null;
             AllowedLadderPatchesItemsControl.ItemsSource = null;
             LadderExtensionPolicyStatusText.Text = "No active ladder extension policy is available.";
+            LadderBundleStatusText.Text = "No signed ladder package is active.";
+            _ladderAction = LadderAction.Blocked;
             UnapprovedLadderExtensionsBanner.IsVisible = false;
             UnapprovedLadderExtensionsSummaryBanner.IsVisible = false;
             return;
         }
 
         LadderExtensionPolicyStatusText.Text = "Checking installed D2RLoader extensions...";
+        LadderBundleStatusText.Text = "Checking the signed ladder package...";
         try
         {
+            _ladderBundleReadiness = await _ladderBundleService.GetReadinessAsync(
+                MainWindow.Settings.CurrentProfile.InstallDirectory,
+                ladder.ActiveBundle);
+            LadderBundleStatusText.Text = _ladderBundleReadiness.Status;
+
             var approvals = MapApprovals(ladder);
             var preview = await D2RLoaderService.PreviewLadderPolicyAsync(
                 MainWindow.Settings.CurrentProfile.InstallDirectory,
@@ -788,14 +827,18 @@ public partial class LaunchView : UserControl
                 .Select(state =>
                 {
                     var isProvidedByLauncher = !state.IsInstalled
-                                               && state.Approval.IsRequired
-                                               && state.Approval.Kind == D2RLoaderExtensionKind.Plugin
-                                               && (ServerSavesConfigService.CanSupplyApprovedPlugin(
+                                               && (LadderBundleService.CanSupplyApproval(
+                                                       ladder.ActiveBundle,
+                                                       state.Approval.FileName,
+                                                       state.Approval.Sha256,
+                                                       state.Approval.Kind)
+                                                   || (state.Approval.Kind == D2RLoaderExtensionKind.Plugin
+                                                       && (ServerSavesConfigService.CanSupplyApprovedPlugin(
                                                        state.Approval.FileName,
                                                        state.Approval.Sha256)
                                                    || ChatRelayConfigService.CanSupplyApprovedPlugin(
                                                        state.Approval.FileName,
-                                                       state.Approval.Sha256));
+                                                       state.Approval.Sha256))));
                     return new LadderExtensionChoice
                     {
                         ApprovalId = state.Approval.Id,
@@ -838,6 +881,11 @@ public partial class LaunchView : UserControl
                     $"Install the exact required extension file(s) before launching: {string.Join(", ", _missingRequiredLadderExtensions)}.");
             }
 
+            if (_ladderBundleReadiness is { IsReady: false } bundleReadiness)
+            {
+                policyWarnings.Add(bundleReadiness.Status);
+            }
+
             if (hasUnapprovedExtensions)
             {
                 var extensionLabel = preview.UnapprovedExtensions.Count == 1 ? "extension is" : "extensions are";
@@ -865,7 +913,10 @@ public partial class LaunchView : UserControl
                         ? null
                         : "Already ladder-disabled: " + string.Join(", ", alreadyDisabled) + "."
                 }.OfType<string>());
-            _ladderPolicyVerified = _missingRequiredLadderExtensions.Count == 0;
+            _ladderPolicyVerified = _missingRequiredLadderExtensions.Count == 0
+                                    && (_ladderBundleReadiness is { IsReady: true }
+                                        || _ladderBundleReadiness is { CanRepair: true });
+            _ladderAction = ResolveLadderAction();
         }
         catch (Exception ex)
         {
@@ -874,6 +925,8 @@ public partial class LaunchView : UserControl
             AllowedLadderPluginsItemsControl.ItemsSource = null;
             AllowedLadderPatchesItemsControl.ItemsSource = null;
             LadderExtensionPolicyStatusText.Text = "Could not verify installed D2RLoader extensions.";
+            LadderBundleStatusText.Text = "Could not verify the signed ladder package.";
+            _ladderAction = LadderAction.Blocked;
             UnapprovedLadderExtensionsBanner.IsVisible = true;
             UnapprovedLadderExtensionsSummaryBanner.IsVisible = true;
             UnapprovedLadderExtensionsSummaryText.Text =
@@ -884,6 +937,108 @@ public partial class LaunchView : UserControl
         }
 
         RefreshInstallDirectoryState();
+    }
+
+    /// <summary>
+    /// Download when nothing is installed, Update when what is installed is not
+    /// the revision the ladder is running, Play only when readiness has verified
+    /// every file. Blocked covers the cases nothing on this machine can fix.
+    /// </summary>
+    private LadderAction ResolveLadderAction()
+    {
+        if (SelectedLadder?.ActiveBundle is null || _ladderBundleReadiness is null)
+        {
+            return LadderAction.Blocked;
+        }
+        if (_ladderBundleReadiness.IsReady && _missingRequiredLadderExtensions.Count == 0)
+        {
+            return LadderAction.Play;
+        }
+        if (!_ladderBundleReadiness.CanRepair)
+        {
+            return LadderAction.Blocked;
+        }
+
+        return _ladderBundleReadiness.IsInstalled ? LadderAction.Update : LadderAction.Download;
+    }
+
+    private bool IsLadderSetupAction(bool isLadderExperience)
+        => isLadderExperience && _ladderAction is LadderAction.Download or LadderAction.Update;
+
+    private static string LadderActionLabel(LadderAction action) => action switch
+    {
+        LadderAction.Download => "Download",
+        LadderAction.Update => "Update",
+        LadderAction.Play => "Play",
+        _ => "Start Ladder"
+    };
+
+    private string LadderActionDescription(LadderAction action) => action switch
+    {
+        LadderAction.Download => "Downloads and verifies everything this ladder requires. This does not start the game.",
+        LadderAction.Update => "This ladder has moved to a newer package. Updating brings your install back in line. This does not start the game.",
+        LadderAction.Play => "Restores clean base files, enforces the ladder extension allowlist, and starts Reimagined through D2RLoader.",
+        _ => _ladderBundleReadiness?.Status ?? "This ladder cannot be played from this installation yet."
+    };
+
+    /// <summary>
+    /// Runs the Download or Update step. It deliberately stops when the install
+    /// is verified: the player sees the button turn into Play and starts the
+    /// game themselves, rather than having a download silently launch D2R.
+    /// </summary>
+    private async Task RunLadderSetupActionAsync()
+    {
+        if (SelectedLadder?.ActiveBundle is not { } bundle || _isLaunching || _isRunningLadderAction)
+        {
+            return;
+        }
+
+        var isUpdate = _ladderAction == LadderAction.Update;
+        _isRunningLadderAction = true;
+        RefreshInstallDirectoryState();
+        SetLadderSetupProgress(
+            isUpdate ? "Updating the ladder package..." : "Downloading the ladder package...",
+            null);
+        try
+        {
+            var progress = new Progress<LadderBundleProgress>(update =>
+                SetLadderSetupProgress(update.Message, update.Percentage));
+            await _ladderBundleService.InstallOrRepairAsync(
+                MainWindow.Settings.CurrentProfile.InstallDirectory,
+                bundle,
+                progress);
+            Notifications.SendNotification(
+                $"Signed ladder package r{bundle.Revision} is installed and verified. You can play now.",
+                "Ladder ready");
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.LogException("Failed to install signed ladder package", exception);
+            Notifications.SendNotification(exception.Message, isUpdate ? "Update failed" : "Download failed");
+        }
+        finally
+        {
+            _isRunningLadderAction = false;
+            LadderBundleProgressPanel.IsVisible = false;
+            MainWindow.Instance?.RefreshLocalModState();
+            await RefreshLadderExtensionPolicyAsync();
+        }
+    }
+
+    private void SetLadderSetupProgress(string message, double? percentage)
+    {
+        LadderBundleProgressPanel.IsVisible = true;
+        LadderBundleProgressText.Text = message;
+        LadderBundleStatusText.Text = message;
+        if (percentage is { } value)
+        {
+            LadderBundleProgressBar.IsIndeterminate = false;
+            LadderBundleProgressBar.Value = Math.Clamp(value, 0, 100);
+        }
+        else
+        {
+            LadderBundleProgressBar.IsIndeterminate = true;
+        }
     }
 
     private async void OnActiveLadderSelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -902,7 +1057,7 @@ public partial class LaunchView : UserControl
     private async void OnLadderExtensionSelectionChanged(object? sender, RoutedEventArgs e)
     {
         if (sender is not CheckBox { DataContext: LadderExtensionChoice choice } checkBox
-            || !choice.IsInstalled
+            || !choice.IsAvailable
             || SelectedLadder is not { } ladder)
         {
             return;
@@ -1060,6 +1215,16 @@ public partial class LaunchView : UserControl
 
     private async void OnRunClick(object? sender, RoutedEventArgs e)
     {
+        // Download and Update are setup, not launch. They share the button so
+        // there is one obvious thing to click, but they must never start D2R -
+        // the player decides to play once the button says Play.
+        if (MainWindow.Settings.CurrentProfile.LaunchExperience == LaunchExperience.Ladder
+            && _ladderAction is LadderAction.Download or LadderAction.Update)
+        {
+            await RunLadderSetupActionAsync();
+            return;
+        }
+
         await StartGameAsync();
     }
 
@@ -1127,6 +1292,24 @@ public partial class LaunchView : UserControl
             LaunchDiagnostics.Log($"D2RLoader launch blocked: {loaderUnavailableReason}");
             Notifications.SendNotification(loaderUnavailableReason ?? "D2RLoader is unavailable.", "Warning");
             return;
+        }
+
+        if (profile.LaunchExperience == LaunchExperience.Ladder)
+        {
+            await RefreshLadderExtensionPolicyAsync();
+
+            // The refresh may have found a newer revision than the one this
+            // click was made against. Hand the player the setup step the button
+            // now offers instead of pushing on into a launch that will fail.
+            if (_ladderAction is LadderAction.Download or LadderAction.Update)
+            {
+                Notifications.SendNotification(
+                    _ladderAction == LadderAction.Download
+                        ? "This ladder needs its package downloaded first. Use the Download button."
+                        : "This ladder has a newer package. Use the Update button before playing.",
+                    "Ladder setup needed");
+                return;
+            }
         }
 
         if (profile.LaunchExperience == LaunchExperience.Ladder && !HasActiveLadder)
@@ -1383,10 +1566,26 @@ public partial class LaunchView : UserControl
                 return false;
             }
 
+            if (ladder.ActiveBundle is not { } activeBundle)
+            {
+                const string message = "The selected ladder does not have an active signed package.";
+                LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
+                Notifications.SendNotification(message, "Warning");
+                await LadderSaveDirectoryService.RestoreAsync(profile.InstallDirectory);
+                return false;
+            }
+
+            var launchTicket = await _apiHttpClient.CreateLadderLaunchTicketAsync(
+                ladder.Id,
+                activeBundle,
+                LadderBundleService.LauncherVersion,
+                accessToken);
+
             var settings = new ServerSavesLaunchSettings(
                 _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority),
                 accessToken,
-                ladder.Id);
+                ladder.Id,
+                launchTicket.LaunchTicket);
             if (!await ServerSavesConfigService.EnableAsync(profile.InstallDirectory, settings))
             {
                 const string message = "The server-saves plugin configuration could not be written.";
@@ -1466,26 +1665,33 @@ public partial class LaunchView : UserControl
                 return false;
             }
 
-            // Install our own bundled plugin before the ladder policy below
-            // decides what stays and what moves to ladder-disabled - a player
-            // should never have to source this DLL themselves. This can only
-            // fail on a real I/O problem; whether the ladder actually approves
-            // the plugin is decided separately, by the policy step that follows.
-            if (!await ServerSavesConfigService.EnsureInstalledAsync(profile.InstallDirectory))
+            if (ladder.ActiveBundle is { } activeBundle)
             {
-                const string message = "The Server Saves plugin could not be installed.";
+                // Play is only offered once readiness has passed, so reaching
+                // here means the ladder moved to a new revision between the
+                // check and the click. Downloading now would turn a launch into
+                // a silent install, so the launch stops and the button goes
+                // back to Update for the player to run deliberately.
+                var readiness = await _ladderBundleService.GetReadinessAsync(
+                    profile.InstallDirectory,
+                    activeBundle);
+                if (!readiness.IsReady)
+                {
+                    LaunchDiagnostics.Log($"Ladder launch blocked: {readiness.Status}");
+                    Notifications.SendNotification(
+                        readiness.CanRepair
+                            ? "This ladder needs an update before you can play. Use the Update button."
+                            : readiness.Status,
+                        "Warning");
+                    return false;
+                }
+            }
+            else
+            {
+                const string message = "This ladder does not have an active signed package.";
                 LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
                 Notifications.SendNotification(message, "Warning");
                 return false;
-            }
-
-            // Chat relay is a convenience, not a requirement: if it cannot be
-            // installed the ladder still plays correctly, only without the
-            // Discord bridge. Blocking the launch over it would be the wrong
-            // trade, so this only records why.
-            if (!await ChatRelayConfigService.EnsureInstalledAsync(profile.InstallDirectory))
-            {
-                LaunchDiagnostics.Log("chat-relay: the plugin could not be installed; this launch has no Discord chat bridge.");
             }
 
             progress.Report("Enforcing ladder D2RLoader extension policy...");
