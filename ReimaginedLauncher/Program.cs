@@ -24,6 +24,11 @@ class Program
         services.AddHttpClient<GitHubAnnouncementsHttpClient>();
         services.AddHttpClient<GitHubDiscussionPluginsHttpClient>();
         services.AddHttpClient<NexusModsHttpClient>();
+        services.AddHttpClient<ReimaginedApiHttpClient>();
+        services.AddHttpClient<D2RLoaderInstallerService>();
+        services.AddHttpClient<ModReleaseInstallerService>();
+        services.AddSingleton<LauncherAuthenticationService>();
+        services.AddSingleton<LadderBundleService>();
         
         ServiceProvider = services.BuildServiceProvider();
 

@@ -48,6 +48,9 @@ public partial class MainWindow : Window
     private static readonly string LauncherVersion = ResolveLauncherVersion();
     private readonly GitHubAnnouncementsHttpClient _gitHubAnnouncementsHttpClient;
     private readonly INexusModsHttpClient _nexusModsHttpClient;
+    private readonly LauncherAuthenticationService _launcherAuthenticationService;
+    private readonly object _reimaginedSignInLock = new();
+    private CancellationTokenSource? _reimaginedSignInCancellationTokenSource;
     public NexusModsValidateResponse? User { get; set; }
     public static NexusUserViewModel UserViewModel { get; } = new();
     
@@ -86,6 +89,7 @@ public partial class MainWindow : Window
         Instance = this;
         _gitHubAnnouncementsHttpClient = Program.ServiceProvider.GetRequiredService<GitHubAnnouncementsHttpClient>();
         _nexusModsHttpClient = Program.ServiceProvider.GetRequiredService<NexusModsHttpClient>();;
+        _launcherAuthenticationService = Program.ServiceProvider.GetRequiredService<LauncherAuthenticationService>();
         Opacity = 0;
         InitializeComponent();
         NotificationManager = new WindowNotificationManager(this)
@@ -190,6 +194,16 @@ public partial class MainWindow : Window
         BackupService.UpdateSchedule();
         await SettingsManager.SaveAsync(Settings);
 
+        try
+        {
+            await _launcherAuthenticationService.InitializeAsync(Settings);
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.Log($"Could not restore the Reimagined API session: {exception.Message}");
+        }
+        RefreshReimaginedAccountUI();
+
         // Network calls (can be slow; don't block UI setup)
         var openedUnreadAnnouncements = await RefreshAnnouncementsStateAsync(openUnreadAnnouncements: true);
 
@@ -229,9 +243,15 @@ public partial class MainWindow : Window
         var bounds = RootScaleControl.Bounds;
         if (bounds.Width > 0 && bounds.Height > 0 && _currentScale > 0)
         {
+            var logicalWidth = bounds.Width / _currentScale;
+            var useCompactShell = logicalWidth < 1200;
+            RootGrid.Margin = useCompactShell ? new Thickness(12) : new Thickness(20);
+            RootGrid.ColumnSpacing = useCompactShell ? 12 : 18;
+            RootGrid.ColumnDefinitions[0].Width = new GridLength(useCompactShell ? 250 : 300);
+
             var horizontalMargin = RootGrid.Margin.Left + RootGrid.Margin.Right;
             var verticalMargin = RootGrid.Margin.Top + RootGrid.Margin.Bottom;
-            RootGrid.Width = (bounds.Width / _currentScale) - horizontalMargin;
+            RootGrid.Width = logicalWidth - horizontalMargin;
             RootGrid.Height = (bounds.Height / _currentScale) - verticalMargin;
         }
     }
@@ -1121,6 +1141,95 @@ public partial class MainWindow : Window
         };
 
         await _nexusSSO.ConnectAsync();
+    }
+
+    private async void OnReimaginedSignInClicked(object? sender, RoutedEventArgs e)
+    {
+        await SignInToReimaginedAsync();
+    }
+
+    public async Task<bool> SignInToReimaginedAsync()
+    {
+        if (_launcherAuthenticationService.IsSignedIn)
+        {
+            RefreshReimaginedAccountUI();
+            return true;
+        }
+
+        var cancellationTokenSource = new CancellationTokenSource();
+        CancellationTokenSource? previousCancellationTokenSource;
+        lock (_reimaginedSignInLock)
+        {
+            previousCancellationTokenSource = _reimaginedSignInCancellationTokenSource;
+            _reimaginedSignInCancellationTokenSource = cancellationTokenSource;
+        }
+
+        // A closed browser tab cannot notify the launcher. Treat another click as
+        // a retry by cancelling the abandoned callback listener immediately.
+        previousCancellationTokenSource?.Cancel();
+
+        try
+        {
+            var user = await _launcherAuthenticationService.SignInAsync(cancellationTokenSource.Token);
+            Notifications.SendNotification($"Signed in as {user.DisplayName}.", "Success");
+            return true;
+        }
+        catch (OperationCanceledException) when (cancellationTokenSource.IsCancellationRequested)
+        {
+            return false;
+        }
+        catch (Exception exception)
+        {
+            Notifications.SendNotification(exception.Message, "Sign-in failed");
+            return false;
+        }
+        finally
+        {
+            lock (_reimaginedSignInLock)
+            {
+                if (ReferenceEquals(_reimaginedSignInCancellationTokenSource, cancellationTokenSource))
+                {
+                    _reimaginedSignInCancellationTokenSource = null;
+                }
+            }
+
+            cancellationTokenSource.Dispose();
+            RefreshReimaginedAccountUI();
+        }
+    }
+
+    private async void OnReimaginedLogoutClicked(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await _launcherAuthenticationService.SignOutAsync();
+            Notifications.SendNotification("Signed out of D2R Reimagined.", "Success");
+        }
+        catch (Exception exception)
+        {
+            Notifications.SendNotification(
+                $"Signed out locally, but the server session could not be revoked: {exception.Message}",
+                "Warning");
+        }
+        finally
+        {
+            RefreshReimaginedAccountUI();
+        }
+    }
+
+    private void RefreshReimaginedAccountUI()
+    {
+        var user = _launcherAuthenticationService.CurrentUser;
+        ReimaginedSignInButton.IsVisible = user is null;
+        ReimaginedUserMenuButton.IsVisible = user is not null;
+        ReimaginedUserMenuButton.Content = user?.DisplayName ?? string.Empty;
+        ToolTip.SetTip(
+            ReimaginedUserMenuButton,
+            user is null ? null : $"D2R Reimagined account: {user.DisplayName}");
+        if (ContentArea.Content is LaunchView launchView)
+        {
+            launchView.RefreshAuthenticationState();
+        }
     }
 
     private void OnUserMenuClick(object? sender, RoutedEventArgs e)

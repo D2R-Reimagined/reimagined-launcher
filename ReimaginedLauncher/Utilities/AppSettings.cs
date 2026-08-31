@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System;
 using System.Text.Json.Serialization;
 
 namespace ReimaginedLauncher.Utilities;
@@ -8,6 +9,13 @@ public enum InstallationType
     BattleNet,
     Steam,
     D2RMM
+}
+
+public enum LaunchExperience
+{
+    Offline,
+    Online,
+    Ladder
 }
 
 public enum StackDropOption
@@ -21,6 +29,9 @@ public enum StackDropOption
 public class InstallationProfile
 {
     public InstallationType Type { get; set; }
+    public LaunchExperience LaunchExperience { get; set; }
+    public Guid? SelectedLadderId { get; set; }
+    public Dictionary<string, List<Guid>> SelectedLadderExtensions { get; set; } = [];
     public string? InstallDirectory { get; set; }
     public string? SteamDirectory { get; set; }
     public bool IsInstallDirectoryValidated { get; set; }
@@ -93,6 +104,16 @@ public class AppSettings
     {
         get => SecretProtector.Protect(NexusModsSSOApiKey);
         set => NexusModsSSOApiKey = SecretProtector.Unprotect(value);
+    }
+
+    [JsonIgnore]
+    public string? D2RReimaginedRefreshToken { get; set; }
+
+    [JsonPropertyName("D2RReimaginedRefreshToken")]
+    public string? D2RReimaginedRefreshTokenEncrypted
+    {
+        get => SecretProtector.Protect(D2RReimaginedRefreshToken);
+        set => D2RReimaginedRefreshToken = SecretProtector.Unprotect(value);
     }
 
     public bool? NexusPremiumDownloadAccess { get; set; }

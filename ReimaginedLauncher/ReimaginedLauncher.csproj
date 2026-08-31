@@ -3,7 +3,7 @@
         <OutputType>WinExe</OutputType>
         <TargetFramework>net10.0</TargetFramework>
         <Nullable>enable</Nullable>
-        <Version>0.10.1</Version>
+        <Version>0.11.0</Version>
         <VelopackVersion>1.2.0</VelopackVersion>
         <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
         <ApplicationManifest>app.manifest</ApplicationManifest>
@@ -21,6 +21,10 @@
         <DebugType>none</DebugType>
         <DebugSymbols>false</DebugSymbols>
     </PropertyGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="ReimaginedLauncher.Tests" />
+    </ItemGroup>
 
     <ItemGroup>
         <PackageReference Include="Avalonia" Version="12.1.1" />
@@ -47,13 +51,18 @@
        <None Include="Assets\Plugins\**\*">
          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
        </None>
+       <None Include="Assets\D2RLoaderPlugins\**\*">
+         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+       </None>
+       <None Include="Assets\LadderBundleSigningKeys\**\*">
+         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+       </None>
        <None Include="Assets\Vignette\**\*">
          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
        </None>
      </ItemGroup>
 
 </Project>
-
 
 
 

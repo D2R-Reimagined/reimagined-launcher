@@ -2,163 +2,408 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+             xmlns:utilities="clr-namespace:ReimaginedLauncher.Utilities"
+             xmlns:httpModels="clr-namespace:ReimaginedLauncher.HttpClients.Models"
+             mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="700"
              x:Class="ReimaginedLauncher.Views.Launch.LaunchView">
-    <ScrollViewer HorizontalScrollBarVisibility="Disabled"
-                  VerticalScrollBarVisibility="Auto">
-        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto"
-              RowSpacing="18">
+    <UserControl.Styles>
+        <Style Selector="Button.experience-card">
+            <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="15" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="MinHeight" Value="96" />
+        </Style>
+        <Style Selector="Button.experience-card:pointerover">
+            <Setter Property="Background" Value="{StaticResource AccentSoftBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderStrongBrush}" />
+        </Style>
+        <Style Selector="Button.experience-card.selected">
+            <Setter Property="Background" Value="#241B18" />
+            <Setter Property="BorderBrush" Value="{StaticResource GoldBrush}" />
+            <Setter Property="BorderThickness" Value="2" />
+        </Style>
+        <Style Selector="Border.extension-card">
+            <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="9" />
+            <Setter Property="Padding" Value="12" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+        </Style>
+        <Style Selector="TextBlock.scope-label">
+            <Setter Property="Foreground" Value="{StaticResource GoldTextBrush}" />
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="LetterSpacing" Value="1" />
+        </Style>
+    </UserControl.Styles>
+
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
+              RowSpacing="14"
+              HorizontalAlignment="Stretch">
             <StackPanel Spacing="4">
-                <TextBlock Classes="view-title"
-                           Text="Sanctuary Awaits" />
-                <TextBlock Classes="muted"
-                           Text="Select your Diablo II: Resurrected install type and location, manage and tweak your Reimagined files, and then launch into Sanctuary"
-                           TextWrapping="Wrap" />
+                <TextBlock Classes="view-title" Text="Launch" />
+                <TextBlock Classes="muted" TextWrapping="Wrap"
+                           Text="Choose a mode, confirm your installation, and enter Sanctuary." />
             </StackPanel>
 
-            <Border Grid.Row="1"
-                    Classes="panel"
-                    Padding="20">
+            <Border Grid.Row="1" Classes="panel" Padding="18">
                 <StackPanel Spacing="12">
-                    <TextBlock Classes="section-title"
-                               Text="Launch" />
-                    <TextBlock x:Name="StartGameDescription"
-                               Classes="muted"
-                               Text="The button stays available here and will enable once the install directory is valid and the mod is detected."
-                               TextWrapping="Wrap" />
-                    <StackPanel Orientation="Horizontal" Spacing="16">
-                        <Button x:Name="StartGameButton"
-                                Classes="accent"
-                                Content="Start Game"
-                                Click="OnRunClick"
-                                Width="220"
-                                HorizontalContentAlignment="Center"
-                                VerticalContentAlignment="Center"
-                                MinHeight="48"
-                                IsEnabled="False" />
-                        <StackPanel VerticalAlignment="Center" Spacing="2">
-                            <TextBlock x:Name="BackupOnLaunchSummary"
-                                       Classes="muted"
-                                       FontSize="14" />
-                            <TextBlock x:Name="BackupIntervalSummary"
-                                       Classes="muted"
-                                       FontSize="14" />
-                        </StackPanel>
+                    <StackPanel Spacing="4">
+                        <TextBlock Classes="section-title" Text="Play Mode" />
+                        <TextBlock Classes="muted" TextWrapping="Wrap"
+                                   Text="Your choice is saved separately for each Battle.Net or Steam installation." />
                     </StackPanel>
-                    <TextBlock Classes="muted"
-                               TextWrapping="Wrap"
-                               Text="Note: Custom edits must be done in &lt;name&gt;_launcher_clean folders and files for them to apply when the game is launched with the above button. Creating a plugin for the edit is recommended for future mod patch compatibility." />
+                    <Grid x:Name="ExperienceGrid" ColumnDefinitions="*,*,*" ColumnSpacing="12">
+                        <Button x:Name="OfflineExperienceButton" Classes="experience-card" Click="OnOfflineExperienceClick">
+                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="14">
+                                <Border Width="34" Height="34" CornerRadius="17" Background="{StaticResource AccentSoftBrush}" VerticalAlignment="Top">
+                                    <TextBlock Text="I" FontFamily="Georgia" FontSize="18" FontWeight="Bold"
+                                               Foreground="{StaticResource GoldTextBrush}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <StackPanel Grid.Column="1" Spacing="5">
+                                    <TextBlock Text="Offline" FontFamily="Georgia" FontSize="19" FontWeight="SemiBold" />
+                                    <TextBlock Classes="muted" TextWrapping="Wrap"
+                                               Text="Local characters with map seeds and /players options." />
+                                </StackPanel>
+                            </Grid>
+                        </Button>
+                        <Button x:Name="OnlineExperienceButton" Grid.Column="1" Classes="experience-card" Click="OnOnlineExperienceClick">
+                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="14">
+                                <Border Width="34" Height="34" CornerRadius="17" Background="{StaticResource AccentSoftBrush}" VerticalAlignment="Top">
+                                    <TextBlock Text="II" FontFamily="Georgia" FontSize="15" FontWeight="Bold"
+                                               Foreground="{StaticResource GoldTextBrush}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <StackPanel Grid.Column="1" Spacing="5">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="Online" FontFamily="Georgia" FontSize="19" FontWeight="SemiBold" />
+                                        <Border Background="#342313" CornerRadius="10" Padding="8,3">
+                                            <TextBlock Text="D2RLOADER" Classes="scope-label" />
+                                        </Border>
+                                    </StackPanel>
+                                    <TextBlock Classes="muted" TextWrapping="Wrap"
+                                               Text="Launches with D2RLoader. Able to play multiplayer. Not Battle.net." />
+                                </StackPanel>
+                            </Grid>
+                        </Button>
+                        <Button x:Name="LadderExperienceButton" Grid.Column="2" Classes="experience-card" Click="OnLadderExperienceClick">
+                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="14">
+                                <Border Width="34" Height="34" CornerRadius="17" Background="{StaticResource AccentSoftBrush}" VerticalAlignment="Top">
+                                    <TextBlock Text="III" FontFamily="Georgia" FontSize="13" FontWeight="Bold"
+                                               Foreground="{StaticResource GoldTextBrush}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <StackPanel Grid.Column="1" Spacing="5">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="Ladder" FontFamily="Georgia" FontSize="19" FontWeight="SemiBold" />
+                                        <Border Background="#342313" CornerRadius="10" Padding="8,3">
+                                            <TextBlock Text="D2RLOADER" Classes="scope-label" />
+                                        </Border>
+                                    </StackPanel>
+                                    <TextBlock x:Name="LadderStatusText" Classes="muted" TextWrapping="Wrap"
+                                               Text="Checking for active ladders..." />
+                                    <ItemsControl x:Name="ActiveLaddersItemsControl">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="httpModels:LadderResponse">
+                                                <StackPanel Margin="0,4,0,0" Spacing="2">
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                    <TextBlock Text="{Binding DateRangeDisplay}" Classes="muted"
+                                                               FontSize="11" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Grid>
+                        </Button>
+                    </Grid>
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="2"
-                    Classes="panel"
-                    Padding="20">
-                <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto"
-                      RowSpacing="14">
-                    <StackPanel Spacing="4">
-                        <TextBlock x:Name="InstallDirectoryTitle" Classes="section-title"
-                                   Text="Install Directory" />
-                        <TextBlock x:Name="InstallDirectoryDescription" Classes="muted"
-                                   Text="Select the Diablo II: Resurrected folder that contains your local mod installation (Folder with .exe in it)" />
-                    </StackPanel>
-
-                    <Border x:Name="ValidationBanner"
-                            Grid.Row="1"
-                            Classes="warning-banner"
-                            Padding="12"
-                            IsVisible="False">
-                        <TextBlock x:Name="ValidationBannerText"
-                                   Foreground="{StaticResource GoldTextBrush}"
-                                   TextWrapping="Wrap" />
-                    </Border>
-
-                    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="10">
-                        <TextBlock Text="Installation Type:" VerticalAlignment="Center" Classes="muted"/>
-                        <ComboBox x:Name="InstallationTypeComboBox" Width="200" SelectionChanged="OnInstallationTypeChanged">
-                            <ComboBoxItem Content="Battle.Net" />
-                            <ComboBoxItem Content="Steam" />
-                            <ComboBoxItem Content="D2RMM Launcher" />
-                        </ComboBox>
-                    </StackPanel>
-
-                    <Grid Grid.Row="3"
-                          ColumnDefinitions="*,Auto"
-                          ColumnSpacing="10">
-                        <StackPanel Orientation="Horizontal"
-                                    Spacing="10">
-                            <TextBox x:Name="DirectoryTextBox"
-                                     IsReadOnly="True"
-                                     Width="563"
-                                     HorizontalAlignment="Left" />
-                            <StackPanel x:Name="DetectionLoadingIndicator"
-                                        Orientation="Horizontal"
-                                        Spacing="8"
-                                        VerticalAlignment="Center"
-                                        IsVisible="False">
-                                <ProgressBar IsIndeterminate="True"
-                                             Width="100"
-                                             Height="4" />
-                                <TextBlock Text="Detecting..."
-                                           Classes="muted"
+            <Grid x:Name="LaunchSetupGrid" Grid.Row="2" ColumnDefinitions="1.2*,*" ColumnSpacing="14">
+                <Border x:Name="LaunchPanel" Classes="hero-panel" Padding="18">
+                    <StackPanel Spacing="12">
+                        <StackPanel Spacing="4">
+                            <TextBlock Classes="section-title" Text="Launch" />
+                            <TextBlock x:Name="StartGameDescription" Classes="muted" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <Border x:Name="LadderAuthenticationWarningBanner"
+                                Classes="warning-banner"
+                                Padding="12"
+                                IsVisible="False">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                <TextBlock Foreground="{StaticResource GoldTextBrush}"
+                                           Text="Sign in with your D2R Reimagined website account to play on the ladder."
+                                           TextWrapping="Wrap"
                                            VerticalAlignment="Center" />
+                                <Button x:Name="LadderSignInButton"
+                                        Grid.Column="1"
+                                        Classes="accent"
+                                        Content="Sign in"
+                                        VerticalAlignment="Center"
+                                        Click="OnLadderSignInClick" />
+                            </Grid>
+                        </Border>
+                        <StackPanel x:Name="LaunchActionsPanel" Orientation="Horizontal" Spacing="16">
+                            <Button x:Name="StartGameButton" Classes="accent" Content="Start Game" Click="OnRunClick"
+                                    Width="220" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                    MinHeight="48" IsEnabled="False" />
+                            <StackPanel VerticalAlignment="Center" Spacing="2">
+                                <TextBlock x:Name="BackupOnLaunchSummary" Classes="muted" FontSize="13" />
+                                <TextBlock x:Name="BackupIntervalSummary" Classes="muted" FontSize="13" />
                             </StackPanel>
                         </StackPanel>
-                        <Button Grid.Column="1"
-                                Content="Browse"
-                                Click="OnInstallDirectoryClick"
-                                VerticalContentAlignment="Center" />
-                    </Grid>
+                        <Expander Header="Advanced launch details">
+                            <StackPanel Margin="0,10,0,0" Spacing="9">
+                                <Border Background="{StaticResource AppBackgroundBrush}"
+                                        BorderBrush="{StaticResource BorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Padding="12">
+                                    <TextBlock x:Name="LaunchCommandText"
+                                               TextWrapping="Wrap"
+                                               FontFamily="Cascadia Code,Consolas,Monaco,monospace"
+                                               FontSize="12" />
+                                </Border>
+                                <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                                           Text="Custom edits must live in &lt;name&gt;_launcher_clean. For long-term update compatibility, use a launcher plugin." />
+                            </StackPanel>
+                        </Expander>
+                    </StackPanel>
+                </Border>
 
-                    <Grid x:Name="SteamExtraPanel" Grid.Row="4" ColumnDefinitions="*,Auto" ColumnSpacing="10" IsVisible="False">
-                        <TextBox x:Name="SteamPathTextBox"
-                                 IsReadOnly="True"
-                                 Width="563"
-                                 HorizontalAlignment="Left"
-                                 PlaceholderText="Steam executable path" />
-                        <Button x:Name="LocateSteamButton"
-                                Grid.Column="1"
-                                Content="Locate Steam"
-                                Click="OnLocateSteamClick"
-                                VerticalContentAlignment="Center" />
+                <Border x:Name="InstallDirectoryPanel" Grid.Column="1" Classes="panel" Padding="18">
+                    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="12">
+                        <StackPanel Spacing="4">
+                            <TextBlock x:Name="InstallDirectoryTitle" Classes="section-title" Text="Installation" />
+                            <TextBlock x:Name="InstallDirectoryDescription" Classes="muted" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <Border x:Name="ValidationBanner" Grid.Row="1" Classes="warning-banner" Padding="12" IsVisible="False">
+                            <TextBlock x:Name="ValidationBannerText" Foreground="{StaticResource GoldTextBrush}" TextWrapping="Wrap" />
+                        </Border>
+                        <StackPanel Grid.Row="2" Spacing="6">
+                            <TextBlock Text="Installation Type" Classes="muted" FontSize="12" />
+                            <ComboBox x:Name="InstallationTypeComboBox" HorizontalAlignment="Stretch" SelectionChanged="OnInstallationTypeChanged">
+                                <ComboBoxItem Content="Battle.Net" />
+                                <ComboBoxItem Content="Steam" />
+                                <ComboBoxItem Content="D2RMM Launcher" />
+                            </ComboBox>
+                        </StackPanel>
+                        <Grid Grid.Row="3" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <TextBox x:Name="DirectoryTextBox" IsReadOnly="True" />
+                                <StackPanel x:Name="DetectionLoadingIndicator" Grid.Column="1" Orientation="Horizontal"
+                                            Spacing="8" VerticalAlignment="Center" IsVisible="False">
+                                    <ProgressBar IsIndeterminate="True" Width="72" Height="4" />
+                                    <TextBlock Text="Detecting..." Classes="muted" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Grid>
+                            <Button Grid.Column="1" Content="Browse" Click="OnInstallDirectoryClick" />
+                        </Grid>
+                        <Grid x:Name="SteamExtraPanel" Grid.Row="4" ColumnDefinitions="*,Auto" ColumnSpacing="8" IsVisible="False">
+                            <TextBox x:Name="SteamPathTextBox" IsReadOnly="True" PlaceholderText="Steam executable path" />
+                            <Button x:Name="LocateSteamButton" Grid.Column="1" Content="Locate Steam" Click="OnLocateSteamClick" />
+                        </Grid>
                     </Grid>
-                </Grid>
-            </Border>
+                </Border>
+            </Grid>
 
-            <Border Grid.Row="3"
-                    Classes="panel"
-                    Padding="20">
-                <StackPanel Spacing="10">
-                    <TextBlock Classes="section-title"
-                               Text="Launch Command" />
-                    <TextBlock Classes="muted"
-                               Text="The exact command the launcher will send to the game process." />
-                    <Border Background="#110A0A"
-                            BorderBrush="#341516"
-                            BorderThickness="1"
-                            CornerRadius="10"
-                            Padding="14">
-                        <TextBlock x:Name="LaunchCommandText"
-                                   TextWrapping="Wrap"
-                                   FontFamily="Cascadia Code,Consolas,Monaco,monospace" />
+            <Border x:Name="LadderPolicyPanel" Grid.Row="3" Classes="panel" Padding="18" IsVisible="False">
+                <StackPanel Spacing="12">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="14">
+                        <StackPanel Spacing="4">
+                            <TextBlock Classes="section-title" Text="Ladder Safeguards" />
+                            <TextBlock Classes="muted" TextWrapping="Wrap"
+                                       Text="Ladder launches use a signed package from the Reimagined API. Every required D2RLoader file is verified before the game starts; unapproved extensions are disabled." />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                            <TextBlock Text="Active Ladder" Classes="muted" VerticalAlignment="Center" />
+                            <ComboBox x:Name="ActiveLadderComboBox" MinWidth="240"
+                                      SelectionChanged="OnActiveLadderSelectionChanged">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate x:DataType="httpModels:LadderResponse">
+                                        <TextBlock Text="{Binding Name}" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                        </StackPanel>
+                    </Grid>
+                    <Border Classes="extension-card" Padding="12">
+                        <StackPanel Spacing="8">
+                            <StackPanel Spacing="3">
+                                <TextBlock Text="Signed Ladder Package" FontWeight="SemiBold" />
+                                <TextBlock x:Name="LadderBundleStatusText" Classes="muted" TextWrapping="Wrap"
+                                           Text="Checking the signed ladder package..." />
+                            </StackPanel>
+                            <StackPanel x:Name="LadderBundleProgressPanel" Spacing="4" IsVisible="False">
+                                <ProgressBar x:Name="LadderBundleProgressBar" Height="6" Minimum="0" Maximum="100" />
+                                <TextBlock x:Name="LadderBundleProgressText" Classes="muted" FontSize="12"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </StackPanel>
                     </Border>
+                    <TextBlock x:Name="LadderExtensionPolicyStatusText" Classes="muted" TextWrapping="Wrap"
+                               Text="Checking installed D2RLoader extensions..." />
+                    <Border x:Name="UnapprovedLadderExtensionsSummaryBanner" Classes="warning-banner"
+                            Padding="12" IsVisible="False">
+                        <TextBlock x:Name="UnapprovedLadderExtensionsSummaryText"
+                                   Foreground="{StaticResource GoldTextBrush}" TextWrapping="Wrap" />
+                    </Border>
+                    <Expander Header="Extension policy details">
+                        <StackPanel Margin="0,10,0,0" Spacing="12">
+                            <Border x:Name="UnapprovedLadderExtensionsBanner" Classes="warning-banner"
+                                    Padding="12" IsVisible="False">
+                                <TextBlock x:Name="UnapprovedLadderExtensionsText"
+                                           Foreground="{StaticResource GoldTextBrush}" TextWrapping="Wrap" />
+                            </Border>
+                            <Grid x:Name="LadderExtensionsGrid" ColumnDefinitions="*,*" ColumnSpacing="14">
+                                <Border x:Name="AllowedLadderPluginsPanel" Classes="extension-card">
+                                    <StackPanel Spacing="8">
+                                        <TextBlock Text="Ladder Plugins" FontFamily="Georgia" FontSize="17" FontWeight="SemiBold" />
+                                        <ItemsControl x:Name="AllowedLadderPluginsItemsControl">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="httpModels:LadderExtensionChoice">
+                                                    <CheckBox IsChecked="{Binding IsSelected, Mode=OneWay}"
+                                                              IsEnabled="{Binding CanToggle}"
+                                                              Click="OnLadderExtensionSelectionChanged">
+                                                        <StackPanel Spacing="2">
+                                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                                <Border IsVisible="{Binding IsRequired}" Background="#4A241C" CornerRadius="8" Padding="6,2">
+                                                                    <TextBlock Text="REQUIRED" Classes="scope-label" />
+                                                                </Border>
+                                                            </StackPanel>
+                                                            <TextBlock Text="{Binding Detail}" Classes="muted" FontSize="11" />
+                                                        </StackPanel>
+                                                    </CheckBox>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Border>
+                                <Border x:Name="AllowedLadderPatchesPanel" Grid.Column="1" Classes="extension-card">
+                                    <StackPanel Spacing="8">
+                                        <TextBlock Text="Ladder Patches" FontFamily="Georgia" FontSize="17" FontWeight="SemiBold" />
+                                        <ItemsControl x:Name="AllowedLadderPatchesItemsControl">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="httpModels:LadderExtensionChoice">
+                                                    <CheckBox IsChecked="{Binding IsSelected, Mode=OneWay}"
+                                                              IsEnabled="{Binding CanToggle}"
+                                                              Click="OnLadderExtensionSelectionChanged">
+                                                        <StackPanel Spacing="2">
+                                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                                <Border IsVisible="{Binding IsRequired}" Background="#4A241C" CornerRadius="8" Padding="6,2">
+                                                                    <TextBlock Text="REQUIRED" Classes="scope-label" />
+                                                                </Border>
+                                                            </StackPanel>
+                                                            <TextBlock Text="{Binding Detail}" Classes="muted" FontSize="11" />
+                                                        </StackPanel>
+                                                    </CheckBox>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                        </StackPanel>
+                    </Expander>
                 </StackPanel>
             </Border>
 
-            <Border x:Name="LaunchStatusPanel"
-                    Grid.Row="4"
-                    Classes="panel"
-                    Padding="20"
-                    IsVisible="False">
+            <Border x:Name="OnlineExperiencePanel" Grid.Row="4" Classes="panel" Padding="18" IsVisible="False">
+                <StackPanel Spacing="16">
+                    <Grid x:Name="LoaderHeaderGrid" ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                        <StackPanel Spacing="5">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <TextBlock Classes="section-title" Text="D2RLoader Extensions" />
+                                <Border x:Name="LoaderStatusBadge" CornerRadius="11" Padding="9,4" VerticalAlignment="Center">
+                                    <TextBlock x:Name="LoaderStatusBadgeText" FontSize="11" FontWeight="Bold" />
+                                </Border>
+                            </StackPanel>
+                            <TextBlock x:Name="LoaderStatusText" Classes="muted" TextWrapping="Wrap" />
+                            <TextBlock x:Name="LoaderExtensionPolicyText" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <StackPanel x:Name="LoaderActionsPanel" Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
+                            <Button Content="Refresh" Click="OnRefreshLoaderClick" />
+                            <Button x:Name="OpenLoaderFolderButton" Content="Open Global" Click="OnOpenLoaderFolderClick" />
+                            <Button x:Name="OpenModLoaderFolderButton" Content="Open Reimagined" Click="OnOpenModLoaderFolderClick" />
+                        </StackPanel>
+                    </Grid>
+                    <Border x:Name="LoaderWarningBanner" Classes="warning-banner" Padding="12" IsVisible="False">
+                        <TextBlock x:Name="LoaderWarningText" Foreground="{StaticResource GoldTextBrush}" TextWrapping="Wrap" />
+                    </Border>
+                    <Grid x:Name="LoaderExtensionsGrid" ColumnDefinitions="*,*" ColumnSpacing="14">
+                        <Border x:Name="LoaderPluginsPanel" Background="{StaticResource SurfaceRaisedBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="14">
+                            <StackPanel Spacing="10">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <TextBlock Text="Plugins" FontFamily="Georgia" FontSize="18" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="LoaderPluginCountText" Grid.Column="1" Classes="muted" VerticalAlignment="Center" />
+                                </Grid>
+                                <TextBlock x:Name="NoLoaderPluginsText" Classes="muted" Text="No plugin DLLs were found." />
+                                <ItemsControl x:Name="LoaderPluginsItemsControl">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="utilities:D2RLoaderExtensionInfo">
+                                            <Border Classes="extension-card">
+                                                <StackPanel Spacing="4">
+                                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="7">
+                                                            <TextBlock Text="{Binding ScopeLabel}" Classes="scope-label" VerticalAlignment="Center" />
+                                                            <TextBlock Text="{Binding VersionLabel}" Classes="muted" FontSize="12" VerticalAlignment="Center" />
+                                                        </StackPanel>
+                                                    </Grid>
+                                                    <TextBlock Text="{Binding Detail}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                        <Border x:Name="LoaderPatchesPanel" Grid.Column="1" Background="{StaticResource SurfaceRaisedBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="14">
+                            <StackPanel Spacing="10">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <TextBlock Text="Patches" FontFamily="Georgia" FontSize="18" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="LoaderPatchCountText" Grid.Column="1" Classes="muted" VerticalAlignment="Center" />
+                                </Grid>
+                                <TextBlock x:Name="NoLoaderPatchesText" Classes="muted" Text="No patch manifests were found." />
+                                <ItemsControl x:Name="LoaderPatchesItemsControl">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="utilities:D2RLoaderExtensionInfo">
+                                            <Border Classes="extension-card">
+                                                <StackPanel Spacing="4">
+                                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="7">
+                                                            <TextBlock Text="{Binding ScopeLabel}" Classes="scope-label" VerticalAlignment="Center" />
+                                                            <TextBlock Text="{Binding VersionLabel}" Classes="muted" FontSize="12" VerticalAlignment="Center" />
+                                                        </StackPanel>
+                                                    </Grid>
+                                                    <TextBlock Text="{Binding Description}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                                                    <TextBlock Text="{Binding Detail}" Classes="muted" FontSize="11" />
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <Border x:Name="LaunchStatusPanel" Grid.Row="5" Classes="panel" Padding="18" IsVisible="False">
                 <StackPanel Spacing="10">
-                    <TextBlock Classes="section-title"
-                               Text="Launch Status" />
-                    <TextBlock x:Name="LaunchStatusText"
-                               Classes="muted"
-                               Text="Preparing launch..." />
-                    <ProgressBar x:Name="LaunchProgressBar"
-                                 IsIndeterminate="True"
-                                 Height="8" />
+                    <TextBlock Classes="section-title" Text="Launch Status" />
+                    <TextBlock x:Name="LaunchStatusText" Classes="muted" Text="Preparing launch..." />
+                    <ProgressBar x:Name="LaunchProgressBar" IsIndeterminate="True" Height="8" />
                 </StackPanel>
             </Border>
         </Grid>

@@ -14,6 +14,11 @@
                   PointerPressed="OnBackgroundPointerPressed">
         <StackPanel Spacing="18"
                     HorizontalAlignment="Stretch">
+            <Border x:Name="LadderLockBanner" Classes="warning-banner"
+                    Padding="14" IsVisible="False">
+                <TextBlock Foreground="{StaticResource GoldTextBrush}" TextWrapping="Wrap"
+                           Text="Launcher plugins are disabled in Ladder mode. Your installed plugins and normal enabled choices are preserved for Offline and Online launches." />
+            </Border>
             <Border x:Name="LoadingBanner"
                     Classes="panel"
                     Padding="16"

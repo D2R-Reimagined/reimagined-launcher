@@ -29,6 +29,9 @@ public partial class ModTweaksView : UserControl
         _isRefreshing = true;
 
         var profile = MainWindow.Settings.CurrentProfile;
+        var isLadder = profile.LaunchExperience == LaunchExperience.Ladder;
+        LadderLockBanner.IsVisible = isLadder;
+        TweaksContentPanel.IsEnabled = !isLadder;
         var skillPointsPerLevel = Clamp(profile.SkillPointsPerLevel, 1, 5);
         var attributesPerLevel = Clamp(profile.AttributesPerLevel, 1, 20);
         var maxSkillLevel = Clamp(profile.MaxSkillLevel, 5, 25);

@@ -37,6 +37,8 @@ public static class ModTweaksService
     private const string CleanStringsDirectoryName = "strings_launcher_clean";
     private const string LayoutsProfileHdFileName = "_profilehd.json";
     private const string CleanLayoutsProfileHdFileName = "layouts_profilehd_launcher_clean.json";
+    private const string CharacterSelectPanelHdFileName = "characterselectpanelhd.json";
+    private const string ControllerDirectoryName = "controller";
     private const string CleanArmorTweaksDirectoryName = "armor_launcher_clean";
     private const string TexturesDirectoryName = "textures";
     private const string VignetteDirectoryName = "vignette";
@@ -62,6 +64,7 @@ public static class ModTweaksService
     private const string SfxDirectoryName = "sfx";
     private const string QuestDirectoryName = "quest";
     private const string DesecratedEnterHdFileName = "desecrated_enter_hd.flac";
+    private const string TerrorZoneFanfareBackupClaimId = "launcher:tweak:terror-zone-fanfare";
     private const string GeneratedTweaksFolderName = "mod-tweaks";
     private static readonly string[] DisableExtraBloodRelativePaths =
     [
@@ -565,7 +568,9 @@ public static class ModTweaksService
         Path.Combine(PeltDirectoryName, "wolf_head.json")
     ];
 
-    public static async Task<bool> PrepareForLaunchAsync(IProgress<string>? progress = null)
+    public static async Task<bool> PrepareForLaunchAsync(
+        IProgress<string>? progress = null,
+        LadderDisplayInfo? ladderDisplay = null)
     {
         ReportProgress(progress, "Resolving mod directories...");
         var excelDirectory = GetExcelDirectory();
@@ -591,6 +596,8 @@ public static class ModTweaksService
         var cleanArmorTweaksDirectory = GetCleanArmorTweaksDirectory(armorDirectory);
         var cleanDesecratedZonesFilePath = GetCleanDesecratedZonesFilePath(desecratedZonesFilePath);
         var excelDirectories = GetExcelDirectories(excelDirectory).ToList();
+        var characterSelectLayoutPaths = GetCharacterSelectLayoutPaths().ToArray();
+        var isLadderLaunch = MainWindow.Settings.CurrentProfile.LaunchExperience == LaunchExperience.Ladder;
         LaunchDiagnostics.Log($"Resolved missiles file path: {missilesFilePath ?? "<null>"}");
         LaunchDiagnostics.Log($"Resolved monsters file path: {monstersFilePath ?? "<null>"}");
         LaunchDiagnostics.Log($"Resolved strings directory path: {stringsDirectory ?? "<null>"}");
@@ -609,12 +616,27 @@ public static class ModTweaksService
             LaunchDiagnostics.Log("Restoring plugin asset backups before tweaks.");
             await PluginAssetBackupService.RestoreAllAsync();
 
+            if (isLadderLaunch && ladderDisplay is null)
+            {
+                throw new InvalidOperationException("The active ladder details were not available for character-select preparation.");
+            }
+
+            ReportProgress(progress, isLadderLaunch
+                ? "Adding ladder participation banner..."
+                : "Restoring the standard character-select screen...");
+            var preparedCharacterSelectLayouts = await LadderCharacterSelectService.PrepareAsync(
+                characterSelectLayoutPaths,
+                isLadderLaunch ? ladderDisplay : null);
+            LaunchDiagnostics.Log(
+                $"Prepared {preparedCharacterSelectLayouts} character-select layout(s) for "
+                + (isLadderLaunch ? $"ladder '{ladderDisplay!.Name}'." : "a non-ladder launch."));
+
             // Surface asset-copy collisions across enabled plugins exactly once
             // per launch, before any pre-stage entry point or
             // ApplyEnabledPluginsModRootAsync runs. Last-writer-wins semantics
             // are preserved; this only tells the user that a silent override
             // is happening so they can adjust load order if it was unintended.
-            if (!string.IsNullOrWhiteSpace(modRoot))
+            if (!isLadderLaunch && !string.IsNullOrWhiteSpace(modRoot))
             {
                 await PluginsService.WarnAssetCollisionsAsync(modRoot, progress);
             }
@@ -643,6 +665,33 @@ public static class ModTweaksService
             ReportProgress(progress, "Preparing clean vis copy...");
             LaunchDiagnostics.Log("Ensuring clean vis directory copy.");
             await EnsureCleanVisCopyAsync();
+
+            if (isLadderLaunch)
+            {
+                ReportProgress(progress, "Restoring clean ladder files...");
+                foreach (var targetExcelDirectory in excelDirectories)
+                {
+                    var sourceExcelDirectory = GetCleanVariantDirectory(
+                        targetExcelDirectory,
+                        excelDirectory,
+                        cleanExcelDirectory);
+                    await ValidateExcelFilesAsync(sourceExcelDirectory);
+                    await CopyDirectoryAsync(sourceExcelDirectory, targetExcelDirectory, overwrite: true);
+                }
+
+                await RestoreMissilesFileAsync(cleanMissilesFilePath, missilesFilePath);
+                await RestoreMonstersFileAsync(cleanMonstersFilePath, monstersFilePath);
+                await RestoreStringsFromCleanCopyAsync(stringsDirectory, cleanStringsDirectory);
+                await RestoreLayoutsProfileHdFileAsync(cleanLayoutsProfileHdFilePath, layoutsProfileHdFilePath);
+                await RestoreArmorTweaksAsync(armorDirectory, cleanArmorTweaksDirectory);
+                await RestoreDesecratedZonesFileAsync(cleanDesecratedZonesFilePath, desecratedZonesFilePath);
+                await RestoreVisFilesAsync();
+                await ApplyVignetteTweakAsync(removeVignette: false);
+
+                LaunchDiagnostics.Log(
+                    "Ladder preparation restored clean base files and skipped all launcher tweaks and plugins.");
+                return true;
+            }
 
             foreach (var targetExcelDirectory in excelDirectories)
             {
@@ -718,7 +767,7 @@ public static class ModTweaksService
             ApplyTerrorZonePurpleOverlayTweak(profile.TerrorZonePurpleOverlay);
             ReportProgress(progress, "Applying terror zone fanfare tweaks...");
             LaunchDiagnostics.Log("Applying terror zone fanfare tweaks.");
-            ApplyTerrorZoneFanfareTweak(profile.RestoreTerrorZoneFanfare);
+            await ApplyTerrorZoneFanfareTweakAsync(profile.RestoreTerrorZoneFanfare);
             ReportProgress(progress, "Applying vignette tweaks...");
             LaunchDiagnostics.Log("Applying vignette tweaks.");
             await ApplyVignetteTweakAsync(profile.RemoveVignette);
@@ -842,6 +891,24 @@ public static class ModTweaksService
             UiDirectoryName,
             LayoutsDirectoryName,
             LayoutsProfileHdFileName);
+    }
+
+    private static IEnumerable<string> GetCharacterSelectLayoutPaths()
+    {
+        var mpqBase = GetMpqBaseDirectory();
+        if (string.IsNullOrWhiteSpace(mpqBase))
+        {
+            yield break;
+        }
+
+        var layoutsDirectory = Path.Combine(
+            mpqBase,
+            DataDirectoryName,
+            GlobalDirectoryName,
+            UiDirectoryName,
+            LayoutsDirectoryName);
+        yield return Path.Combine(layoutsDirectory, CharacterSelectPanelHdFileName);
+        yield return Path.Combine(layoutsDirectory, ControllerDirectoryName, CharacterSelectPanelHdFileName);
     }
 
     private static string? GetDesecratedZonesFilePath()
@@ -2130,7 +2197,7 @@ public static class ModTweaksService
             DesecratedEnterHdFileName);
     }
 
-    private static void ApplyTerrorZoneFanfareTweak(bool restoreTerrorZoneFanfare)
+    private static async Task ApplyTerrorZoneFanfareTweakAsync(bool restoreTerrorZoneFanfare)
     {
         if (restoreTerrorZoneFanfare)
         {
@@ -2144,6 +2211,9 @@ public static class ModTweaksService
             return;
         }
 
+        await PluginAssetBackupService.RegisterReplacementAsync(
+            TerrorZoneFanfareBackupClaimId,
+            fanfareFilePath);
         File.Delete(fanfareFilePath);
         LaunchDiagnostics.Log($"Deleted terror zone fanfare file: {fanfareFilePath}");
     }

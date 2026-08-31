@@ -43,6 +43,7 @@ Output will be in `ReimaginedLauncher/bin/Production/net10.0/linux-x64/publish/`
 
 ## Notes
 
+- The D2RLoader Online experience is currently Windows-only. Linux profiles continue to use the Offline launch path until Loader startup through Proton/Wine has been validated end to end.
 - Launcher self-updates are supported by the packaged AppImage.
 - Steam launches use app ID `2536520` and pass the same Reimagined launch parameters as Windows.
 - Battle.net installations are launched through Wine. When the selected game is inside a Wine prefix, the launcher derives and supplies `WINEPREFIX` automatically.

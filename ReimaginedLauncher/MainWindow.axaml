@@ -10,8 +10,8 @@
     x:Class="ReimaginedLauncher.MainWindow"
     x:DataType="reimaginedLauncher1:NexusUserViewModel"
     Title="D2R Reimagined Launcher"
-    MinWidth="1180"
-    MinHeight="760"
+    MinWidth="960"
+    MinHeight="640"
 >
     <Window.Styles>
         <materialIcons:MaterialIconStyles />
@@ -27,12 +27,15 @@
     </Window.Styles>
     <LayoutTransformControl x:Name="RootScaleControl">
         <Grid x:Name="RootGrid"
-              ColumnDefinitions="300,*"
-              Margin="20"
-              ColumnSpacing="18">
+              Margin="16"
+              ColumnSpacing="14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="260" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
             <Border Grid.Column="0"
                     Classes="panel"
-                    Padding="20">
+                    Padding="16">
             <Grid RowDefinitions="Auto,*,Auto" RowSpacing="18">
                 <Border Grid.Row="0"
                         Classes="hero-panel"
@@ -56,9 +59,6 @@
                             <TextBlock Text="Launcher"
                                        FontWeight="SemiBold"
                                        Foreground="{StaticResource GoldBrush}" />
-                            <TextBlock Classes="muted"
-                                       Text="A darker control surface for launching, updating, and safeguarding your install."
-                                       TextWrapping="Wrap" />
                         </StackPanel>
 
                         <Border Grid.Row="1"
@@ -163,8 +163,8 @@
             </Grid>
         </Border>
 
-            <Grid Grid.Column="1" RowDefinitions="Auto,*" RowSpacing="18">
-                <StackPanel Grid.Row="0" Spacing="18">
+            <Grid Grid.Column="1" RowDefinitions="Auto,*" RowSpacing="14">
+                <StackPanel Grid.Row="0" Spacing="14">
                     <Border x:Name="UpdateBanner"
                             IsVisible="False"
                             Classes="warning-banner"
@@ -196,7 +196,7 @@
                     </Border>
 
                     <Border Classes="panel"
-                            Padding="20,16">
+                            Padding="18,14">
                         <Grid ColumnDefinitions="*,Auto"
                               ColumnSpacing="16">
                             <StackPanel Spacing="3">
@@ -259,13 +259,33 @@
                                 </Button>
 
                                 <Grid VerticalAlignment="Center">
-                                    <Button Classes="accent"
+                                    <Button x:Name="ReimaginedSignInButton"
+                                            Classes="accent"
+                                            Content="Sign in to Reimagined"
+                                            Click="OnReimaginedSignInClicked"
+                                            VerticalAlignment="Center" />
+                                    <Button x:Name="ReimaginedUserMenuButton"
+                                            Classes="link-button"
+                                            Click="OnUserMenuClick"
+                                            VerticalAlignment="Center"
+                                            FontWeight="Bold"
+                                            IsVisible="False">
+                                        <Button.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="Sign out of Reimagined" Click="OnReimaginedLogoutClicked"/>
+                                            </ContextMenu>
+                                        </Button.ContextMenu>
+                                    </Button>
+                                </Grid>
+
+                                <Grid VerticalAlignment="Center">
+                                    <Button Classes="link-button"
                                             Content="Login with Nexus Mods"
                                             Click="OnNexusLoginClicked"
                                             IsVisible="{Binding IsLoggedIn, Converter={StaticResource InverseBooleanConverter}}"
                                             VerticalAlignment="Center" />
                                     <Button x:Name="UserMenuButton"
-                                            Classes="accent"
+                                            Classes="link-button"
                                             Content="{Binding Name}"
                                             Click="OnUserMenuClick"
                                             VerticalAlignment="Center"
@@ -273,7 +293,7 @@
                                             IsVisible="{Binding IsLoggedIn}">
                                         <Button.ContextMenu>
                                             <ContextMenu>
-                                                <MenuItem Header="Logout" Click="OnLogoutClicked"/>
+                                                <MenuItem Header="Logout of Nexus Mods" Click="OnLogoutClicked"/>
                                             </ContextMenu>
                                         </Button.ContextMenu>
                                     </Button>
@@ -284,8 +304,8 @@
                 </StackPanel>
 
                 <Border Grid.Row="1"
-                        Classes="panel"
-                        Padding="24">
+                        Background="Transparent"
+                        Padding="0">
                     <ContentControl x:Name="ContentArea"
                                     HorizontalContentAlignment="Stretch"
                                     VerticalContentAlignment="Stretch" />

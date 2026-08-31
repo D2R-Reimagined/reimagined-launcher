@@ -61,6 +61,14 @@
                                IsVisible="False"
                                TextWrapping="Wrap"
                                Text="Launch parameters are not available when using the D2RMM launcher. Configure launch options directly in D2RMM." />
+                    <Border x:Name="OnlineLaunchParamsNotice"
+                            Classes="warning-banner"
+                            Padding="12"
+                            IsVisible="False">
+                        <TextBlock Foreground="{StaticResource GoldTextBrush}"
+                                   TextWrapping="Wrap"
+                                   Text="Offline-only options (-enablerespec, -resetofflinemaps, -players, and -seed) are saved but not sent to D2RLoader while the Online experience is selected." />
+                    </Border>
                     <StackPanel x:Name="LaunchParametersPanel" Spacing="10">
                         <StackPanel Spacing="4">
                             <CheckBox x:Name="EnableRespecCheckBox"
