@@ -801,7 +801,7 @@ public partial class LaunchView : UserControl
             _missingRequiredLadderExtensions = [];
             AllowedLadderPluginsItemsControl.ItemsSource = null;
             AllowedLadderPatchesItemsControl.ItemsSource = null;
-            LadderExtensionPolicyStatusText.Text = "No active ladder extension policy is available.";
+            LadderExtensionPolicyStatusText.Text = "Not Yet Available";
             LadderBundleStatusText.Text = "No signed ladder package is active.";
             _ladderAction = LadderAction.Blocked;
             UnapprovedLadderExtensionsBanner.IsVisible = false;

@@ -39,7 +39,7 @@ public sealed class LadderBundleServiceTests : IDisposable
         var verified = LadderBundleService.VerifyArchive(fixture.Descriptor, fixture.Archive);
 
         Assert.Equal(fixture.Descriptor.Id, verified.Manifest.BundleId);
-        Assert.Equal("announcement-code"u8.ToArray(), verified.Files[fixture.Descriptor.Files[0].TargetPath]);
+        Assert.Equal(fixture.Archive, verified.ArchiveBytes);
     }
 
     [Fact]
@@ -150,6 +150,23 @@ public sealed class LadderBundleServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task InstallOrRepairManagesJsonAndTxtFilesAlongsidePlugins()
+    {
+        var fixture = CreateBundle(
+            ("announcements", "d2rl-announcements.dll", "announcement-code"u8.ToArray()),
+            ("modinfo", "modinfo.json", "{\"version\":\"3.0.11\"}"u8.ToArray()),
+            ("levels", "levels.txt", "level-data"u8.ToArray()));
+        var service = CreateService(fixture.Archive);
+
+        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+
+        var readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
+        Assert.True(readiness.IsReady, readiness.Status);
+        Assert.Contains(fixture.Descriptor.Files, file => file.FileName == "modinfo.json");
+        Assert.Contains(fixture.Descriptor.Files, file => file.FileName == "levels.txt");
+    }
+
+    [Fact]
     public async Task ReadinessRejectsEditedStateAndModifiedInstalledFiles()
     {
         var fixture = CreateBundle(("maps", "d2rl-maps.dll", "map-code"u8.ToArray()));
@@ -167,9 +184,8 @@ public sealed class LadderBundleServiceTests : IDisposable
         await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
         var statePath = Path.Combine(
             _installDirectory,
-            "mods",
-            "Reimagined",
-            "d2rloader",
+            ".reimagined-launcher",
+            "ladder-bundles",
             "ladder-bundle-state.json");
         var state = JsonSerializer.Deserialize<InstalledLadderBundleState>(
             await File.ReadAllTextAsync(statePath),
@@ -198,33 +214,124 @@ public sealed class LadderBundleServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task FailedInstallRestoresPreviouslyInstalledFiles()
+    public async Task ReadinessAcceptsOnlyLauncherManagedFilesWithASignedBaseline()
     {
+        var original = "{\"type\":\"CharacterSelectPanel\"}"u8.ToArray();
+        var files = new[]
+        {
+            ("layout", "characterselectpanelhd.json", original),
+            ("announcements", "d2rl-announcements.dll", "plugin"u8.ToArray())
+        };
+        var targetPath = "mods/Reimagined/Reimagined.mpq/data/global/ui/layouts/characterselectpanelhd.json";
         var fixture = CreateBundle(
-            ("announcements", "d2rl-announcements.dll", "new-announcement-code"u8.ToArray()),
-            ("maps", "d2rl-maps.dll", "map-code"u8.ToArray()));
-        var firstTarget = Path.Combine(
-            _installDirectory,
-            fixture.Descriptor.Files[0].TargetPath.Replace('/', Path.DirectorySeparatorChar));
-        Directory.CreateDirectory(Path.GetDirectoryName(firstTarget)!);
-        await File.WriteAllBytesAsync(firstTarget, "player-original"u8.ToArray());
-        var blockedTarget = Path.Combine(
-            _installDirectory,
-            fixture.Descriptor.Files[1].TargetPath.Replace('/', Path.DirectorySeparatorChar));
-        Directory.CreateDirectory(blockedTarget);
+            files,
+            files.Select(file => file.Item3).ToArray(),
+            targetPaths: new Dictionary<string, string> { ["layout"] = targetPath });
         var service = CreateService(fixture.Archive);
+        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
 
-        await Assert.ThrowsAnyAsync<IOException>(
-            () => service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor));
-
-        Assert.Equal("player-original"u8.ToArray(), await File.ReadAllBytesAsync(firstTarget));
-        Assert.True(Directory.Exists(blockedTarget));
-        Assert.False(File.Exists(Path.Combine(
+        var target = Path.Combine(_installDirectory, targetPath.Replace('/', Path.DirectorySeparatorChar));
+        var baseline = LadderRuntimeFileService.RestoreOrCaptureBaseline(_installDirectory, target);
+        await File.WriteAllTextAsync(target, "launcher-generated ladder banner");
+        var config = Path.Combine(
             _installDirectory,
             "mods",
             "Reimagined",
             "d2rloader",
-            "ladder-bundle-state.json")));
+            "config",
+            "server-saves.toml");
+        Directory.CreateDirectory(Path.GetDirectoryName(config)!);
+        await File.WriteAllTextAsync(config, "enabled = true");
+        await File.WriteAllTextAsync(
+            Path.Combine(Path.GetDirectoryName(config)!, "announcements.toml"),
+            "enabled = true");
+        var logs = Path.Combine(
+            _installDirectory,
+            "mods",
+            "Reimagined",
+            "d2rloader",
+            "logs");
+        Directory.CreateDirectory(logs);
+        await File.WriteAllTextAsync(Path.Combine(logs, "announcements.log"), "runtime output");
+        await File.WriteAllTextAsync(Path.Combine(logs, "server-saves.log"), "runtime output");
+
+        var readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
+
+        Assert.True(readiness.IsReady, readiness.Status);
+
+        var unapprovedConfig = Path.Combine(Path.GetDirectoryName(config)!, "unapproved.toml");
+        await File.WriteAllTextAsync(unapprovedConfig, "enabled = true");
+        readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
+        Assert.False(readiness.IsReady);
+        Assert.Contains(readiness.Problems, problem => problem.Contains("unapproved.toml"));
+        File.Delete(unapprovedConfig);
+
+        await File.WriteAllTextAsync(baseline, "tampered baseline");
+        readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
+        Assert.False(readiness.IsReady);
+        Assert.Contains(readiness.Problems, problem => problem.Contains("modified after installation"));
+    }
+
+    [Fact]
+    public async Task InstallOrRepairReplacesTheWholeModTreeAndRemovesUndeclaredFiles()
+    {
+        var fixture = CreateBundle(
+            ("announcements", "d2rl-announcements.dll", "new-announcement-code"u8.ToArray()),
+            ("maps", "d2rl-maps.dll", "map-code"u8.ToArray()));
+        var undeclared = Path.Combine(
+            _installDirectory,
+            "mods",
+            "Reimagined",
+            "unapproved.txt");
+        Directory.CreateDirectory(Path.GetDirectoryName(undeclared)!);
+        await File.WriteAllTextAsync(undeclared, "local change");
+        var service = CreateService(fixture.Archive);
+
+        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+
+        Assert.False(File.Exists(undeclared));
+        var readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
+        Assert.True(readiness.IsReady, readiness.Status);
+    }
+
+    [Fact]
+    public async Task ReadinessRejectsFilesOutsideTheSignedManifest()
+    {
+        var fixture = CreateBundle(("announcements", "d2rl-announcements.dll", "announcement-code"u8.ToArray()));
+        var service = CreateService(fixture.Archive);
+        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+        var undeclared = Path.Combine(_installDirectory, "mods", "Reimagined", "local-change.txt");
+        await File.WriteAllTextAsync(undeclared, "not signed");
+
+        var readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
+
+        Assert.False(readiness.IsReady);
+        Assert.Contains(readiness.Problems, problem => problem.Contains("is not declared"));
+    }
+
+    [Fact]
+    public async Task LegacyPluginOnlyBundlesDoNotReplaceTheModTree()
+    {
+        var files = new[] { ("announcements", "d2rl-announcements.dll", "announcement-code"u8.ToArray()) };
+        var fixture = CreateBundle(files, files.Select(file => file.Item3).ToArray(), schemaVersion: 1);
+        var existingData = Path.Combine(
+            _installDirectory,
+            "mods",
+            "Reimagined",
+            "Reimagined.mpq",
+            "data",
+            "global",
+            "excel",
+            "levels.txt");
+        Directory.CreateDirectory(Path.GetDirectoryName(existingData)!);
+        await File.WriteAllTextAsync(existingData, "existing mod data");
+        var service = CreateService(fixture.Archive);
+
+        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+
+        Assert.Equal("existing mod data", await File.ReadAllTextAsync(existingData));
+        var readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
+        Assert.True(readiness.IsReady, readiness.Status);
     }
 
     private LadderBundleService CreateService(byte[] archive)
@@ -244,32 +351,49 @@ public sealed class LadderBundleServiceTests : IDisposable
 
     private BundleFixture CreateBundle(
         (string Id, string FileName, byte[] Content)[] signedFiles,
-        byte[][] archivedContents)
+        byte[][] archivedContents,
+        int schemaVersion = 2,
+        IReadOnlyDictionary<string, string>? targetPaths = null)
     {
         var bundleId = Guid.NewGuid();
         var ladderId = Guid.NewGuid();
         var compatibility = new LadderBundleCompatibility("0.0.0", "0.0.0", "", "", "", "*");
-        var manifestFiles = signedFiles.Select((file, index) => new LadderBundleManifestFile(
-            Guid.NewGuid(),
-            file.Id,
-            file.Id,
-            "0.1.0",
-            D2RLoaderExtensionKind.Plugin,
-            true,
-            $"payload/plugins/{file.FileName}",
-            $"mods/Reimagined/d2rloader/plugins/{file.FileName}",
+        var manifestFiles = signedFiles.Select(file =>
+        {
+            var isPlugin = file.FileName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
+            var targetPath = targetPaths?.GetValueOrDefault(file.Id)
+                             ?? (isPlugin
+                                 ? $"mods/Reimagined/d2rloader/plugins/{file.FileName}"
+                                 : $"mods/Reimagined/Reimagined.mpq/data/test/{file.FileName}");
+            return new LadderBundleManifestFile(
+                $"payload/{targetPath}",
+                targetPath,
+                file.FileName,
+                file.Content.LongLength,
+                Convert.ToHexString(SHA256.HashData(file.Content)),
+                isPlugin ? Guid.NewGuid() : Guid.Empty,
+                isPlugin ? file.Id : string.Empty,
+                isPlugin ? file.Id : string.Empty,
+                isPlugin ? "0.1.0" : string.Empty,
+                isPlugin ? D2RLoaderExtensionKind.Plugin : null,
+                true);
+        }).ToArray();
+        var plugins = manifestFiles.Where(file => file.Kind == D2RLoaderExtensionKind.Plugin).Select(file => new LadderBundlePlugin(
+            file.PluginId,
+            file.Name,
             file.FileName,
-            file.Content.LongLength,
-            Convert.ToHexString(SHA256.HashData(file.Content)))).ToArray();
+            file.TargetPath,
+            file.SizeBytes,
+            file.Sha256)).ToArray();
         var manifest = new LadderBundleManifest(
-            1,
+            schemaVersion,
             bundleId,
             ladderId,
             1,
             DateTimeOffset.UtcNow,
-            "test-source-commit",
             compatibility,
-            manifestFiles);
+            manifestFiles,
+            schemaVersion >= 2 ? plugins : null);
         var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions);
         var signature = Convert.ToBase64String(_signingKey.SignData(manifestBytes, HashAlgorithmName.SHA256));
 
@@ -292,15 +416,16 @@ public sealed class LadderBundleServiceTests : IDisposable
             bundleId,
             ladderId,
             1,
+            schemaVersion,
             "Ready",
             Convert.ToHexString(SHA256.HashData(archive)),
             Convert.ToHexString(SHA256.HashData(manifestBytes)),
             signature,
             "test-key",
-            "test-source-commit",
             archive.LongLength,
             compatibility,
             manifestFiles,
+            plugins,
             manifest.CreatedAtUtc,
             manifest.CreatedAtUtc,
             null,

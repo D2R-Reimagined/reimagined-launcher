@@ -44,7 +44,7 @@ internal sealed record InstalledLadderBundleFile(string TargetPath, string Sha25
 internal sealed record DownloadedLadderBundle(
     LadderBundleManifest Manifest,
     byte[] ManifestBytes,
-    IReadOnlyDictionary<string, byte[]> Files);
+    byte[] ArchiveBytes);
 
 internal sealed record LadderBundleManifest(
     int SchemaVersion,
@@ -52,17 +52,20 @@ internal sealed record LadderBundleManifest(
     Guid LadderId,
     int Revision,
     DateTimeOffset CreatedAtUtc,
-    string SourceCommit,
     LadderBundleCompatibility Compatibility,
-    IReadOnlyList<LadderBundleManifestFile> Files);
+    IReadOnlyList<LadderBundleManifestFile> Files,
+    IReadOnlyList<LadderBundlePlugin>? Plugins = null);
 
 public sealed class LadderBundleService(
     ReimaginedApiHttpClient apiClient,
     D2RLoaderInstallerService loaderInstaller,
     ModReleaseInstallerService modInstaller)
 {
-    private const long MaxManifestBytes = 1024 * 1024;
-    private const long MaxBundleBytes = 64L * 1024 * 1024;
+    private const long MaxManifestBytes = 8L * 1024 * 1024;
+    private const long MaxBundleBytes = 512L * 1024 * 1024;
+    private const long MaxBundleFileBytes = 256L * 1024 * 1024;
+    private const long MaxBundleUncompressedBytes = 4L * 1024 * 1024 * 1024;
+    private const int MaxBundleFiles = 20_000;
     private const string StateFileName = "ladder-bundle-state.json";
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
 
@@ -79,7 +82,7 @@ public sealed class LadderBundleService(
     {
         if (bundle is null)
         {
-            return new LadderBundleReadiness(false, false, "No signed ladder bundle is active.", ["The ladder is using its legacy extension policy."]);
+            return new LadderBundleReadiness(false, false, "Not Yet Available", ["The ladder is using its legacy extension policy."]);
         }
 
         var normalized = InstallDirectoryValidator.NormalizeInstallDirectory(installDirectory);
@@ -133,23 +136,42 @@ public sealed class LadderBundleService(
                 var path = ResolveTargetPath(normalized, file.TargetPath);
                 if (!File.Exists(path))
                 {
-                    // An optional file the player unchecked was moved to
-                    // ladder-disabled by the policy step of the previous launch.
-                    // Treating that as damage would redownload and reinstall the
-                    // bundle on every single launch. Required files must be here.
-                    if (file.IsRequired)
+                    if (bundle.SchemaVersion >= 2 || file.IsRequired)
                     {
-                        problems.Add($"{Path.GetFileName(path)} is missing.");
+                        problems.Add($"{file.TargetPath} is missing.");
                     }
-
                     continue;
                 }
 
                 var info = new FileInfo(path);
-                if (info.Length != file.SizeBytes
-                    || !string.Equals(await Sha256Async(path, cancellationToken), file.Sha256, StringComparison.OrdinalIgnoreCase))
+                var currentMatches = info.Length == file.SizeBytes
+                                     && string.Equals(
+                                         await Sha256Async(path, cancellationToken),
+                                         file.Sha256,
+                                         StringComparison.OrdinalIgnoreCase);
+                if (!currentMatches
+                    && !await RuntimeBaselineMatchesAsync(normalized, file, cancellationToken))
                 {
-                    problems.Add($"{Path.GetFileName(path)} was modified after installation.");
+                    problems.Add($"{file.TargetPath} was modified after installation.");
+                }
+            }
+
+            if (bundle.SchemaVersion >= 2)
+            {
+                var expectedPaths = bundle.Files
+                    .Select(file => file.TargetPath)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var approvedPluginIds = bundle.Plugins
+                    .Select(plugin => plugin.PluginId)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                foreach (var path in EnumerateInstalledModFiles(normalized))
+                {
+                    var relativePath = Path.GetRelativePath(normalized, path).Replace('\\', '/');
+                    if (!expectedPaths.Contains(relativePath)
+                        && !LadderRuntimeFileService.IsGeneratedRuntimePath(relativePath, approvedPluginIds))
+                    {
+                        problems.Add($"{relativePath} is not declared by the signed ladder package.");
+                    }
                 }
             }
         }
@@ -189,9 +211,13 @@ public sealed class LadderBundleService(
             await InstallPrerequisitesAsync(normalized, bundle, compatibilityProblems, progress, cancellationToken);
             compatibilityProblems = await GetCompatibilityProblemsAsync(normalized, bundle, cancellationToken);
         }
-        if (compatibilityProblems.Count > 0)
+        var preInstallProblems = compatibilityProblems
+            .Where(problem => bundle.SchemaVersion < 2
+                              || !problem.StartsWith("Reimagined mod", StringComparison.Ordinal))
+            .ToArray();
+        if (preInstallProblems.Length > 0)
         {
-            throw new InvalidOperationException(string.Join(" ", compatibilityProblems));
+            throw new InvalidOperationException(string.Join(" ", preInstallProblems));
         }
 
         var downloadMessage = $"Downloading signed ladder package r{bundle.Revision}...";
@@ -232,7 +258,11 @@ public sealed class LadderBundleService(
         return bundle?.Files.Any(file =>
             file.Kind == kind
             && string.Equals(file.FileName, fileName, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(file.Sha256, sha256.Trim(), StringComparison.OrdinalIgnoreCase)) == true;
+            && string.Equals(file.Sha256, sha256.Trim(), StringComparison.OrdinalIgnoreCase)) == true
+            || bundle?.Plugins.Any(plugin =>
+                kind == D2RLoaderExtensionKind.Plugin
+                && string.Equals(plugin.FileName, fileName, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(plugin.Sha256, sha256.Trim(), StringComparison.OrdinalIgnoreCase)) == true;
     }
 
     public static string LauncherVersion =>
@@ -242,7 +272,7 @@ public sealed class LadderBundleService(
     {
         if (archiveBytes.LongLength > MaxBundleBytes)
         {
-            throw new InvalidDataException("The ladder bundle exceeds the 64 MiB limit.");
+            throw new InvalidDataException("The ladder bundle exceeds the 512 MiB limit.");
         }
 
         using var bundleStream = new MemoryStream(archiveBytes, writable: false);
@@ -286,6 +316,11 @@ public sealed class LadderBundleService(
             ?? throw new InvalidDataException("The ladder bundle manifest could not be parsed.");
         ValidateManifestDescriptor(bundle, manifest);
 
+        if (manifest.Files.Count is <= 0 or > MaxBundleFiles)
+        {
+            throw new InvalidDataException("The ladder bundle contains an invalid number of managed files.");
+        }
+
         var expectedEntries = manifest.Files.Select(file => file.ArchivePath).ToHashSet(StringComparer.Ordinal);
         expectedEntries.Add("manifest.json");
         expectedEntries.Add("manifest.sig");
@@ -299,31 +334,40 @@ public sealed class LadderBundleService(
             throw new InvalidDataException("The ladder bundle contains files not declared by its signed manifest.");
         }
 
-        var files = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        var targetPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        long totalUncompressedBytes = 0;
         foreach (var file in manifest.Files)
         {
-            ValidateRelativePath(file.ArchivePath);
-            ValidateRelativePath(file.TargetPath);
+            ValidateManagedFile(file);
+            if (!targetPaths.Add(file.TargetPath))
+            {
+                throw new InvalidDataException($"The ladder bundle declares {file.TargetPath} more than once.");
+            }
             var entry = archive.GetEntry(file.ArchivePath)
                 ?? throw new InvalidDataException($"The ladder bundle is missing {file.ArchivePath}.");
-            if (entry.Length != file.SizeBytes || entry.Length is <= 0 or > 16L * 1024 * 1024)
+            if (entry.Length != file.SizeBytes || entry.Length < 0 || entry.Length > MaxBundleFileBytes)
             {
                 throw new InvalidDataException($"{file.FileName} has an invalid size.");
             }
 
-            var content = ReadEntry(entry, 16L * 1024 * 1024);
+            totalUncompressedBytes = checked(totalUncompressedBytes + entry.Length);
+            if (totalUncompressedBytes > MaxBundleUncompressedBytes)
+            {
+                throw new InvalidDataException("The ladder bundle expands beyond the 4 GiB limit.");
+            }
+
+            var currentHash = HashEntry(entry, MaxBundleFileBytes);
             if (!string.Equals(
-                    Convert.ToHexString(SHA256.HashData(content)),
+                    currentHash,
                     file.Sha256,
                     StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidDataException($"{file.FileName} failed its signed SHA-256 check.");
             }
 
-            files.Add(file.TargetPath, content);
         }
 
-        return new DownloadedLadderBundle(manifest, manifestBytes, files);
+        return new DownloadedLadderBundle(manifest, manifestBytes, archiveBytes);
     }
 
     private static async Task InstallVerifiedAsync(
@@ -332,6 +376,12 @@ public sealed class LadderBundleService(
         DownloadedLadderBundle downloaded,
         CancellationToken cancellationToken)
     {
+        if (bundle.SchemaVersion < 2)
+        {
+            await InstallLegacyVerifiedAsync(installDirectory, bundle, downloaded, cancellationToken);
+            return;
+        }
+
         var managementRoot = Path.Combine(installDirectory, ".reimagined-launcher", "ladder-bundles");
         var transactionId = DateTime.UtcNow.ToString("yyyyMMddHHmmss") + "-" + Guid.NewGuid().ToString("N")[..8];
         var stagingRoot = Path.Combine(managementRoot, "staging-" + transactionId);
@@ -340,44 +390,28 @@ public sealed class LadderBundleService(
         Directory.CreateDirectory(backupRoot);
 
         var previous = await ReadStateAsync(installDirectory, cancellationToken);
-        var targetPaths = (previous?.Files.Select(file => file.TargetPath) ?? [])
-            .Concat(downloaded.Manifest.Files.Select(file => file.TargetPath))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        var backedUp = new List<string>();
-        var installed = new List<string>();
+        var modRoot = Path.Combine(installDirectory, "mods", "Reimagined");
+        var stagedModRoot = Path.Combine(stagingRoot, "mods", "Reimagined");
+        var backupModRoot = Path.Combine(backupRoot, "Reimagined");
+        var backedUp = false;
+        var installed = false;
         try
         {
-            foreach (var file in downloaded.Manifest.Files)
+            await StageVerifiedFilesAsync(stagingRoot, downloaded, cancellationToken);
+
+            if (!Directory.Exists(stagedModRoot))
             {
-                var staged = ResolveUnderRoot(stagingRoot, file.TargetPath);
-                Directory.CreateDirectory(Path.GetDirectoryName(staged)!);
-                await File.WriteAllBytesAsync(staged, downloaded.Files[file.TargetPath], cancellationToken);
+                throw new InvalidDataException("The ladder package did not stage a Reimagined mod directory.");
             }
 
-            foreach (var relativePath in targetPaths)
+            Directory.CreateDirectory(Path.GetDirectoryName(modRoot)!);
+            if (Directory.Exists(modRoot))
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var target = ResolveTargetPath(installDirectory, relativePath);
-                if (!File.Exists(target))
-                {
-                    continue;
-                }
-
-                var backup = ResolveUnderRoot(backupRoot, relativePath);
-                Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
-                File.Move(target, backup, overwrite: true);
-                backedUp.Add(relativePath);
+                Directory.Move(modRoot, backupModRoot);
+                backedUp = true;
             }
-
-            foreach (var file in downloaded.Manifest.Files)
-            {
-                var staged = ResolveUnderRoot(stagingRoot, file.TargetPath);
-                var target = ResolveTargetPath(installDirectory, file.TargetPath);
-                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                File.Move(staged, target, overwrite: false);
-                installed.Add(file.TargetPath);
-            }
+            Directory.Move(stagedModRoot, modRoot);
+            installed = true;
 
             var state = new InstalledLadderBundleState(
                 bundle.Id,
@@ -392,27 +426,27 @@ public sealed class LadderBundleService(
                     file.SizeBytes)).ToArray(),
                 DateTimeOffset.UtcNow);
             await WriteStateAsync(installDirectory, state, cancellationToken);
+            LadderRuntimeFileService.DeleteBaselines(installDirectory);
         }
         catch
         {
-            foreach (var relativePath in installed)
+            if (installed && Directory.Exists(modRoot))
             {
-                var target = ResolveTargetPath(installDirectory, relativePath);
-                if (File.Exists(target))
-                {
-                    File.Delete(target);
-                }
+                Directory.Delete(modRoot, recursive: true);
             }
 
-            foreach (var relativePath in backedUp.AsEnumerable().Reverse())
+            if (backedUp && Directory.Exists(backupModRoot))
             {
-                var backup = ResolveUnderRoot(backupRoot, relativePath);
-                var target = ResolveTargetPath(installDirectory, relativePath);
-                if (File.Exists(backup))
-                {
-                    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                    File.Move(backup, target, overwrite: true);
-                }
+                Directory.Move(backupModRoot, modRoot);
+            }
+
+            if (previous is null)
+            {
+                DeleteState(installDirectory);
+            }
+            else
+            {
+                await WriteStateAsync(installDirectory, previous, CancellationToken.None);
             }
 
             throw;
@@ -460,7 +494,8 @@ public sealed class LadderBundleService(
                 bundle.Compatibility.RequiredD2RLoaderVersion);
         }
 
-        if (problems.Any(problem => problem.StartsWith("Reimagined mod", StringComparison.Ordinal)))
+        if (bundle.SchemaVersion < 2
+            && problems.Any(problem => problem.StartsWith("Reimagined mod", StringComparison.Ordinal)))
         {
             progress?.Report(new LadderBundleProgress(
                 $"Installing Reimagined {bundle.Compatibility.RequiredModVersion}..."));
@@ -552,11 +587,11 @@ public sealed class LadderBundleService(
 
     private static void ValidateManifestDescriptor(LadderBundleResponse bundle, LadderBundleManifest manifest)
     {
-        if (manifest.SchemaVersion != 1
+        if (manifest.SchemaVersion is not (1 or 2)
+            || manifest.SchemaVersion != bundle.SchemaVersion
             || manifest.BundleId != bundle.Id
             || manifest.LadderId != bundle.LadderId
             || manifest.Revision != bundle.Revision
-            || !string.Equals(manifest.SourceCommit, bundle.SourceCommit, StringComparison.Ordinal)
             || !CompatibilityMatches(manifest.Compatibility, bundle.Compatibility)
             || manifest.Files.Count != bundle.Files.Count)
         {
@@ -565,20 +600,35 @@ public sealed class LadderBundleService(
 
         foreach (var expected in bundle.Files)
         {
-            var actual = manifest.Files.SingleOrDefault(file => file.PluginReleaseId == expected.PluginReleaseId);
+            var actual = manifest.Files.SingleOrDefault(file =>
+                string.Equals(file.TargetPath, expected.TargetPath, StringComparison.Ordinal));
             if (actual is null
-                || actual.Kind != expected.Kind
-                || actual.IsRequired != expected.IsRequired
-                || !string.Equals(actual.PluginId, expected.PluginId, StringComparison.Ordinal)
-                || !string.Equals(actual.Name, expected.Name, StringComparison.Ordinal)
-                || !string.Equals(actual.Version, expected.Version, StringComparison.Ordinal)
                 || !string.Equals(actual.ArchivePath, expected.ArchivePath, StringComparison.Ordinal)
-                || !string.Equals(actual.TargetPath, expected.TargetPath, StringComparison.Ordinal)
                 || !string.Equals(actual.FileName, expected.FileName, StringComparison.Ordinal)
                 || !string.Equals(actual.Sha256, expected.Sha256, StringComparison.OrdinalIgnoreCase)
                 || actual.SizeBytes != expected.SizeBytes)
             {
-                throw new InvalidDataException($"The signed manifest entry for {expected.PluginId} does not match the API descriptor.");
+                throw new InvalidDataException($"The signed manifest entry for {expected.TargetPath} does not match the API descriptor.");
+            }
+        }
+
+        var manifestPlugins = manifest.Plugins ?? DeriveLegacyPlugins(manifest.Files);
+        if (manifestPlugins.Count != bundle.Plugins.Count)
+        {
+            throw new InvalidDataException("The signed manifest plugin list does not match the API descriptor.");
+        }
+        foreach (var expected in bundle.Plugins)
+        {
+            var actual = manifestPlugins.SingleOrDefault(plugin =>
+                string.Equals(plugin.PluginId, expected.PluginId, StringComparison.Ordinal));
+            if (actual is null
+                || !string.Equals(actual.Name, expected.Name, StringComparison.Ordinal)
+                || !string.Equals(actual.FileName, expected.FileName, StringComparison.Ordinal)
+                || !string.Equals(actual.TargetPath, expected.TargetPath, StringComparison.Ordinal)
+                || !string.Equals(actual.Sha256, expected.Sha256, StringComparison.OrdinalIgnoreCase)
+                || actual.SizeBytes != expected.SizeBytes)
+            {
+                throw new InvalidDataException($"The signed manifest plugin entry for {expected.PluginId} does not match the API descriptor.");
             }
         }
     }
@@ -709,6 +759,10 @@ public sealed class LadderBundleService(
         var path = GetStatePath(installDirectory);
         if (!File.Exists(path))
         {
+            path = GetLegacyStatePath(installDirectory);
+        }
+        if (!File.Exists(path))
+        {
             return null;
         }
 
@@ -742,7 +796,155 @@ public sealed class LadderBundleService(
     }
 
     private static string GetStatePath(string installDirectory)
+        => Path.Combine(installDirectory, ".reimagined-launcher", "ladder-bundles", StateFileName);
+
+    private static string GetLegacyStatePath(string installDirectory)
         => Path.Combine(installDirectory, "mods", "Reimagined", "d2rloader", StateFileName);
+
+    private static void DeleteState(string installDirectory)
+    {
+        foreach (var path in new[] { GetStatePath(installDirectory), GetLegacyStatePath(installDirectory) })
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
+    private static async Task InstallLegacyVerifiedAsync(
+        string installDirectory,
+        LadderBundleResponse bundle,
+        DownloadedLadderBundle downloaded,
+        CancellationToken cancellationToken)
+    {
+        var managementRoot = Path.Combine(installDirectory, ".reimagined-launcher", "ladder-bundles");
+        var transactionId = DateTime.UtcNow.ToString("yyyyMMddHHmmss") + "-" + Guid.NewGuid().ToString("N")[..8];
+        var stagingRoot = Path.Combine(managementRoot, "staging-" + transactionId);
+        var backupRoot = Path.Combine(managementRoot, "backups", transactionId);
+        Directory.CreateDirectory(stagingRoot);
+        Directory.CreateDirectory(backupRoot);
+
+        var previous = await ReadStateAsync(installDirectory, cancellationToken);
+        var targetPaths = (previous?.Files
+                               .Select(file => file.TargetPath)
+                               .Where(path => path.StartsWith("mods/Reimagined/d2rloader/", StringComparison.OrdinalIgnoreCase))
+                           ?? [])
+            .Concat(downloaded.Manifest.Files.Select(file => file.TargetPath))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var backedUp = new List<string>();
+        var installed = new List<string>();
+        try
+        {
+            await StageVerifiedFilesAsync(stagingRoot, downloaded, cancellationToken);
+            foreach (var relativePath in targetPaths)
+            {
+                var target = ResolveTargetPath(installDirectory, relativePath);
+                if (!File.Exists(target))
+                {
+                    continue;
+                }
+
+                var backup = ResolveUnderRoot(backupRoot, relativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
+                File.Move(target, backup, overwrite: true);
+                backedUp.Add(relativePath);
+            }
+
+            foreach (var file in downloaded.Manifest.Files)
+            {
+                var staged = ResolveUnderRoot(stagingRoot, file.TargetPath);
+                var target = ResolveTargetPath(installDirectory, file.TargetPath);
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.Move(staged, target, overwrite: false);
+                installed.Add(file.TargetPath);
+            }
+
+            await WriteStateAsync(
+                installDirectory,
+                CreateInstalledState(bundle, downloaded),
+                cancellationToken);
+        }
+        catch
+        {
+            foreach (var relativePath in installed)
+            {
+                var target = ResolveTargetPath(installDirectory, relativePath);
+                if (File.Exists(target))
+                {
+                    File.Delete(target);
+                }
+            }
+            foreach (var relativePath in backedUp.AsEnumerable().Reverse())
+            {
+                var backup = ResolveUnderRoot(backupRoot, relativePath);
+                var target = ResolveTargetPath(installDirectory, relativePath);
+                if (File.Exists(backup))
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                    File.Move(backup, target, overwrite: true);
+                }
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (Directory.Exists(stagingRoot))
+            {
+                Directory.Delete(stagingRoot, recursive: true);
+            }
+        }
+    }
+
+    private static async Task StageVerifiedFilesAsync(
+        string stagingRoot,
+        DownloadedLadderBundle downloaded,
+        CancellationToken cancellationToken)
+    {
+        using var bundleStream = new MemoryStream(downloaded.ArchiveBytes, writable: false);
+        using var archive = new ZipArchive(bundleStream, ZipArchiveMode.Read);
+        foreach (var file in downloaded.Manifest.Files)
+        {
+            var staged = ResolveUnderRoot(stagingRoot, file.TargetPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(staged)!);
+            var entry = archive.GetEntry(file.ArchivePath)
+                ?? throw new InvalidDataException($"The verified ladder bundle is missing {file.ArchivePath}.");
+            await using var input = entry.Open();
+            await using var output = new FileStream(
+                staged,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                81920,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            await input.CopyToAsync(output, cancellationToken);
+            await output.FlushAsync(cancellationToken);
+            if (output.Length != file.SizeBytes)
+            {
+                throw new InvalidDataException($"{file.TargetPath} changed while the verified package was being staged.");
+            }
+        }
+    }
+
+    private static InstalledLadderBundleState CreateInstalledState(
+        LadderBundleResponse bundle,
+        DownloadedLadderBundle downloaded)
+    {
+        return new InstalledLadderBundleState(
+            bundle.Id,
+            bundle.Revision,
+            bundle.ArtifactSha256,
+            bundle.ManifestSha256,
+            Convert.ToBase64String(downloaded.ManifestBytes),
+            bundle.ManifestSignature,
+            downloaded.Manifest.Files.Select(file => new InstalledLadderBundleFile(
+                file.TargetPath,
+                file.Sha256,
+                file.SizeBytes)).ToArray(),
+            DateTimeOffset.UtcNow);
+    }
 
     private static string ResolveTargetPath(string installDirectory, string targetPath)
     {
@@ -755,14 +957,47 @@ public sealed class LadderBundleService(
             throw new InvalidDataException("A ladder bundle target escapes the D2R installation.");
         }
 
-        var allowedRoot = Path.GetFullPath(Path.Combine(installDirectory, "mods", "Reimagined", "d2rloader"))
+        var allowedRoot = Path.GetFullPath(Path.Combine(installDirectory, "mods", "Reimagined"))
             .TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         if (!path.StartsWith(allowedRoot, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidDataException("Ladder bundle files may only target the Reimagined D2RLoader directory.");
+            throw new InvalidDataException("Ladder bundle files may only target the Reimagined mod directory.");
         }
 
         return path;
+    }
+
+    private static IEnumerable<string> EnumerateInstalledModFiles(string installDirectory)
+    {
+        var root = Path.Combine(installDirectory, "mods", "Reimagined");
+        return Directory.Exists(root)
+            ? Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+            : [];
+    }
+
+    private static async Task<bool> RuntimeBaselineMatchesAsync(
+        string installDirectory,
+        LadderBundleManifestFile file,
+        CancellationToken cancellationToken)
+    {
+        if (!LadderRuntimeFileService.IsMutableSignedPath(file.TargetPath))
+        {
+            return false;
+        }
+
+        var targetPath = ResolveTargetPath(installDirectory, file.TargetPath);
+        var baselinePath = LadderRuntimeFileService.GetBaselinePath(installDirectory, targetPath);
+        if (!File.Exists(baselinePath))
+        {
+            return false;
+        }
+
+        var info = new FileInfo(baselinePath);
+        return info.Length == file.SizeBytes
+               && string.Equals(
+                   await Sha256Async(baselinePath, cancellationToken),
+                   file.Sha256,
+                   StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ResolveUnderRoot(string root, string relativePath)
@@ -780,16 +1015,49 @@ public sealed class LadderBundleService(
 
     private static void ValidateRelativePath(string path)
     {
+        var normalized = path.Replace('\\', '/');
+        var segments = normalized.Split('/');
         if (string.IsNullOrWhiteSpace(path)
             || path.StartsWith('/')
             || path.StartsWith('\\')
             || path.Contains("../", StringComparison.Ordinal)
             || path.Contains("..\\", StringComparison.Ordinal)
             || path.Contains(':', StringComparison.Ordinal)
+            || path.Contains("//", StringComparison.Ordinal)
+            || segments.Any(segment => segment is "" or "." or "..")
             || Path.IsPathRooted(path))
         {
             throw new InvalidDataException("The ladder bundle contains an unsafe path.");
         }
+    }
+
+    private static void ValidateManagedFile(LadderBundleManifestFile file)
+    {
+        ValidateRelativePath(file.ArchivePath);
+        ValidateRelativePath(file.TargetPath);
+        if (!file.TargetPath.StartsWith("mods/Reimagined/", StringComparison.Ordinal)
+            || !string.Equals(file.ArchivePath, "payload/" + file.TargetPath, StringComparison.Ordinal)
+            || !string.Equals(file.FileName, Path.GetFileName(file.TargetPath), StringComparison.Ordinal)
+            || file.Sha256.Length != 64
+            || file.Sha256.Any(character => !Uri.IsHexDigit(character)))
+        {
+            throw new InvalidDataException("The ladder bundle contains an invalid managed file descriptor.");
+        }
+    }
+
+    private static IReadOnlyList<LadderBundlePlugin> DeriveLegacyPlugins(
+        IReadOnlyList<LadderBundleManifestFile> files)
+    {
+        return files
+            .Where(file => file.Kind == D2RLoaderExtensionKind.Plugin && !string.IsNullOrWhiteSpace(file.PluginId))
+            .Select(file => new LadderBundlePlugin(
+                file.PluginId,
+                string.IsNullOrWhiteSpace(file.Name) ? file.PluginId : file.Name,
+                file.FileName,
+                file.TargetPath,
+                file.SizeBytes,
+                file.Sha256))
+            .ToArray();
     }
 
     private static byte[] ReadEntry(ZipArchiveEntry entry, long limit)
@@ -815,6 +1083,36 @@ public sealed class LadderBundleService(
         }
 
         return output.ToArray();
+    }
+
+    private static string HashEntry(ZipArchiveEntry entry, long limit)
+    {
+        using var input = entry.Open();
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[81920];
+        long total = 0;
+        while (true)
+        {
+            var read = input.Read(buffer, 0, buffer.Length);
+            if (read == 0)
+            {
+                break;
+            }
+
+            total += read;
+            if (total > limit)
+            {
+                throw new InvalidDataException("A ladder bundle entry exceeds its allowed size.");
+            }
+            hash.AppendData(buffer, 0, read);
+        }
+
+        if (total != entry.Length)
+        {
+            throw new InvalidDataException("A ladder bundle entry has inconsistent size metadata.");
+        }
+
+        return Convert.ToHexString(hash.GetHashAndReset());
     }
 
     private static async Task<string> Sha256Async(string path, CancellationToken cancellationToken)

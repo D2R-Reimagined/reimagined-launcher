@@ -28,15 +28,16 @@ public sealed record LadderBundleResponse(
     Guid Id,
     Guid LadderId,
     int Revision,
+    int SchemaVersion,
     string Status,
     string ArtifactSha256,
     string ManifestSha256,
     string ManifestSignature,
     string SigningKeyId,
-    string SourceCommit,
     long ArtifactSizeBytes,
     LadderBundleCompatibility Compatibility,
     IReadOnlyList<LadderBundleManifestFile> Files,
+    IReadOnlyList<LadderBundlePlugin> Plugins,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset? PublishedAtUtc,
     DateTimeOffset? RevokedAtUtc,
@@ -51,15 +52,23 @@ public sealed record LadderBundleCompatibility(
     string SupportedGameVersion);
 
 public sealed record LadderBundleManifestFile(
-    Guid PluginReleaseId,
-    string PluginId,
-    string Name,
-    string Version,
-    D2RLoaderExtensionKind Kind,
-    bool IsRequired,
     string ArchivePath,
     string TargetPath,
     string FileName,
+    long SizeBytes,
+    string Sha256,
+    Guid PluginReleaseId = default,
+    string PluginId = "",
+    string Name = "",
+    string Version = "",
+    D2RLoaderExtensionKind? Kind = null,
+    bool IsRequired = true);
+
+public sealed record LadderBundlePlugin(
+    string PluginId,
+    string Name,
+    string FileName,
+    string TargetPath,
     long SizeBytes,
     string Sha256);
 

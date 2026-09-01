@@ -608,6 +608,27 @@ public static class ModTweaksService
 
         try
         {
+            if (isLadderLaunch)
+            {
+                if (ladderDisplay is null)
+                {
+                    throw new InvalidOperationException(
+                        "The active ladder details were not available for character-select preparation.");
+                }
+
+                ReportProgress(progress, "Adding ladder participation banner...");
+                var preparedLadderLayouts = await LadderCharacterSelectService.PrepareAsync(
+                    characterSelectLayoutPaths,
+                    ladderDisplay,
+                    InstallDirectoryValidator.NormalizeInstallDirectory(
+                        MainWindow.Settings.CurrentProfile.InstallDirectory));
+                LaunchDiagnostics.Log(
+                    $"Prepared {preparedLadderLayouts} character-select layout(s) for ladder '{ladderDisplay.Name}'.");
+                LaunchDiagnostics.Log(
+                    "Ladder preparation skipped launcher tweaks; signed package files remain authoritative.");
+                return true;
+            }
+
             // Revert any previous plugin asset writes before tweaks or plugins
             // run so this pass operates on a genuinely pre-plugin baseline.
             // Without this, the next plugin snapshot would capture the prior
@@ -616,20 +637,14 @@ public static class ModTweaksService
             LaunchDiagnostics.Log("Restoring plugin asset backups before tweaks.");
             await PluginAssetBackupService.RestoreAllAsync();
 
-            if (isLadderLaunch && ladderDisplay is null)
-            {
-                throw new InvalidOperationException("The active ladder details were not available for character-select preparation.");
-            }
-
-            ReportProgress(progress, isLadderLaunch
-                ? "Adding ladder participation banner..."
-                : "Restoring the standard character-select screen...");
+            ReportProgress(progress, "Restoring the standard character-select screen...");
             var preparedCharacterSelectLayouts = await LadderCharacterSelectService.PrepareAsync(
                 characterSelectLayoutPaths,
-                isLadderLaunch ? ladderDisplay : null);
+                ladder: null,
+                installDirectory: InstallDirectoryValidator.NormalizeInstallDirectory(
+                    MainWindow.Settings.CurrentProfile.InstallDirectory));
             LaunchDiagnostics.Log(
-                $"Prepared {preparedCharacterSelectLayouts} character-select layout(s) for "
-                + (isLadderLaunch ? $"ladder '{ladderDisplay!.Name}'." : "a non-ladder launch."));
+                $"Prepared {preparedCharacterSelectLayouts} character-select layout(s) for a non-ladder launch.");
 
             // Surface asset-copy collisions across enabled plugins exactly once
             // per launch, before any pre-stage entry point or
@@ -665,33 +680,6 @@ public static class ModTweaksService
             ReportProgress(progress, "Preparing clean vis copy...");
             LaunchDiagnostics.Log("Ensuring clean vis directory copy.");
             await EnsureCleanVisCopyAsync();
-
-            if (isLadderLaunch)
-            {
-                ReportProgress(progress, "Restoring clean ladder files...");
-                foreach (var targetExcelDirectory in excelDirectories)
-                {
-                    var sourceExcelDirectory = GetCleanVariantDirectory(
-                        targetExcelDirectory,
-                        excelDirectory,
-                        cleanExcelDirectory);
-                    await ValidateExcelFilesAsync(sourceExcelDirectory);
-                    await CopyDirectoryAsync(sourceExcelDirectory, targetExcelDirectory, overwrite: true);
-                }
-
-                await RestoreMissilesFileAsync(cleanMissilesFilePath, missilesFilePath);
-                await RestoreMonstersFileAsync(cleanMonstersFilePath, monstersFilePath);
-                await RestoreStringsFromCleanCopyAsync(stringsDirectory, cleanStringsDirectory);
-                await RestoreLayoutsProfileHdFileAsync(cleanLayoutsProfileHdFilePath, layoutsProfileHdFilePath);
-                await RestoreArmorTweaksAsync(armorDirectory, cleanArmorTweaksDirectory);
-                await RestoreDesecratedZonesFileAsync(cleanDesecratedZonesFilePath, desecratedZonesFilePath);
-                await RestoreVisFilesAsync();
-                await ApplyVignetteTweakAsync(removeVignette: false);
-
-                LaunchDiagnostics.Log(
-                    "Ladder preparation restored clean base files and skipped all launcher tweaks and plugins.");
-                return true;
-            }
 
             foreach (var targetExcelDirectory in excelDirectories)
             {

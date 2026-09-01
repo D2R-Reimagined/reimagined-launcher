@@ -29,11 +29,10 @@ public static partial class LadderCharacterSelectService
     internal const string GeneratedRuntimeWidgetName = "ReimaginedLadderRuntimeInfo";
     private const string LegacyGeneratedWidgetName = "ReimaginedLadderInfo";
     private const string CharacterSelectPanelName = "CharacterSelectPanel";
-    private const string CleanSuffix = "_launcher_clean";
-
     public static async Task<int> PrepareAsync(
         IEnumerable<string> layoutPaths,
         LadderDisplayInfo? ladder,
+        string? installDirectory = null,
         CancellationToken cancellationToken = default)
     {
         var preparedCount = 0;
@@ -45,34 +44,25 @@ public static partial class LadderCharacterSelectService
                 continue;
             }
 
-            await PrepareLayoutAsync(layoutPath, ladder, cancellationToken);
+            await PrepareLayoutAsync(layoutPath, ladder, installDirectory, cancellationToken);
             preparedCount++;
         }
 
         return preparedCount;
     }
 
-    internal static string GetCleanLayoutPath(string layoutPath)
-    {
-        var directory = Path.GetDirectoryName(layoutPath)
-                        ?? throw new DirectoryNotFoundException("Character-select layout directory could not be resolved.");
-        return Path.Combine(
-            directory,
-            $"{Path.GetFileNameWithoutExtension(layoutPath)}{CleanSuffix}{Path.GetExtension(layoutPath)}");
-    }
-
     private static async Task PrepareLayoutAsync(
         string layoutPath,
         LadderDisplayInfo? ladder,
+        string? installDirectory,
         CancellationToken cancellationToken)
     {
-        var cleanLayoutPath = GetCleanLayoutPath(layoutPath);
-        if (!File.Exists(cleanLayoutPath))
+        if (string.IsNullOrWhiteSpace(installDirectory))
         {
-            File.Copy(layoutPath, cleanLayoutPath, overwrite: false);
+            throw new InvalidOperationException("The D2R installation is required to prepare ladder layouts.");
         }
 
-        File.Copy(cleanLayoutPath, layoutPath, overwrite: true);
+        LadderRuntimeFileService.RestoreOrCaptureBaseline(installDirectory, layoutPath);
         if (ladder is null)
         {
             return;

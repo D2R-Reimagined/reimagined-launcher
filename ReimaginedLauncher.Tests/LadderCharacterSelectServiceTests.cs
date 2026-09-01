@@ -25,7 +25,8 @@ public sealed class LadderCharacterSelectServiceTests : IDisposable
 
         var prepared = await LadderCharacterSelectService.PrepareAsync(
             [keyboardLayout, controllerLayout],
-            firstLadder);
+            firstLadder,
+            _testDirectory);
 
         Assert.Equal(2, prepared);
         AssertBanner(keyboardLayout, firstLadder.Name);
@@ -34,7 +35,10 @@ public sealed class LadderCharacterSelectServiceTests : IDisposable
         AssertBannerIsAFullScreenOverlay(controllerLayout);
 
         var secondLadder = firstLadder with { Name = "Second Ladder" };
-        await LadderCharacterSelectService.PrepareAsync([keyboardLayout, controllerLayout], secondLadder);
+        await LadderCharacterSelectService.PrepareAsync(
+            [keyboardLayout, controllerLayout],
+            secondLadder,
+            _testDirectory);
 
         AssertBanner(keyboardLayout, secondLadder.Name);
         AssertBanner(controllerLayout, secondLadder.Name);
@@ -51,14 +55,20 @@ public sealed class LadderCharacterSelectServiceTests : IDisposable
             DateTimeOffset.UtcNow,
             DateTimeOffset.UtcNow.AddDays(7));
 
-        await LadderCharacterSelectService.PrepareAsync([layoutPath], ladder);
+        await LadderCharacterSelectService.PrepareAsync([layoutPath], ladder, _testDirectory);
         Assert.Contains(NameWidgetName, await File.ReadAllTextAsync(layoutPath));
 
-        await LadderCharacterSelectService.PrepareAsync([layoutPath], ladder: null);
+        await LadderCharacterSelectService.PrepareAsync(
+            [layoutPath],
+            ladder: null,
+            installDirectory: _testDirectory);
 
         Assert.Equal(original, await File.ReadAllTextAsync(layoutPath));
         Assert.DoesNotContain(NameWidgetName, await File.ReadAllTextAsync(layoutPath));
         Assert.DoesNotContain(RuntimeWidgetName, await File.ReadAllTextAsync(layoutPath));
+        Assert.False(File.Exists(Path.Combine(
+            Path.GetDirectoryName(layoutPath)!,
+            "characterselectpanelhd_launcher_clean.json")));
     }
 
     private string CreateLayout(string relativePath)
