@@ -22,8 +22,6 @@ namespace ReimaginedLauncher.Utilities;
 /// </summary>
 public static class LadderSaveDirectoryService
 {
-    private const string CleanSuffix = "_launcher_clean";
-
     /// <summary>Longest slug taken from a ladder's name, before the id suffix.</summary>
     private const int MaxSlugLength = 40;
 
@@ -113,7 +111,8 @@ public static class LadderSaveDirectoryService
         string? ladderName,
         CancellationToken cancellationToken = default)
     {
-        var modInfoPath = ResolveModInfoPath(installDirectory);
+        var normalizedInstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(installDirectory);
+        var modInfoPath = ResolveModInfoPath(normalizedInstallDirectory);
         if (modInfoPath is null)
         {
             LaunchDiagnostics.Log("ladder saves: modinfo.json could not be located; the ladder save folder was not prepared.");
@@ -122,7 +121,10 @@ public static class LadderSaveDirectoryService
 
         try
         {
-            var baseSavePath = await ReadBaseSavePathAsync(modInfoPath, cancellationToken);
+            var baseSavePath = await ReadBaseSavePathAsync(
+                normalizedInstallDirectory!,
+                modInfoPath,
+                cancellationToken);
             if (string.IsNullOrWhiteSpace(baseSavePath))
             {
                 LaunchDiagnostics.Log("ladder saves: modinfo.json has no savepath; the ladder save folder was not prepared.");
@@ -136,7 +138,7 @@ public static class LadderSaveDirectoryService
             }
 
             var baseDirectory = ResolveSaveDirectory(baseSavePath);
-            var ladderDirectory = ResolveSaveDirectory(ladderSavePath);
+            var ladderDirectory = ResolveSaveDirectory(ladderSavePath, createMissingDirectories: true);
             if (ladderDirectory is null)
             {
                 return null;
@@ -163,7 +165,8 @@ public static class LadderSaveDirectoryService
         string? installDirectory,
         CancellationToken cancellationToken = default)
     {
-        var modInfoPath = ResolveModInfoPath(installDirectory);
+        var normalizedInstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(installDirectory);
+        var modInfoPath = ResolveModInfoPath(normalizedInstallDirectory);
         if (modInfoPath is null)
         {
             return true;
@@ -171,19 +174,17 @@ public static class LadderSaveDirectoryService
 
         try
         {
-            var baseSavePath = await ReadBaseSavePathAsync(modInfoPath, cancellationToken);
+            var cleanPath = LadderRuntimeFileService.RestoreOrCaptureBaseline(
+                normalizedInstallDirectory!,
+                modInfoPath);
+            var baseSavePath = await ReadSavePathAsync(cleanPath, cancellationToken);
             if (string.IsNullOrWhiteSpace(baseSavePath))
             {
                 return true;
             }
 
-            var current = await ReadSavePathAsync(modInfoPath, cancellationToken);
-            if (string.Equals(current, baseSavePath, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            return await WriteSavePathAsync(modInfoPath, baseSavePath, cancellationToken);
+            File.Copy(cleanPath, modInfoPath, overwrite: true);
+            return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -197,14 +198,12 @@ public static class LadderSaveDirectoryService
     /// first time this ran. Reading it back out of a file we may already have
     /// rewritten would compound the ladder suffix every launch.
     /// </summary>
-    private static async Task<string?> ReadBaseSavePathAsync(string modInfoPath, CancellationToken cancellationToken)
+    private static async Task<string?> ReadBaseSavePathAsync(
+        string installDirectory,
+        string modInfoPath,
+        CancellationToken cancellationToken)
     {
-        var cleanPath = GetCleanModInfoPath(modInfoPath);
-        if (!File.Exists(cleanPath))
-        {
-            File.Copy(modInfoPath, cleanPath, overwrite: false);
-        }
-
+        var cleanPath = LadderRuntimeFileService.RestoreOrCaptureBaseline(installDirectory, modInfoPath);
         return await ReadSavePathAsync(cleanPath, cancellationToken);
     }
 
@@ -233,15 +232,6 @@ public static class LadderSaveDirectoryService
             new UTF8Encoding(false),
             cancellationToken);
         return true;
-    }
-
-    internal static string GetCleanModInfoPath(string modInfoPath)
-    {
-        var directory = Path.GetDirectoryName(modInfoPath)
-                        ?? throw new DirectoryNotFoundException("The modinfo.json directory could not be resolved.");
-        return Path.Combine(
-            directory,
-            $"{Path.GetFileNameWithoutExtension(modInfoPath)}{CleanSuffix}{Path.GetExtension(modInfoPath)}");
     }
 
     /// <summary>
@@ -302,26 +292,68 @@ public static class LadderSaveDirectoryService
     /// <summary>Saved Games\Diablo II Resurrected\mods\&lt;savePath&gt;.</summary>
     public static string? ResolveSaveDirectory(string savePath)
     {
+        return ResolveSaveDirectory(savePath, createMissingDirectories: false);
+    }
+
+    private static string? ResolveSaveDirectory(string savePath, bool createMissingDirectories)
+    {
+        return ResolveSaveDirectory(
+            savePath,
+            SaveFileService.GetSavedGamesPath(),
+            createMissingDirectories);
+    }
+
+    internal static string? ResolveSaveDirectory(
+        string savePath,
+        string? savedGamesPath,
+        bool createMissingDirectories)
+    {
         var trimmed = savePath.Trim().Trim('/', '\\');
         if (string.IsNullOrWhiteSpace(trimmed))
         {
             return null;
         }
 
-        var savedGamesPath = SaveFileService.GetSavedGamesPath();
         if (string.IsNullOrWhiteSpace(savedGamesPath))
         {
             return null;
         }
 
+        if (!Directory.Exists(savedGamesPath))
+        {
+            if (!createMissingDirectories)
+            {
+                return null;
+            }
+
+            Directory.CreateDirectory(savedGamesPath);
+        }
+
         var d2rPath = SaveFileService.ResolveDirectoryCaseInsensitive(savedGamesPath, "Diablo II Resurrected");
         if (d2rPath == null)
         {
-            return null;
+            if (!createMissingDirectories)
+            {
+                return null;
+            }
+
+            d2rPath = Path.Combine(savedGamesPath, "Diablo II Resurrected");
+            Directory.CreateDirectory(d2rPath);
         }
 
         var modsPath = SaveFileService.ResolveDirectoryCaseInsensitive(d2rPath, "mods");
-        return modsPath == null ? null : Path.Combine(modsPath, trimmed);
+        if (modsPath == null)
+        {
+            if (!createMissingDirectories)
+            {
+                return null;
+            }
+
+            modsPath = Path.Combine(d2rPath, "mods");
+            Directory.CreateDirectory(modsPath);
+        }
+
+        return Path.Combine(modsPath, trimmed);
     }
 
     private static string? ResolveModInfoPath(string? installDirectory)

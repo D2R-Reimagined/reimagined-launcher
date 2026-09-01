@@ -77,6 +77,7 @@ public class InstallationProfile
 public class AppSettings
 {
     public double UiScale { get; set; } = 1.0;
+    public bool LadderPlayModeUnlocked { get; set; }
     public bool MinimizeToTray { get; set; }
     public bool MinimizeToTrayOnClose { get; set; }
     public bool DisableLauncherUpdates { get; set; }

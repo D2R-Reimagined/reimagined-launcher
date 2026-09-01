@@ -81,6 +81,38 @@ public sealed class LadderSaveDirectoryServiceTests : IDisposable
     }
 
     [Fact]
+    public void LadderSaveResolutionCreatesTheSavedGamesHierarchyOnFirstUse()
+    {
+        var savedGamesDirectory = Path.Combine(_testDirectory, "Saved Games");
+
+        var resolved = LadderSaveDirectoryService.ResolveSaveDirectory(
+            "ReimaginedThree-ladder",
+            savedGamesDirectory,
+            createMissingDirectories: true);
+
+        var expectedModsDirectory = Path.Combine(
+            savedGamesDirectory,
+            "Diablo II Resurrected",
+            "mods");
+        Assert.Equal(Path.Combine(expectedModsDirectory, "ReimaginedThree-ladder"), resolved);
+        Assert.True(Directory.Exists(expectedModsDirectory));
+    }
+
+    [Fact]
+    public void ReadOnlySaveResolutionDoesNotCreateMissingDirectories()
+    {
+        var savedGamesDirectory = Path.Combine(_testDirectory, "Saved Games");
+
+        var resolved = LadderSaveDirectoryService.ResolveSaveDirectory(
+            "ReimaginedThree-ladder",
+            savedGamesDirectory,
+            createMissingDirectories: false);
+
+        Assert.Null(resolved);
+        Assert.False(Directory.Exists(savedGamesDirectory));
+    }
+
+    [Fact]
     public void SeedingCarriesSettingsAndLootFiltersButNotCharacters()
     {
         var baseDirectory = Path.Combine(_testDirectory, "ReimaginedThree");

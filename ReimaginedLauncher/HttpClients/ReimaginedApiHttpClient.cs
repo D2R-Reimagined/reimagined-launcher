@@ -57,7 +57,7 @@ public sealed class ReimaginedApiHttpClient
         response.EnsureSuccessStatusCode();
 
         var expectedLength = response.Content.Headers.ContentLength ?? bundle.ArtifactSizeBytes;
-        if (expectedLength <= 0 || expectedLength > 64L * 1024 * 1024)
+        if (expectedLength <= 0 || expectedLength > 512L * 1024 * 1024)
         {
             throw new InvalidOperationException("The ladder bundle has an invalid download size.");
         }
@@ -75,9 +75,9 @@ public sealed class ReimaginedApiHttpClient
             }
 
             total += read;
-            if (total > 64L * 1024 * 1024)
+            if (total > 512L * 1024 * 1024)
             {
-                throw new InvalidOperationException("The ladder bundle exceeded the 64 MiB download limit.");
+                throw new InvalidOperationException("The ladder bundle exceeded the 512 MiB download limit.");
             }
 
             await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);

@@ -118,7 +118,7 @@ Signed ladder packages also require the public half of the API's ECDSA signing k
 $env:D2R_REIMAGINED_BUNDLE_PUBLIC_KEY_PATH = "C:\dev\d2r\reimagined-api\local-keys\local-development.pem"
 ```
 
-The launcher rejects packages when the API descriptor, archive SHA-256, signed manifest, compatibility contract, declared file list, or installed file hashes differ. The private signing key must never be placed in this repository.
+The launcher rejects packages when the API descriptor, archive SHA-256, signed manifest, compatibility contract, declared file list, or installed file hashes differ. Schema-v2 packages manage the complete `mods/Reimagined` tree, including data JSON and TXT files; undeclared local files also block launch and are removed during repair. The private signing key must never be placed in this repository.
 
 ## Downloads
 
