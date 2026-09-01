@@ -8,7 +8,19 @@ public enum InstallationType
 {
     BattleNet,
     Steam,
-    D2RMM
+    D2RMM,
+    Lutris
+}
+
+public static class InstallationTypes
+{
+    /// <summary>
+    /// Lutris is a Linux application, so on Windows the type is shown in the
+    /// dropdown as unavailable rather than being selectable. Unavailable types
+    /// get no profile, which keeps a Windows settings file exactly as it was.
+    /// </summary>
+    public static bool IsAvailable(InstallationType type)
+        => type != InstallationType.Lutris || OperatingSystem.IsLinux();
 }
 
 public enum LaunchExperience
@@ -34,6 +46,11 @@ public class InstallationProfile
     public Dictionary<string, List<Guid>> SelectedLadderExtensions { get; set; } = [];
     public string? InstallDirectory { get; set; }
     public string? SteamDirectory { get; set; }
+
+    // The id drives the launch URI; the slug locates the game's YAML config.
+    public int? LutrisGameId { get; set; }
+    public string? LutrisGameSlug { get; set; }
+    public string? LutrisGameName { get; set; }
     public bool IsInstallDirectoryValidated { get; set; }
     public string? SaveDirectory { get; set; }
 
@@ -139,6 +156,28 @@ public class AppSettings
                 SelectedProfileIndex = 0;
             }
             return Profiles[SelectedProfileIndex];
+        }
+    }
+
+    /// <summary>
+    /// Adds the Lutris profile to a settings file written before the type
+    /// existed. It is appended, so existing profiles keep their position and
+    /// <see cref="SelectedProfileIndex"/> still refers to the same installation.
+    /// Windows never gets one: the type cannot be selected there.
+    /// </summary>
+    public void EnsureLutrisProfile()
+    {
+        if (!InstallationTypes.IsAvailable(InstallationType.Lutris))
+        {
+            return;
+        }
+
+        // Seeds the default profiles when the settings file is brand new.
+        _ = CurrentProfile;
+
+        if (!Profiles.Exists(profile => profile.Type == InstallationType.Lutris))
+        {
+            Profiles.Add(new InstallationProfile { Type = InstallationType.Lutris });
         }
     }
 }

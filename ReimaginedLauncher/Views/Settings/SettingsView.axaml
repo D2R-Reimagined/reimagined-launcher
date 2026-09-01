@@ -61,6 +61,11 @@
                                IsVisible="False"
                                TextWrapping="Wrap"
                                Text="Launch parameters are not available when using the D2RMM launcher. Configure launch options directly in D2RMM." />
+                    <TextBlock x:Name="LutrisLaunchParamsNotice"
+                               Classes="muted"
+                               IsVisible="False"
+                               TextWrapping="Wrap"
+                               Text="Launch parameters are not available for Lutris installations. Lutris starts the game through its own URI handler, which accepts no arguments, so set them on the game's arguments in Lutris - including &quot;-mod Reimagined -txt&quot;, without which the Reimagined mod is not loaded." />
                     <Border x:Name="OnlineLaunchParamsNotice"
                             Classes="warning-banner"
                             Padding="12"

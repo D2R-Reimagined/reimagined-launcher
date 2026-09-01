@@ -56,7 +56,7 @@
                     <StackPanel Spacing="4">
                         <TextBlock Classes="section-title" Text="Play Mode" />
                         <TextBlock Classes="muted" TextWrapping="Wrap"
-                                   Text="Your choice is saved separately for each Battle.Net or Steam installation." />
+                                   Text="Your choice is saved separately for each installation type." />
                     </StackPanel>
                     <Grid x:Name="ExperienceGrid" ColumnDefinitions="*,*,*" ColumnSpacing="12">
                         <Button x:Name="OfflineExperienceButton" Classes="experience-card" Click="OnOfflineExperienceClick">
@@ -191,7 +191,7 @@
                 </Border>
 
                 <Border x:Name="InstallDirectoryPanel" Grid.Column="1" Classes="panel" Padding="18">
-                    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="12">
+                    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="12">
                         <StackPanel Spacing="4">
                             <TextBlock x:Name="InstallDirectoryTitle" Classes="section-title" Text="Installation" />
                             <TextBlock x:Name="InstallDirectoryDescription" Classes="muted" TextWrapping="Wrap" />
@@ -205,9 +205,27 @@
                                 <ComboBoxItem Content="Battle.Net" />
                                 <ComboBoxItem Content="Steam" />
                                 <ComboBoxItem Content="D2RMM Launcher" />
+                                <ComboBoxItem x:Name="LutrisInstallationTypeItem" Content="Lutris" />
                             </ComboBox>
                         </StackPanel>
-                        <Grid Grid.Row="3" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                        <StackPanel x:Name="LutrisExtraPanel" Grid.Row="3" Spacing="6" IsVisible="False">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <ComboBox x:Name="LutrisGameComboBox"
+                                          HorizontalAlignment="Stretch"
+                                          PlaceholderText="Select your Lutris game"
+                                          SelectionChanged="OnLutrisGameChanged">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate x:DataType="utilities:LutrisGame">
+                                            <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                                <Button x:Name="RefreshLutrisGamesButton" Grid.Column="1"
+                                        Content="Refresh" Click="OnRefreshLutrisGamesClick" />
+                            </Grid>
+                            <TextBlock x:Name="LutrisGameStatusText" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <Grid Grid.Row="4" ColumnDefinitions="*,Auto" ColumnSpacing="8">
                             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                                 <TextBox x:Name="DirectoryTextBox" IsReadOnly="True" />
                                 <StackPanel x:Name="DetectionLoadingIndicator" Grid.Column="1" Orientation="Horizontal"
@@ -216,9 +234,9 @@
                                     <TextBlock Text="Detecting..." Classes="muted" VerticalAlignment="Center" />
                                 </StackPanel>
                             </Grid>
-                            <Button Grid.Column="1" Content="Browse" Click="OnInstallDirectoryClick" />
+                            <Button x:Name="BrowseInstallDirectoryButton" Grid.Column="1" Content="Browse" Click="OnInstallDirectoryClick" />
                         </Grid>
-                        <Grid x:Name="SteamExtraPanel" Grid.Row="4" ColumnDefinitions="*,Auto" ColumnSpacing="8" IsVisible="False">
+                        <Grid x:Name="SteamExtraPanel" Grid.Row="5" ColumnDefinitions="*,Auto" ColumnSpacing="8" IsVisible="False">
                             <TextBox x:Name="SteamPathTextBox" IsReadOnly="True" PlaceholderText="Steam executable path" />
                             <Button x:Name="LocateSteamButton" Grid.Column="1" Content="Locate Steam" Click="OnLocateSteamClick" />
                         </Grid>
