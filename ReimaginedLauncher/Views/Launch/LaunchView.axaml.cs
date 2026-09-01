@@ -41,6 +41,9 @@ public partial class LaunchView : UserControl
     private bool _isRunningLadderAction;
     private D2RLoaderInventory? _loaderInventory;
     private bool? _isCompactLayout;
+    private IReadOnlyList<LutrisGame> _lutrisGames = [];
+    private bool _isRefreshingLutrisControls;
+    private bool _lutrisGamesLoaded;
 
     /// <summary>
     /// What the ladder button does right now. Download and Update are setup
@@ -66,6 +69,13 @@ public partial class LaunchView : UserControl
         _d2rLoaderInstallerService = Program.ServiceProvider.GetRequiredService<D2RLoaderInstallerService>();
         _ladderBundleService = Program.ServiceProvider.GetRequiredService<LadderBundleService>();
         SizeChanged += (_, _) => UpdateResponsiveLayout();
+
+        if (!InstallationTypes.IsAvailable(InstallationType.Lutris))
+        {
+            LutrisInstallationTypeItem.IsEnabled = false;
+            LutrisInstallationTypeItem.Content = "Lutris (Linux only)";
+            ToolTip.SetTip(LutrisInstallationTypeItem, "Lutris is a Linux application and is not available on this platform.");
+        }
 
         RefreshInstallDirectoryState();
     }
@@ -243,6 +253,16 @@ public partial class LaunchView : UserControl
         DetectionLoadingIndicator.IsVisible = LauncherService.IsDetecting;
 
         SteamExtraPanel.IsVisible = profile.Type == InstallationType.Steam;
+        LutrisExtraPanel.IsVisible = profile.Type == InstallationType.Lutris;
+
+        // The Lutris game is the source of the install path.
+        BrowseInstallDirectoryButton.IsVisible = profile.Type != InstallationType.Lutris;
+
+        if (profile.Type == InstallationType.Lutris)
+        {
+            RefreshLutrisGameControls(profile);
+        }
+
         SteamPathTextBox.Text = profile.SteamDirectory ?? string.Empty;
         SteamPathTextBox.PlaceholderText = OperatingSystem.IsLinux() ? "Steam or Flatpak executable" : "Steam.exe Path";
         LocateSteamButton.Content = OperatingSystem.IsLinux() ? "Locate Steam" : "Locate Steam.exe";
@@ -283,7 +303,9 @@ public partial class LaunchView : UserControl
         else
         {
             InstallDirectoryTitle.Text = "Install Directory";
-            InstallDirectoryDescription.Text = "Select the Diablo II: Resurrected folder that contains your local mod installation (Folder with .exe in it)";
+            InstallDirectoryDescription.Text = profile.Type == InstallationType.Lutris
+                ? "Pick your Diablo II: Resurrected entry in Lutris. The install directory is read from that game's Lutris configuration."
+                : "Select the Diablo II: Resurrected folder that contains your local mod installation (Folder with .exe in it)";
             isValidated = profile.Type == InstallationType.Steam
                 ? InstallDirectoryValidator.IsValidSteamInstallDirectory(profile.InstallDirectory)
                 : InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory);
@@ -304,10 +326,12 @@ public partial class LaunchView : UserControl
         OfflineExperienceButton.Classes.Set("selected", profile.LaunchExperience == LaunchExperience.Offline);
         OnlineExperienceButton.Classes.Set("selected", isOnlineExperience);
         LadderExperienceButton.Classes.Set("selected", isLadderExperience);
-        OnlineExperienceButton.IsEnabled = profile.Type != InstallationType.D2RMM;
-        LadderExperienceButton.IsEnabled = profile.Type != InstallationType.D2RMM && ladderAvailable;
-        OnlineExperiencePanel.IsVisible = isOnlineExperience && profile.Type != InstallationType.D2RMM;
-        LadderPolicyPanel.IsVisible = isLadderExperience && profile.Type != InstallationType.D2RMM;
+        // Neither type lets the launcher substitute D2RLoader.exe for D2R.exe.
+        var supportsD2RLoader = profile.Type is not (InstallationType.D2RMM or InstallationType.Lutris);
+        OnlineExperienceButton.IsEnabled = supportsD2RLoader;
+        LadderExperienceButton.IsEnabled = supportsD2RLoader && ladderAvailable;
+        OnlineExperiencePanel.IsVisible = isOnlineExperience && supportsD2RLoader;
+        LadderPolicyPanel.IsVisible = isLadderExperience && supportsD2RLoader;
         LadderAuthenticationWarningBanner.IsVisible = isLadderExperience && !isReimaginedSignedIn;
         RefreshLadderAuthenticationState();
 
@@ -389,7 +413,11 @@ public partial class LaunchView : UserControl
                 : isOnlineExperience && isValidated && isModDetected && !loaderAvailable
                 ? loaderUnavailableReason ?? "D2RLoader is unavailable for this profile."
                 : !isValidated
-                ? string.IsNullOrWhiteSpace(profile.InstallDirectory)
+                ? profile.Type == InstallationType.Lutris
+                    ? string.IsNullOrWhiteSpace(profile.InstallDirectory)
+                        ? "Select the Lutris game that runs Diablo II: Resurrected."
+                        : "That Lutris game does not run Diablo II: Resurrected - no D2R.exe in its install directory. Pick a different Lutris game."
+                    : string.IsNullOrWhiteSpace(profile.InstallDirectory)
                     ? "Enter your Diablo II: Resurrected install directory before using the launcher."
                     : profile.Type == InstallationType.Steam
                         && InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory)
@@ -1303,9 +1331,23 @@ public partial class LaunchView : UserControl
         var newType = (InstallationType)selectedIndex;
         if (MainWindow.Settings.CurrentProfile.Type == newType) return;
 
+        if (!InstallationTypes.IsAvailable(newType))
+        {
+            // The item is disabled, but keyboard navigation can still reach it.
+            InstallationTypeComboBox.SelectedIndex = (int)MainWindow.Settings.CurrentProfile.Type;
+            return;
+        }
+
+        if (newType == InstallationType.Lutris)
+        {
+            // Appends the profile the first time Lutris is picked, so a settings
+            // file written before the type existed keeps its other profiles put.
+            MainWindow.Settings.EnsureLutrisProfile();
+        }
+
         // Switch profile
         MainWindow.Settings.SelectedProfileIndex = selectedIndex;
-        if (MainWindow.Settings.CurrentProfile.Type == InstallationType.D2RMM)
+        if (MainWindow.Settings.CurrentProfile.Type is InstallationType.D2RMM or InstallationType.Lutris)
         {
             MainWindow.Settings.CurrentProfile.LaunchExperience = LaunchExperience.Offline;
         }
@@ -1318,6 +1360,108 @@ public partial class LaunchView : UserControl
             await mw.RefreshUpdateStateAsync();
         }
         
+        RefreshInstallDirectoryState();
+    }
+
+    private void RefreshLutrisGameControls(InstallationProfile profile)
+    {
+        if (!_lutrisGamesLoaded)
+        {
+            _lutrisGamesLoaded = true;
+            _ = LoadLutrisGamesAsync();
+            return;
+        }
+
+        _isRefreshingLutrisControls = true;
+        try
+        {
+            LutrisGameComboBox.ItemsSource = _lutrisGames;
+            LutrisGameComboBox.SelectedItem = _lutrisGames
+                .FirstOrDefault(game => game.Id == profile.LutrisGameId);
+        }
+        finally
+        {
+            _isRefreshingLutrisControls = false;
+        }
+
+        if (!LutrisService.IsAvailable())
+        {
+            LutrisGameStatusText.Text = "Lutris was not found on PATH.";
+        }
+        else if (_lutrisGames.Count == 0)
+        {
+            LutrisGameStatusText.Text = "No installed Lutris games were found.";
+        }
+        else if (profile.LutrisGameId is { } gameId)
+        {
+            // The command itself is shown under Advanced launch details.
+            LutrisGameStatusText.Text = LutrisGameComboBox.SelectedItem is null
+                ? $"The saved Lutris game (id {gameId}) is no longer installed. Pick it again."
+                : InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory)
+                    ? "Diablo II: Resurrected detected. Saves and backups follow this game's Lutris prefix."
+                    : "This Lutris game has no D2R.exe beside it. Pick the entry that runs Diablo II: Resurrected.";
+        }
+        else
+        {
+            LutrisGameStatusText.Text = "Select the Lutris game that runs Diablo II: Resurrected.";
+        }
+    }
+
+    private async Task LoadLutrisGamesAsync(bool forceRefresh = false)
+    {
+        _lutrisGames = await LutrisService.GetInstalledGamesAsync(forceRefresh);
+
+        if (MainWindow.Settings.CurrentProfile.Type == InstallationType.Lutris)
+        {
+            RefreshLutrisGameControls(MainWindow.Settings.CurrentProfile);
+        }
+    }
+
+    private async void OnRefreshLutrisGamesClick(object? sender, RoutedEventArgs e)
+    {
+        RefreshLutrisGamesButton.IsEnabled = false;
+        LutrisGameStatusText.Text = "Reading the Lutris game list...";
+        try
+        {
+            await LoadLutrisGamesAsync(forceRefresh: true);
+        }
+        finally
+        {
+            RefreshLutrisGamesButton.IsEnabled = true;
+        }
+    }
+
+    private async void OnLutrisGameChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_isRefreshingLutrisControls) return;
+        if (LutrisGameComboBox.SelectedItem is not LutrisGame game) return;
+
+        var profile = MainWindow.Settings.CurrentProfile;
+        if (profile.Type != InstallationType.Lutris) return;
+
+        profile.LutrisGameId = game.Id;
+        profile.LutrisGameSlug = game.Slug;
+        profile.LutrisGameName = game.Name;
+
+        // The selected game is the only source of the path, so it always
+        // replaces the previous one - picking a non-D2R game must fail
+        // validation rather than keep a stale valid path.
+        var detectedDirectory = LutrisService.TryResolveInstallDirectory(game.Slug);
+        profile.InstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(detectedDirectory);
+        profile.IsInstallDirectoryValidated =
+            InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory);
+        LaunchDiagnostics.Log(
+            $"Lutris game '{game.Slug}' resolved to '{profile.InstallDirectory ?? "<none>"}' "
+            + $"(valid={profile.IsInstallDirectoryValidated}).");
+
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+
+        if (TopLevel.GetTopLevel(this) is MainWindow mainWindow)
+        {
+            mainWindow.RefreshLocalModState();
+            await mainWindow.RefreshUpdateStateAsync();
+        }
+
         RefreshInstallDirectoryState();
     }
 
@@ -1563,12 +1707,19 @@ public partial class LaunchView : UserControl
                         expectedExePath = LauncherService.GetExpectedGameExecutablePath();
                     }
 
+                    // Lutris hands off to its own wrapper and the exe is commonly
+                    // D2RLoader.exe, so the session is found by path instead of
+                    // waiting on the process the launcher started.
+                    var lutrisGameExePath = profile.Type == InstallationType.Lutris
+                        ? LutrisService.TryResolveGameExePath(profile.LutrisGameSlug)
+                        : null;
+
                     // The game is always watched now, not only when minimising to
                     // tray: a ladder session leaves the mod pointed at the ladder
                     // save folder, and something has to put it back once the
                     // session is over. One watcher owns the process handle.
                     var minimizeTarget = MainWindow.Settings.MinimizeToTray ? MainWindow.Instance : null;
-                    _ = WatchGameAndRestoreSaveDirectoryAsync(profile.InstallDirectory, gameProcess, expectedExePath, minimizeTarget);
+                    _ = WatchGameAndRestoreSaveDirectoryAsync(profile.InstallDirectory, gameProcess, expectedExePath, minimizeTarget, lutrisGameExePath);
                 }
             }
             catch (Exception ex)
@@ -1690,11 +1841,26 @@ public partial class LaunchView : UserControl
         string? installDirectory,
         Process gameProcess,
         string? expectedExePath,
-        MainWindow? minimizeTarget)
+        MainWindow? minimizeTarget,
+        string? lutrisGameExePath = null)
     {
         try
         {
-            if (minimizeTarget is not null)
+            if (lutrisGameExePath is not null)
+            {
+                // The lutris process hands off and may exit immediately or outlive
+                // the session, so it is never waited on.
+                gameProcess.Dispose();
+                if (minimizeTarget is not null)
+                {
+                    await minimizeTarget.MinimizeToTrayAndWaitForLutrisExitAsync(lutrisGameExePath);
+                }
+                else
+                {
+                    await LutrisService.WaitForGameSessionAsync(lutrisGameExePath, TimeSpan.FromMinutes(2));
+                }
+            }
+            else if (minimizeTarget is not null)
             {
                 await minimizeTarget.MinimizeToTrayAndWaitForExitAsync(gameProcess, expectedExePath);
             }

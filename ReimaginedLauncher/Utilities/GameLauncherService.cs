@@ -450,6 +450,11 @@ public class GameLauncherService
             return "D2RMM Install: No launch command. Clicking install mod will install Reimagined into D2RMM/mods.";
         }
 
+        if (profile.Type == InstallationType.Lutris)
+        {
+            return BuildLutrisLaunchCommand(profile);
+        }
+
         var launchParameters = string.IsNullOrWhiteSpace(launchParamOverride)
             ? LaunchParameters
             : launchParamOverride;
@@ -483,6 +488,24 @@ public class GameLauncherService
         return $"\"{executablePath}\" {launchParameters}";
     }
 
+    /// <summary>
+    /// Lutris is started through its own URI handler, which takes no game
+    /// arguments, so launch parameters have to be set on the Lutris side.
+    /// </summary>
+    internal static string BuildLutrisLaunchCommand(InstallationProfile profile)
+    {
+        if (profile.LutrisGameId is not { } gameId)
+        {
+            return "Lutris: no game selected yet. Choose your Diablo II: Resurrected entry in the Installation section.";
+        }
+
+        return $"env LUTRIS_SKIP_INIT=1 lutris {LutrisService.BuildRunGameUri(gameId)}"
+               + Environment.NewLine
+               + Environment.NewLine
+               + "Add \"-mod Reimagined -txt\" to this game's arguments in Lutris, otherwise"
+               + " it starts without the Reimagined mod.";
+    }
+
     public Process? LaunchGame(string? launchParamOverride = null, string? gamePathOverride = null)
     {
         var profile = MainWindow.Settings.CurrentProfile;
@@ -503,8 +526,31 @@ public class GameLauncherService
         string finalArgs;
         string? winePrefix = null;
         string? workingDirectory = null;
+        var environmentOverrides = new Dictionary<string, string>();
 
-        if (UsesD2RLoader(profile))
+        if (profile.Type == InstallationType.Lutris)
+        {
+            if (profile.LutrisGameId is not { } lutrisGameId)
+            {
+                Notifications.SendNotification(
+                    "Select your Diablo II: Resurrected entry in the Installation section before launching.",
+                    "Warning");
+                return null;
+            }
+
+            executablePath = FindExecutableOnPath("lutris") ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(executablePath))
+            {
+                Notifications.SendNotification("Lutris was not found on PATH.", "Warning");
+                return null;
+            }
+
+            finalArgs = LutrisService.BuildRunGameUri(lutrisGameId);
+
+            // Matches the command Lutris writes into its own desktop shortcuts.
+            environmentOverrides["LUTRIS_SKIP_INIT"] = "1";
+        }
+        else if (UsesD2RLoader(profile))
         {
             if (!D2RLoaderService.CanUseOnlineExperience(profile, out var reason))
             {
@@ -570,6 +616,11 @@ public class GameLauncherService
         if (!string.IsNullOrWhiteSpace(winePrefix))
         {
             processStartInfo.Environment["WINEPREFIX"] = winePrefix;
+        }
+
+        foreach (var (name, value) in environmentOverrides)
+        {
+            processStartInfo.Environment[name] = value;
         }
 
         try
@@ -694,7 +745,7 @@ public class GameLauncherService
         return path.Replace('\\', '/');
     }
 
-    private static string? FindExecutableOnPath(string executableName)
+    internal static string? FindExecutableOnPath(string executableName)
     {
         var pathValue = Environment.GetEnvironmentVariable("PATH");
         if (string.IsNullOrWhiteSpace(pathValue))
