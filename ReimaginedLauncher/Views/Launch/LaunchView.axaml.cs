@@ -54,22 +54,11 @@ public partial class LaunchView : UserControl
         Play
     }
 
-    private static bool IsLadderExperienceEnabled
-    {
-        get
-        {
-#if DEBUG
-            return true;
-#else
-            return false;
-#endif
-        }
-    }
+    private static bool IsLadderExperienceEnabled => MainWindow.Settings.LadderPlayModeUnlocked;
 
     public LaunchView()
     {
         InitializeComponent();
-        LadderExperienceButton.IsVisible = IsLadderExperienceEnabled;
         _apiHttpClient = Program.ServiceProvider.GetRequiredService<ReimaginedApiHttpClient>();
         _launcherAuthenticationService = Program.ServiceProvider.GetRequiredService<LauncherAuthenticationService>();
         _d2rLoaderInstallerService = Program.ServiceProvider.GetRequiredService<D2RLoaderInstallerService>();
@@ -224,7 +213,20 @@ public partial class LaunchView : UserControl
     {
         var settings = MainWindow.Settings;
         var profile = settings.CurrentProfile;
-        if (!IsLadderExperienceEnabled && profile.LaunchExperience == LaunchExperience.Ladder)
+        var ladderExperienceEnabled = IsLadderExperienceEnabled;
+        if (LadderExperienceButton.IsVisible != ladderExperienceEnabled)
+        {
+            LadderExperienceButton.IsVisible = ladderExperienceEnabled;
+            _isCompactLayout = null;
+            UpdateResponsiveLayout();
+        }
+
+        if (ladderExperienceEnabled && !_ladderStatusLoaded && !_isRefreshingLadders)
+        {
+            _ = RefreshLadderStateAsync();
+        }
+
+        if (!ladderExperienceEnabled && profile.LaunchExperience == LaunchExperience.Ladder)
         {
             profile.LaunchExperience = LaunchExperience.Online;
         }
