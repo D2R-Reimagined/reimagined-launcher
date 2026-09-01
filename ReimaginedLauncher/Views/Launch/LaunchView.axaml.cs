@@ -1004,7 +1004,7 @@ public partial class LaunchView : UserControl
         try
         {
             var progress = new Progress<LadderBundleProgress>(update =>
-                SetLadderSetupProgress(update.Message, update.Percentage));
+                SetLadderSetupProgress(update.Message, update.Percentage, update.Details));
             await _ladderBundleService.InstallOrRepairAsync(
                 MainWindow.Settings.CurrentProfile.InstallDirectory,
                 bundle,
@@ -1027,10 +1027,10 @@ public partial class LaunchView : UserControl
         }
     }
 
-    private void SetLadderSetupProgress(string message, double? percentage)
+    private void SetLadderSetupProgress(string message, double? percentage, string? details = null)
     {
         LadderBundleProgressPanel.IsVisible = true;
-        LadderBundleProgressText.Text = message;
+        LadderBundleProgressText.Text = details ?? message;
         LadderBundleStatusText.Text = message;
         if (percentage is { } value)
         {

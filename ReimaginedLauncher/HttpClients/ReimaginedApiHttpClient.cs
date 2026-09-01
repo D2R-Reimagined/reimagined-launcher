@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Net.Http.Headers;
@@ -11,6 +12,13 @@ using ReimaginedLauncher.HttpClients.Models;
 using ReimaginedLauncher.Utilities;
 
 namespace ReimaginedLauncher.HttpClients;
+
+public sealed record LadderBundleDownloadProgress(
+    long BytesReceived,
+    long TotalBytes,
+    double Percentage,
+    double BytesPerSecond,
+    TimeSpan? EstimatedTimeRemaining);
 
 public sealed class ReimaginedApiHttpClient
 {
@@ -47,7 +55,7 @@ public sealed class ReimaginedApiHttpClient
 
     public async Task<byte[]> DownloadLadderBundleAsync(
         LadderBundleResponse bundle,
-        IProgress<double>? progress = null,
+        IProgress<LadderBundleDownloadProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
         using var response = await _httpClient.GetAsync(
@@ -65,6 +73,10 @@ public sealed class ReimaginedApiHttpClient
         await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
         await using var output = new System.IO.MemoryStream((int)expectedLength);
         var buffer = new byte[81920];
+        var stopwatch = Stopwatch.StartNew();
+        var lastReportAt = TimeSpan.Zero;
+        long lastReportBytes = 0;
+        double smoothedBytesPerSecond = 0;
         long total = 0;
         while (true)
         {
@@ -81,10 +93,64 @@ public sealed class ReimaginedApiHttpClient
             }
 
             await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-            progress?.Report(expectedLength > 0 ? total * 100d / expectedLength : 0);
+            var elapsed = stopwatch.Elapsed;
+            if (elapsed - lastReportAt >= TimeSpan.FromMilliseconds(250))
+            {
+                smoothedBytesPerSecond = ReportDownloadProgress(
+                    progress,
+                    total,
+                    expectedLength,
+                    elapsed,
+                    lastReportAt,
+                    lastReportBytes,
+                    smoothedBytesPerSecond);
+                lastReportAt = elapsed;
+                lastReportBytes = total;
+            }
         }
 
+        ReportDownloadProgress(
+            progress,
+            total,
+            expectedLength,
+            stopwatch.Elapsed,
+            lastReportAt,
+            lastReportBytes,
+            smoothedBytesPerSecond);
+
         return output.ToArray();
+    }
+
+    private static double ReportDownloadProgress(
+        IProgress<LadderBundleDownloadProgress>? progress,
+        long bytesReceived,
+        long totalBytes,
+        TimeSpan elapsed,
+        TimeSpan previousReportAt,
+        long previousReportBytes,
+        double previousBytesPerSecond)
+    {
+        var sampleSeconds = (elapsed - previousReportAt).TotalSeconds;
+        var sampleBytesPerSecond = sampleSeconds > 0 && bytesReceived > previousReportBytes
+            ? (bytesReceived - previousReportBytes) / sampleSeconds
+            : 0;
+        var bytesPerSecond = sampleBytesPerSecond <= 0
+            ? previousBytesPerSecond
+            : previousBytesPerSecond > 0
+                ? (previousBytesPerSecond * 0.7) + (sampleBytesPerSecond * 0.3)
+                : sampleBytesPerSecond;
+        var percentage = Math.Clamp(bytesReceived * 100d / totalBytes, 0, 100);
+        TimeSpan? remaining = bytesPerSecond > 0 && bytesReceived < totalBytes
+            ? TimeSpan.FromSeconds((totalBytes - bytesReceived) / bytesPerSecond)
+            : null;
+
+        progress?.Report(new LadderBundleDownloadProgress(
+            bytesReceived,
+            totalBytes,
+            percentage,
+            bytesPerSecond,
+            remaining));
+        return bytesPerSecond;
     }
 
     public async Task<LadderLaunchTicketResponse> CreateLadderLaunchTicketAsync(

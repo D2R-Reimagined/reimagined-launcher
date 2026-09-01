@@ -27,7 +27,10 @@ public sealed record LadderBundleReadiness(
 /// Percentage is null for steps that cannot report one. Callers should fall
 /// back to an indeterminate indicator rather than showing zero.
 /// </summary>
-public sealed record LadderBundleProgress(string Message, double? Percentage = null);
+public sealed record LadderBundleProgress(
+    string Message,
+    double? Percentage = null,
+    string? Details = null);
 
 internal sealed record InstalledLadderBundleState(
     Guid BundleId,
@@ -221,10 +224,16 @@ public sealed class LadderBundleService(
         }
 
         var downloadMessage = $"Downloading signed ladder package r{bundle.Revision}...";
-        progress?.Report(new LadderBundleProgress(downloadMessage, 0));
+        progress?.Report(new LadderBundleProgress(
+            downloadMessage,
+            0,
+            $"0 B / {FormatBytes(bundle.ArtifactSizeBytes)} | 0%"));
         var archiveBytes = await apiClient.DownloadLadderBundleAsync(
             bundle,
-            new Progress<double>(percent => progress?.Report(new LadderBundleProgress(downloadMessage, percent))),
+            new Progress<LadderBundleDownloadProgress>(update => progress?.Report(new LadderBundleProgress(
+                downloadMessage,
+                update.Percentage,
+                FormatDownloadDetails(update)))),
             cancellationToken);
         if (archiveBytes.LongLength != bundle.ArtifactSizeBytes
             || !string.Equals(
@@ -247,6 +256,53 @@ public sealed class LadderBundleService(
         }
 
         LaunchDiagnostics.Log($"Installed signed ladder bundle {bundle.Id} revision {bundle.Revision}.");
+    }
+
+    private static string FormatDownloadDetails(LadderBundleDownloadProgress progress)
+    {
+        var details = $"{FormatBytes(progress.BytesReceived)} / {FormatBytes(progress.TotalBytes)}"
+                      + $" | {progress.Percentage:0.0}%"
+                      + $" | {FormatBytes(progress.BytesPerSecond)}/s";
+        if (progress.EstimatedTimeRemaining is { } remaining)
+        {
+            details += $" | {FormatRemainingTime(remaining)} remaining";
+        }
+
+        return details;
+    }
+
+    private static string FormatBytes(double bytes)
+    {
+        string[] units = ["B", "KB", "MB", "GB"];
+        var value = Math.Max(0, bytes);
+        var unit = 0;
+        while (value >= 1024 && unit < units.Length - 1)
+        {
+            value /= 1024;
+            unit++;
+        }
+
+        return unit == 0 ? $"{value:0} {units[unit]}" : $"{value:0.0} {units[unit]}";
+    }
+
+    private static string FormatRemainingTime(TimeSpan remaining)
+    {
+        if (remaining < TimeSpan.FromSeconds(1))
+        {
+            return "less than a second";
+        }
+
+        if (remaining < TimeSpan.FromMinutes(1))
+        {
+            return $"{Math.Ceiling(remaining.TotalSeconds):0} sec";
+        }
+
+        if (remaining < TimeSpan.FromHours(1))
+        {
+            return $"{(int)remaining.TotalMinutes} min {remaining.Seconds} sec";
+        }
+
+        return $"{(int)remaining.TotalHours} hr {remaining.Minutes} min";
     }
 
     public static bool CanSupplyApproval(
