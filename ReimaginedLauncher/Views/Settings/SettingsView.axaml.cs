@@ -58,10 +58,12 @@ public partial class SettingsView : UserControl
 
         var profile = MainWindow.Settings.CurrentProfile;
         var isD2Rmm = profile.Type == InstallationType.D2RMM;
+        var isLutris = profile.Type == InstallationType.Lutris;
         var isOnline = profile.LaunchExperience == LaunchExperience.Online;
-        LaunchParametersPanel.IsEnabled = !isD2Rmm;
+        LaunchParametersPanel.IsEnabled = !isD2Rmm && !isLutris;
         D2RmmLaunchParamsNotice.IsVisible = isD2Rmm;
-        OnlineLaunchParamsNotice.IsVisible = !isD2Rmm && isOnline;
+        LutrisLaunchParamsNotice.IsVisible = isLutris;
+        OnlineLaunchParamsNotice.IsVisible = !isD2Rmm && !isLutris && isOnline;
         EnableRespecCheckBox.IsEnabled = !isOnline;
         ResetOfflineMapsCheckBox.IsEnabled = !isOnline;
         PlayersComboBox.IsEnabled = !isOnline;
