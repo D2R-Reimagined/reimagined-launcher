@@ -123,6 +123,18 @@
                             </Grid>
                         </Button>
                     </Grid>
+                    <Border x:Name="NormalModRepairBanner" Classes="warning-banner" Padding="12" IsVisible="False">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Normal mod recovery needed" FontWeight="SemiBold"
+                                       Foreground="{StaticResource GoldTextBrush}" />
+                            <TextBlock Text="This installation needs a normal mod reinstall before Online or Offline play. Ladder play can continue if its save folder can be recovered automatically."
+                                       TextWrapping="Wrap" />
+                            <TextBlock Classes="muted" TextWrapping="Wrap"
+                                       Text="Open Install/Update and choose Reinstall, or Select Zip Manually with a Nexus mod archive. Character saves are not changed." />
+                            <Button x:Name="RepairNormalModButton" Content="Repair normal mod"
+                                    HorizontalAlignment="Left" Click="OnRepairNormalModClick" />
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </Border>
 

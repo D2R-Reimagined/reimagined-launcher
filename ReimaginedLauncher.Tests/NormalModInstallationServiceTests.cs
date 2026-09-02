@@ -92,6 +92,12 @@ public sealed class NormalModInstallationServiceTests : IDisposable
 
         Assert.False(Directory.Exists(NormalModInstallationService.NormalModRoot(_installDirectory)));
         Assert.Throws<InvalidDataException>(() => NormalModInstallationService.Restore(_installDirectory));
+        Assert.True(NormalModInstallationService.RequiresRecovery(_installDirectory));
+
+        ReplaceActiveMod("NexusSaves");
+        NormalModInstallationService.RecordNexusInstallation(_installDirectory);
+
+        Assert.False(NormalModInstallationService.RequiresRecovery(_installDirectory));
     }
 
     [Fact]

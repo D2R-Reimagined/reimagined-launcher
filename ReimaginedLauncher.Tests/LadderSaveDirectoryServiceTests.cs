@@ -257,6 +257,101 @@ public sealed class LadderSaveDirectoryServiceTests : IDisposable
         Assert.True(await LadderSaveDirectoryService.RestoreIfRedirectedAsync(installDirectory));
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task LegacyLadderPreparationRecoversWithoutPromotingThePackageToNormal(
+        bool hasRuntimeBaseline, bool usesLegacyStateLocation)
+    {
+        var installDirectory = CreateInstall(
+            hasRuntimeBaseline ? "ReimaginedThree-Season-1-d630a3fc" : "ReimaginedThree", null);
+        var statePath = usesLegacyStateLocation
+            ? Path.Combine(installDirectory, "mods", "Reimagined", "d2rloader", "ladder-bundle-state.json")
+            : NormalModInstallationService.BundleStatePath(installDirectory);
+        Directory.CreateDirectory(Path.GetDirectoryName(statePath)!);
+        await File.WriteAllTextAsync(statePath, "{}");
+        if (hasRuntimeBaseline)
+        {
+            var modInfo = Path.Combine(installDirectory, "mods", "Reimagined", "Reimagined.mpq", "modinfo.json");
+            var baseline = LadderRuntimeFileService.GetBaselinePath(installDirectory, modInfo);
+            Directory.CreateDirectory(Path.GetDirectoryName(baseline)!);
+            await File.WriteAllTextAsync(baseline, "{\"savepath\":\"ReimaginedThree/\"}");
+        }
+
+        var savedGames = Path.Combine(_testDirectory, "Saved Games");
+        var normalSaves = Path.Combine(savedGames, "Diablo II Resurrected", "mods", "ReimaginedThree");
+        Directory.CreateDirectory(normalSaves);
+        await File.WriteAllTextAsync(Path.Combine(normalSaves, "Hero.d2s"), "local character");
+        await File.WriteAllTextAsync(Path.Combine(normalSaves, "Settings.json"), "normal settings");
+
+        NormalModInstallationService.PreserveBeforeLadderInstall(installDirectory);
+        var result = await LadderSaveDirectoryService.PrepareAsync(installDirectory, Ladder, "Season 1", savedGames);
+
+        var expectedPath = Path.Combine(savedGames, "Diablo II Resurrected", "mods", "ReimaginedThree-Season-1-d630a3fc");
+        Assert.Null(result.ErrorMessage);
+        Assert.Equal(expectedPath, result.DirectoryPath);
+        Assert.True(Directory.Exists(expectedPath));
+        Assert.Equal("ReimaginedThree-Season-1-d630a3fc", ReadCurrentSavePath(installDirectory));
+        Assert.Equal("normal settings", await File.ReadAllTextAsync(Path.Combine(expectedPath, "Settings.json")));
+        Assert.False(File.Exists(Path.Combine(expectedPath, "Hero.d2s")));
+        Assert.Equal("local character", await File.ReadAllTextAsync(Path.Combine(normalSaves, "Hero.d2s")));
+        Assert.True(File.Exists(statePath));
+        Assert.False(Directory.Exists(NormalModInstallationService.NormalModRoot(installDirectory)));
+        Assert.True(NormalModInstallationService.RequiresRecovery(installDirectory));
+        Assert.False(await LadderSaveDirectoryService.RestoreAsync(installDirectory));
+
+        await File.WriteAllTextAsync(Path.Combine(expectedPath, "Settings.json"), "ladder settings");
+        var repeated = await LadderSaveDirectoryService.PrepareAsync(installDirectory, Ladder, "Season 1", savedGames);
+        Assert.Equal(expectedPath, repeated.DirectoryPath);
+        Assert.Equal("ladder settings", await File.ReadAllTextAsync(Path.Combine(expectedPath, "Settings.json")));
+    }
+
+    [Fact]
+    public async Task PreparationKeepsThePreservedNormalSavePathWhenThePackageHasAnotherPath()
+    {
+        var installDirectory = CreateInstall("PackageSaves", "NexusSaves");
+        var result = await LadderSaveDirectoryService.PrepareAsync(
+            installDirectory, Ladder, "Season 1", Path.Combine(_testDirectory, "Saved Games"));
+
+        Assert.Null(result.ErrorMessage);
+        Assert.EndsWith("NexusSaves-Season-1-d630a3fc", result.DirectoryPath);
+        Assert.True(await LadderSaveDirectoryService.RestoreAsync(installDirectory));
+        Assert.Equal("NexusSaves", ReadCurrentSavePath(installDirectory));
+        Assert.False(NormalModInstallationService.RequiresRecovery(installDirectory));
+    }
+
+    [Theory]
+    [InlineData("ReimaginedThree-Old-Ladder-aaaaaaaa")]
+    [InlineData("../../outside")]
+    [InlineData("")]
+    public async Task PreparationDoesNotGuessAnOriginalPathFromUnusableMetadata(string savePath)
+    {
+        var installDirectory = CreateInstall(savePath, null);
+        var savedGames = Path.Combine(_testDirectory, "Saved Games");
+        var result = await LadderSaveDirectoryService.PrepareAsync(installDirectory, Ladder, "Season 1", savedGames);
+
+        Assert.Null(result.DirectoryPath);
+        Assert.Contains("Reinstall", result.ErrorMessage);
+        Assert.False(Directory.Exists(savedGames));
+        Assert.False(Directory.Exists(NormalModInstallationService.NormalModRoot(installDirectory)));
+    }
+
+    [Fact]
+    public async Task PreparationReportsTheUnderlyingFolderFailureWithoutApplyingALadderRedirect()
+    {
+        var installDirectory = CreateInstall("ReimaginedThree", null);
+        var savedGames = Path.Combine(_testDirectory, "Saved Games");
+        await File.WriteAllTextAsync(savedGames, "a file blocks directory creation");
+
+        var result = await LadderSaveDirectoryService.PrepareAsync(installDirectory, Ladder, "Season 1", savedGames);
+
+        Assert.Null(result.DirectoryPath);
+        Assert.Contains("The ladder save folder could not be prepared:", result.ErrorMessage);
+        Assert.Contains("Saved Games", result.ErrorMessage);
+        Assert.Equal("ReimaginedThree", ReadCurrentSavePath(installDirectory));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_testDirectory))

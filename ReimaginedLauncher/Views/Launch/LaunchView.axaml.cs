@@ -291,6 +291,11 @@ public partial class LaunchView : UserControl
 
         profile.IsInstallDirectoryValidated = isValidated;
 
+        NormalModRepairBanner.IsVisible = profile.Type != InstallationType.D2RMM
+                                          && isValidated
+                                          && NormalModInstallationService.RequiresRecovery(profile.InstallDirectory);
+        RepairNormalModButton.IsEnabled = !_isLaunching && !_isRunningLadderAction && !MainWindow.IsInstallInProgress;
+
         _loaderInventory = D2RLoaderService.Discover(profile.InstallDirectory);
         RefreshD2RLoaderState(profile, _loaderInventory);
         var loaderAvailable = D2RLoaderService.CanUseOnlineExperience(profile, out var loaderUnavailableReason);
@@ -463,6 +468,20 @@ public partial class LaunchView : UserControl
         OpenLoaderFolderButton.IsEnabled = Directory.Exists(inventory.GlobalRoot);
         OpenModLoaderFolderButton.IsEnabled = Directory.Exists(inventory.ModRoot)
                                                 || Directory.Exists(Path.GetDirectoryName(inventory.ModRoot));
+    }
+
+    private async void OnRepairNormalModClick(object? sender, RoutedEventArgs e)
+    {
+        if (_isLaunching || _isRunningLadderAction || MainWindow.IsInstallInProgress) return;
+
+        if (MainWindow.IsGameRunning())
+        {
+            Notifications.SendNotification("Close Diablo II: Resurrected before repairing the mod.", "Warning");
+            return;
+        }
+
+        if (MainWindow.Instance is { } mainWindow)
+            await mainWindow.NavigateToUpdateViewAsync();
     }
 
     private async void OnOfflineExperienceClick(object? sender, RoutedEventArgs e)
@@ -1777,20 +1796,20 @@ public partial class LaunchView : UserControl
 
             // Only now, with the plugin present and configured, is it safe to send
             // D2R at this ladder's own save folder.
-            var ladderDirectory = await LadderSaveDirectoryService.PrepareAsync(
+            var preparation = await LadderSaveDirectoryService.PrepareAsync(
                 profile.InstallDirectory,
                 ladder.Id,
                 ladder.Name);
-            if (ladderDirectory is null)
+            if (preparation.DirectoryPath is null)
             {
-                const string message = "The ladder save folder could not be prepared.";
+                var message = preparation.ErrorMessage ?? "The ladder save folder could not be prepared.";
                 LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
                 Notifications.SendNotification(message, "Warning");
                 await LadderSaveDirectoryService.RestoreAsync(profile.InstallDirectory);
                 return false;
             }
 
-            LaunchDiagnostics.Log($"server-saves configured for ladder {ladder.Id} at \"{ladderDirectory}\".");
+            LaunchDiagnostics.Log($"server-saves configured for ladder {ladder.Id} at \"{preparation.DirectoryPath}\".");
 
             await ConfigureChatRelayAsync(profile, accessToken);
             return true;

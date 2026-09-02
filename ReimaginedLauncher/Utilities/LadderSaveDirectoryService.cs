@@ -10,6 +10,8 @@ using System.Threading.Tasks;
 
 namespace ReimaginedLauncher.Utilities;
 
+public sealed record LadderSavePreparationResult(string? DirectoryPath, string? ErrorMessage = null);
+
 /// <summary>
 /// Points D2R at a per-ladder save folder by rewriting the mod's
 /// <c>savepath</c>, so ladder characters and the player's own characters live in
@@ -102,59 +104,94 @@ public static class LadderSaveDirectoryService
     /// <summary>
     /// Redirects the mod at <paramref name="installDirectory"/> to this ladder's
     /// own save folder and seeds it with the player's settings and loot filters.
-    /// Returns the resolved ladder save directory, or null on failure.
+    /// Returns the resolved ladder save directory or an actionable failure message.
     /// </summary>
-    public static async Task<string?> PrepareAsync(
+    public static Task<LadderSavePreparationResult> PrepareAsync(
         string? installDirectory,
         Guid ladderId,
         string? ladderName,
         CancellationToken cancellationToken = default)
     {
-        var normalizedInstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(installDirectory);
-        var modInfoPath = ResolveModInfoPath(normalizedInstallDirectory);
-        if (modInfoPath is null)
-        {
-            LaunchDiagnostics.Log("ladder saves: modinfo.json could not be located; the ladder save folder was not prepared.");
-            return null;
-        }
+        return PrepareAsync(installDirectory, ladderId, ladderName, null, cancellationToken);
+    }
 
+    internal static async Task<LadderSavePreparationResult> PrepareAsync(
+        string? installDirectory,
+        Guid ladderId,
+        string? ladderName,
+        string? savedGamesPath,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedInstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(installDirectory);
         try
         {
-            LadderRuntimeFileService.RestoreOrCaptureBaseline(normalizedInstallDirectory!, modInfoPath);
+            var modInfoPath = ResolveModInfoPath(normalizedInstallDirectory);
+            if (modInfoPath is null)
+            {
+                return PreparationFailed("The ladder mod's modinfo.json is missing. Update or reinstall the ladder package and try again.");
+            }
+
+            var baselinePath = LadderRuntimeFileService.RestoreOrCaptureBaseline(normalizedInstallDirectory!, modInfoPath);
             var baseSavePath = await ReadBaseSavePathAsync(
                 normalizedInstallDirectory!,
                 modInfoPath,
                 cancellationToken);
-            if (string.IsNullOrWhiteSpace(baseSavePath))
+            // A signed package can supply the ladder path, but cannot recover the normal installation.
+            if (string.IsNullOrWhiteSpace(baseSavePath) && NormalModInstallationService.HasNormalSavePath(baselinePath))
             {
-                LaunchDiagnostics.Log("ladder saves: modinfo.json has no savepath; the ladder save folder was not prepared.");
-                return null;
+                baseSavePath = await ReadSavePathAsync(baselinePath, cancellationToken);
+                LaunchDiagnostics.Log("ladder saves: using the package savepath for a legacy installation without a normal-mod backup.");
+            }
+
+            if (string.IsNullOrWhiteSpace(baseSavePath) || !IsRelativeSavePath(baseSavePath))
+            {
+                return PreparationFailed("The original save path could not be recovered. Use Reinstall on the Install/Update page, or Select Zip Manually with a Nexus mod archive, then update the ladder package and try again. Character saves are not changed.");
             }
 
             var ladderSavePath = BuildLadderSavePath(baseSavePath, ladderId, ladderName);
-            if (!await WriteSavePathAsync(modInfoPath, ladderSavePath, cancellationToken))
-            {
-                return null;
-            }
-
-            var baseDirectory = ResolveSaveDirectory(baseSavePath);
-            var ladderDirectory = ResolveSaveDirectory(ladderSavePath, createMissingDirectories: true);
+            savedGamesPath ??= SaveFileService.GetSavedGamesPath();
+            var baseDirectory = ResolveSaveDirectory(baseSavePath, savedGamesPath, createMissingDirectories: false);
+            var ladderDirectory = ResolveSaveDirectory(ladderSavePath, savedGamesPath, createMissingDirectories: true);
             if (ladderDirectory is null)
             {
-                return null;
+                return PreparationFailed("The Saved Games folder could not be located. Check that your Windows user profile or Wine/Proton save folder is available.");
             }
 
             Directory.CreateDirectory(ladderDirectory);
             SeedPlayerPreferences(baseDirectory, ladderDirectory);
+            if (!await WriteSavePathAsync(modInfoPath, ladderSavePath, cancellationToken))
+            {
+                return PreparationFailed("The ladder mod's modinfo.json is invalid. Update or reinstall the ladder package and try again.");
+            }
 
             LaunchDiagnostics.Log($"ladder saves: D2R will use \"{ladderSavePath}\" for this session.");
-            return ladderDirectory;
+            return new LadderSavePreparationResult(ladderDirectory);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
-            LaunchDiagnostics.Log($"ladder saves: could not prepare the ladder save folder: {exception.Message}");
-            return null;
+            LaunchDiagnostics.LogException("ladder saves: could not prepare the ladder save folder", exception);
+            return new LadderSavePreparationResult(null, $"The ladder save folder could not be prepared: {exception.Message}");
         }
+    }
+
+    private static LadderSavePreparationResult PreparationFailed(string message)
+    {
+        LaunchDiagnostics.Log($"ladder saves: {message}");
+        return new LadderSavePreparationResult(null, message);
+    }
+
+    private static bool IsRelativeSavePath(string savePath)
+    {
+        if (Path.IsPathRooted(savePath)) return false;
+
+        foreach (var segment in savePath.Split('/', '\\'))
+        {
+            if (segment is "." or ".." || segment.Contains(':')
+                || segment.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+                return false;
+        }
+
+        return true;
     }
 
     /// <summary>

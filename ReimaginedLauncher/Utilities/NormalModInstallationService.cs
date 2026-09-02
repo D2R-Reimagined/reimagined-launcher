@@ -27,6 +27,25 @@ internal static class NormalModInstallationService
         || File.Exists(BundleStatePath(installDirectory))
         || File.Exists(Path.Combine(installDirectory, "mods", "Reimagined", "d2rloader", "ladder-bundle-state.json"));
 
+    internal static bool RequiresRecovery(string? installDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(installDirectory)) return false;
+
+        try
+        {
+            var normalModInfo = FindModInfo(NormalModRoot(installDirectory));
+            if (normalModInfo is not null && HasNormalSavePath(normalModInfo)) return false;
+
+            var activeModInfo = FindModInfo(Path.Combine(installDirectory, "mods", "Reimagined"));
+            return HasLadderInstallation(installDirectory)
+                   || activeModInfo is not null && !HasNormalSavePath(activeModInfo);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
+
     internal static string? FindModInfo(string modRoot)
     {
         foreach (var path in new[]
