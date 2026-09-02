@@ -1352,10 +1352,27 @@ public partial class MainWindow : Window
         try
         {
             Notifications.SendNotification("Checking for launcher updates...", "Launcher");
-            await LauncherUpdateService.CheckForUpdatesAsync();
-            if (!LauncherUpdateService.IsUpdateAvailable && !LauncherUpdateService.IsUpdateDownloaded)
+            var result = await LauncherUpdateService.CheckForUpdatesAsync();
+            switch (result.Status)
             {
-                Notifications.SendNotification($"Launcher v{LauncherVersion} is up to date.", "Launcher");
+                case LauncherUpdateCheckStatus.UpToDate:
+                    Notifications.SendNotification($"Launcher v{LauncherVersion} is up to date.", "Launcher");
+                    break;
+                case LauncherUpdateCheckStatus.UpdateReady:
+                    Notifications.SendNotification($"Launcher update {LauncherUpdateService.LatestVersion} is ready to install.", "Launcher");
+                    break;
+                case LauncherUpdateCheckStatus.InProgress:
+                    Notifications.SendNotification("A launcher update check or download is already in progress.", "Launcher");
+                    break;
+                case LauncherUpdateCheckStatus.NotInstalled:
+                    Notifications.SendNotification("This launcher is not installed with automatic update support.", "Launcher");
+                    break;
+                case LauncherUpdateCheckStatus.Disabled:
+                    Notifications.SendNotification("Launcher updates are disabled in Settings.", "Launcher");
+                    break;
+                case LauncherUpdateCheckStatus.Failed:
+                    Notifications.SendNotification($"Update check failed: {result.ErrorMessage}", "Error");
+                    break;
             }
         }
         catch (Exception ex)

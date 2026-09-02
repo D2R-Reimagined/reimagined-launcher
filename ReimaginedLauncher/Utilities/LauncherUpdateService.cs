@@ -1,16 +1,28 @@
 using System;
 using System.Diagnostics;
+using System.Threading;
 using System.Threading.Tasks;
-using Avalonia.Threading;
 using Velopack;
 using Velopack.Sources;
 
 namespace ReimaginedLauncher.Utilities;
 
+public enum LauncherUpdateCheckStatus
+{
+    UpToDate,
+    UpdateReady,
+    Disabled,
+    InProgress,
+    NotInstalled,
+    Failed
+}
+
+public sealed record LauncherUpdateCheckResult(LauncherUpdateCheckStatus Status, string? ErrorMessage = null);
+
 public static class LauncherUpdateService
 {
     private const string RepoUrl = "https://github.com/D2R-Reimagined/reimagined-launcher";
-    private static bool _hasCheckedForUpdates;
+    private static readonly SemaphoreSlim UpdateCheckLock = new(1, 1);
     private static UpdateManager? _updateManager;
     private static UpdateInfo? _updateInfo;
     
@@ -28,32 +40,57 @@ public static class LauncherUpdateService
     public static event EventHandler? UpdateDownloaded;
     public static event EventHandler? UpdateStateChanged;
 
-    public static async Task CheckForUpdatesAsync()
+    public static Task<LauncherUpdateCheckResult> CheckForUpdatesAsync()
     {
-        if (AreUpdatesDisabled || _hasCheckedForUpdates)
+        return CheckForUpdatesAsync(() =>
+            new UpdateManager(new GithubSource(RepoUrl, accessToken: null, prerelease: false)));
+    }
+
+    internal static async Task<LauncherUpdateCheckResult> CheckForUpdatesAsync(Func<UpdateManager> createUpdateManager)
+    {
+        if (AreUpdatesDisabled)
         {
-            return;
+            return new(LauncherUpdateCheckStatus.Disabled);
         }
 
-        _hasCheckedForUpdates = true;
+        if (!await UpdateCheckLock.WaitAsync(0))
+        {
+            return new(LauncherUpdateCheckStatus.InProgress);
+        }
 
         try
         {
-            var source = new GithubSource(RepoUrl, accessToken: null, prerelease: false);
-            _updateManager = new UpdateManager(source);
+            var updateManager = createUpdateManager();
 
-            if (!_updateManager.IsInstalled)
+            if (!updateManager.IsInstalled)
             {
-                return;
+                return new(LauncherUpdateCheckStatus.NotInstalled);
             }
 
-            _updateInfo = await _updateManager.CheckForUpdatesAsync();
-            if (_updateInfo == null)
+            var updateInfo = await updateManager.CheckForUpdatesAsync();
+            if (AreUpdatesDisabled)
             {
-                return;
+                return new(LauncherUpdateCheckStatus.Disabled);
             }
 
+            if (updateInfo == null)
+            {
+                _updateInfo = null;
+                IsUpdateAvailable = false;
+                IsUpdateDownloaded = false;
+                LatestVersion = null;
+                return new(LauncherUpdateCheckStatus.UpToDate);
+            }
+
+            if (IsUpdateDownloaded && _updateInfo?.TargetFullRelease.Version == updateInfo.TargetFullRelease.Version)
+            {
+                return new(LauncherUpdateCheckStatus.UpdateReady);
+            }
+
+            _updateManager = updateManager;
+            _updateInfo = updateInfo;
             IsUpdateAvailable = true;
+            IsUpdateDownloaded = false;
             LatestVersion = _updateInfo.TargetFullRelease.Version.ToString();
             UpdateStateChanged?.Invoke(null, EventArgs.Empty);
 
@@ -71,11 +108,17 @@ public static class LauncherUpdateService
             }
 
             UpdateDownloaded?.Invoke(null, EventArgs.Empty);
-            UpdateStateChanged?.Invoke(null, EventArgs.Empty);
+            return new(LauncherUpdateCheckStatus.UpdateReady);
         }
         catch (Exception ex)
         {
             Trace.WriteLine($"Launcher update check failed: {ex}");
+            return new(LauncherUpdateCheckStatus.Failed, ex.Message);
+        }
+        finally
+        {
+            UpdateCheckLock.Release();
+            UpdateStateChanged?.Invoke(null, EventArgs.Empty);
         }
     }
 
