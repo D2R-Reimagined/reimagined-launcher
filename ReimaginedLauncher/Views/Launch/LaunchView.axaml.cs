@@ -303,9 +303,12 @@ public partial class LaunchView : UserControl
         else
         {
             InstallDirectoryTitle.Text = "Install Directory";
-            InstallDirectoryDescription.Text = profile.Type == InstallationType.Lutris
-                ? "Pick your Diablo II: Resurrected entry in Lutris. The install directory is read from that game's Lutris configuration."
-                : "Select the Diablo II: Resurrected folder that contains your local mod installation (Folder with .exe in it)";
+            InstallDirectoryDescription.Text = "Select the Diablo II: Resurrected folder that contains your local mod installation (Folder with .exe in it)";
+            if (profile.Type == InstallationType.Lutris)
+            {
+                InstallDirectoryDescription.Text = "Pick your Diablo II: Resurrected entry in Lutris. The install directory is read from that game's Lutris configuration.";
+            }
+
             isValidated = profile.Type == InstallationType.Steam
                 ? InstallDirectoryValidator.IsValidSteamInstallDirectory(profile.InstallDirectory)
                 : InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory);
