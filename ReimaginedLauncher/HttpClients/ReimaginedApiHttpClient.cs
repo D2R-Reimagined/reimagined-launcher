@@ -30,13 +30,30 @@ public sealed class ReimaginedApiHttpClient
 #endif
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
 
+    /// <summary>Deadline for the small JSON calls, which used to inherit it from the client.</summary>
+    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// The package is served from object storage in a different region than
+    /// the API, so one connection is limited by window size over a long round
+    /// trip rather than by the player's bandwidth. Several ranged requests at
+    /// once is what actually fills the pipe.
+    /// </summary>
+    private const int DownloadParallelism = 8;
+    private const long DownloadChunkBytes = 8L * 1024 * 1024;
+    private const int DownloadChunkAttempts = 4;
+    private static readonly TimeSpan DownloadChunkTimeout = TimeSpan.FromMinutes(5);
+
     private readonly HttpClient _httpClient;
 
     public ReimaginedApiHttpClient(HttpClient httpClient)
     {
         _httpClient = httpClient;
         _httpClient.BaseAddress = ResolveApiBaseAddress();
-        _httpClient.Timeout = TimeSpan.FromSeconds(10);
+        // A client-wide timeout also caps how long a response body may take to
+        // read, which a package download cannot live with. Every short call
+        // below sets its own deadline instead.
+        _httpClient.Timeout = Timeout.InfiniteTimeSpan;
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("ReimaginedLauncher/1.0");
         LaunchDiagnostics.Log($"Reimagined API base address: {_httpClient.BaseAddress}");
     }
@@ -47,10 +64,23 @@ public sealed class ReimaginedApiHttpClient
     public async Task<IReadOnlyList<LadderResponse>> GetActiveLaddersAsync(
         CancellationToken cancellationToken = default)
     {
+        using var timeout = CreateRequestTimeout(cancellationToken);
         return await _httpClient.GetFromJsonAsync<List<LadderResponse>>(
             "ladders/active",
             JsonOptions,
-            cancellationToken) ?? [];
+            timeout.Token) ?? [];
+    }
+
+    /// <summary>
+    /// Per-call deadline for the short JSON requests. The client itself no
+    /// longer sets one, because a client-wide timeout also applies while a
+    /// package download is reading its response body.
+    /// </summary>
+    private static CancellationTokenSource CreateRequestTimeout(CancellationToken cancellationToken)
+    {
+        var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(RequestTimeout);
+        return timeout;
     }
 
     public async Task<byte[]> DownloadLadderBundleAsync(
@@ -58,41 +88,48 @@ public sealed class ReimaginedApiHttpClient
         IProgress<LadderBundleDownloadProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        using var response = await _httpClient.GetAsync(
+        // The first request resolves where the bytes actually live. The API
+        // redirects to object storage when it can, and the effective URL is
+        // what the ranged requests below are aimed at.
+        using var probe = await _httpClient.GetAsync(
             bundle.DownloadPath.TrimStart('/'),
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
-        response.EnsureSuccessStatusCode();
+        probe.EnsureSuccessStatusCode();
 
-        var expectedLength = response.Content.Headers.ContentLength ?? bundle.ArtifactSizeBytes;
+        var expectedLength = probe.Content.Headers.ContentLength ?? bundle.ArtifactSizeBytes;
         if (expectedLength <= 0 || expectedLength > 512L * 1024 * 1024)
         {
             throw new InvalidOperationException("The ladder bundle has an invalid download size.");
         }
 
-        await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
-        await using var output = new System.IO.MemoryStream((int)expectedLength);
-        var buffer = new byte[81920];
+        var effectiveUrl = probe.RequestMessage?.RequestUri;
+        var supportsRanges = effectiveUrl is not null
+                             && probe.Headers.AcceptRanges.Contains("bytes")
+                             && expectedLength > DownloadChunkBytes;
         var stopwatch = Stopwatch.StartNew();
+        var payload = new byte[expectedLength];
+        if (supportsRanges)
+        {
+            probe.Dispose();
+            await DownloadInParallelAsync(effectiveUrl!, payload, progress, stopwatch, cancellationToken);
+            return payload;
+        }
+
+        await using var input = await probe.Content.ReadAsStreamAsync(cancellationToken);
         var lastReportAt = TimeSpan.Zero;
         long lastReportBytes = 0;
         double smoothedBytesPerSecond = 0;
         long total = 0;
-        while (true)
+        while (total < expectedLength)
         {
-            var read = await input.ReadAsync(buffer, cancellationToken);
+            var read = await input.ReadAsync(payload.AsMemory((int)total), cancellationToken);
             if (read == 0)
             {
                 break;
             }
 
             total += read;
-            if (total > 512L * 1024 * 1024)
-            {
-                throw new InvalidOperationException("The ladder bundle exceeded the 512 MiB download limit.");
-            }
-
-            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
             var elapsed = stopwatch.Elapsed;
             if (elapsed - lastReportAt >= TimeSpan.FromMilliseconds(250))
             {
@@ -109,6 +146,12 @@ public sealed class ReimaginedApiHttpClient
             }
         }
 
+        if (total != expectedLength)
+        {
+            throw new InvalidOperationException(
+                $"The ladder bundle download ended after {total} of {expectedLength} bytes.");
+        }
+
         ReportDownloadProgress(
             progress,
             total,
@@ -118,7 +161,112 @@ public sealed class ReimaginedApiHttpClient
             lastReportBytes,
             smoothedBytesPerSecond);
 
-        return output.ToArray();
+        return payload;
+    }
+
+    /// <summary>
+    /// Fills <paramref name="payload"/> with several ranged requests in flight
+    /// at once, each writing only into its own slice. A chunk that fails
+    /// resumes from the bytes it already has, so a dropped connection costs
+    /// the remainder of one chunk rather than the whole download.
+    /// </summary>
+    private async Task DownloadInParallelAsync(
+        Uri source,
+        byte[] payload,
+        IProgress<LadderBundleDownloadProgress>? progress,
+        Stopwatch stopwatch,
+        CancellationToken cancellationToken)
+    {
+        var total = payload.LongLength;
+        var chunks = new List<(long Start, long EndInclusive)>();
+        for (var start = 0L; start < total; start += DownloadChunkBytes)
+        {
+            chunks.Add((start, Math.Min(total, start + DownloadChunkBytes) - 1));
+        }
+
+        long received = 0;
+        var download = Parallel.ForEachAsync(
+            chunks,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = DownloadParallelism,
+                CancellationToken = cancellationToken
+            },
+            async (chunk, token) =>
+            {
+                var offset = chunk.Start;
+                var attempt = 0;
+                while (offset <= chunk.EndInclusive)
+                {
+                    attempt++;
+                    try
+                    {
+                        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                        timeout.CancelAfter(DownloadChunkTimeout);
+                        using var request = new HttpRequestMessage(HttpMethod.Get, source);
+                        request.Headers.Range = new RangeHeaderValue(offset, chunk.EndInclusive);
+                        using var response = await _httpClient.SendAsync(
+                            request,
+                            HttpCompletionOption.ResponseHeadersRead,
+                            timeout.Token);
+                        response.EnsureSuccessStatusCode();
+                        await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
+                        while (offset <= chunk.EndInclusive)
+                        {
+                            var read = await stream.ReadAsync(
+                                payload.AsMemory((int)offset, (int)(chunk.EndInclusive - offset + 1)),
+                                timeout.Token);
+                            if (read == 0)
+                            {
+                                throw new System.IO.EndOfStreamException(
+                                    $"The ladder bundle download ended at byte {offset} of {total}.");
+                            }
+
+                            offset += read;
+                            Interlocked.Add(ref received, read);
+                        }
+                    }
+                    catch (Exception exception) when (
+                        exception is not OperationCanceledException
+                        && attempt < DownloadChunkAttempts
+                        && !token.IsCancellationRequested)
+                    {
+                        LaunchDiagnostics.Log(
+                            $"Ladder bundle chunk {chunk.Start}-{chunk.EndInclusive} stopped at {offset}: {exception.Message}. Retrying.");
+                        await Task.Delay(TimeSpan.FromSeconds(attempt), token);
+                    }
+                }
+            });
+
+        var lastReportAt = TimeSpan.Zero;
+        long lastReportBytes = 0;
+        double smoothedBytesPerSecond = 0;
+        while (!download.IsCompleted)
+        {
+            await Task.WhenAny(download, Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken));
+            var soFar = Interlocked.Read(ref received);
+            var elapsed = stopwatch.Elapsed;
+            smoothedBytesPerSecond = ReportDownloadProgress(
+                progress,
+                soFar,
+                total,
+                elapsed,
+                lastReportAt,
+                lastReportBytes,
+                smoothedBytesPerSecond);
+            lastReportAt = elapsed;
+            lastReportBytes = soFar;
+        }
+
+        await download;
+        ReportDownloadProgress(
+            progress,
+            total,
+            total,
+            stopwatch.Elapsed,
+            lastReportAt,
+            lastReportBytes,
+            smoothedBytesPerSecond);
     }
 
     public async Task<byte[]> DownloadOptionalExtensionAsync(
@@ -207,9 +355,10 @@ public sealed class ReimaginedApiHttpClient
             }, options: JsonOptions)
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        using var timeout = CreateRequestTimeout(cancellationToken);
+        using var response = await _httpClient.SendAsync(request, timeout.Token);
         response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<LadderLaunchTicketResponse>(JsonOptions, cancellationToken)
+        return await response.Content.ReadFromJsonAsync<LadderLaunchTicketResponse>(JsonOptions, timeout.Token)
                ?? throw new InvalidOperationException("The API returned an empty ladder launch ticket response.");
     }
 
@@ -219,11 +368,12 @@ public sealed class ReimaginedApiHttpClient
         string redirectUri,
         CancellationToken cancellationToken = default)
     {
+        using var timeout = CreateRequestTimeout(cancellationToken);
         using var response = await _httpClient.PostAsJsonAsync(
             "auth/launcher/token",
             new { code, codeVerifier, redirectUri },
             JsonOptions,
-            cancellationToken);
+            timeout.Token);
         if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
         {
             return null;
@@ -232,18 +382,19 @@ public sealed class ReimaginedApiHttpClient
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<LauncherTokenResponse>(
             JsonOptions,
-            cancellationToken);
+            timeout.Token);
     }
 
     public async Task<LauncherTokenResponse?> RefreshLauncherSessionAsync(
         string refreshToken,
         CancellationToken cancellationToken = default)
     {
+        using var timeout = CreateRequestTimeout(cancellationToken);
         using var response = await _httpClient.PostAsJsonAsync(
             "auth/launcher/refresh",
             new { refreshToken },
             JsonOptions,
-            cancellationToken);
+            timeout.Token);
         if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
         {
             return null;
@@ -252,18 +403,19 @@ public sealed class ReimaginedApiHttpClient
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<LauncherTokenResponse>(
             JsonOptions,
-            cancellationToken);
+            timeout.Token);
     }
 
     public async Task RevokeLauncherSessionAsync(
         string refreshToken,
         CancellationToken cancellationToken = default)
     {
+        using var timeout = CreateRequestTimeout(cancellationToken);
         using var response = await _httpClient.PostAsJsonAsync(
             "auth/launcher/revoke",
             new { refreshToken },
             JsonOptions,
-            cancellationToken);
+            timeout.Token);
         response.EnsureSuccessStatusCode();
     }
 
