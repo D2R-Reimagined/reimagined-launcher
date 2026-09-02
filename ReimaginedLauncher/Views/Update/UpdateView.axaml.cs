@@ -28,24 +28,29 @@ public partial class UpdateView : UserControl
         var isAuthenticated = MainWindow.UserViewModel.User != null;
         var usesDownloadsWatcher = isAuthenticated && MainWindow.Settings.NexusPremiumDownloadAccess == false;
         var isInstallMissing = MainWindow.UpdateCurrentVersion.Equals("Not detected", StringComparison.OrdinalIgnoreCase);
-        var canDownload = isInstallMissing || MainWindow.IsUpdateAvailable;
+        var actions = GetInstallActionAvailability(
+            isInstallMissing,
+            MainWindow.IsUpdateAvailable,
+            _isLoading,
+            MainWindow.IsInstallInProgress,
+            MainWindow.CanInstallOrUpdate,
+            isAuthenticated);
 
         LoadingBanner.IsVisible = _isLoading;
         InstallProgressBanner.IsVisible = MainWindow.IsInstallInProgress;
         StatusBorder.IsVisible = !_isLoading && !MainWindow.IsInstallInProgress;
         VersionsBorder.IsVisible = !_isLoading && !MainWindow.IsInstallInProgress;
         AuthWarningBanner.IsVisible = !_isLoading && !MainWindow.IsInstallInProgress && !isAuthenticated;
-        NonPremiumWarningBanner.IsVisible = !_isLoading && !MainWindow.IsInstallInProgress && usesDownloadsWatcher && canDownload;
+        NonPremiumWarningBanner.IsVisible = usesDownloadsWatcher && (actions.CanInstallOrUpdate || actions.CanReinstall);
 
         StatusTitleText.Text = MainWindow.UpdateStatusTitle;
         StatusMessageText.Text = MainWindow.UpdateStatusMessage;
         CurrentVersionText.Text = MainWindow.UpdateCurrentVersion;
         LatestVersionText.Text = MainWindow.UpdateLatestVersion;
-        InstallOrUpdateButton.IsEnabled = !_isLoading &&
-                                          MainWindow.CanInstallOrUpdate &&
-                                          !MainWindow.IsInstallInProgress &&
-                                          isAuthenticated &&
-                                          canDownload;
+        InstallOrUpdateButton.IsEnabled = actions.CanInstallOrUpdate;
+        ReinstallButton.IsVisible = !isInstallMissing;
+        ReinstallButton.IsEnabled = actions.CanReinstall;
+        ReinstallHelpText.IsVisible = !isInstallMissing && !_isLoading && !MainWindow.IsInstallInProgress;
         SelectZipManuallyButton.IsEnabled = !_isLoading &&
                                             !MainWindow.IsInstallInProgress &&
                                             MainWindow.Settings.CurrentProfile.IsInstallDirectoryValidated &&
@@ -69,15 +74,33 @@ public partial class UpdateView : UserControl
         RefreshUpdateState();
     }
 
+    internal static (bool CanInstallOrUpdate, bool CanReinstall) GetInstallActionAvailability(
+        bool isInstallMissing,
+        bool isUpdateAvailable,
+        bool isLoading,
+        bool isInstallInProgress,
+        bool canInstallOrUpdate,
+        bool isAuthenticated)
+    {
+        var canDownload = !isLoading && !isInstallInProgress && canInstallOrUpdate && isAuthenticated;
+        return (canDownload && (isInstallMissing || isUpdateAvailable), canDownload && !isInstallMissing);
+    }
+
     private async void OnInstallOrUpdateClick(object? sender, RoutedEventArgs e)
     {
         if (MainWindow.IsInstallInProgress || string.IsNullOrWhiteSpace(MainWindow.UpdateDownloadUrl))
             return;
 
+        if (MainWindow.IsGameRunning())
+        {
+            Notifications.SendNotification("Close Diablo II: Resurrected before installing or reinstalling mod files.", "Warning");
+            return;
+        }
+
         if (MainWindow.UserViewModel.User == null)
         {
             Notifications.SendNotification(
-                "Authenticate with Nexus Mods first to use Download and Install.",
+                "Authenticate with Nexus Mods first to download, update, or reinstall the mod.",
                 "Warning");
             return;
         }

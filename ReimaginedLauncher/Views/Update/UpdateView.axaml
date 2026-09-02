@@ -59,7 +59,7 @@
                 Classes="warning-banner"
                 Padding="10"
                 IsVisible="False">
-            <TextBlock Text="Authenticate with Nexus Mods first to use Download and Install."
+            <TextBlock Text="Authenticate with Nexus Mods first to download, update, or reinstall the mod."
                        Foreground="{StaticResource GoldTextBrush}"
                        TextWrapping="Wrap"/>
         </Border>
@@ -67,14 +67,22 @@
                 Classes="warning-banner"
                 Padding="10"
                 IsVisible="False">
-            <TextBlock Text="Non-premium workflow: click Download and Install, complete Manual Download in your browser, and keep this launcher open. It will watch Downloads for the new zip and install it automatically."
+            <TextBlock Text="Non-premium workflow: click the download or reinstall button, complete Manual Download in your browser, and keep this launcher open. It will watch Downloads for the new zip and install it automatically."
                        Foreground="{StaticResource GoldTextBrush}"
                        TextWrapping="Wrap"/>
         </Border>
-        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
+        <TextBlock x:Name="ReinstallHelpText"
+                   Classes="muted"
+                   Text="Need to repair your installation? Reinstall downloads the latest Nexus release again and replaces the mod files, including the normal save path. Character saves are not changed."
+                   TextWrapping="Wrap"/>
+        <WrapPanel Orientation="Horizontal" ItemSpacing="8" LineSpacing="8" Margin="0,12,0,0">
             <Button x:Name="InstallOrUpdateButton"
                     Classes="accent"
                     Content="Download and Install"
+                    Click="OnInstallOrUpdateClick"/>
+            <Button x:Name="ReinstallButton"
+                    Content="Reinstall"
+                    ToolTip.Tip="Download and reinstall the latest Nexus release, even when your installed version is up to date."
                     Click="OnInstallOrUpdateClick"/>
             <Button Content="Select Zip Manually"
                     x:Name="SelectZipManuallyButton"
@@ -85,6 +93,6 @@
             <Button Content="Re-check"
                     x:Name="RecheckButton"
                     Click="OnRecheckClick"/>
-        </StackPanel>
+        </WrapPanel>
     </StackPanel>
 </UserControl>
