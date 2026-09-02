@@ -56,7 +56,7 @@ Because the folders are separate, **nothing is ever moved**. A player's own char
 
 Each ladder also gets its own shared stash, since `.d2i` lives in the save folder. Items cannot be moved between a ladder and offline play.
 
-The launcher seeds a new ladder folder with `Settings.json`, `lootfilter.json` and any `*.fltr` loot filters so a ladder session does not begin on default graphics settings with no filters. Characters and the shared stash are deliberately not carried across. Existing files are never overwritten, so anything tuned inside a ladder is kept.
+The launcher seeds a ladder folder with `Settings.json`, `lootfilter.json`, and any `*.fltr` loot filters from the normal Reimagined save folder when a destination file does not exist. Characters and the shared stash are deliberately not carried across. Existing files are never overwritten, so anything tuned inside a ladder is kept.
 
 Every non-ladder launch restores the normal `savepath`, as does every ladder-launch failure path.
 

@@ -148,11 +148,14 @@ public sealed class LadderSaveDirectoryServiceTests : IDisposable
         Directory.CreateDirectory(ladderDirectory);
 
         File.WriteAllText(Path.Combine(baseDirectory, "Settings.json"), "base");
+        File.WriteAllText(Path.Combine(baseDirectory, "lootfilter.json"), "base filter");
         File.WriteAllText(Path.Combine(ladderDirectory, "Settings.json"), "ladder");
 
-        LadderSaveDirectoryService.SeedPlayerPreferences(baseDirectory, ladderDirectory);
+        var copied = LadderSaveDirectoryService.SeedPlayerPreferences(baseDirectory, ladderDirectory);
 
+        Assert.Equal(1, copied);
         Assert.Equal("ladder", File.ReadAllText(Path.Combine(ladderDirectory, "Settings.json")));
+        Assert.Equal("base filter", File.ReadAllText(Path.Combine(ladderDirectory, "lootfilter.json")));
     }
 
     [Fact]
