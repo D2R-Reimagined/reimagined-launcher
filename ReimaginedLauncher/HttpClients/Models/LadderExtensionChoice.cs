@@ -19,7 +19,7 @@ public sealed class LadderExtensionChoice
     public string Detail => IsProvidedByLauncher
         ? IsRequired
             ? $"{FileName} (required, supplied by signed ladder package)"
-            : $"{FileName} (optional, supplied by signed ladder package)"
+            : $"{FileName} (optional, select then Update to download)"
         : !IsInstalled
         ? IsRequired
             ? $"{FileName} (required, not installed or hash mismatch)"

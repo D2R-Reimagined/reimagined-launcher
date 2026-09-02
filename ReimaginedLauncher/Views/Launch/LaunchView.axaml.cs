@@ -791,8 +791,11 @@ public partial class LaunchView : UserControl
         MainWindow.Settings.CurrentProfile.SelectedLadderId = selectedLadder?.Id;
     }
 
+    private int _ladderPolicyGeneration;
+
     private async Task RefreshLadderExtensionPolicyAsync()
     {
+        var generation = ++_ladderPolicyGeneration;
         _ladderPolicyVerified = false;
         _missingRequiredLadderExtensions = [];
         _ladderBundleReadiness = null;
@@ -815,21 +818,28 @@ public partial class LaunchView : UserControl
         LadderBundleStatusText.Text = "Checking the signed ladder package...";
         try
         {
-            _ladderBundleReadiness = await _ladderBundleService.GetReadinessAsync(
+            var readiness = await _ladderBundleService.GetReadinessAsync(
                 MainWindow.Settings.CurrentProfile.InstallDirectory,
-                ladder.ActiveBundle);
+                ladder.ActiveBundle,
+                allowedExtensions: ladder.AllowedExtensions,
+                selectedExtensionIds: GetEffectiveSelectedLadderExtensionIds(ladder));
+            if (generation != _ladderPolicyGeneration) return;
+            _ladderBundleReadiness = readiness;
             LadderBundleStatusText.Text = _ladderBundleReadiness.Status;
 
             var approvals = MapApprovals(ladder);
             var preview = await D2RLoaderService.PreviewLadderPolicyAsync(
                 MainWindow.Settings.CurrentProfile.InstallDirectory,
                 approvals);
+            if (generation != _ladderPolicyGeneration) return;
             var selectedIds = GetEffectiveSelectedLadderExtensionIds(ladder);
             _ladderExtensionChoices = preview.ApprovedExtensions
                 .Select(state =>
                 {
                     var isProvidedByLauncher = !state.IsInstalled
-                                               && (LadderBundleService.CanSupplyApproval(
+                                               && (ladder.AllowedExtensions.Any(extension => extension.Id == state.Approval.Id
+                                                       && LadderOptionalExtensionService.CanDownload(extension))
+                                                   || LadderBundleService.CanSupplyApproval(
                                                        ladder.ActiveBundle,
                                                        state.Approval.FileName,
                                                        state.Approval.Sha256,
@@ -922,6 +932,7 @@ public partial class LaunchView : UserControl
         }
         catch (Exception ex)
         {
+            if (generation != _ladderPolicyGeneration) return;
             _ladderExtensionChoices = [];
             _missingRequiredLadderExtensions = [];
             AllowedLadderPluginsItemsControl.ItemsSource = null;
@@ -978,7 +989,7 @@ public partial class LaunchView : UserControl
     private string LadderActionDescription(LadderAction action) => action switch
     {
         LadderAction.Download => "Downloads and verifies everything this ladder requires. This does not start the game.",
-        LadderAction.Update => "This ladder has moved to a newer package. Updating brings your install back in line. This does not start the game.",
+        LadderAction.Update => "Update the required package or apply your optional plugin and patch selections. This does not start the game.",
         LadderAction.Play => "Restores clean base files, enforces the ladder extension allowlist, and starts Reimagined through D2RLoader.",
         _ => _ladderBundleReadiness?.Status ?? "This ladder cannot be played from this installation yet."
     };
@@ -990,13 +1001,15 @@ public partial class LaunchView : UserControl
     /// </summary>
     private async Task RunLadderSetupActionAsync()
     {
-        if (SelectedLadder?.ActiveBundle is not { } bundle || _isLaunching || _isRunningLadderAction)
+        if (SelectedLadder is not { ActiveBundle: { } bundle } ladder || _isLaunching || _isRunningLadderAction)
         {
             return;
         }
 
         var isUpdate = _ladderAction == LadderAction.Update;
         _isRunningLadderAction = true;
+        LadderExtensionsGrid.IsEnabled = false;
+        ActiveLadderComboBox.IsEnabled = false;
         RefreshInstallDirectoryState();
         SetLadderSetupProgress(
             isUpdate ? "Updating the ladder package..." : "Downloading the ladder package...",
@@ -1005,10 +1018,18 @@ public partial class LaunchView : UserControl
         {
             var progress = new Progress<LadderBundleProgress>(update =>
                 SetLadderSetupProgress(update.Message, update.Percentage, update.Details));
-            await _ladderBundleService.InstallOrRepairAsync(
-                MainWindow.Settings.CurrentProfile.InstallDirectory,
-                bundle,
-                progress);
+            var installDirectory = MainWindow.Settings.CurrentProfile.InstallDirectory;
+            var selectedIds = GetEffectiveSelectedLadderExtensionIds(ladder);
+            var readiness = await _ladderBundleService.GetReadinessAsync(installDirectory, bundle,
+                allowedExtensions: ladder.AllowedExtensions, selectedExtensionIds: selectedIds);
+            if (readiness.RequiresBundleRepair)
+                await _ladderBundleService.InstallOrRepairAsync(installDirectory, bundle, progress);
+            await LadderOptionalExtensionService.SynchronizeAsync(installDirectory!, bundle,
+                ladder.AllowedExtensions, selectedIds,
+                (extension, token) => _apiHttpClient.DownloadOptionalExtensionAsync(ladder.Id, extension, progress, token), progress);
+            readiness = await _ladderBundleService.GetReadinessAsync(installDirectory, bundle,
+                allowedExtensions: ladder.AllowedExtensions, selectedExtensionIds: selectedIds);
+            if (!readiness.IsReady) throw new InvalidOperationException(readiness.Status);
             Notifications.SendNotification(
                 $"Signed ladder package r{bundle.Revision} is installed and verified. You can play now.",
                 "Ladder ready");
@@ -1021,6 +1042,8 @@ public partial class LaunchView : UserControl
         finally
         {
             _isRunningLadderAction = false;
+            LadderExtensionsGrid.IsEnabled = true;
+            ActiveLadderComboBox.IsEnabled = true;
             LadderBundleProgressPanel.IsVisible = false;
             MainWindow.Instance?.RefreshLocalModState();
             await RefreshLadderExtensionPolicyAsync();
@@ -1058,7 +1081,8 @@ public partial class LaunchView : UserControl
 
     private async void OnLadderExtensionSelectionChanged(object? sender, RoutedEventArgs e)
     {
-        if (sender is not CheckBox { DataContext: LadderExtensionChoice choice } checkBox
+        if (_isRunningLadderAction || _isLaunching
+            || sender is not CheckBox { DataContext: LadderExtensionChoice choice } checkBox
             || !choice.IsAvailable
             || SelectedLadder is not { } ladder)
         {
@@ -1084,7 +1108,12 @@ public partial class LaunchView : UserControl
 
         MainWindow.Settings.CurrentProfile.SelectedLadderExtensions ??= [];
         MainWindow.Settings.CurrentProfile.SelectedLadderExtensions[ladder.Id.ToString("N")] = selectedIds.ToList();
+        _ladderPolicyGeneration++;
+        _ladderPolicyVerified = false;
+        _ladderAction = LadderAction.Blocked;
+        RefreshInstallDirectoryState();
         await SettingsManager.SaveAsync(MainWindow.Settings);
+        await RefreshLadderExtensionPolicyAsync();
     }
 
     private static IReadOnlyList<LadderExtensionApproval> MapApprovals(LadderResponse ladder)
@@ -1339,6 +1368,19 @@ public partial class LaunchView : UserControl
 
         try
         {
+            // Put the mod back on its normal save folder before anything else
+            // runs. Mod tweaks and the launch backup both resolve the save
+            // directory out of modinfo.json, and every step below here can bail
+            // out early - so leaving the restore until PrepareServerSavesAsync
+            // meant a failed preparation could strand the player's install
+            // pointed at the last ladder's folder, with their own characters
+            // nowhere to be seen. Doing it twice is harmless; it is idempotent.
+            if (!await RestoreNonLadderSaveDirectoryAsync(profile))
+            {
+                SetLaunchStatus($"{actionName} preparation failed.");
+                return;
+            }
+
             if (!await PrepareD2RLoaderExtensionsAsync(profile, progress))
             {
                 SetLaunchStatus($"{actionName} preparation failed.");
@@ -1399,17 +1441,19 @@ public partial class LaunchView : UserControl
                     LaunchDiagnostics.Log("GameLauncherService.LaunchGame returned without throwing.");
                     SetLaunchStatus($"{actionName} command sent.");
 
-                    if (MainWindow.Settings.MinimizeToTray && MainWindow.Instance is { } mainWindow)
+                    string? expectedExePath = null;
+                    if (profile.Type == InstallationType.Steam
+                        || profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder)
                     {
-                        string? expectedExePath = null;
-                        if (profile.Type == InstallationType.Steam
-                            || profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder)
-                        {
-                            expectedExePath = LauncherService.GetExpectedGameExecutablePath();
-                        }
-
-                        _ = mainWindow.MinimizeToTrayAndWaitForExitAsync(gameProcess, expectedExePath);
+                        expectedExePath = LauncherService.GetExpectedGameExecutablePath();
                     }
+
+                    // The game is always watched now, not only when minimising to
+                    // tray: a ladder session leaves the mod pointed at the ladder
+                    // save folder, and something has to put it back once the
+                    // session is over. One watcher owns the process handle.
+                    var minimizeTarget = MainWindow.Settings.MinimizeToTray ? MainWindow.Instance : null;
+                    _ = WatchGameAndRestoreSaveDirectoryAsync(profile, gameProcess, expectedExePath, minimizeTarget);
                 }
             }
             catch (Exception ex)
@@ -1513,6 +1557,70 @@ public partial class LaunchView : UserControl
     }
 
     /// <summary>
+    /// Waits for the game to close and then puts the mod back on its normal save
+    /// folder. Without this a ladder session leaves the install redirected until
+    /// the next non-ladder launch through the launcher - and anyone who starts
+    /// D2R from Battle.net or a shortcut before then finds an empty character
+    /// screen where their own characters should be.
+    ///
+    /// Failures are logged and swallowed: this runs unattended after a launch the
+    /// player has already walked away from, and the launcher's own startup pass
+    /// will try again.
+    /// </summary>
+    private static async Task WatchGameAndRestoreSaveDirectoryAsync(
+        InstallationProfile profile,
+        Process gameProcess,
+        string? expectedExePath,
+        MainWindow? minimizeTarget)
+    {
+        try
+        {
+            if (minimizeTarget is not null)
+            {
+                await minimizeTarget.MinimizeToTrayAndWaitForExitAsync(gameProcess, expectedExePath);
+            }
+            else
+            {
+                await MainWindow.WaitForGameExitAsync(gameProcess, expectedExePath);
+            }
+
+            await LadderSaveDirectoryService.RestoreIfRedirectedAsync(profile.InstallDirectory);
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.LogException("Could not restore the normal save folder after the game exited", exception);
+        }
+    }
+
+    /// <summary>
+    /// Puts the mod back on its normal save folder for any launch that is not a
+    /// ladder launch. Returns false when the restore failed, which the caller
+    /// must treat as a reason not to launch: the game would start on the last
+    /// ladder's folder and the player would find none of their own characters
+    /// there, which is indistinguishable from having lost them.
+    /// </summary>
+    private static async Task<bool> RestoreNonLadderSaveDirectoryAsync(InstallationProfile profile)
+    {
+        var isLadderLaunch = profile.Type != InstallationType.D2RMM
+                             && profile.LaunchExperience == LaunchExperience.Ladder;
+        if (isLadderLaunch)
+        {
+            return true;
+        }
+
+        if (await LadderSaveDirectoryService.RestoreAsync(profile.InstallDirectory))
+        {
+            return true;
+        }
+
+        const string message =
+            "Your normal save folder could not be restored, so this launch was stopped to avoid starting with no characters. Close anything using the D2R folder and try again.";
+        LaunchDiagnostics.Log($"Launch blocked: {message}");
+        Notifications.SendNotification(message, "Warning");
+        return false;
+    }
+
+    /// <summary>
     /// Points the server-saves plugin at the API for a ladder launch, and turns
     /// it off for every other launch. A stale token left enabled would keep
     /// hiding the player's own characters outside the ladder.
@@ -1528,8 +1636,8 @@ public partial class LaunchView : UserControl
             {
                 await ServerSavesConfigService.DisableAsync(profile.InstallDirectory);
                 await ChatRelayConfigService.DisableAsync(profile.InstallDirectory);
-                await LadderSaveDirectoryService.RestoreAsync(profile.InstallDirectory);
-                return true;
+
+                return await RestoreNonLadderSaveDirectoryAsync(profile);
             }
 
             // PrepareD2RLoaderExtensionsAsync already installed the plugin and ran
@@ -1676,7 +1784,9 @@ public partial class LaunchView : UserControl
                 // back to Update for the player to run deliberately.
                 var readiness = await _ladderBundleService.GetReadinessAsync(
                     profile.InstallDirectory,
-                    activeBundle);
+                    activeBundle,
+                    allowedExtensions: ladder.AllowedExtensions,
+                    selectedExtensionIds: GetEffectiveSelectedLadderExtensionIds(ladder));
                 if (!readiness.IsReady)
                 {
                     LaunchDiagnostics.Log($"Ladder launch blocked: {readiness.Status}");

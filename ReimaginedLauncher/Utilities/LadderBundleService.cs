@@ -21,7 +21,8 @@ public sealed record LadderBundleReadiness(
     bool CanRepair,
     string Status,
     IReadOnlyList<string> Problems,
-    bool IsInstalled = false);
+    bool IsInstalled = false,
+    bool RequiresBundleRepair = true);
 
 /// <summary>
 /// Percentage is null for steps that cannot report one. Callers should fall
@@ -81,7 +82,9 @@ public sealed class LadderBundleService(
     public async Task<LadderBundleReadiness> GetReadinessAsync(
         string? installDirectory,
         LadderBundleResponse? bundle,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<LadderAllowedExtensionResponse>? allowedExtensions = null,
+        IReadOnlySet<Guid>? selectedExtensionIds = null)
     {
         if (bundle is null)
         {
@@ -167,10 +170,14 @@ public sealed class LadderBundleService(
                 var approvedPluginIds = bundle.Plugins
                     .Select(plugin => plugin.PluginId)
                     .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (allowedExtensions is not null)
+                    approvedPluginIds.UnionWith(allowedExtensions.Where(item => item.Kind == D2RLoaderExtensionKind.Plugin)
+                        .Select(LadderOptionalExtensionService.PluginId));
                 foreach (var path in EnumerateInstalledModFiles(normalized))
                 {
                     var relativePath = Path.GetRelativePath(normalized, path).Replace('\\', '/');
                     if (!expectedPaths.Contains(relativePath)
+                        && !(allowedExtensions is not null && LadderOptionalExtensionService.IsExtensionPath(relativePath))
                         && !LadderRuntimeFileService.IsGeneratedRuntimePath(relativePath, approvedPluginIds))
                     {
                         problems.Add($"{relativePath} is not declared by the signed ladder package.");
@@ -179,6 +186,11 @@ public sealed class LadderBundleService(
             }
         }
 
+        var requiresBundleRepair = problems.Count > 0;
+        if (allowedExtensions is not null)
+            problems.AddRange(await LadderOptionalExtensionService.GetProblemsAsync(
+                normalized, bundle, allowedExtensions, selectedExtensionIds ?? new HashSet<Guid>(), cancellationToken));
+
         if (problems.Count == 0)
         {
             return new LadderBundleReadiness(
@@ -186,7 +198,8 @@ public sealed class LadderBundleService(
                 true,
                 $"Signed ladder bundle r{bundle.Revision} is installed and verified ({bundle.Files.Count} files).",
                 [],
-                IsInstalled: true);
+                IsInstalled: true,
+                RequiresBundleRepair: false);
         }
 
         // D2RLoader, D2RCore and the mod are all things the launcher can fetch,
@@ -197,7 +210,7 @@ public sealed class LadderBundleService(
         var canRepair = problems.All(problem => !problem.StartsWith("Launcher ", StringComparison.Ordinal)
                                                && !problem.StartsWith("D2R game", StringComparison.Ordinal)
                                                && !problem.StartsWith("No trusted", StringComparison.Ordinal));
-        return new LadderBundleReadiness(false, canRepair, string.Join(" ", problems), problems, state is not null);
+        return new LadderBundleReadiness(false, canRepair, string.Join(" ", problems), problems, state is not null, requiresBundleRepair);
     }
 
     public async Task InstallOrRepairAsync(

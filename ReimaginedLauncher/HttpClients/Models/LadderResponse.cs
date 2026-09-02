@@ -22,7 +22,9 @@ public sealed record LadderAllowedExtensionResponse(
     string FileName,
     string Sha256,
     D2RLoaderExtensionKind Kind,
-    bool IsRequired);
+    bool IsRequired,
+    long? SizeBytes = null,
+    string? DownloadPath = null);
 
 public sealed record LadderBundleResponse(
     Guid Id,

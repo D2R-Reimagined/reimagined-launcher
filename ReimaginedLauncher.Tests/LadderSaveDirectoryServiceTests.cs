@@ -169,6 +169,93 @@ public sealed class LadderSaveDirectoryServiceTests : IDisposable
             ladderDirectory));
     }
 
+    /// <summary>
+    /// A fake install with a modinfo.json, and optionally the pristine baseline a
+    /// ladder launch captures before it rewrites one.
+    /// </summary>
+    private string CreateInstall(string currentSavePath, string? baselineSavePath)
+    {
+        var installDirectory = Path.Combine(_testDirectory, $"install-{Guid.NewGuid():N}");
+        var modInfoPath = Path.Combine(installDirectory, "mods", "Reimagined", "Reimagined.mpq", "modinfo.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(modInfoPath)!);
+        File.WriteAllText(modInfoPath, $"{{\"name\":\"Reimagined\",\"savepath\":\"{currentSavePath}/\"}}");
+
+        if (baselineSavePath is not null)
+        {
+            var baselinePath = LadderRuntimeFileService.GetBaselinePath(installDirectory, modInfoPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(baselinePath)!);
+            File.WriteAllText(baselinePath, $"{{\"name\":\"Reimagined\",\"savepath\":\"{baselineSavePath}/\"}}");
+        }
+
+        return installDirectory;
+    }
+
+    private static string ReadCurrentSavePath(string installDirectory)
+    {
+        var modInfoPath = Path.Combine(installDirectory, "mods", "Reimagined", "Reimagined.mpq", "modinfo.json");
+        var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(modInfoPath));
+        return json!["savepath"]!.GetValue<string>().Trim('/');
+    }
+
+    [Fact]
+    public async Task ASessionThatEndedRedirectedIsPutBackOnTheNormalFolder()
+    {
+        var installDirectory = CreateInstall(
+            currentSavePath: "ReimaginedThree-Season-1-d630a3fc",
+            baselineSavePath: "ReimaginedThree");
+
+        Assert.True(await LadderSaveDirectoryService.RestoreIfRedirectedAsync(installDirectory));
+        Assert.Equal("ReimaginedThree", ReadCurrentSavePath(installDirectory));
+    }
+
+    [Fact]
+    public async Task AnInstallThatIsAlreadyOnTheNormalFolderIsLeftAlone()
+    {
+        var installDirectory = CreateInstall(
+            currentSavePath: "ReimaginedThree",
+            baselineSavePath: "ReimaginedThree");
+        var modInfoPath = Path.Combine(installDirectory, "mods", "Reimagined", "Reimagined.mpq", "modinfo.json");
+        var before = File.ReadAllText(modInfoPath);
+
+        Assert.True(await LadderSaveDirectoryService.RestoreIfRedirectedAsync(installDirectory));
+        Assert.Equal(before, File.ReadAllText(modInfoPath));
+    }
+
+    [Fact]
+    public async Task WithNoBaselineNothingIsTouchedAndNoneIsCaptured()
+    {
+        // Capturing here would enshrine whatever savepath is current as the
+        // pristine one, and every later restore would return the player to it.
+        var installDirectory = CreateInstall(
+            currentSavePath: "ReimaginedThree-Season-1-d630a3fc",
+            baselineSavePath: null);
+
+        Assert.True(await LadderSaveDirectoryService.RestoreIfRedirectedAsync(installDirectory));
+        Assert.Equal("ReimaginedThree-Season-1-d630a3fc", ReadCurrentSavePath(installDirectory));
+        Assert.False(Directory.Exists(Path.Combine(installDirectory, ".reimagined-launcher", "ladder-runtime")));
+    }
+
+    [Fact]
+    public async Task RestoringIsIdempotent()
+    {
+        var installDirectory = CreateInstall(
+            currentSavePath: "ReimaginedThree-Season-1-d630a3fc",
+            baselineSavePath: "ReimaginedThree");
+
+        Assert.True(await LadderSaveDirectoryService.RestoreIfRedirectedAsync(installDirectory));
+        Assert.True(await LadderSaveDirectoryService.RestoreIfRedirectedAsync(installDirectory));
+        Assert.Equal("ReimaginedThree", ReadCurrentSavePath(installDirectory));
+    }
+
+    [Fact]
+    public async Task AnInstallWithoutTheModIsNotAFailure()
+    {
+        var installDirectory = Path.Combine(_testDirectory, "no-mod");
+        Directory.CreateDirectory(installDirectory);
+
+        Assert.True(await LadderSaveDirectoryService.RestoreIfRedirectedAsync(installDirectory));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_testDirectory))

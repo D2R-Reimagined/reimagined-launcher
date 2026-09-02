@@ -40,6 +40,27 @@ internal static class LadderRuntimeFileService
         return baselinePath;
     }
 
+    /// <summary>
+    /// The pristine copy of <paramref name="targetPath"/> if one has already been
+    /// captured, or null. Unlike <see cref="RestoreOrCaptureBaseline"/> this never
+    /// captures one, which is what makes it safe to call at times when the target
+    /// may already be rewritten - capturing then would enshrine a ladder's
+    /// savepath as the mod's pristine one, and every later restore would put the
+    /// player back on the ladder folder instead of their own.
+    /// </summary>
+    internal static string? TryGetExistingBaselinePath(string installDirectory, string targetPath)
+    {
+        try
+        {
+            var baselinePath = GetBaselinePath(installDirectory, targetPath);
+            return File.Exists(baselinePath) ? baselinePath : null;
+        }
+        catch (Exception exception) when (exception is InvalidDataException or ArgumentException or IOException)
+        {
+            return null;
+        }
+    }
+
     internal static string GetBaselinePath(string installDirectory, string targetPath)
     {
         var root = Path.GetFullPath(installDirectory).TrimEnd(Path.DirectorySeparatorChar)

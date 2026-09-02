@@ -193,6 +193,67 @@ public static class LadderSaveDirectoryService
     }
 
     /// <summary>
+    /// Puts the mod back on its normal save folder if - and only if - it is
+    /// currently redirected at a ladder folder and a pristine copy of
+    /// modinfo.json already exists to restore from.
+    ///
+    /// This is the self-healing path, called when the launcher starts and again
+    /// when the game exits, so a ladder session that ended without a following
+    /// non-ladder launch does not leave the install pointed at the ladder folder.
+    /// Anyone starting D2R outside the launcher after that would reach the
+    /// character screen and find none of their own characters, which is
+    /// indistinguishable from having lost them.
+    ///
+    /// Deliberately weaker than <see cref="RestoreAsync"/>: it never captures a
+    /// baseline. It runs at moments when modinfo.json may already be rewritten,
+    /// and capturing then would make the ladder's savepath the one every future
+    /// restore returns to.
+    /// </summary>
+    public static async Task<bool> RestoreIfRedirectedAsync(
+        string? installDirectory,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedInstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(installDirectory);
+        var modInfoPath = ResolveModInfoPath(normalizedInstallDirectory);
+        if (modInfoPath is null)
+        {
+            return true;
+        }
+
+        try
+        {
+            var baselinePath = LadderRuntimeFileService.TryGetExistingBaselinePath(
+                normalizedInstallDirectory!,
+                modInfoPath);
+            if (baselinePath is null)
+            {
+                // Nothing known-good to go back to. A ladder launch captures one
+                // before it ever rewrites the file, so this means no ladder
+                // session has run here and there is nothing to undo.
+                return true;
+            }
+
+            var baseSavePath = await ReadSavePathAsync(baselinePath, cancellationToken);
+            var currentSavePath = await ReadSavePathAsync(modInfoPath, cancellationToken);
+            if (string.IsNullOrWhiteSpace(baseSavePath)
+                || string.Equals(baseSavePath, currentSavePath, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            File.Copy(baselinePath, modInfoPath, overwrite: true);
+            LaunchDiagnostics.Log(
+                $"ladder saves: the mod was still pointed at \"{currentSavePath}\"; restored the normal save folder \"{baseSavePath}\".");
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            LaunchDiagnostics.Log($"ladder saves: could not restore the normal save folder: {exception.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
     /// The savepath the mod shipped with, taken from a pristine copy made the
     /// first time this ran. Reading it back out of a file we may already have
     /// rewritten would compound the ladder suffix every launch.

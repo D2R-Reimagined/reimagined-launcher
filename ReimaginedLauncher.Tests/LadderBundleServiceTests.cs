@@ -150,6 +150,104 @@ public sealed class LadderBundleServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task OptionalSelectionDownloadsOnceAndDeselectionBacksUpWithoutBundleRepair()
+    {
+        var fixture = CreateBundle(("maps", "d2rl-maps.dll", "required-code"u8.ToArray()));
+        var service = CreateService(fixture.Archive);
+        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+        var bytes = "optional-code"u8.ToArray();
+        var optional = new LadderAllowedExtensionResponse(Guid.NewGuid(), "Optional", "d2rl-optional.dll",
+            Convert.ToHexString(SHA256.HashData(bytes)), D2RLoaderExtensionKind.Plugin, false, bytes.Length, "/download");
+        HashSet<Guid> selected = [optional.Id];
+        var downloads = 0;
+        Task<byte[]> Download(LadderAllowedExtensionResponse _, CancellationToken token)
+        {
+            downloads++;
+            return Task.FromResult(bytes);
+        }
+        var pending = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor,
+            allowedExtensions: [optional], selectedExtensionIds: selected);
+        Assert.False(pending.IsReady);
+        Assert.False(pending.RequiresBundleRepair);
+        await LadderOptionalExtensionService.SynchronizeAsync(_installDirectory, fixture.Descriptor, [optional], selected, Download);
+        var ready = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor,
+            allowedExtensions: [optional], selectedExtensionIds: selected);
+        Assert.True(ready.IsReady, ready.Status);
+        await LadderOptionalExtensionService.SynchronizeAsync(_installDirectory, fixture.Descriptor, [optional], selected, Download);
+        Assert.Equal(1, downloads);
+        selected.Clear();
+        pending = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor,
+            allowedExtensions: [optional], selectedExtensionIds: selected);
+        Assert.False(pending.IsReady);
+        Assert.False(pending.RequiresBundleRepair);
+        await LadderOptionalExtensionService.SynchronizeAsync(_installDirectory, fixture.Descriptor, [optional], selected, Download);
+        Assert.False(File.Exists(Path.Combine(_installDirectory, LadderOptionalExtensionService.TargetPath(optional))));
+        Assert.Single(Directory.GetFiles(Path.Combine(_installDirectory, ".reimagined-launcher", "ladder-bundles", "optional-backups"), optional.FileName, SearchOption.AllDirectories));
+        Assert.Equal(1, downloads);
+        ready = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor,
+            allowedExtensions: [optional], selectedExtensionIds: selected);
+        Assert.True(ready.IsReady, ready.Status);
+    }
+
+    [Fact]
+    public async Task OptionalHashChangeRequiresUpdateAndRevocationRemovesTheFile()
+    {
+        var fixture = CreateBundle(("maps", "d2rl-maps.dll", "required-code"u8.ToArray()));
+        var service = CreateService(fixture.Archive);
+        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+        var bytes = "optional-code"u8.ToArray();
+        var optional = new LadderAllowedExtensionResponse(Guid.NewGuid(), "Patch", "optional.json",
+            Convert.ToHexString(SHA256.HashData(bytes)), D2RLoaderExtensionKind.Patch, false, bytes.Length, "/download");
+        HashSet<Guid> selected = [optional.Id];
+        await LadderOptionalExtensionService.SynchronizeAsync(_installDirectory, fixture.Descriptor, [optional], selected,
+            (_, _) => Task.FromResult(bytes));
+        var path = Path.Combine(_installDirectory, LadderOptionalExtensionService.TargetPath(optional));
+        await File.WriteAllBytesAsync(path, "tampered-code"u8.ToArray());
+        var pending = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor,
+            allowedExtensions: [optional], selectedExtensionIds: selected);
+        Assert.False(pending.IsReady);
+        Assert.False(pending.RequiresBundleRepair);
+        await Assert.ThrowsAsync<InvalidDataException>(() => LadderOptionalExtensionService.SynchronizeAsync(
+            _installDirectory, fixture.Descriptor, [optional], selected, (_, _) => Task.FromResult("bad"u8.ToArray())));
+        Assert.Equal("tampered-code", await File.ReadAllTextAsync(path));
+        await LadderOptionalExtensionService.SynchronizeAsync(_installDirectory, fixture.Descriptor, [], selected,
+            (_, _) => throw new InvalidOperationException("Revocation must not download"));
+        Assert.False(File.Exists(path));
+        Assert.True((await service.GetReadinessAsync(_installDirectory, fixture.Descriptor,
+            allowedExtensions: [], selectedExtensionIds: selected)).IsReady);
+    }
+
+    [Fact]
+    public async Task OptionalsCannotOverrideRequiredFilesOrWhitelistUnrelatedJson()
+    {
+        var fixture = CreateBundle(("maps", "d2rl-maps.dll", "required-code"u8.ToArray()));
+        var service = CreateService(fixture.Archive);
+        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+        var file = fixture.Descriptor.Files[0];
+        var optional = new LadderAllowedExtensionResponse(Guid.NewGuid(), "Override", file.FileName, file.Sha256,
+            D2RLoaderExtensionKind.Plugin, false, file.SizeBytes, "/download");
+        await Assert.ThrowsAsync<InvalidDataException>(() => LadderOptionalExtensionService.SynchronizeAsync(
+            _installDirectory, fixture.Descriptor, [optional], new HashSet<Guid> { optional.Id },
+            (_, _) => throw new InvalidOperationException("Must not download")));
+        await File.WriteAllTextAsync(Path.Combine(_installDirectory, "mods", "Reimagined", "cheat.json"), "{}");
+        var readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor, allowedExtensions: []);
+        Assert.False(readiness.IsReady);
+        Assert.True(readiness.RequiresBundleRepair);
+    }
+
+    [Theory]
+    [InlineData("../escape.dll")]
+    [InlineData("file.dll:stream")]
+    [InlineData("C:\\outside.dll")]
+    [InlineData("wrong.json")]
+    public void OptionalDownloadRejectsInvalidPluginMetadata(string name)
+    {
+        var optional = new LadderAllowedExtensionResponse(Guid.NewGuid(), "Invalid", name, new string('A', 64),
+            D2RLoaderExtensionKind.Plugin, false, 10, "/download");
+        Assert.False(LadderOptionalExtensionService.CanDownload(optional));
+    }
+
+    [Fact]
     public async Task InstallOrRepairManagesJsonAndTxtFilesAlongsidePlugins()
     {
         var fixture = CreateBundle(

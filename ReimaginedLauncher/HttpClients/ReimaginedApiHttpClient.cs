@@ -121,6 +121,42 @@ public sealed class ReimaginedApiHttpClient
         return output.ToArray();
     }
 
+    public async Task<byte[]> DownloadOptionalExtensionAsync(
+        Guid ladderId,
+        LadderAllowedExtensionResponse extension,
+        IProgress<LadderBundleProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!LadderOptionalExtensionService.CanDownload(extension))
+            throw new InvalidOperationException("This optional file is not available for download.");
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromMinutes(5));
+        var token = timeout.Token;
+        using var response = await _httpClient.GetAsync(
+            $"ladders/{ladderId}/optional-extensions/{extension.Id}/download",
+            HttpCompletionOption.ResponseHeadersRead, token);
+        response.EnsureSuccessStatusCode();
+        if (response.Content.Headers.ContentLength is { } length && length != extension.SizeBytes)
+            throw new System.IO.InvalidDataException("The optional file changed on the server. Refresh the ladder and try again.");
+        await using var input = await response.Content.ReadAsStreamAsync(token);
+        using var output = new System.IO.MemoryStream();
+        var buffer = new byte[81920];
+        var watch = Stopwatch.StartNew();
+        int read;
+        while ((read = await input.ReadAsync(buffer, token)) > 0)
+        {
+            if (output.Length + read > extension.SizeBytes)
+                throw new System.IO.InvalidDataException("The optional file exceeded its approved size.");
+            await output.WriteAsync(buffer.AsMemory(0, read), token);
+            var percent = output.Length * 100d / extension.SizeBytes!.Value;
+            progress?.Report(new LadderBundleProgress($"Downloading {extension.FileName}...", percent,
+                $"{output.Length / 1048576d:F1} / {extension.SizeBytes.Value / 1048576d:F1} MiB | {percent:F0}% | {output.Length / Math.Max(watch.Elapsed.TotalSeconds, .001) / 1048576d:F1} MiB/s"));
+        }
+        var bytes = output.ToArray();
+        LadderOptionalExtensionService.VerifyDownload(extension, bytes);
+        return bytes;
+    }
+
     private static double ReportDownloadProgress(
         IProgress<LadderBundleDownloadProgress>? progress,
         long bytesReceived,

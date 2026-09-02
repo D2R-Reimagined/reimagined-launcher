@@ -153,6 +153,18 @@ public partial class MainWindow : Window
         profile.IsInstallDirectoryValidated = InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory);
         BackupService.ApplyDefaultSettings();
 
+        // Undo a ladder redirect that outlived its session - a crash, a machine
+        // that lost power, or a launcher closed before the game did. The player's
+        // own characters are only visible while the mod points at its normal save
+        // folder, so this runs before anything else looks at the install.
+        //
+        // Skipped while D2R is running: that session read modinfo.json at startup
+        // and may be a ladder session still writing into the ladder folder.
+        if (!IsGameRunning())
+        {
+            await LadderSaveDirectoryService.RestoreIfRedirectedAsync(profile.InstallDirectory);
+        }
+
         // Resolve local mod state and refresh the current view immediately,
         // before any potentially-slow network calls.
         var installDir = Settings.CurrentProfile.InstallDirectory;
@@ -1513,8 +1525,19 @@ public partial class MainWindow : Window
     public async Task MinimizeToTrayAndWaitForExitAsync(Process gameProcess, string? expectedExePath = null)
     {
         MinimizeToTray();
+        await WaitForGameExitAsync(gameProcess, expectedExePath);
+        RestoreFromTray();
+    }
 
-        await Task.Run(() =>
+    /// <summary>
+    /// Waits for the game to close, taking ownership of <paramref name="gameProcess"/>.
+    /// Returns as soon as the process is gone, and also if it could never be
+    /// resolved - callers use this to run teardown, so it must not hang forever
+    /// on a launch that went sideways.
+    /// </summary>
+    public static Task WaitForGameExitAsync(Process gameProcess, string? expectedExePath = null)
+    {
+        return Task.Run(() =>
         {
             Process? processToWatch = null;
             try
@@ -1543,8 +1566,28 @@ public partial class MainWindow : Window
                 processToWatch?.Dispose();
             }
         });
+    }
 
-        RestoreFromTray();
+    /// <summary>
+    /// True while a D2R process this launcher can see is running. Used to hold
+    /// off touching mod files that a live session has already read.
+    /// </summary>
+    public static bool IsGameRunning()
+    {
+        try
+        {
+            var running = Process.GetProcessesByName("D2R");
+            foreach (var process in running)
+            {
+                process.Dispose();
+            }
+
+            return running.Length > 0;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     private static Process? WaitForProcessByPath(string exePath, TimeSpan timeout)
