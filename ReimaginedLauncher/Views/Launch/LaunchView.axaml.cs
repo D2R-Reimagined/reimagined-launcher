@@ -51,6 +51,7 @@ public partial class LaunchView : UserControl
         Blocked,
         Download,
         Update,
+        Restore,
         Play
     }
 
@@ -485,15 +486,52 @@ public partial class LaunchView : UserControl
     private async Task SetLaunchExperienceAsync(LaunchExperience experience)
     {
         var profile = MainWindow.Settings.CurrentProfile;
-        if (profile.Type == InstallationType.D2RMM)
+        if (profile.Type == InstallationType.D2RMM || _isLaunching || _isRunningLadderAction || MainWindow.IsInstallInProgress)
         {
             return;
         }
 
         if (profile.LaunchExperience != experience)
         {
+            if (experience != LaunchExperience.Ladder && profile.InstallDirectory is { } installDirectory)
+            {
+                if (MainWindow.IsGameRunning())
+                {
+                    Notifications.SendNotification(
+                        "Close Diablo II: Resurrected before changing play modes.",
+                        "Mode switch blocked");
+                    return;
+                }
+
+                try
+                {
+                    _isLaunching = true;
+                    MainWindow.IsInstallInProgress = true;
+                    await Task.Run(() => NormalModInstallationService.Restore(installDirectory));
+                    if (!await LadderSaveDirectoryService.RestoreAsync(installDirectory))
+                    {
+                        Notifications.SendNotification(NormalModInstallationService.RecoveryMessage, "Normal save restore failed");
+                        return;
+                    }
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+                {
+                    LaunchDiagnostics.LogException("Could not restore the normal mod installation", exception);
+                    Notifications.SendNotification(exception.Message, "Normal mod restore failed");
+                    return;
+                }
+                finally
+                {
+                    MainWindow.IsInstallInProgress = false;
+                    _isLaunching = false;
+                }
+            }
+
             profile.LaunchExperience = experience;
             await SettingsManager.SaveAsync(MainWindow.Settings);
+            MainWindow.Instance?.RefreshLocalModState();
+            if (experience == LaunchExperience.Ladder)
+                await RefreshLadderExtensionPolicyAsync();
             RefreshInstallDirectoryState();
         }
 
@@ -972,16 +1010,20 @@ public partial class LaunchView : UserControl
             return LadderAction.Blocked;
         }
 
-        return _ladderBundleReadiness.IsInstalled ? LadderAction.Update : LadderAction.Download;
+        if (_ladderBundleReadiness.IsInstalled) return LadderAction.Update;
+        return LadderBundleService.HasCachedPackage(MainWindow.Settings.CurrentProfile.InstallDirectory, SelectedLadder.ActiveBundle)
+            ? LadderAction.Restore
+            : LadderAction.Download;
     }
 
     private bool IsLadderSetupAction(bool isLadderExperience)
-        => isLadderExperience && _ladderAction is LadderAction.Download or LadderAction.Update;
+        => isLadderExperience && _ladderAction is LadderAction.Download or LadderAction.Update or LadderAction.Restore;
 
     private static string LadderActionLabel(LadderAction action) => action switch
     {
         LadderAction.Download => "Download",
         LadderAction.Update => "Update",
+        LadderAction.Restore => "Restore Ladder",
         LadderAction.Play => "Play",
         _ => "Start Ladder"
     };
@@ -990,6 +1032,7 @@ public partial class LaunchView : UserControl
     {
         LadderAction.Download => "Downloads and verifies everything this ladder requires. This does not start the game.",
         LadderAction.Update => "Update the required package or apply your optional plugin and patch selections. This does not start the game.",
+        LadderAction.Restore => "Restores and verifies the cached ladder package while preserving your normal installation. This does not start the game.",
         LadderAction.Play => "Restores clean base files, enforces the ladder extension allowlist, and starts Reimagined through D2RLoader.",
         _ => _ladderBundleReadiness?.Status ?? "This ladder cannot be played from this installation yet."
     };
@@ -1001,18 +1044,21 @@ public partial class LaunchView : UserControl
     /// </summary>
     private async Task RunLadderSetupActionAsync()
     {
-        if (SelectedLadder is not { ActiveBundle: { } bundle } ladder || _isLaunching || _isRunningLadderAction)
+        if (SelectedLadder is not { ActiveBundle: { } bundle } ladder || _isLaunching || _isRunningLadderAction
+            || MainWindow.IsInstallInProgress || MainWindow.IsGameRunning())
         {
             return;
         }
 
         var isUpdate = _ladderAction == LadderAction.Update;
         _isRunningLadderAction = true;
+        MainWindow.IsInstallInProgress = true;
         LadderExtensionsGrid.IsEnabled = false;
         ActiveLadderComboBox.IsEnabled = false;
         RefreshInstallDirectoryState();
         SetLadderSetupProgress(
-            isUpdate ? "Updating the ladder package..." : "Downloading the ladder package...",
+            _ladderAction == LadderAction.Restore ? "Restoring the ladder package..."
+                : isUpdate ? "Updating the ladder package..." : "Downloading the ladder package...",
             null);
         try
         {
@@ -1041,6 +1087,7 @@ public partial class LaunchView : UserControl
         }
         finally
         {
+            MainWindow.IsInstallInProgress = false;
             _isRunningLadderAction = false;
             LadderExtensionsGrid.IsEnabled = true;
             ActiveLadderComboBox.IsEnabled = true;
@@ -1250,7 +1297,7 @@ public partial class LaunchView : UserControl
         // there is one obvious thing to click, but they must never start D2R -
         // the player decides to play once the button says Play.
         if (MainWindow.Settings.CurrentProfile.LaunchExperience == LaunchExperience.Ladder
-            && _ladderAction is LadderAction.Download or LadderAction.Update)
+            && _ladderAction is LadderAction.Download or LadderAction.Update or LadderAction.Restore)
         {
             await RunLadderSetupActionAsync();
             return;
@@ -1267,7 +1314,7 @@ public partial class LaunchView : UserControl
         LaunchDiagnostics.ResetSession();
         LaunchDiagnostics.Log("Launch/Install button clicked.");
 
-        if (_isLaunching)
+        if (_isLaunching || _isRunningLadderAction || MainWindow.IsInstallInProgress || MainWindow.IsGameRunning())
         {
             LaunchDiagnostics.Log("Action ignored because an action is already in progress.");
             return;
@@ -1332,10 +1379,12 @@ public partial class LaunchView : UserControl
             // The refresh may have found a newer revision than the one this
             // click was made against. Hand the player the setup step the button
             // now offers instead of pushing on into a launch that will fail.
-            if (_ladderAction is LadderAction.Download or LadderAction.Update)
+            if (_ladderAction is LadderAction.Download or LadderAction.Update or LadderAction.Restore)
             {
                 Notifications.SendNotification(
-                    _ladderAction == LadderAction.Download
+                    _ladderAction == LadderAction.Restore
+                        ? "Use Restore Ladder to activate the cached ladder package before playing."
+                        : _ladderAction == LadderAction.Download
                         ? "This ladder needs its package downloaded first. Use the Download button."
                         : "This ladder has a newer package. Use the Update button before playing.",
                     "Ladder setup needed");
@@ -1365,6 +1414,7 @@ public partial class LaunchView : UserControl
         var actionName = profile.Type == InstallationType.D2RMM ? "Installation" : "Launch";
         SetLaunchStatus($"Preparing {actionName.ToLower()}...");
         var progress = new Progress<string>(status => SetLaunchStatus(status));
+        var gameStarted = false;
 
         try
         {
@@ -1438,6 +1488,7 @@ public partial class LaunchView : UserControl
                         SetLaunchStatus("Launch failed.");
                         return;
                     }
+                    gameStarted = true;
                     LaunchDiagnostics.Log("GameLauncherService.LaunchGame returned without throwing.");
                     SetLaunchStatus($"{actionName} command sent.");
 
@@ -1453,7 +1504,7 @@ public partial class LaunchView : UserControl
                     // save folder, and something has to put it back once the
                     // session is over. One watcher owns the process handle.
                     var minimizeTarget = MainWindow.Settings.MinimizeToTray ? MainWindow.Instance : null;
-                    _ = WatchGameAndRestoreSaveDirectoryAsync(profile, gameProcess, expectedExePath, minimizeTarget);
+                    _ = WatchGameAndRestoreSaveDirectoryAsync(profile.InstallDirectory, gameProcess, expectedExePath, minimizeTarget);
                 }
             }
             catch (Exception ex)
@@ -1468,6 +1519,10 @@ public partial class LaunchView : UserControl
         }
         finally
         {
+            if (!gameStarted && profile.LaunchExperience == LaunchExperience.Ladder)
+            {
+                await LadderSaveDirectoryService.RestoreIfRedirectedAsync(profile.InstallDirectory);
+            }
             LaunchDiagnostics.Log($"{actionName} flow completed.");
             _isLaunching = false;
             await Dispatcher.UIThread.InvokeAsync(async () =>
@@ -1568,7 +1623,7 @@ public partial class LaunchView : UserControl
     /// will try again.
     /// </summary>
     private static async Task WatchGameAndRestoreSaveDirectoryAsync(
-        InstallationProfile profile,
+        string? installDirectory,
         Process gameProcess,
         string? expectedExePath,
         MainWindow? minimizeTarget)
@@ -1584,7 +1639,7 @@ public partial class LaunchView : UserControl
                 await MainWindow.WaitForGameExitAsync(gameProcess, expectedExePath);
             }
 
-            await LadderSaveDirectoryService.RestoreIfRedirectedAsync(profile.InstallDirectory);
+            await LadderSaveDirectoryService.RestoreIfRedirectedAsync(installDirectory);
         }
         catch (Exception exception)
         {
@@ -1603,9 +1658,20 @@ public partial class LaunchView : UserControl
     {
         var isLadderLaunch = profile.Type != InstallationType.D2RMM
                              && profile.LaunchExperience == LaunchExperience.Ladder;
-        if (isLadderLaunch)
+        if (isLadderLaunch || profile.Type == InstallationType.D2RMM)
         {
             return true;
+        }
+
+        try
+        {
+            await Task.Run(() => NormalModInstallationService.Restore(profile.InstallDirectory!));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            LaunchDiagnostics.LogException("Could not restore the normal mod installation", exception);
+            Notifications.SendNotification(exception.Message, "Normal mod restore failed");
+            return false;
         }
 
         if (await LadderSaveDirectoryService.RestoreAsync(profile.InstallDirectory))
@@ -1614,7 +1680,7 @@ public partial class LaunchView : UserControl
         }
 
         const string message =
-            "Your normal save folder could not be restored, so this launch was stopped to avoid starting with no characters. Close anything using the D2R folder and try again.";
+            NormalModInstallationService.RecoveryMessage;
         LaunchDiagnostics.Log($"Launch blocked: {message}");
         Notifications.SendNotification(message, "Warning");
         return false;
@@ -1653,7 +1719,11 @@ public partial class LaunchView : UserControl
             if (!ServerSavesConfigService.IsPluginInstalled(profile.InstallDirectory))
             {
                 LaunchDiagnostics.Log("server-saves plugin is not approved for this ladder; this launch uses local characters.");
-                await LadderSaveDirectoryService.RestoreAsync(profile.InstallDirectory);
+                if (!await LadderSaveDirectoryService.RestoreAsync(profile.InstallDirectory))
+                {
+                    Notifications.SendNotification(NormalModInstallationService.RecoveryMessage, "Normal save restore failed");
+                    return false;
+                }
                 return true;
             }
 

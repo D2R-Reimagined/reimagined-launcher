@@ -13,6 +13,7 @@ internal static class LadderRuntimeFileService
     private static readonly string[] MutableSignedPathSuffixes =
     [
         "/Reimagined.mpq/modinfo.json",
+        "/Reimagined/modinfo.json",
         "/Reimagined.mpq/data/global/ui/layouts/characterselectpanelhd.json",
         "/Reimagined.mpq/data/global/ui/layouts/controller/characterselectpanelhd.json"
     ];

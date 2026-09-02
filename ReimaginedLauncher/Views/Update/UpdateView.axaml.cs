@@ -310,6 +310,9 @@ public partial class UpdateView : UserControl
 
     private async Task ExtractAndFinalizeInstallAsync(string zipPath, string installDirectory)
     {
+        if (MainWindow.IsGameRunning())
+            throw new InvalidOperationException("Close Diablo II: Resurrected before installing mod files.");
+
         if (!IsZipArchive(zipPath))
         {
             Notifications.SendNotification("Downloaded file is not a valid zip archive.", "Warning");
@@ -390,6 +393,7 @@ public partial class UpdateView : UserControl
                 }
 
                 ZipFile.ExtractToDirectory(zipPath, installDirectory, overwriteFiles: true);
+                NormalModInstallationService.RecordNexusInstallation(installDirectory);
             });
 
             Notifications.SendNotification("Mod installed successfully.", "Success");

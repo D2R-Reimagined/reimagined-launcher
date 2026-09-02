@@ -221,6 +221,7 @@ public sealed class LadderBundleService(
     {
         var normalized = InstallDirectoryValidator.NormalizeInstallDirectory(installDirectory)
             ?? throw new InvalidOperationException("Select a valid D2R installation before installing a ladder bundle.");
+        await Task.Run(() => NormalModInstallationService.PreserveBeforeLadderInstall(normalized), cancellationToken);
         var compatibilityProblems = await GetCompatibilityProblemsAsync(normalized, bundle, cancellationToken);
         if (compatibilityProblems.Count > 0)
         {
@@ -236,18 +237,27 @@ public sealed class LadderBundleService(
             throw new InvalidOperationException(string.Join(" ", preInstallProblems));
         }
 
-        var downloadMessage = $"Downloading signed ladder package r{bundle.Revision}...";
-        progress?.Report(new LadderBundleProgress(
-            downloadMessage,
-            0,
-            $"0 B / {FormatBytes(bundle.ArtifactSizeBytes)} | 0%"));
-        var archiveBytes = await apiClient.DownloadLadderBundleAsync(
-            bundle,
-            new Progress<LadderBundleDownloadProgress>(update => progress?.Report(new LadderBundleProgress(
+        var archiveBytes = await ReadCachedArchiveAsync(normalized, bundle, cancellationToken);
+        var usedCache = archiveBytes is not null;
+        if (archiveBytes is null)
+        {
+            var downloadMessage = $"Downloading signed ladder package r{bundle.Revision}...";
+            progress?.Report(new LadderBundleProgress(
                 downloadMessage,
-                update.Percentage,
-                FormatDownloadDetails(update)))),
-            cancellationToken);
+                0,
+                $"0 B / {FormatBytes(bundle.ArtifactSizeBytes)} | 0%"));
+            archiveBytes = await apiClient.DownloadLadderBundleAsync(
+                bundle,
+                new Progress<LadderBundleDownloadProgress>(update => progress?.Report(new LadderBundleProgress(
+                    downloadMessage,
+                    update.Percentage,
+                    FormatDownloadDetails(update)))),
+                cancellationToken);
+        }
+        else
+        {
+            progress?.Report(new LadderBundleProgress("Using the verified cached ladder package..."));
+        }
         if (archiveBytes.LongLength != bundle.ArtifactSizeBytes
             || !string.Equals(
                 Convert.ToHexString(SHA256.HashData(archiveBytes)),
@@ -259,6 +269,8 @@ public sealed class LadderBundleService(
 
         progress?.Report(new LadderBundleProgress("Verifying ladder package signature and contents..."));
         var downloaded = VerifyArchive(bundle, archiveBytes);
+        if (!usedCache)
+            await CacheArchiveAsync(normalized, bundle, archiveBytes, cancellationToken);
         progress?.Report(new LadderBundleProgress("Installing ladder package..."));
         await InstallVerifiedAsync(normalized, bundle, downloaded, cancellationToken);
 
@@ -282,6 +294,56 @@ public sealed class LadderBundleService(
         }
 
         return details;
+    }
+
+    private static string? GetArchiveCachePath(string installDirectory, LadderBundleResponse bundle)
+    {
+        if (bundle.ArtifactSha256.Length != 64 || bundle.ArtifactSha256.Any(character => !Uri.IsHexDigit(character)))
+            return null;
+
+        return Path.Combine(
+            installDirectory,
+            ".reimagined-launcher",
+            "ladder-bundles",
+            "downloads",
+            bundle.ArtifactSha256.ToUpperInvariant() + ".zip");
+    }
+
+    internal static bool HasCachedPackage(string? installDirectory, LadderBundleResponse bundle)
+    {
+        if (string.IsNullOrWhiteSpace(installDirectory)) return false;
+        var path = GetArchiveCachePath(installDirectory, bundle);
+        return path is not null && File.Exists(path) && new FileInfo(path).Length == bundle.ArtifactSizeBytes;
+    }
+
+    private static async Task<byte[]?> ReadCachedArchiveAsync(
+        string installDirectory,
+        LadderBundleResponse bundle,
+        CancellationToken cancellationToken)
+    {
+        var path = GetArchiveCachePath(installDirectory, bundle);
+        if (bundle.ArtifactSizeBytes is <= 0 or > MaxBundleBytes
+            || path is null || !File.Exists(path) || new FileInfo(path).Length != bundle.ArtifactSizeBytes)
+            return null;
+
+        var bytes = await File.ReadAllBytesAsync(path, cancellationToken);
+        return string.Equals(Convert.ToHexString(SHA256.HashData(bytes)), bundle.ArtifactSha256,
+            StringComparison.OrdinalIgnoreCase) ? bytes : null;
+    }
+
+    private static async Task CacheArchiveAsync(
+        string installDirectory,
+        LadderBundleResponse bundle,
+        byte[] archiveBytes,
+        CancellationToken cancellationToken)
+    {
+        var path = GetArchiveCachePath(installDirectory, bundle);
+        if (path is null) return;
+
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var partial = path + ".partial-" + Guid.NewGuid().ToString("N");
+        await File.WriteAllBytesAsync(partial, archiveBytes, cancellationToken);
+        File.Move(partial, path, overwrite: true);
     }
 
     private static string FormatBytes(double bytes)
@@ -934,6 +996,7 @@ public sealed class LadderBundleService(
                 installDirectory,
                 CreateInstalledState(bundle, downloaded),
                 cancellationToken);
+            LadderRuntimeFileService.DeleteBaselines(installDirectory);
         }
         catch
         {

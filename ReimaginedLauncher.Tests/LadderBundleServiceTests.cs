@@ -132,6 +132,46 @@ public sealed class LadderBundleServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ModeRoundTripsRestoreNexusFilesAndReuseTheSignedDownload()
+    {
+        const string relativeModInfo = "mods/Reimagined/Reimagined.mpq/modinfo.json";
+        var modInfo = Path.Combine(_installDirectory, relativeModInfo.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(modInfo)!);
+        await File.WriteAllTextAsync(modInfo, "{\"savepath\":\"NexusNormal/\",\"version\":\"normal\"}");
+        var normalOnly = Path.Combine(Path.GetDirectoryName(modInfo)!, "normal-only.txt");
+        await File.WriteAllTextAsync(normalOnly, "normal");
+        NormalModInstallationService.RecordNexusInstallation(_installDirectory);
+
+        var signedFiles = new[]
+        {
+            ("modinfo", "modinfo.json", "{\"savepath\":\"Wrong-Ladder-f2faf859/\",\"version\":\"ladder\"}"u8.ToArray()),
+            ("maps", "d2rl-maps.dll", "ladder-only-code"u8.ToArray())
+        };
+        var fixture = CreateBundle(signedFiles, signedFiles.Select(file => file.Item3).ToArray(),
+            targetPaths: new Dictionary<string, string> { ["modinfo"] = relativeModInfo });
+        await CreateService(fixture.Archive).InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+        LadderRuntimeFileService.RestoreOrCaptureBaseline(_installDirectory, modInfo);
+
+        Assert.True(await LadderSaveDirectoryService.RestoreIfRedirectedAsync(_installDirectory));
+        Assert.Contains("NexusNormal/", await File.ReadAllTextAsync(modInfo));
+        Assert.Contains("ladder", await File.ReadAllTextAsync(modInfo));
+        var service = CreateService("not a valid download"u8.ToArray());
+        Assert.True((await service.GetReadinessAsync(_installDirectory, fixture.Descriptor)).IsReady);
+
+        NormalModInstallationService.Restore(_installDirectory);
+        Assert.True(File.Exists(normalOnly));
+        Assert.Contains("normal", await File.ReadAllTextAsync(modInfo));
+        Assert.False(File.Exists(Path.Combine(_installDirectory, "mods", "Reimagined", "d2rloader", "plugins", "d2rl-maps.dll")));
+
+        await File.WriteAllTextAsync(normalOnly, "user edit after returning to normal");
+        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+        Assert.True((await service.GetReadinessAsync(_installDirectory, fixture.Descriptor)).IsReady);
+        NormalModInstallationService.Restore(_installDirectory);
+        Assert.Equal("user edit after returning to normal", await File.ReadAllTextAsync(normalOnly));
+        Assert.Contains("NexusNormal/", await File.ReadAllTextAsync(modInfo));
+    }
+
+    [Fact]
     public async Task InstallOrRepairWritesAndReverifiesEveryManagedFile()
     {
         var fixture = CreateBundle(

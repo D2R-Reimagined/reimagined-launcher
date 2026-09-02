@@ -3,6 +3,7 @@ using Xunit;
 
 namespace ReimaginedLauncher.Tests;
 
+[Collection("Ladder bundle signing")]
 public sealed class LadderSaveDirectoryServiceTests : IDisposable
 {
     private static readonly Guid Ladder = Guid.Parse("d630a3fc-9da3-11f1-a936-c87f5404bb80");
@@ -170,8 +171,7 @@ public sealed class LadderSaveDirectoryServiceTests : IDisposable
     }
 
     /// <summary>
-    /// A fake install with a modinfo.json, and optionally the pristine baseline a
-    /// ladder launch captures before it rewrites one.
+    /// A fake install with optional metadata preserved from the normal download.
     /// </summary>
     private string CreateInstall(string currentSavePath, string? baselineSavePath)
     {
@@ -182,7 +182,8 @@ public sealed class LadderSaveDirectoryServiceTests : IDisposable
 
         if (baselineSavePath is not null)
         {
-            var baselinePath = LadderRuntimeFileService.GetBaselinePath(installDirectory, modInfoPath);
+            var baselinePath = Path.Combine(
+                NormalModInstallationService.NormalModRoot(installDirectory), "Reimagined.mpq", "modinfo.json");
             Directory.CreateDirectory(Path.GetDirectoryName(baselinePath)!);
             File.WriteAllText(baselinePath, $"{{\"name\":\"Reimagined\",\"savepath\":\"{baselineSavePath}/\"}}");
         }
@@ -222,7 +223,7 @@ public sealed class LadderSaveDirectoryServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task WithNoBaselineNothingIsTouchedAndNoneIsCaptured()
+    public async Task WithNoNormalCopyRestoreFailsWithoutCapturingTheRedirect()
     {
         // Capturing here would enshrine whatever savepath is current as the
         // pristine one, and every later restore would return the player to it.
@@ -230,7 +231,7 @@ public sealed class LadderSaveDirectoryServiceTests : IDisposable
             currentSavePath: "ReimaginedThree-Season-1-d630a3fc",
             baselineSavePath: null);
 
-        Assert.True(await LadderSaveDirectoryService.RestoreIfRedirectedAsync(installDirectory));
+        Assert.False(await LadderSaveDirectoryService.RestoreIfRedirectedAsync(installDirectory));
         Assert.Equal("ReimaginedThree-Season-1-d630a3fc", ReadCurrentSavePath(installDirectory));
         Assert.False(Directory.Exists(Path.Combine(installDirectory, ".reimagined-launcher", "ladder-runtime")));
     }

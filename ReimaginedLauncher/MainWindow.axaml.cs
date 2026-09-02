@@ -162,6 +162,17 @@ public partial class MainWindow : Window
         // and may be a ladder session still writing into the ladder folder.
         if (!IsGameRunning())
         {
+            if (profile.LaunchExperience != LaunchExperience.Ladder && profile.InstallDirectory is not null)
+            {
+                try
+                {
+                    NormalModInstallationService.Restore(profile.InstallDirectory);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+                {
+                    LaunchDiagnostics.LogException("Could not restore the normal mod installation during startup", exception);
+                }
+            }
             await LadderSaveDirectoryService.RestoreIfRedirectedAsync(profile.InstallDirectory);
         }
 
