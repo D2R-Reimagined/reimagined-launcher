@@ -4,16 +4,23 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace ReimaginedLauncher.Utilities;
 
 public sealed record D2RLoaderInstallProgress(string Message, double? Percentage = null);
+public sealed record D2RLoaderUpdateCheckResult(
+    string InstalledVersion,
+    string LatestVersion,
+    bool IsUpdateAvailable);
 
 public sealed class D2RLoaderInstallerService
 {
     private const string DownloadUrl = "https://d2rloader.net/downloads/latest";
+    private const string VersionUrl = "https://d2rloader.net/api/v1/version";
     private const string LoaderExecutableName = "D2RLoader.exe";
     private readonly HttpClient _httpClient;
 
@@ -28,6 +35,8 @@ public sealed class D2RLoaderInstallerService
     /// Downloads and installs D2RLoader. Pass <paramref name="minimumVersion"/>
     /// to also upgrade an install that is already present but older than a
     /// ladder requires - without it an existing install is always left alone.
+    /// Pass <paramref name="forceDownload"/> after a published-version check
+    /// to replace an older installed loader with the latest download.
     /// Only the latest published build can be fetched, so an install that is
     /// still too old afterwards is reported rather than retried.
     /// </summary>
@@ -35,7 +44,8 @@ public sealed class D2RLoaderInstallerService
         string? installDirectory,
         IProgress<D2RLoaderInstallProgress>? progress = null,
         CancellationToken cancellationToken = default,
-        string? minimumVersion = null)
+        string? minimumVersion = null,
+        bool forceDownload = false)
     {
         var normalized = InstallDirectoryValidator.NormalizeInstallDirectory(installDirectory);
         if (!InstallDirectoryValidator.IsValidInstallDirectory(normalized))
@@ -44,7 +54,9 @@ public sealed class D2RLoaderInstallerService
                 "Select the Diablo II: Resurrected folder that contains D2R.exe before installing D2RLoader.");
         }
 
-        if (D2RLoaderService.IsInstalled(normalized) && SatisfiesMinimum(normalized!, minimumVersion))
+        if (!forceDownload
+            && D2RLoaderService.IsInstalled(normalized)
+            && SatisfiesMinimum(normalized!, minimumVersion))
         {
             return;
         }
@@ -118,6 +130,145 @@ public sealed class D2RLoaderInstallerService
         {
             TryDeleteDirectory(tempDirectory);
         }
+    }
+
+    public async Task<D2RLoaderUpdateCheckResult> CheckForUpdateAsync(
+        string? installDirectory,
+        CancellationToken cancellationToken = default)
+    {
+        var inventory = D2RLoaderService.Discover(installDirectory);
+        if (!inventory.IsInstalled)
+        {
+            throw new InvalidOperationException("D2RLoader is not installed.");
+        }
+
+        if (string.IsNullOrWhiteSpace(inventory.Version))
+        {
+            throw new InvalidDataException("The installed D2RLoader version could not be read.");
+        }
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+        using var response = await _httpClient.GetAsync(VersionUrl, timeout.Token);
+        response.EnsureSuccessStatusCode();
+        await using var content = await response.Content.ReadAsStreamAsync(timeout.Token);
+        var published = await JsonSerializer.DeserializeAsync<D2RLoaderVersionResponse>(
+            content,
+            cancellationToken: timeout.Token);
+        if (string.IsNullOrWhiteSpace(published?.Version))
+        {
+            throw new InvalidDataException("The D2RLoader version service returned an invalid response.");
+        }
+
+        if (!TryCompareSemanticVersions(published.Version, inventory.Version, out var comparison))
+        {
+            throw new InvalidDataException(
+                $"D2RLoader version information could not be compared (installed: {inventory.Version}, published: {published.Version}).");
+        }
+
+        return new D2RLoaderUpdateCheckResult(
+            inventory.Version,
+            published.Version,
+            comparison > 0);
+    }
+
+    internal static bool IsUpdateAvailable(string? installedVersion, string? latestVersion) =>
+        TryCompareSemanticVersions(latestVersion, installedVersion, out var comparison) && comparison > 0;
+
+    private static bool TryCompareSemanticVersions(string? left, string? right, out int comparison)
+    {
+        comparison = 0;
+        if (!TryParseSemanticVersion(left, out var leftCore, out var leftPrerelease)
+            || !TryParseSemanticVersion(right, out var rightCore, out var rightPrerelease))
+        {
+            return false;
+        }
+
+        comparison = leftCore.CompareTo(rightCore);
+        if (comparison != 0)
+        {
+            return true;
+        }
+
+        comparison = ComparePrerelease(leftPrerelease, rightPrerelease);
+        return true;
+    }
+
+    private static bool TryParseSemanticVersion(
+        string? value,
+        out Version core,
+        out string[]? prerelease)
+    {
+        core = new Version(0, 0, 0, 0);
+        prerelease = null;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var withoutBuild = value.Trim().TrimStart('v', 'V').Split('+', 2)[0];
+        var parts = withoutBuild.Split('-', 2);
+        if (!Version.TryParse(parts[0], out var parsed)
+            || parsed.Major < 0
+            || parsed.Minor < 0)
+        {
+            return false;
+        }
+
+        core = new Version(
+            parsed.Major,
+            parsed.Minor,
+            Math.Max(0, parsed.Build),
+            Math.Max(0, parsed.Revision));
+        if (parts.Length == 2)
+        {
+            if (string.IsNullOrWhiteSpace(parts[1]))
+            {
+                return false;
+            }
+
+            prerelease = parts[1].Split('.');
+        }
+
+        return true;
+    }
+
+    private static int ComparePrerelease(string[]? left, string[]? right)
+    {
+        if (left is null)
+        {
+            return right is null ? 0 : 1;
+        }
+        if (right is null)
+        {
+            return -1;
+        }
+
+        for (var index = 0; index < Math.Min(left.Length, right.Length); index++)
+        {
+            var leftIsNumeric = long.TryParse(left[index], out var leftNumber);
+            var rightIsNumeric = long.TryParse(right[index], out var rightNumber);
+            int comparison;
+            if (leftIsNumeric && rightIsNumeric)
+            {
+                comparison = leftNumber.CompareTo(rightNumber);
+            }
+            else if (leftIsNumeric != rightIsNumeric)
+            {
+                comparison = leftIsNumeric ? -1 : 1;
+            }
+            else
+            {
+                comparison = string.Compare(left[index], right[index], StringComparison.Ordinal);
+            }
+
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+        }
+
+        return left.Length.CompareTo(right.Length);
     }
 
     private static bool SatisfiesMinimum(string installDirectory, string? minimumVersion)
@@ -233,4 +384,7 @@ public sealed class D2RLoaderInstallerService
         {
         }
     }
+
+    private sealed record D2RLoaderVersionResponse(
+        [property: JsonPropertyName("version")] string? Version);
 }

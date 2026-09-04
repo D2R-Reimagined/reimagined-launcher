@@ -27,6 +27,7 @@ public partial class LaunchView : UserControl
     private readonly LadderBundleService _ladderBundleService;
     private bool _isLaunching;
     private bool _isLoaderInstallPromptOpen;
+    private string? _loaderUpdatePromptedVersion;
     private bool _isRefreshingLadders;
     private bool _isRefreshingLadderControls;
     private bool _ladderStatusLoaded;
@@ -563,7 +564,6 @@ public partial class LaunchView : UserControl
     private async Task PromptInstallD2RLoaderAsync(InstallationProfile profile)
     {
         if (_isLoaderInstallPromptOpen
-            || D2RLoaderService.IsInstalled(profile.InstallDirectory)
             || !OperatingSystem.IsWindows()
             || !InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory)
             || TopLevel.GetTopLevel(this) is not Window owner)
@@ -574,15 +574,47 @@ public partial class LaunchView : UserControl
         _isLoaderInstallPromptOpen = true;
         try
         {
-            var installed = await ShowD2RLoaderInstallDialogAsync(owner, profile.InstallDirectory!);
+            var inventory = D2RLoaderService.Discover(profile.InstallDirectory);
+            D2RLoaderUpdateCheckResult? update = null;
+            if (inventory.IsInstalled)
+            {
+                try
+                {
+                    update = await _d2rLoaderInstallerService.CheckForUpdateAsync(profile.InstallDirectory);
+                }
+                catch (Exception exception)
+                {
+                    LaunchDiagnostics.LogException("D2RLoader update check failed", exception);
+                    return;
+                }
+
+                if (!update.IsUpdateAvailable
+                    || string.Equals(
+                        _loaderUpdatePromptedVersion,
+                        update.LatestVersion,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                _loaderUpdatePromptedVersion = update.LatestVersion;
+            }
+
+            var installed = await ShowD2RLoaderInstallDialogAsync(
+                owner,
+                profile.InstallDirectory!,
+                update);
             if (!installed)
             {
                 return;
             }
 
-            LaunchDiagnostics.Log($"D2RLoader installed to {profile.InstallDirectory}.");
+            var action = update is null ? "installed" : $"updated to {update.LatestVersion}";
+            LaunchDiagnostics.Log($"D2RLoader {action} at {profile.InstallDirectory}.");
             Notifications.SendNotification(
-                "D2RLoader installed. Online and Ladder modes are now ready to use.",
+                update is null
+                    ? "D2RLoader installed. Online and Ladder modes are now ready to use."
+                    : $"D2RLoader updated to {update.LatestVersion}.",
                 "Success");
             RefreshInstallDirectoryState();
             await RefreshLadderStateAsync();
@@ -593,15 +625,19 @@ public partial class LaunchView : UserControl
         }
     }
 
-    private async Task<bool> ShowD2RLoaderInstallDialogAsync(Window owner, string installDirectory)
+    private async Task<bool> ShowD2RLoaderInstallDialogAsync(
+        Window owner,
+        string installDirectory,
+        D2RLoaderUpdateCheckResult? update = null)
     {
+        var isUpdate = update is not null;
         var dialog = new Window
         {
             Width = 520,
             SizeToContent = SizeToContent.Height,
             CanResize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Title = "Install D2RLoader?"
+            Title = isUpdate ? "Update D2RLoader?" : "Install D2RLoader?"
         };
 
         var statusText = new TextBlock
@@ -618,7 +654,7 @@ public partial class LaunchView : UserControl
         };
         var installButton = new Button
         {
-            Content = "Download and Install",
+            Content = isUpdate ? "Download and Update" : "Download and Install",
             Classes = { "accent" },
             MinWidth = 156
         };
@@ -657,9 +693,15 @@ public partial class LaunchView : UserControl
 
             try
             {
-                await _d2rLoaderInstallerService.InstallAsync(installDirectory, progress);
+                await _d2rLoaderInstallerService.InstallAsync(
+                    installDirectory,
+                    progress,
+                    minimumVersion: update?.LatestVersion,
+                    forceDownload: isUpdate);
                 isInstalled = true;
-                statusText.Text = "D2RLoader installed successfully.";
+                statusText.Text = isUpdate
+                    ? $"D2RLoader {update!.LatestVersion} installed successfully."
+                    : "D2RLoader installed successfully.";
                 statusText.Foreground = new SolidColorBrush(Color.Parse("#86D88F"));
                 progressBar.IsIndeterminate = false;
                 progressBar.Value = 100;
@@ -702,13 +744,17 @@ public partial class LaunchView : UserControl
                 {
                     new TextBlock
                     {
-                        Text = "D2RLoader is required for Online and Ladder modes, but it was not found beside D2R.exe.",
+                        Text = isUpdate
+                            ? $"D2RLoader {update!.LatestVersion} is available. You currently have {update.InstalledVersion}."
+                            : "D2RLoader is required for Online and Ladder modes, but it was not found beside D2R.exe.",
                         FontWeight = FontWeight.SemiBold,
                         TextWrapping = TextWrapping.Wrap
                     },
                     new TextBlock
                     {
-                        Text = "Would you like the launcher to download D2RLoader and extract it into your Diablo II: Resurrected installation?",
+                        Text = isUpdate
+                            ? "Would you like the launcher to download and install the update now? Your loader configuration, plugins, and patches will be preserved."
+                            : "Would you like the launcher to download D2RLoader and extract it into your Diablo II: Resurrected installation?",
                         TextWrapping = TextWrapping.Wrap
                     },
                     new TextBlock
@@ -1377,8 +1423,7 @@ public partial class LaunchView : UserControl
             return;
         }
 
-        if (profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder
-            && !D2RLoaderService.IsInstalled(profile.InstallDirectory))
+        if (profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder)
         {
             await PromptInstallD2RLoaderAsync(profile);
         }

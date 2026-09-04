@@ -1,4 +1,7 @@
 using System.IO.Compression;
+using System.Net;
+using System.Net.Http;
+using System.Text;
 using ReimaginedLauncher.Utilities;
 using Xunit;
 
@@ -55,6 +58,39 @@ public sealed class D2RLoaderInstallerServiceTests : IDisposable
         Assert.False(File.Exists(Path.Combine(_testDirectory, "outside.txt")));
     }
 
+    [Theory]
+    [InlineData("1.2.0", "1.2.1-beta", true)]
+    [InlineData("1.2.1-alpha.2", "1.2.1-beta", true)]
+    [InlineData("1.2.1-beta", "1.2.1-beta", false)]
+    [InlineData("1.2.1", "1.2.1-beta", false)]
+    [InlineData("1.2.1.0", "1.2.1", false)]
+    [InlineData("1.2.1-beta+preview.1", "1.2.1-beta+preview.2", false)]
+    public void UpdateComparisonUsesSemanticVersionPrecedence(
+        string installed,
+        string latest,
+        bool expected)
+    {
+        Assert.Equal(expected, D2RLoaderInstallerService.IsUpdateAvailable(installed, latest));
+    }
+
+    [Fact]
+    public async Task UpdateCheckReadsPublishedVersionFromD2RLoaderEndpoint()
+    {
+        var installDirectory = Path.Combine(_testDirectory, "install");
+        Directory.CreateDirectory(installDirectory);
+        File.Copy(
+            typeof(D2RLoaderInstallerServiceTests).Assembly.Location,
+            Path.Combine(installDirectory, "D2RLoader.exe"));
+        var handler = new StaticResponseHandler("{\"version\":\"999.0.0-beta\"}");
+        var service = new D2RLoaderInstallerService(new HttpClient(handler));
+
+        var result = await service.CheckForUpdateAsync(installDirectory);
+
+        Assert.True(result.IsUpdateAvailable);
+        Assert.Equal("999.0.0-beta", result.LatestVersion);
+        Assert.Equal(new Uri("https://d2rloader.net/api/v1/version"), handler.RequestUri);
+    }
+
     private string CreateArchive(params (string Path, string Content)[] entries)
     {
         Directory.CreateDirectory(_testDirectory);
@@ -75,6 +111,22 @@ public sealed class D2RLoaderInstallerServiceTests : IDisposable
         if (Directory.Exists(_testDirectory))
         {
             Directory.Delete(_testDirectory, recursive: true);
+        }
+    }
+
+    private sealed class StaticResponseHandler(string json) : HttpMessageHandler
+    {
+        public Uri? RequestUri { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            RequestUri = request.RequestUri;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            });
         }
     }
 }
