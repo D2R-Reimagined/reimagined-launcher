@@ -68,7 +68,6 @@ public static partial class D2RLoaderService
 {
     private const string LoaderExecutableName = "D2RLoader.exe";
     private const string LoaderFolderName = "d2rloader";
-    private const string ModName = "Reimagined";
 
     public static string? GetLoaderPath(string? installDirectory)
     {
@@ -87,12 +86,12 @@ public static partial class D2RLoaderService
         return !string.IsNullOrWhiteSpace(loaderPath) && File.Exists(loaderPath);
     }
 
-    public static D2RLoaderInventory Discover(string? installDirectory)
+    public static D2RLoaderInventory Discover(string? installDirectory, LaunchExperience experience = LaunchExperience.Online)
     {
         var normalized = InstallDirectoryValidator.NormalizeInstallDirectory(installDirectory) ?? string.Empty;
         var loaderPath = Path.Combine(normalized, LoaderExecutableName);
         var globalRoot = Path.Combine(normalized, LoaderFolderName);
-        var modRoot = Path.Combine(normalized, "mods", ModName, LoaderFolderName);
+        var modRoot = Path.Combine(normalized, "mods", ModInstallationPaths.ModName(experience), LoaderFolderName);
         var installed = File.Exists(loaderPath);
         var extensions = new List<D2RLoaderExtensionInfo>();
 
@@ -342,7 +341,7 @@ public static partial class D2RLoaderService
             : CultureInfo.InvariantCulture.TextInfo.ToTitleCase(words);
     }
 
-    [GeneratedRegex("^d2rl-(?:[^-]+-)?", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex("^d2rl-", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex PluginPrefixRegex();
 
     [GeneratedRegex("[-_]+", RegexOptions.CultureInvariant)]

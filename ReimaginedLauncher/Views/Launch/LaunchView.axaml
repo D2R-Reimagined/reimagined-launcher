@@ -226,7 +226,15 @@
                 </Border>
             </Grid>
 
-            <Border x:Name="LadderPolicyPanel" Grid.Row="3" Classes="panel" Padding="18" IsVisible="False">
+            <Border x:Name="LaunchStatusPanel" Grid.Row="3" Classes="panel" Padding="18" IsVisible="False">
+                <StackPanel Spacing="10">
+                    <TextBlock Classes="section-title" Text="Launch Status" />
+                    <TextBlock x:Name="LaunchStatusText" Classes="muted" Text="Preparing launch..." />
+                    <ProgressBar x:Name="LaunchProgressBar" IsIndeterminate="True" Height="8" />
+                </StackPanel>
+            </Border>
+
+            <Border x:Name="LadderPolicyPanel" Grid.Row="4" Classes="panel" Padding="18" IsVisible="False">
                 <StackPanel Spacing="12">
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="14">
                         <StackPanel Spacing="4">
@@ -329,7 +337,7 @@
                 </StackPanel>
             </Border>
 
-            <Border x:Name="OnlineExperiencePanel" Grid.Row="4" Classes="panel" Padding="18" IsVisible="False">
+            <Border x:Name="OnlineExperiencePanel" Grid.Row="5" Classes="panel" Padding="18" IsVisible="False">
                 <StackPanel Spacing="16">
                     <Grid x:Name="LoaderHeaderGrid" ColumnDefinitions="*,Auto" ColumnSpacing="16">
                         <StackPanel Spacing="5">
@@ -408,14 +416,6 @@
                             </StackPanel>
                         </Border>
                     </Grid>
-                </StackPanel>
-            </Border>
-
-            <Border x:Name="LaunchStatusPanel" Grid.Row="5" Classes="panel" Padding="18" IsVisible="False">
-                <StackPanel Spacing="10">
-                    <TextBlock Classes="section-title" Text="Launch Status" />
-                    <TextBlock x:Name="LaunchStatusText" Classes="muted" Text="Preparing launch..." />
-                    <ProgressBar x:Name="LaunchProgressBar" IsIndeterminate="True" Height="8" />
                 </StackPanel>
             </Border>
         </Grid>

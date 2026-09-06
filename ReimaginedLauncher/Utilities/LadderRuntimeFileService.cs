@@ -8,7 +8,7 @@ namespace ReimaginedLauncher.Utilities;
 internal static class LadderRuntimeFileService
 {
     private const string ManagementDirectoryName = ".reimagined-launcher";
-    private const string RuntimeDirectoryName = "ladder-runtime";
+    private const string RuntimeDirectoryName = "isolated-ladder-runtime";
 
     private static readonly string[] MutableSignedPathSuffixes =
     [
@@ -78,7 +78,7 @@ internal static class LadderRuntimeFileService
 
     internal static bool IsMutableSignedPath(string targetPath)
     {
-        var normalized = targetPath.Replace('\\', '/');
+        var normalized = ModInstallationPaths.ToSignedPath(targetPath);
         return MutableSignedPathSuffixes.Any(suffix =>
             normalized.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
     }
@@ -87,7 +87,7 @@ internal static class LadderRuntimeFileService
         string targetPath,
         IReadOnlySet<string>? approvedPluginIds = null)
     {
-        var normalized = targetPath.Replace('\\', '/');
+        var normalized = ModInstallationPaths.ToSignedPath(targetPath);
         if (GeneratedRuntimePaths.Contains(normalized)
             || normalized.StartsWith(
                 "mods/Reimagined/d2rloader/logs/",

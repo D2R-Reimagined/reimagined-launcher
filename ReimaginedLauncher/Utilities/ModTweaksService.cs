@@ -830,7 +830,8 @@ public static class ModTweaksService
                    Path.Combine(installDirectory, ModDirectoryName);
         }
 
-        return Path.Combine(installDirectory, "mods", ModDirectoryName, $"{ModDirectoryName}.mpq");
+        var modName = ModInstallationPaths.ModName(profile.LaunchExperience);
+        return Path.Combine(installDirectory, "mods", modName, $"{modName}.mpq");
     }
 
     private static string? GetExcelDirectory()

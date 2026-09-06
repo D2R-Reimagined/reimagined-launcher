@@ -247,7 +247,7 @@ public partial class MainWindow : Window
         UserViewModel.PropertyChanged -= UserViewModelOnPropertyChanged;
         UserViewModel.PropertyChanged += UserViewModelOnPropertyChanged;
 
-        if (!IsLocalModDetected)
+        if (!IsLocalModDetected && Settings.CurrentProfile.LaunchExperience != LaunchExperience.Ladder)
         {
             if (!openedUnreadAnnouncements)
             {
@@ -371,7 +371,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!IsLocalModDetected)
+        if (!IsLocalModDetected && Settings.CurrentProfile.LaunchExperience != LaunchExperience.Ladder)
         {
             var latestVersionForInstall = "Latest available";
             var downloadUrlForInstall = NexusUrl;

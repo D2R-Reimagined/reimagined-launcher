@@ -72,7 +72,7 @@ internal static class NormalModInstallationService
 
             var savePath = value.GetString()?.Trim().Trim('/', '\\');
             return !string.IsNullOrWhiteSpace(savePath)
-                   && !Regex.IsMatch(savePath, "-[0-9a-fA-F]{8}$");
+                   && !Regex.IsMatch(savePath, "-(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{32})$");
         }
         catch (JsonException)
         {
@@ -101,7 +101,6 @@ internal static class NormalModInstallationService
         if (modInfo is null || !HasNormalSavePath(modInfo))
             throw new InvalidDataException("The downloaded mod has no valid normal savepath in modinfo.json.");
 
-        ReplaceFromCopy(installDirectory, modRoot, NormalModRoot(installDirectory));
         ClearLadderState(installDirectory);
     }
 
@@ -119,7 +118,8 @@ internal static class NormalModInstallationService
 
     private static void ClearLadderState(string installDirectory)
     {
-        LadderRuntimeFileService.DeleteBaselines(installDirectory);
+        var legacyRuntimeRoot = Path.Combine(ManagementRoot(installDirectory), "ladder-runtime");
+        if (Directory.Exists(legacyRuntimeRoot)) Directory.Delete(legacyRuntimeRoot, recursive: true);
         foreach (var path in new[]
                  {
                      BundleStatePath(installDirectory),

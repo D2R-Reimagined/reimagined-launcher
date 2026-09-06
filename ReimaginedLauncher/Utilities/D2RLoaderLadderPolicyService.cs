@@ -69,8 +69,8 @@ public static partial class D2RLoaderService
         IReadOnlySet<Guid> selectedApprovalIds,
         CancellationToken cancellationToken = default)
     {
-        var restoredCount = RestoreLadderDisabledExtensions(installDirectory);
-        var inventory = Discover(installDirectory);
+        var restoredCount = RestoreLadderDisabledExtensions(installDirectory, LaunchExperience.Ladder);
+        var inventory = Discover(installDirectory, LaunchExperience.Ladder);
         var matches = await MatchApprovalsAsync(inventory.Extensions, approvals, cancellationToken);
         var approvalByPath = matches.ToDictionary(
             match => match.Extension.FilePath,
@@ -111,16 +111,16 @@ public static partial class D2RLoaderService
         return new LadderD2RLoaderPolicyResult(unapprovedMoved, unselectedMoved, restoredCount);
     }
 
-    public static int RestoreLadderDisabledExtensions(string? installDirectory)
+    public static int RestoreLadderDisabledExtensions(string? installDirectory, LaunchExperience experience = LaunchExperience.Online)
     {
-        var inventory = Discover(installDirectory);
+        var inventory = Discover(installDirectory, experience);
         return RestoreDisabledRoot(inventory.GlobalRoot, inventory.ModRoot)
                + RestoreDisabledRoot(inventory.ModRoot, inventory.GlobalRoot);
     }
 
     private static D2RLoaderInventory DiscoverForLadderPolicy(string? installDirectory)
     {
-        var inventory = Discover(installDirectory);
+        var inventory = Discover(installDirectory, LaunchExperience.Ladder);
         var extensions = inventory.Extensions.ToList();
         AddExtensions(
             extensions,

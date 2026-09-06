@@ -396,7 +396,7 @@ public class GameLauncherService
         var launchParameters = new List<string>
         {
             "-mod",
-            "Reimagined",
+            ModInstallationPaths.ModName(profile.LaunchExperience),
             "-txt"
         };
 
@@ -407,7 +407,8 @@ public class GameLauncherService
             launchParameters.Add("-enablerespec");
         }
 
-        if (isOfflineExperience && profile.ResetOfflineMaps)
+        if (profile.LaunchExperience == LaunchExperience.Ladder ||
+            (isOfflineExperience && profile.ResetOfflineMaps))
         {
             launchParameters.Add("-resetofflinemaps");
         }
@@ -574,6 +575,8 @@ public class GameLauncherService
 
         try
         {
+            if (D2RLoaderService.IsInstalled(profile.InstallDirectory))
+                D2RLoaderService.SetDefaultMod(profile.InstallDirectory!, profile.LaunchExperience);
             var process = Process.Start(processStartInfo);
             if (process == null)
             {
@@ -585,7 +588,7 @@ public class GameLauncherService
             LaunchDiagnostics.Log($"Process started with PID {process.Id}.");
             return process;
         }
-        catch (Win32Exception ex)
+        catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException)
         {
             LaunchDiagnostics.LogException("Process.Start failed", ex);
             Notifications.SendNotification($"Failed to start {Path.GetFileName(executablePath)}: {ex.Message}", "Warning");

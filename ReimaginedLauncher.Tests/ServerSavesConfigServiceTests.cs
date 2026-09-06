@@ -12,7 +12,7 @@ public sealed class ServerSavesConfigServiceTests : IDisposable
         Path.GetTempPath(),
         $"reimagined-server-saves-tests-{Guid.NewGuid():N}");
 
-    private string ModLoaderRoot => Path.Combine(_installDirectory, "mods", "Reimagined", "d2rloader");
+    private string ModLoaderRoot => Path.Combine(_installDirectory, "mods", "ReimaginedLadder", "d2rloader");
     private string ModConfigPath => Path.Combine(ModLoaderRoot, "config", "server-saves.toml");
     private string InstalledPluginPath => Path.Combine(ModLoaderRoot, "plugins", ServerSavesConfigService.PluginFileName);
 

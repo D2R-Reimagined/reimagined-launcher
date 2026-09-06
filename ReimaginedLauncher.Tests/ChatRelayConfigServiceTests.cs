@@ -13,7 +13,7 @@ public sealed class ChatRelayConfigServiceTests : IDisposable
         Path.GetTempPath(),
         $"reimagined-chat-relay-tests-{Guid.NewGuid():N}");
 
-    private string ModLoaderRoot => Path.Combine(_installDirectory, "mods", "Reimagined", "d2rloader");
+    private string ModLoaderRoot => Path.Combine(_installDirectory, "mods", "ReimaginedLadder", "d2rloader");
     private string ModConfigPath => Path.Combine(ModLoaderRoot, "config", "chat-relay.toml");
     private string InstalledPluginPath => Path.Combine(ModLoaderRoot, "plugins", ChatRelayConfigService.PluginFileName);
 

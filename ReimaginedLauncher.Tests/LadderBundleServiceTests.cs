@@ -132,7 +132,7 @@ public sealed class LadderBundleServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ModeRoundTripsRestoreNexusFilesAndReuseTheSignedDownload()
+    public async Task ModeRoundTripsKeepBothInstallationsAndReuseTheSignedDownload()
     {
         const string relativeModInfo = "mods/Reimagined/Reimagined.mpq/modinfo.json";
         var modInfo = Path.Combine(_installDirectory, relativeModInfo.Replace('/', Path.DirectorySeparatorChar));
@@ -149,12 +149,20 @@ public sealed class LadderBundleServiceTests : IDisposable
         };
         var fixture = CreateBundle(signedFiles, signedFiles.Select(file => file.Item3).ToArray(),
             targetPaths: new Dictionary<string, string> { ["modinfo"] = relativeModInfo });
-        await CreateService(fixture.Archive).InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
-        LadderRuntimeFileService.RestoreOrCaptureBaseline(_installDirectory, modInfo);
+        using (var normalLock = File.Open(modInfo, FileMode.Open, FileAccess.Read, FileShare.Read))
+            await CreateService(fixture.Archive).InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+        Assert.Contains("normal", await File.ReadAllTextAsync(modInfo));
+        Assert.False(Directory.Exists(NormalModInstallationService.NormalModRoot(_installDirectory)));
+        var ladderModInfo = ModInstallationPaths.FindLadderModInfo(_installDirectory)!;
+        var savedGames = Path.Combine(_installDirectory, "Saved Games");
+        var prepared = await LadderSaveDirectoryService.PrepareAsync(
+            _installDirectory, fixture.Descriptor.LadderId, "First Name", savedGames);
+        Assert.Null(prepared.ErrorMessage);
+        Assert.Contains(Path.GetFileName(prepared.DirectoryPath) + "/", await File.ReadAllTextAsync(ladderModInfo));
 
         Assert.True(await LadderSaveDirectoryService.RestoreIfRedirectedAsync(_installDirectory));
         Assert.Contains("NexusNormal/", await File.ReadAllTextAsync(modInfo));
-        Assert.Contains("ladder", await File.ReadAllTextAsync(modInfo));
+        Assert.Contains("ladder", await File.ReadAllTextAsync(ladderModInfo));
         var service = CreateService("not a valid download"u8.ToArray());
         Assert.True((await service.GetReadinessAsync(_installDirectory, fixture.Descriptor)).IsReady);
 
@@ -165,6 +173,11 @@ public sealed class LadderBundleServiceTests : IDisposable
 
         await File.WriteAllTextAsync(normalOnly, "user edit after returning to normal");
         await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+        Assert.True((await service.GetReadinessAsync(_installDirectory, fixture.Descriptor)).IsReady);
+        var preparedAgain = await LadderSaveDirectoryService.PrepareAsync(
+            _installDirectory, fixture.Descriptor.LadderId, "Renamed Ladder", savedGames);
+        Assert.Null(preparedAgain.ErrorMessage);
+        Assert.Equal(prepared.DirectoryPath, preparedAgain.DirectoryPath);
         Assert.True((await service.GetReadinessAsync(_installDirectory, fixture.Descriptor)).IsReady);
         NormalModInstallationService.Restore(_installDirectory);
         Assert.Equal("user edit after returning to normal", await File.ReadAllTextAsync(normalOnly));
@@ -185,7 +198,7 @@ public sealed class LadderBundleServiceTests : IDisposable
         Assert.True(readiness.IsReady, readiness.Status);
         foreach (var file in fixture.Descriptor.Files)
         {
-            Assert.True(File.Exists(Path.Combine(_installDirectory, file.TargetPath.Replace('/', Path.DirectorySeparatorChar))));
+            Assert.True(File.Exists(Path.Combine(_installDirectory, ModInstallationPaths.ToLadderPath(file.TargetPath).Replace('/', Path.DirectorySeparatorChar))));
         }
     }
 
@@ -221,7 +234,7 @@ public sealed class LadderBundleServiceTests : IDisposable
         Assert.False(pending.IsReady);
         Assert.False(pending.RequiresBundleRepair);
         await LadderOptionalExtensionService.SynchronizeAsync(_installDirectory, fixture.Descriptor, [optional], selected, Download);
-        Assert.False(File.Exists(Path.Combine(_installDirectory, LadderOptionalExtensionService.TargetPath(optional))));
+        Assert.False(File.Exists(Path.Combine(_installDirectory, ModInstallationPaths.ToLadderPath(LadderOptionalExtensionService.TargetPath(optional)))));
         Assert.Single(Directory.GetFiles(Path.Combine(_installDirectory, ".reimagined-launcher", "ladder-bundles", "optional-backups"), optional.FileName, SearchOption.AllDirectories));
         Assert.Equal(1, downloads);
         ready = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor,
@@ -241,7 +254,7 @@ public sealed class LadderBundleServiceTests : IDisposable
         HashSet<Guid> selected = [optional.Id];
         await LadderOptionalExtensionService.SynchronizeAsync(_installDirectory, fixture.Descriptor, [optional], selected,
             (_, _) => Task.FromResult(bytes));
-        var path = Path.Combine(_installDirectory, LadderOptionalExtensionService.TargetPath(optional));
+        var path = Path.Combine(_installDirectory, ModInstallationPaths.ToLadderPath(LadderOptionalExtensionService.TargetPath(optional)));
         await File.WriteAllBytesAsync(path, "tampered-code"u8.ToArray());
         var pending = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor,
             allowedExtensions: [optional], selectedExtensionIds: selected);
@@ -269,7 +282,7 @@ public sealed class LadderBundleServiceTests : IDisposable
         await Assert.ThrowsAsync<InvalidDataException>(() => LadderOptionalExtensionService.SynchronizeAsync(
             _installDirectory, fixture.Descriptor, [optional], new HashSet<Guid> { optional.Id },
             (_, _) => throw new InvalidOperationException("Must not download")));
-        await File.WriteAllTextAsync(Path.Combine(_installDirectory, "mods", "Reimagined", "cheat.json"), "{}");
+        await File.WriteAllTextAsync(Path.Combine(_installDirectory, "mods", "ReimaginedLadder", "cheat.json"), "{}");
         var readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor, allowedExtensions: []);
         Assert.False(readiness.IsReady);
         Assert.True(readiness.RequiresBundleRepair);
@@ -312,7 +325,7 @@ public sealed class LadderBundleServiceTests : IDisposable
         await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
         var target = Path.Combine(
             _installDirectory,
-            fixture.Descriptor.Files[0].TargetPath.Replace('/', Path.DirectorySeparatorChar));
+            ModInstallationPaths.ToLadderPath(fixture.Descriptor.Files[0].TargetPath).Replace('/', Path.DirectorySeparatorChar));
         await File.WriteAllBytesAsync(target, "bad-code"u8.ToArray());
 
         var modifiedReadiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
@@ -324,7 +337,7 @@ public sealed class LadderBundleServiceTests : IDisposable
             _installDirectory,
             ".reimagined-launcher",
             "ladder-bundles",
-            "ladder-bundle-state.json");
+            "isolated-ladder-bundle-state.json");
         var state = JsonSerializer.Deserialize<InstalledLadderBundleState>(
             await File.ReadAllTextAsync(statePath),
             JsonOptions)!;
@@ -368,13 +381,13 @@ public sealed class LadderBundleServiceTests : IDisposable
         var service = CreateService(fixture.Archive);
         await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
 
-        var target = Path.Combine(_installDirectory, targetPath.Replace('/', Path.DirectorySeparatorChar));
+        var target = Path.Combine(_installDirectory, ModInstallationPaths.ToLadderPath(targetPath).Replace('/', Path.DirectorySeparatorChar));
         var baseline = LadderRuntimeFileService.RestoreOrCaptureBaseline(_installDirectory, target);
         await File.WriteAllTextAsync(target, "launcher-generated ladder banner");
         var config = Path.Combine(
             _installDirectory,
             "mods",
-            "Reimagined",
+            "ReimaginedLadder",
             "d2rloader",
             "config",
             "server-saves.toml");
@@ -386,7 +399,7 @@ public sealed class LadderBundleServiceTests : IDisposable
         var logs = Path.Combine(
             _installDirectory,
             "mods",
-            "Reimagined",
+            "ReimaginedLadder",
             "d2rloader",
             "logs");
         Directory.CreateDirectory(logs);
@@ -419,7 +432,7 @@ public sealed class LadderBundleServiceTests : IDisposable
         var undeclared = Path.Combine(
             _installDirectory,
             "mods",
-            "Reimagined",
+            "ReimaginedLadder",
             "unapproved.txt");
         Directory.CreateDirectory(Path.GetDirectoryName(undeclared)!);
         await File.WriteAllTextAsync(undeclared, "local change");
@@ -438,7 +451,7 @@ public sealed class LadderBundleServiceTests : IDisposable
         var fixture = CreateBundle(("announcements", "d2rl-announcements.dll", "announcement-code"u8.ToArray()));
         var service = CreateService(fixture.Archive);
         await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
-        var undeclared = Path.Combine(_installDirectory, "mods", "Reimagined", "local-change.txt");
+        var undeclared = Path.Combine(_installDirectory, "mods", "ReimaginedLadder", "local-change.txt");
         await File.WriteAllTextAsync(undeclared, "not signed");
 
         var readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
@@ -448,28 +461,17 @@ public sealed class LadderBundleServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task LegacyPluginOnlyBundlesDoNotReplaceTheModTree()
+    public async Task LegacyPluginOnlyBundlesCannotUseLocalModFiles()
     {
         var files = new[] { ("announcements", "d2rl-announcements.dll", "announcement-code"u8.ToArray()) };
         var fixture = CreateBundle(files, files.Select(file => file.Item3).ToArray(), schemaVersion: 1);
-        var existingData = Path.Combine(
-            _installDirectory,
-            "mods",
-            "Reimagined",
-            "Reimagined.mpq",
-            "data",
-            "global",
-            "excel",
-            "levels.txt");
-        Directory.CreateDirectory(Path.GetDirectoryName(existingData)!);
-        await File.WriteAllTextAsync(existingData, "existing mod data");
         var service = CreateService(fixture.Archive);
-
-        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
-
-        Assert.Equal("existing mod data", await File.ReadAllTextAsync(existingData));
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() => service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor));
+        Assert.Equal(LadderBundleService.LegacyBundleMessage, exception.Message);
         var readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
-        Assert.True(readiness.IsReady, readiness.Status);
+        Assert.False(readiness.IsReady);
+        Assert.False(readiness.CanRepair);
+        Assert.False(Directory.Exists(ModInstallationPaths.LadderModRoot(_installDirectory)));
     }
 
     private LadderBundleService CreateService(byte[] archive)
@@ -480,8 +482,7 @@ public sealed class LadderBundleServiceTests : IDisposable
         var handler = new StaticResponseHandler(archive);
         return new LadderBundleService(
             new ReimaginedApiHttpClient(new HttpClient(handler)),
-            new D2RLoaderInstallerService(new HttpClient(handler)),
-            new ModReleaseInstallerService(new HttpClient(handler)));
+            new D2RLoaderInstallerService(new HttpClient(handler)));
     }
 
     private BundleFixture CreateBundle(params (string Id, string FileName, byte[] Content)[] files)

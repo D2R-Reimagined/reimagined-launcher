@@ -27,7 +27,7 @@ namespace ReimaginedLauncher.Utilities;
 public sealed class D2RLoaderPluginPackage
 {
     private const string LoaderFolderName = "d2rloader";
-    private const string ModName = "Reimagined";
+    private readonly string _modName;
 
     private readonly string? _bundledPluginPathOverride;
 
@@ -35,8 +35,10 @@ public sealed class D2RLoaderPluginPackage
         string pluginId,
         string pluginFileName,
         string managedHeader,
-        string? bundledPluginPath = null)
+        string? bundledPluginPath = null,
+        string modName = "Reimagined")
     {
+        _modName = modName;
         PluginId = pluginId;
         PluginFileName = pluginFileName;
         ManagedHeader = managedHeader;
@@ -112,7 +114,7 @@ public sealed class D2RLoaderPluginPackage
             return Task.FromResult(false);
         }
 
-        var targetDirectory = Path.Combine(normalized, "mods", ModName, LoaderFolderName, "plugins");
+        var targetDirectory = Path.Combine(normalized, "mods", _modName, LoaderFolderName, "plugins");
         var target = Path.Combine(targetDirectory, PluginFileName);
 
         try
@@ -266,7 +268,7 @@ public sealed class D2RLoaderPluginPackage
             .ToList();
     }
 
-    private static IEnumerable<string> EnumerateRoots(string? installDirectory)
+    private IEnumerable<string> EnumerateRoots(string? installDirectory)
     {
         var normalized = InstallDirectoryValidator.NormalizeInstallDirectory(installDirectory);
         if (string.IsNullOrWhiteSpace(normalized))
@@ -274,7 +276,7 @@ public sealed class D2RLoaderPluginPackage
             yield break;
         }
 
-        yield return Path.Combine(normalized, "mods", ModName, LoaderFolderName);
+        yield return Path.Combine(normalized, "mods", _modName, LoaderFolderName);
         yield return Path.Combine(normalized, LoaderFolderName);
     }
 }

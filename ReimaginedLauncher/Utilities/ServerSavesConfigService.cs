@@ -37,7 +37,8 @@ public static class ServerSavesConfigService
         + "# setting left out uses the plugin's built-in default.\n"
         + "\n";
 
-    private static readonly D2RLoaderPluginPackage Package = new(PluginId, PluginFileName, ManagedHeader);
+    private static readonly D2RLoaderPluginPackage Package = new(PluginId, PluginFileName, ManagedHeader, modName: ModInstallationPaths.LadderModName);
+    private static readonly D2RLoaderPluginPackage NormalPackage = new(PluginId, PluginFileName, ManagedHeader);
 
     public static bool IsPluginInstalled(string? installDirectory)
     {
@@ -115,7 +116,9 @@ public static class ServerSavesConfigService
             ["ladder_launch_ticket"] = "\"\""
         };
 
-        return await Package.WriteAsync(installDirectory, values, requireInstalled: false, cancellationToken);
+        var normalDisabled = await NormalPackage.WriteAsync(installDirectory, values, requireInstalled: false, cancellationToken);
+        var ladderDisabled = await Package.WriteAsync(installDirectory, values, requireInstalled: false, cancellationToken);
+        return normalDisabled && ladderDisabled;
     }
 
     /// <summary>Kept for the tests that cover the TOML rewriting directly.</summary>

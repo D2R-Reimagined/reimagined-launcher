@@ -38,7 +38,8 @@ public static class ChatRelayConfigService
         + "# which stays off unless you deliberately turn it on.\n"
         + "\n";
 
-    private static readonly D2RLoaderPluginPackage Package = new(PluginId, PluginFileName, ManagedHeader);
+    private static readonly D2RLoaderPluginPackage Package = new(PluginId, PluginFileName, ManagedHeader, modName: ModInstallationPaths.LadderModName);
+    private static readonly D2RLoaderPluginPackage NormalPackage = new(PluginId, PluginFileName, ManagedHeader);
 
     public static bool IsPluginInstalled(string? installDirectory)
     {
@@ -109,6 +110,8 @@ public static class ChatRelayConfigService
             ["access_token"] = "\"\""
         };
 
-        return await Package.WriteAsync(installDirectory, values, requireInstalled: false, cancellationToken);
+        var normalDisabled = await NormalPackage.WriteAsync(installDirectory, values, requireInstalled: false, cancellationToken);
+        var ladderDisabled = await Package.WriteAsync(installDirectory, values, requireInstalled: false, cancellationToken);
+        return normalDisabled && ladderDisabled;
     }
 }

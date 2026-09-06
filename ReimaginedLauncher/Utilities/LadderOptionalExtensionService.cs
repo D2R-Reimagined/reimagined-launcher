@@ -165,6 +165,8 @@ public static partial class LadderOptionalExtensionService
     internal static string CheckedPath(string root, string relative)
     {
         var fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (relative.StartsWith("mods/Reimagined/", StringComparison.OrdinalIgnoreCase))
+            relative = ModInstallationPaths.ToLadderPath(relative);
         var path = Path.GetFullPath(Path.Combine(fullRoot, relative.Replace('/', Path.DirectorySeparatorChar)));
         if (!path.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Optional extension path escapes the installation.");

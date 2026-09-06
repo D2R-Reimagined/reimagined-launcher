@@ -36,20 +36,13 @@ public static class LadderSaveDirectoryService
     private static readonly string[] CarriedPatterns = ["*.fltr"];
 
     /// <summary>
-    /// Folder name for one ladder, e.g. "ReimaginedThree-Bens-Bitchin-HC-Ladder-d630a3fc".
-    /// The id suffix keeps two ladders apart even if their names slugify the same.
+    /// New folders use the full ladder ID; existing folder names are kept by the registry.
     /// </summary>
-    public static string BuildLadderSavePath(string baseSavePath, Guid ladderId, string? ladderName)
+    public static string BuildLadderSavePath(Guid ladderId, string? ladderName)
     {
-        var root = baseSavePath.Trim().Trim('/', '\\');
-        if (string.IsNullOrWhiteSpace(root))
-        {
-            root = "Reimagined";
-        }
-
         var slug = Slugify(ladderName);
-        var suffix = ladderId.ToString("N")[..8];
-        return slug.Length == 0 ? $"{root}-{suffix}" : $"{root}-{slug}-{suffix}";
+        var suffix = ladderId.ToString("N");
+        return slug.Length == 0 ? $"ReimaginedThree-{suffix}" : $"ReimaginedThree-{slug}-{suffix}";
     }
 
     /// <summary>
@@ -125,40 +118,26 @@ public static class LadderSaveDirectoryService
         var normalizedInstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(installDirectory);
         try
         {
-            var modInfoPath = ResolveModInfoPath(normalizedInstallDirectory);
+            var modInfoPath = string.IsNullOrWhiteSpace(normalizedInstallDirectory)
+                ? null : ModInstallationPaths.FindLadderModInfo(normalizedInstallDirectory);
             if (modInfoPath is null)
             {
                 return PreparationFailed("The ladder mod's modinfo.json is missing. Update or reinstall the ladder package and try again.");
             }
 
-            var baselinePath = LadderRuntimeFileService.RestoreOrCaptureBaseline(normalizedInstallDirectory!, modInfoPath);
-            var baseSavePath = await ReadBaseSavePathAsync(
-                normalizedInstallDirectory!,
-                modInfoPath,
-                cancellationToken);
-            // A signed package can supply the ladder path, but cannot recover the normal installation.
-            if (string.IsNullOrWhiteSpace(baseSavePath) && NormalModInstallationService.HasNormalSavePath(baselinePath))
-            {
-                baseSavePath = await ReadSavePathAsync(baselinePath, cancellationToken);
-                LaunchDiagnostics.Log("ladder saves: using the package savepath for a legacy installation without a normal-mod backup.");
-            }
-
-            if (string.IsNullOrWhiteSpace(baseSavePath) || !IsRelativeSavePath(baseSavePath))
-            {
-                return PreparationFailed("The original save path could not be recovered. Use Reinstall on the Install/Update page, or Select Zip Manually with a Nexus mod archive, then update the ladder package and try again. Character saves are not changed.");
-            }
-
-            var ladderSavePath = BuildLadderSavePath(baseSavePath, ladderId, ladderName);
+            LadderRuntimeFileService.RestoreOrCaptureBaseline(normalizedInstallDirectory!, modInfoPath);
             savedGamesPath ??= SaveFileService.GetSavedGamesPath();
-            var baseDirectory = ResolveSaveDirectory(baseSavePath, savedGamesPath, createMissingDirectories: false);
-            var ladderDirectory = ResolveSaveDirectory(ladderSavePath, savedGamesPath, createMissingDirectories: true);
-            if (ladderDirectory is null)
+            var defaultSaveDirectory = ResolveSaveDirectory("ReimaginedThree", savedGamesPath, createMissingDirectories: true);
+            if (defaultSaveDirectory is null)
             {
                 return PreparationFailed("The Saved Games folder could not be located. Check that your Windows user profile or Wine/Proton save folder is available.");
             }
 
+            var modsDirectory = Path.GetDirectoryName(defaultSaveDirectory)!;
+            var ladderSavePath = LadderSavePathRegistry.GetOrCreate(modsDirectory, ladderId, ladderName);
+            var ladderDirectory = Path.Combine(modsDirectory, ladderSavePath);
             Directory.CreateDirectory(ladderDirectory);
-            SeedPlayerPreferences(baseDirectory, ladderDirectory);
+            SeedPlayerPreferences(defaultSaveDirectory, ladderDirectory);
             if (!await WriteSavePathAsync(modInfoPath, ladderSavePath, cancellationToken))
             {
                 return PreparationFailed("The ladder mod's modinfo.json is invalid. Update or reinstall the ladder package and try again.");
@@ -178,20 +157,6 @@ public static class LadderSaveDirectoryService
     {
         LaunchDiagnostics.Log($"ladder saves: {message}");
         return new LadderSavePreparationResult(null, message);
-    }
-
-    private static bool IsRelativeSavePath(string savePath)
-    {
-        if (Path.IsPathRooted(savePath)) return false;
-
-        foreach (var segment in savePath.Split('/', '\\'))
-        {
-            if (segment is "." or ".." || segment.Contains(':')
-                || segment.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
-                return false;
-        }
-
-        return true;
     }
 
     /// <summary>
@@ -247,6 +212,10 @@ public static class LadderSaveDirectoryService
         string modInfoPath,
         CancellationToken cancellationToken)
     {
+        if (!NormalModInstallationService.HasLadderInstallation(installDirectory)
+            && NormalModInstallationService.HasNormalSavePath(modInfoPath))
+            return await ReadSavePathAsync(modInfoPath, cancellationToken);
+
         var normalModInfo = NormalModInstallationService.FindModInfo(
             NormalModInstallationService.NormalModRoot(installDirectory));
         if (normalModInfo is not null && NormalModInstallationService.HasNormalSavePath(normalModInfo))

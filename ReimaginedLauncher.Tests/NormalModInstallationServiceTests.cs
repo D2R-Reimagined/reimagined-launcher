@@ -101,7 +101,7 @@ public sealed class NormalModInstallationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task NexusReinstallReplacesTheNormalSavePathAndClearsLadderBaselines()
+    public async Task NexusReinstallReplacesNormalSavePathWithoutClearingIsolatedLadderBaselines()
     {
         WriteMod("OldNexusSaves");
         NormalModInstallationService.RecordNexusInstallation(_installDirectory);
@@ -112,7 +112,7 @@ public sealed class NormalModInstallationServiceTests : IDisposable
         ReplaceActiveMod("NewNexusSaves");
         NormalModInstallationService.RecordNexusInstallation(_installDirectory);
 
-        Assert.Null(LadderRuntimeFileService.TryGetExistingBaselinePath(_installDirectory, modInfo));
+        Assert.NotNull(LadderRuntimeFileService.TryGetExistingBaselinePath(_installDirectory, modInfo));
         Assert.False(NormalModInstallationService.HasLadderInstallation(_installDirectory));
         Assert.True(await LadderSaveDirectoryService.RestoreAsync(_installDirectory));
         Assert.Contains("NewNexusSaves/", File.ReadAllText(modInfo));

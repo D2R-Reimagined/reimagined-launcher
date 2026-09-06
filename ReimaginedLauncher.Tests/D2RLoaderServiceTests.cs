@@ -48,11 +48,28 @@ public sealed class D2RLoaderServiceTests : IDisposable
         Assert.True(inventory.AllowModExtensions);
         var plugin = Assert.Single(inventory.Plugins);
         Assert.Equal(D2RLoaderExtensionScope.Global, plugin.Scope);
-        Assert.Equal("Fast Stash", plugin.Name);
+        Assert.Equal("Author Fast Stash", plugin.Name);
         var patch = Assert.Single(inventory.Patches);
         Assert.Equal(D2RLoaderExtensionScope.Reimagined, patch.Scope);
         Assert.Equal("Level Cap", patch.Name);
         Assert.Equal(2, patch.PatchCount);
+    }
+
+    [Theory]
+    [InlineData("d2rl-death-tracker.dll", "Death Tracker")]
+    [InlineData("d2rl-kill-tracker.dll", "Kill Tracker")]
+    [InlineData("d2rl-server-saves.dll", "Server Saves")]
+    [InlineData("D2RL-chat-relay.dll", "Chat Relay")]
+    [InlineData("d2rl-maps.dll", "Maps")]
+    [InlineData("custom-plugin.dll", "Custom Plugin")]
+    public void DiscoverPreservesFullPluginNameWithoutMetadata(string fileName, string expectedName)
+    {
+        File.WriteAllBytes(CreatePath("D2RLoader.exe"), [0]);
+        File.WriteAllBytes(CreatePath("mods", "Reimagined", "d2rloader", "plugins", fileName), [0]);
+
+        var plugin = Assert.Single(D2RLoaderService.Discover(_installDirectory).Plugins);
+
+        Assert.Equal(expectedName, plugin.Name);
     }
 
     [Fact]
@@ -108,13 +125,13 @@ public sealed class D2RLoaderServiceTests : IDisposable
     }
 
     [Fact]
-    public void LadderLaunchParametersOmitOfflineOnlyOptions()
+    public void LadderLaunchParametersRequireFreshMapsAndOmitOtherOfflineOptions()
     {
         var profile = new InstallationProfile
         {
             LaunchExperience = LaunchExperience.Ladder,
             EnableRespec = true,
-            ResetOfflineMaps = true,
+            ResetOfflineMaps = false,
             PlayersCount = 8,
             CustomMapSeedEnabled = true,
             CustomMapSeed = 123,
@@ -123,7 +140,7 @@ public sealed class D2RLoaderServiceTests : IDisposable
 
         var parameters = GameLauncherService.BuildLaunchParameters(profile);
 
-        Assert.Equal("-mod Reimagined -txt -nosound", parameters);
+        Assert.Equal("-mod ReimaginedLadder -txt -resetofflinemaps -nosound", parameters);
     }
 
     [Fact]
@@ -132,7 +149,7 @@ public sealed class D2RLoaderServiceTests : IDisposable
         File.WriteAllBytes(CreatePath("D2RLoader.exe"), [0]);
         var approvedPluginPath = CreatePath("d2rloader", "plugins", "approved.dll");
         var unapprovedPluginPath = CreatePath("d2rloader", "plugins", "unapproved.dll");
-        var approvedPatchPath = CreatePath("mods", "Reimagined", "d2rloader", "patches", "approved.json");
+        var approvedPatchPath = CreatePath("mods", "ReimaginedLadder", "d2rloader", "patches", "approved.json");
         File.WriteAllBytes(approvedPluginPath, [1, 2, 3]);
         File.WriteAllBytes(unapprovedPluginPath, [4, 5, 6]);
         File.WriteAllText(approvedPatchPath, "{\"name\":\"Approved Patch\",\"patches\":[]}");
@@ -171,7 +188,7 @@ public sealed class D2RLoaderServiceTests : IDisposable
         Assert.False(File.Exists(approvedPatchPath));
         Assert.True(File.Exists(CreatePath("d2rloader", "ladder-disabled", "plugins", "unapproved.dll")));
         Assert.True(File.Exists(CreatePath(
-            "mods", "Reimagined", "d2rloader", "ladder-disabled", "patches", "approved.json")));
+            "mods", "ReimaginedLadder", "d2rloader", "ladder-disabled", "patches", "approved.json")));
         Assert.Single(result.UnapprovedMoved);
         Assert.Single(result.UnselectedMoved);
 
@@ -180,7 +197,7 @@ public sealed class D2RLoaderServiceTests : IDisposable
             state.Approval.Id == patchApprovalId && state.IsInstalled && state.IsLadderDisabled);
         Assert.Contains(preview.UnapprovedExtensions, extension => extension.FileName == "unapproved.dll");
 
-        var restored = D2RLoaderService.RestoreLadderDisabledExtensions(_installDirectory);
+        var restored = D2RLoaderService.RestoreLadderDisabledExtensions(_installDirectory, LaunchExperience.Ladder);
 
         Assert.Equal(2, restored);
         Assert.True(File.Exists(unapprovedPluginPath));

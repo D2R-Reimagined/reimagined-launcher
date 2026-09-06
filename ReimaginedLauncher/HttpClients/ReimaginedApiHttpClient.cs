@@ -61,6 +61,23 @@ public sealed class ReimaginedApiHttpClient
     /// <summary>The resolved API origin, for components that talk to it outside this client.</summary>
     public Uri BaseAddress => _httpClient.BaseAddress!;
 
+    public async Task<LadderLaunchSchedule> GetLadderLaunchScheduleAsync(
+        CancellationToken cancellationToken = default)
+    {
+        using var timeout = CreateRequestTimeout(cancellationToken);
+        using var scheduleRequest = new HttpRequestMessage(HttpMethod.Get, "ladders");
+        scheduleRequest.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
+        using var scheduleResponse = await _httpClient.SendAsync(scheduleRequest, timeout.Token);
+        scheduleResponse.EnsureSuccessStatusCode();
+        var ladders = await scheduleResponse.Content.ReadFromJsonAsync<List<LadderResponse>>(JsonOptions, timeout.Token) ?? [];
+        using var request = new HttpRequestMessage(HttpMethod.Get, "ladders/active");
+        request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
+        using var response = await _httpClient.SendAsync(request, timeout.Token);
+        response.EnsureSuccessStatusCode();
+        var live = await response.Content.ReadFromJsonAsync<List<LadderResponse>>(JsonOptions, timeout.Token) ?? [];
+        return new LadderLaunchSchedule(ladders, live, response.Headers.Date ?? DateTimeOffset.UtcNow);
+    }
+
     public async Task<IReadOnlyList<LadderResponse>> GetActiveLaddersAsync(
         CancellationToken cancellationToken = default)
     {
