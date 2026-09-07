@@ -539,6 +539,8 @@ public partial class LaunchView : UserControl
             return;
         }
 
+        var isLadderTransition = profile.LaunchExperience != experience
+                                 && (profile.LaunchExperience == LaunchExperience.Ladder || experience == LaunchExperience.Ladder);
         if (profile.LaunchExperience != experience)
         {
             if (MainWindow.IsGameRunning())
@@ -547,7 +549,7 @@ public partial class LaunchView : UserControl
                 return;
             }
 
-            if (experience != LaunchExperience.Ladder && profile.InstallDirectory is { } installDirectory)
+            if (isLadderTransition && experience != LaunchExperience.Ladder && profile.InstallDirectory is { } installDirectory)
             {
                 try
                 {
@@ -575,7 +577,7 @@ public partial class LaunchView : UserControl
 
             try
             {
-                if (D2RLoaderService.IsInstalled(profile.InstallDirectory))
+                if (isLadderTransition && D2RLoaderService.IsInstalled(profile.InstallDirectory))
                     D2RLoaderService.SetDefaultMod(profile.InstallDirectory!, experience);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -592,7 +594,7 @@ public partial class LaunchView : UserControl
             RefreshInstallDirectoryState();
         }
 
-        if (experience is LaunchExperience.Online or LaunchExperience.Ladder)
+        if (isLadderTransition && experience is LaunchExperience.Online or LaunchExperience.Ladder)
         {
             await PromptInstallD2RLoaderAsync(profile);
         }
@@ -1011,6 +1013,9 @@ public partial class LaunchView : UserControl
                         Name = state.Approval.Name,
                         FileName = state.Approval.FileName,
                         Kind = state.Approval.Kind,
+                        Version = state.Version ?? ladder.ActiveBundle?.Files.FirstOrDefault(file =>
+                            string.Equals(file.FileName, state.Approval.FileName, StringComparison.OrdinalIgnoreCase)
+                            && string.Equals(file.Sha256, state.Approval.Sha256, StringComparison.OrdinalIgnoreCase))?.Version,
                         IsRequired = state.Approval.IsRequired,
                         IsInstalled = state.IsInstalled,
                         IsProvidedByLauncher = isProvidedByLauncher,

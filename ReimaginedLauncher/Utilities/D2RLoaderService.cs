@@ -211,7 +211,7 @@ public static partial class D2RLoaderService
                 Kind = D2RLoaderExtensionKind.Plugin,
                 Scope = scope,
                 IsLadderDisabled = isLadderDisabled,
-                Version = NormalizeVersion(versionInfo.FileVersion),
+                Version = D2RLoaderPluginVersion.Read(path) ?? NormalizeVersion(versionInfo.FileVersion),
                 Description = versionInfo.FileDescription
             };
         }

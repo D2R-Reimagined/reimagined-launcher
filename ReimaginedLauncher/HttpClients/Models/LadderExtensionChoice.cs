@@ -9,6 +9,8 @@ public sealed class LadderExtensionChoice
     public required string Name { get; init; }
     public required string FileName { get; init; }
     public required D2RLoaderExtensionKind Kind { get; init; }
+    public string? Version { get; init; }
+    public string VersionLabel => string.IsNullOrWhiteSpace(Version) ? string.Empty : $"v{Version}";
     public bool IsRequired { get; init; }
     public bool IsInstalled { get; init; }
     public bool IsProvidedByLauncher { get; init; }

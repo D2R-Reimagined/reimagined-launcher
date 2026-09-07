@@ -19,7 +19,8 @@ public sealed record LadderExtensionApproval(
 public sealed record LadderApprovedExtensionState(
     LadderExtensionApproval Approval,
     bool IsInstalled,
-    bool IsLadderDisabled);
+    bool IsLadderDisabled,
+    string? Version = null);
 
 public sealed record LadderD2RLoaderPolicyPreview(
     IReadOnlyList<LadderApprovedExtensionState> ApprovedExtensions,
@@ -48,7 +49,8 @@ public static partial class D2RLoaderService
                 return new LadderApprovedExtensionState(
                     approval,
                     installed is not null,
-                    installed?.IsLadderDisabled ?? false);
+                    installed?.IsLadderDisabled ?? false,
+                    installed?.Version);
             })
             .OrderBy(state => state.Approval.Kind)
             .ThenBy(state => state.Approval.Name, StringComparer.OrdinalIgnoreCase)
