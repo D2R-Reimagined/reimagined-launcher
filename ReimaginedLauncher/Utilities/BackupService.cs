@@ -141,7 +141,11 @@ public static class BackupService
 
     public static string GetResolvedSaveDirectory()
     {
-        var profile = MainWindow.Settings.CurrentProfile;
+        return GetResolvedSaveDirectory(MainWindow.Settings.CurrentProfile);
+    }
+
+    internal static string GetResolvedSaveDirectory(InstallationProfile profile, string? savedGamesPath = null)
+    {
 
         // D2RMM profiles must always use the user-selected save directory.
         if (profile.Type == InstallationType.D2RMM)
@@ -150,24 +154,29 @@ public static class BackupService
         }
 
         // If the user has manually set a save directory, use it.
-        if (!string.IsNullOrWhiteSpace(profile.SaveDirectory))
+        if (profile.LaunchExperience != LaunchExperience.Ladder && !string.IsNullOrWhiteSpace(profile.SaveDirectory))
         {
             return profile.SaveDirectory;
         }
 
-        return GetAutoResolvedSaveDirectory();
+        return GetAutoResolvedSaveDirectory(profile, savedGamesPath);
     }
 
     public static string GetAutoResolvedSaveDirectory()
     {
-        var savePath = GetSavePathFromModInfo();
+        return GetAutoResolvedSaveDirectory(MainWindow.Settings.CurrentProfile);
+    }
+
+    private static string GetAutoResolvedSaveDirectory(InstallationProfile profile, string? savedGamesPath = null)
+    {
+        var savePath = GetSavePathFromModInfo(profile);
         if (string.IsNullOrWhiteSpace(savePath))
         {
             return string.Empty;
         }
 
         var trimmedSavePath = savePath.Trim().Trim('/', '\\');
-        var savedGamesPath = SaveFileService.GetSavedGamesPath();
+        savedGamesPath ??= SaveFileService.GetSavedGamesPath();
         if (string.IsNullOrWhiteSpace(savedGamesPath))
         {
             return string.Empty;
@@ -681,9 +690,9 @@ public static class BackupService
             StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string? GetSavePathFromModInfo()
+    private static string? GetSavePathFromModInfo(InstallationProfile profile)
     {
-        var modInfoPath = GetModInfoPath();
+        var modInfoPath = GetModInfoPath(profile);
         if (string.IsNullOrWhiteSpace(modInfoPath) || !File.Exists(modInfoPath))
         {
             return null;
@@ -702,9 +711,8 @@ public static class BackupService
         }
     }
 
-    private static string? GetModInfoPath()
+    private static string? GetModInfoPath(InstallationProfile profile)
     {
-        var profile = MainWindow.Settings.CurrentProfile;
         var installDirectory = profile.InstallDirectory;
         if (string.IsNullOrWhiteSpace(installDirectory))
         {
@@ -720,7 +728,12 @@ public static class BackupService
             return File.Exists(d2rmmPath) ? d2rmmPath : null;
         }
 
-        // For B.net and Steam, only use the canonical Reimagined.mpq location.
+        if (profile.LaunchExperience == LaunchExperience.Ladder)
+        {
+            return ModInstallationPaths.FindLadderModInfo(installDirectory);
+        }
+
+        // For normal B.net and Steam launches, use the canonical Reimagined.mpq location.
         var modsPath = SaveFileService.ResolveDirectoryCaseInsensitive(installDirectory, "mods");
         if (modsPath == null)
         {
