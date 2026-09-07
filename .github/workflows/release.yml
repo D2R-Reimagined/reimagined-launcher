@@ -18,7 +18,7 @@ jobs:
     steps:
       - name: Create GitHub App token
         id: app_token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.D2RR_GH_APP_ID }}
           private-key: ${{ secrets.D2RR_GH_APP_PRIVATE_KEY }}
@@ -286,7 +286,7 @@ jobs:
           & dnx @arguments
 
       - name: Upload downloads to GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           token: ${{ steps.app_token.outputs.token }}
           tag_name: ${{ steps.release_version.outputs.tag }}
