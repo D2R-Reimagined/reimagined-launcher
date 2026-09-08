@@ -11,7 +11,23 @@ namespace ReimaginedLauncher.Utilities;
 
 public sealed record LutrisGame(int Id, string Slug, string Name, string Runner, string Platform)
 {
+    /// <summary>File name of the executable this Lutris entry starts, if known.</summary>
+    public string? ExeFileName { get; init; }
+
     public string DisplayName => string.IsNullOrWhiteSpace(Name) ? Slug : Name;
+
+    /// <summary>
+    /// D2R entries are commonly configured to start D2RLoader.exe or D2R.exe.
+    /// Anything else stays unlabelled so unrelated games read normally.
+    /// </summary>
+    public string LauncherLabel => ExeFileName?.ToLowerInvariant() switch
+    {
+        "d2rloader.exe" => "(D2RLoader.exe)",
+        "d2r.exe" => "(D2R.exe)",
+        _ => string.Empty
+    };
+
+    public bool HasLauncherLabel => LauncherLabel.Length > 0;
 }
 
 /// <summary>
@@ -88,7 +104,7 @@ public static class LutrisService
             var output = await process.StandardOutput.ReadToEndAsync(timeout.Token);
             await process.WaitForExitAsync(timeout.Token);
 
-            var games = ParseGameList(output);
+            var games = WithExecutableNames(GamesConfigDirectory, ParseGameList(output));
             LaunchDiagnostics.Log(
                 $"lutris -loj exit={process.ExitCode} stdoutBytes={output.Length} games={games.Count}");
             return games;
@@ -102,6 +118,33 @@ public static class LutrisService
         {
             LaunchDiagnostics.LogException("Failed to list Lutris games", ex);
             return [];
+        }
+    }
+
+    /// <summary>
+    /// The listing has no executable, so it is read from each game's config
+    /// once here rather than on the UI thread every time the list is shown.
+    /// </summary>
+    internal static IReadOnlyList<LutrisGame> WithExecutableNames(
+        string gamesConfigDirectory,
+        IReadOnlyList<LutrisGame> games)
+        => [.. games.Select(game => game with { ExeFileName = ResolveExeFileName(gamesConfigDirectory, game.Slug) })];
+
+    private static string? ResolveExeFileName(string gamesConfigDirectory, string? slug)
+    {
+        var exePath = ReadGameConfig(gamesConfigDirectory, slug, ExtractGameExePath);
+        if (string.IsNullOrWhiteSpace(exePath))
+        {
+            return null;
+        }
+
+        try
+        {
+            return Path.GetFileName(exePath);
+        }
+        catch (ArgumentException)
+        {
+            return null;
         }
     }
 

@@ -215,7 +215,12 @@
                                               SelectionChanged="OnLutrisGameChanged">
                                         <ComboBox.ItemTemplate>
                                             <DataTemplate x:DataType="utilities:LutrisGame">
-                                                <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
+                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                    <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{Binding LauncherLabel}"
+                                                               IsVisible="{Binding HasLauncherLabel}"
+                                                               FontWeight="Bold" VerticalAlignment="Center" />
+                                                </StackPanel>
                                             </DataTemplate>
                                         </ComboBox.ItemTemplate>
                                     </ComboBox>

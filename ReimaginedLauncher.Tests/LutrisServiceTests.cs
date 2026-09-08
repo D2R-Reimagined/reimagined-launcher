@@ -383,6 +383,49 @@ public sealed class LutrisServiceTests : IDisposable
     }
 
     [Fact]
+    public void WithExecutableNamesReadsTheExeFromEachGameConfig()
+    {
+        var gamesDirectory = Path.Combine(_testDirectory, "games");
+        Directory.CreateDirectory(gamesDirectory);
+        File.WriteAllText(
+            Path.Combine(gamesDirectory, "diablo-ii-resurrected-1788284282.yml"),
+            "game:\n  exe: /home/player/Games/D2R/D2RLoader.exe\n");
+
+        var games = LutrisService.WithExecutableNames(
+            gamesDirectory,
+            LutrisService.ParseGameList(GameListJson));
+
+        Assert.Equal("D2RLoader.exe", games.Single(game => game.Id == 145).ExeFileName);
+        Assert.Null(games.Single(game => game.Id == 35).ExeFileName);
+    }
+
+    [Theory]
+    [InlineData("D2RLoader.exe", "(D2RLoader.exe)")]
+    [InlineData("d2rloader.exe", "(D2RLoader.exe)")]
+    [InlineData("D2R.exe", "(D2R.exe)")]
+    [InlineData("Battle.net Launcher.exe", "")]
+    [InlineData(null, "")]
+    public void LauncherLabelNamesOnlyTheKnownExecutables(string? exeFileName, string expected)
+    {
+        var game = new LutrisGame(145, "diablo-ii-resurrected", "Diablo II Resurrected", "wine", "Windows")
+        {
+            ExeFileName = exeFileName
+        };
+
+        Assert.Equal(expected, game.LauncherLabel);
+        Assert.Equal(expected.Length > 0, game.HasLauncherLabel);
+        Assert.Equal("Diablo II Resurrected", game.DisplayName);
+    }
+
+    [Fact]
+    public void DisplayNameFallsBackToTheSlug()
+    {
+        var game = new LutrisGame(145, "diablo-ii-resurrected", string.Empty, "wine", "Windows");
+
+        Assert.Equal("diablo-ii-resurrected", game.DisplayName);
+    }
+
+    [Fact]
     public void ResolveInstallDirectoryReturnsNullWhenTheDirectoryIsMissing()
     {
         Assert.Null(LutrisService.ResolveInstallDirectory(
