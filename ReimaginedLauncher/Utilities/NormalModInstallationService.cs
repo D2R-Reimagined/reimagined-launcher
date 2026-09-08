@@ -101,6 +101,7 @@ internal static class NormalModInstallationService
         if (modInfo is null || !HasNormalSavePath(modInfo))
             throw new InvalidDataException("The downloaded mod has no valid normal savepath in modinfo.json.");
 
+        LadderCharacterSelectService.RefreshInstalledBaselines(installDirectory, Path.GetDirectoryName(modInfo)!);
         ClearLadderState(installDirectory);
     }
 

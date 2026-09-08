@@ -371,6 +371,7 @@ public partial class UpdateView : UserControl
                         Directory.Delete(legacyTargetDir, recursive: true);
 
                     CopyDirectory(sourceMpqDir, targetMpqDir);
+                    LadderCharacterSelectService.RefreshInstalledBaselines(installDirectory, targetMpqDir);
 
                     var backupDir = Path.Combine(installDirectory, "Reimagined.backup");
                     if (Directory.Exists(backupDir))

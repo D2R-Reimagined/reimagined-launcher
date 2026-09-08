@@ -561,11 +561,7 @@ public partial class MainWindow : Window
                 var panel = CharacterSelectPanelService.FromJson(layoutsDir);
                 var panelVersion = panel?.GetModVersion();
                 var modInfoVersion = TryGetVersionFromModInfo(modInfoPath);
-                _localModVersion = !string.IsNullOrWhiteSpace(panelVersion) && !panelVersion.Equals("Unknown", StringComparison.OrdinalIgnoreCase)
-                    ? panelVersion
-                    : !string.IsNullOrWhiteSpace(modInfoVersion)
-                        ? modInfoVersion
-                        : "Unknown";
+                _localModVersion = SelectInstalledModVersion(modInfoVersion, panelVersion);
             }
         }
         else
@@ -584,11 +580,7 @@ public partial class MainWindow : Window
                 var panel = CharacterSelectPanelService.FromJson(layoutsDir);
                 var panelVersion = panel?.GetModVersion();
                 var modInfoVersion = TryGetVersionFromModInfo(modInfoPath) ?? TryGetVersionFromModInfo(modInfoPathInMpq);
-                _localModVersion = !string.IsNullOrWhiteSpace(panelVersion) && !panelVersion.Equals("Unknown", StringComparison.OrdinalIgnoreCase)
-                    ? panelVersion
-                    : !string.IsNullOrWhiteSpace(modInfoVersion)
-                        ? modInfoVersion
-                        : "Unknown";
+                _localModVersion = SelectInstalledModVersion(modInfoVersion, panelVersion);
 
                 IsLocalModDetected = Directory.Exists(modRootDirectory) || File.Exists(modInfoPath) || File.Exists(modInfoPathInMpq);
             }
@@ -612,6 +604,17 @@ public partial class MainWindow : Window
                     : $"D2R Reimagined v{_localModVersion}"
                 : "D2R Reimagined Version Not Detected";
         });
+    }
+
+    internal static string SelectInstalledModVersion(string? modInfoVersion, string? panelVersion)
+    {
+        foreach (var version in new[] { modInfoVersion, panelVersion })
+        {
+            if (!string.IsNullOrWhiteSpace(version) && !version.Trim().Equals("Unknown", StringComparison.OrdinalIgnoreCase))
+                return version.Trim();
+        }
+
+        return "Unknown";
     }
 
     private static string? TryGetVersionFromModInfo(string modInfoPath)

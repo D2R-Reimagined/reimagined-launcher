@@ -63,6 +63,35 @@ public sealed class NormalModInstallationServiceTests : IDisposable
 
     private string ActiveModRoot() => Path.Combine(_installDirectory, "mods", "Reimagined");
 
+    [Fact]
+    public async Task NexusUpdateRefreshesBothLayoutsWithoutChangingLadderBaselines()
+    {
+        WriteMod("NexusSaves");
+        var layouts = new[] { "characterselectpanelhd.json", "controller/characterselectpanelhd.json" }
+            .Select(name => Path.Combine(ActiveModRoot(), "Reimagined.mpq", "data", "global", "ui", "layouts", name))
+            .ToArray();
+        foreach (var layout in layouts)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(layout)!);
+            File.WriteAllText(layout, "D2R Reimagined v3.0.10");
+            LadderRuntimeFileService.RestoreOrCaptureBaseline(_installDirectory, layout);
+            File.WriteAllText(layout, "D2R Reimagined v3.0.11");
+        }
+
+        var ladderLayout = layouts[0].Replace("mods" + Path.DirectorySeparatorChar + "Reimagined",
+            "mods" + Path.DirectorySeparatorChar + "ReimaginedLadder");
+        Directory.CreateDirectory(Path.GetDirectoryName(ladderLayout)!);
+        File.WriteAllText(ladderLayout, "ladder baseline");
+        var ladderBaseline = LadderRuntimeFileService.RestoreOrCaptureBaseline(_installDirectory, ladderLayout);
+
+        NormalModInstallationService.RecordNexusInstallation(_installDirectory);
+        await LadderCharacterSelectService.PrepareAsync(layouts, null, _installDirectory);
+
+        foreach (var layout in layouts)
+            Assert.Equal("D2R Reimagined v3.0.11", File.ReadAllText(layout));
+        Assert.Equal("ladder baseline", File.ReadAllText(ladderBaseline));
+    }
+
     [Theory]
     [InlineData("not-json")]
     [InlineData("[]")]

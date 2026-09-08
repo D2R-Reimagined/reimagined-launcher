@@ -29,6 +29,29 @@ public static partial class LadderCharacterSelectService
     internal const string GeneratedRuntimeWidgetName = "ReimaginedLadderRuntimeInfo";
     private const string LegacyGeneratedWidgetName = "ReimaginedLadderInfo";
     private const string CharacterSelectPanelName = "CharacterSelectPanel";
+
+    internal static void RefreshInstalledBaselines(string installDirectory, string modDirectory)
+    {
+        var layoutsDirectory = Path.Combine(modDirectory, "data", "global", "ui", "layouts");
+        foreach (var layoutPath in new[]
+                 {
+                     Path.Combine(layoutsDirectory, "characterselectpanelhd.json"),
+                     Path.Combine(layoutsDirectory, "controller", "characterselectpanelhd.json")
+                 })
+        {
+            var baselinePath = LadderRuntimeFileService.GetBaselinePath(installDirectory, layoutPath);
+            if (File.Exists(layoutPath))
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(baselinePath)!);
+                File.Copy(layoutPath, baselinePath, overwrite: true);
+            }
+            else if (File.Exists(baselinePath))
+            {
+                File.Delete(baselinePath);
+            }
+        }
+    }
+
     public static async Task<int> PrepareAsync(
         IEnumerable<string> layoutPaths,
         LadderDisplayInfo? ladder,
