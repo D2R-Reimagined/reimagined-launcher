@@ -7,6 +7,30 @@ namespace ReimaginedLauncher.Tests;
 public sealed class D2RLoaderPluginVersionTests
 {
     [Fact]
+    public void ReadsAuthorWithoutLoadingDll()
+    {
+        Assert.Equal("yinyin", ReadFixture(CreatePlugin(), author: true));
+    }
+
+    [Fact]
+    public void OlderMetadataHasVersionButNoAuthor()
+    {
+        var bytes = CreatePlugin();
+        BitConverter.GetBytes(32).CopyTo(bytes, 0x380);
+        Assert.Null(ReadFixture(bytes, author: true));
+        Assert.Equal("0.2.14", ReadFixture(bytes));
+    }
+
+    [Fact]
+    public void InvalidAuthorPointerDoesNotHideVersion()
+    {
+        var bytes = CreatePlugin();
+        BitConverter.GetBytes(ulong.MaxValue).CopyTo(bytes, 0x3a0);
+        Assert.Null(ReadFixture(bytes, author: true));
+        Assert.Equal("0.2.14", ReadFixture(bytes));
+    }
+
+    [Fact]
     public void ReadsStaticPluginInfoVersionWithoutLoadingDll()
     {
         Assert.Equal("0.2.14", ReadFixture(CreatePlugin()));
@@ -34,13 +58,13 @@ public sealed class D2RLoaderPluginVersionTests
         Assert.Null(ReadFixture([1, 2, 3]));
     }
 
-    private static string? ReadFixture(byte[] bytes)
+    private static string? ReadFixture(byte[] bytes, bool author = false)
     {
         var path = Path.GetTempFileName();
         try
         {
             File.WriteAllBytes(path, bytes);
-            return D2RLoaderPluginVersion.Read(path);
+            return author ? D2RLoaderPluginVersion.ReadAuthor(path) : D2RLoaderPluginVersion.Read(path);
         }
         finally
         {
@@ -76,7 +100,9 @@ public sealed class D2RLoaderPluginVersionTests
         writer.Write(0x1180 - 0x1107); writer.Write((byte)0xc3);
         At(0x380); writer.Write(72); writer.Write(1);
         At(0x398); writer.Write(0x1800011d0UL);
+        At(0x3a0); writer.Write(0x1800011e0UL);
         At(0x3d0); writer.Write(Encoding.UTF8.GetBytes("0.2.14\0"));
+        At(0x3e0); writer.Write(Encoding.UTF8.GetBytes("yinyin\0"));
         return bytes;
     }
 }

@@ -7,6 +7,12 @@ namespace ReimaginedLauncher.Utilities;
 internal static class D2RLoaderPluginVersion
 {
     public static string? Read(string path)
+        => ReadField(path, 24);
+
+    public static string? ReadAuthor(string path)
+        => ReadField(path, 32);
+
+    private static string? ReadField(string path, int fieldOffset)
     {
         try
         {
@@ -44,9 +50,9 @@ internal static class D2RLoaderPluginVersion
                     return null;
                 var infoRva = checked(getter + 7 + code.ReadInt32());
                 if (code.ReadByte() != 0xc3) return null;
-                var info = pe.GetSectionData(infoRva).GetReader(0, 32);
-                if (info.ReadUInt32() < 32) return null;
-                info.Offset = 24;
+                var info = pe.GetSectionData(infoRva).GetReader(0, fieldOffset + 8);
+                if (info.ReadUInt32() < fieldOffset + 8) return null;
+                info.Offset = fieldOffset;
                 var address = info.ReadUInt64();
                 if (address < header.ImageBase || address - header.ImageBase > int.MaxValue) return null;
                 var version = ReadString(pe, (int)(address - header.ImageBase));

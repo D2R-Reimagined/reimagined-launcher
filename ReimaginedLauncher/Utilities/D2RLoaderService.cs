@@ -29,12 +29,13 @@ public sealed class D2RLoaderExtensionInfo
     public required D2RLoaderExtensionKind Kind { get; init; }
     public required D2RLoaderExtensionScope Scope { get; init; }
     public string? Version { get; init; }
+    public string? Author { get; init; }
+    public bool HasAuthor => !string.IsNullOrWhiteSpace(Author);
     public string? Description { get; init; }
     public int PatchCount { get; init; }
     public string? Error { get; init; }
     public bool IsLadderDisabled { get; init; }
 
-    public string ScopeLabel => Scope == D2RLoaderExtensionScope.Global ? "GLOBAL" : "REIMAGINED";
     public string VersionLabel => string.IsNullOrWhiteSpace(Version) ? string.Empty : $"v{Version}";
     public string Detail => !string.IsNullOrWhiteSpace(Error)
         ? Error
@@ -212,6 +213,7 @@ public static partial class D2RLoaderService
                 Scope = scope,
                 IsLadderDisabled = isLadderDisabled,
                 Version = D2RLoaderPluginVersion.Read(path) ?? NormalizeVersion(versionInfo.FileVersion),
+                Author = D2RLoaderPluginVersion.ReadAuthor(path),
                 Description = versionInfo.FileDescription
             };
         }
@@ -257,6 +259,7 @@ public static partial class D2RLoaderService
                 Scope = scope,
                 IsLadderDisabled = isLadderDisabled,
                 Version = version,
+                Author = GetString(root, "author")?.Trim(),
                 Description = GetString(root, "description"),
                 PatchCount = patchCount
             };

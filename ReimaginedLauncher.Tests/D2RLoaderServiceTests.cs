@@ -37,6 +37,7 @@ public sealed class D2RLoaderServiceTests : IDisposable
             {
                 version = 2,
                 name = "Level Cap",
+                author = "Dimentio",
                 description = "Raises the level cap.",
                 patches = new[] { new { op = "bytes" }, new { op = "bytes" } }
             }));
@@ -53,6 +54,9 @@ public sealed class D2RLoaderServiceTests : IDisposable
         Assert.Equal(D2RLoaderExtensionScope.Reimagined, patch.Scope);
         Assert.Equal("Level Cap", patch.Name);
         Assert.Equal(2, patch.PatchCount);
+        Assert.Equal("Dimentio", patch.Author);
+        Assert.True(patch.HasAuthor);
+        Assert.False(plugin.HasAuthor);
     }
 
     [Theory]
