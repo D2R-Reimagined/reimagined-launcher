@@ -9,7 +9,7 @@ public sealed class IsolatedModLaunchTests : IDisposable
 
     [Theory]
     [InlineData(LaunchExperience.Ladder, "ReimaginedLadder")]
-    [InlineData(LaunchExperience.Online, "Reimagined")]
+    [InlineData(LaunchExperience.D2RLoader, "Reimagined")]
     [InlineData(LaunchExperience.Offline, "Reimagined")]
     public void DefaultModIsWrittenInTheLoaderTableAndPreservesOtherSettings(LaunchExperience experience, string mod)
     {
@@ -45,7 +45,7 @@ public sealed class IsolatedModLaunchTests : IDisposable
         File.WriteAllText(ladder, "{\"savepath\":\"Normal-Season-aaaaaaaa/\"}");
         using var normalLock = File.Open(normal, FileMode.Open, FileAccess.Read, FileShare.Read);
         using var ladderLock = File.Open(ladder, FileMode.Open, FileAccess.Read, FileShare.Read);
-        foreach (var experience in new[] { LaunchExperience.Ladder, LaunchExperience.Online, LaunchExperience.Ladder, LaunchExperience.Offline })
+        foreach (var experience in new[] { LaunchExperience.Ladder, LaunchExperience.D2RLoader, LaunchExperience.Ladder, LaunchExperience.Offline })
         {
             NormalModInstallationService.Restore(_root);
             D2RLoaderService.SetDefaultMod(_root, experience);

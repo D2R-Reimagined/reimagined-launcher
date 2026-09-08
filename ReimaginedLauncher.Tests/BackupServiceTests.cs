@@ -35,7 +35,7 @@ public sealed class BackupServiceTests : IDisposable
 
     [Theory]
     [InlineData(LaunchExperience.Offline)]
-    [InlineData(LaunchExperience.Online)]
+    [InlineData(LaunchExperience.D2RLoader)]
     public void NormalLaunchUsesNormalMetadataAndPreservesManualOverride(LaunchExperience experience)
     {
         var profile = CreateProfile(experience);

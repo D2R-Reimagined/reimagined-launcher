@@ -86,7 +86,7 @@ public static partial class D2RLoaderService
         return !string.IsNullOrWhiteSpace(loaderPath) && File.Exists(loaderPath);
     }
 
-    public static D2RLoaderInventory Discover(string? installDirectory, LaunchExperience experience = LaunchExperience.Online)
+    public static D2RLoaderInventory Discover(string? installDirectory, LaunchExperience experience = LaunchExperience.D2RLoader)
     {
         var normalized = InstallDirectoryValidator.NormalizeInstallDirectory(installDirectory) ?? string.Empty;
         var loaderPath = Path.Combine(normalized, LoaderExecutableName);
@@ -125,7 +125,7 @@ public static partial class D2RLoaderService
     {
         if (profile.Type == InstallationType.D2RMM)
         {
-            reason = "The Online experience is not available for D2RMM profiles.";
+            reason = "The D2RLoader experience is not available for D2RMM profiles.";
             return false;
         }
 

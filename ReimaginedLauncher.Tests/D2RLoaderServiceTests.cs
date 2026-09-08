@@ -89,7 +89,7 @@ public sealed class D2RLoaderServiceTests : IDisposable
     {
         var profile = new InstallationProfile
         {
-            LaunchExperience = LaunchExperience.Online,
+            LaunchExperience = LaunchExperience.D2RLoader,
             EnableRespec = true,
             ResetOfflineMaps = true,
             PlayersCount = 8,

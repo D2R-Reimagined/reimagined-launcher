@@ -14,7 +14,7 @@ public enum InstallationType
 public enum LaunchExperience
 {
     Offline,
-    Online,
+    D2RLoader,
     Ladder
 }
 

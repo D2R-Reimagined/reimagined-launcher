@@ -258,10 +258,10 @@ public partial class LaunchView : UserControl
 
         if (!ladderExperienceEnabled && profile.LaunchExperience == LaunchExperience.Ladder)
         {
-            profile.LaunchExperience = LaunchExperience.Online;
+            profile.LaunchExperience = LaunchExperience.D2RLoader;
         }
 
-        var isOnlineExperience = profile.LaunchExperience == LaunchExperience.Online;
+        var isOnlineExperience = profile.LaunchExperience == LaunchExperience.D2RLoader;
         var isLadderExperience = profile.LaunchExperience == LaunchExperience.Ladder;
         var ladderAvailable = HasAvailableLadder;
         var isReimaginedSignedIn = _launcherAuthenticationService.IsSignedIn;
@@ -348,7 +348,7 @@ public partial class LaunchView : UserControl
         else
         {
             StartGameButton.Content = isOnlineExperience
-                ? "Start Online"
+                ? "Start D2RLoader"
                 : isLadderExperience
                     ? LadderActionLabel(_ladderAction)
                     : "Start Offline";
@@ -520,7 +520,7 @@ public partial class LaunchView : UserControl
 
     private async void OnOnlineExperienceClick(object? sender, RoutedEventArgs e)
     {
-        await SetLaunchExperienceAsync(LaunchExperience.Online);
+        await SetLaunchExperienceAsync(LaunchExperience.D2RLoader);
     }
 
     private async void OnLadderExperienceClick(object? sender, RoutedEventArgs e)
@@ -594,7 +594,7 @@ public partial class LaunchView : UserControl
             RefreshInstallDirectoryState();
         }
 
-        if (isLadderTransition && experience is LaunchExperience.Online or LaunchExperience.Ladder)
+        if (isLadderTransition && experience is LaunchExperience.D2RLoader or LaunchExperience.Ladder)
         {
             await PromptInstallD2RLoaderAsync(profile);
         }
@@ -652,7 +652,7 @@ public partial class LaunchView : UserControl
             LaunchDiagnostics.Log($"D2RLoader {action} at {profile.InstallDirectory}.");
             Notifications.SendNotification(
                 update is null
-                    ? "D2RLoader installed. Online and Ladder modes are now ready to use."
+                    ? "D2RLoader installed. D2RLoader and Ladder modes are now ready to use."
                     : $"D2RLoader updated to {update.LatestVersion}.",
                 "Success");
             RefreshInstallDirectoryState();
@@ -785,7 +785,7 @@ public partial class LaunchView : UserControl
                     {
                         Text = isUpdate
                             ? $"D2RLoader {update!.LatestVersion} is available. You currently have {update.InstalledVersion}."
-                            : "D2RLoader is required for Online and Ladder modes, but it was not found beside D2R.exe.",
+                            : "D2RLoader is required for D2RLoader and Ladder modes, but it was not found beside D2R.exe.",
                         FontWeight = FontWeight.SemiBold,
                         TextWrapping = TextWrapping.Wrap
                     },
@@ -1543,12 +1543,12 @@ public partial class LaunchView : UserControl
             return;
         }
 
-        if (profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder)
+        if (profile.LaunchExperience is LaunchExperience.D2RLoader or LaunchExperience.Ladder)
         {
             await PromptInstallD2RLoaderAsync(profile);
         }
 
-        if (profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder
+        if (profile.LaunchExperience is LaunchExperience.D2RLoader or LaunchExperience.Ladder
             && !D2RLoaderService.CanUseOnlineExperience(profile, out var loaderUnavailableReason))
         {
             LaunchDiagnostics.Log($"D2RLoader launch blocked: {loaderUnavailableReason}");
@@ -1661,7 +1661,7 @@ public partial class LaunchView : UserControl
                 else
                 {
                     LaunchDiagnostics.Log("Calling GameLauncherService.LaunchGame.");
-                    SetLaunchStatus(profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder
+                    SetLaunchStatus(profile.LaunchExperience is LaunchExperience.D2RLoader or LaunchExperience.Ladder
                         ? "Starting D2RLoader..."
                         : "Starting Diablo II: Resurrected...");
                     var gameProcess = LauncherService.LaunchGame();
@@ -1676,7 +1676,7 @@ public partial class LaunchView : UserControl
 
                     string? expectedExePath = null;
                     if (profile.Type == InstallationType.Steam
-                        || profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder)
+                        || profile.LaunchExperience is LaunchExperience.D2RLoader or LaunchExperience.Ladder)
                     {
                         expectedExePath = LauncherService.GetExpectedGameExecutablePath();
                     }

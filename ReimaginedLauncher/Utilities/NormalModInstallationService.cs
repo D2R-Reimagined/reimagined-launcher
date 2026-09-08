@@ -8,7 +8,7 @@ namespace ReimaginedLauncher.Utilities;
 internal static class NormalModInstallationService
 {
     internal const string RecoveryMessage =
-        "The normal Reimagined installation could not be recovered. Use Reinstall on the Install/Update page to download the mod from Nexus Mods again before playing Online or Offline. You can also use Select Zip Manually with a Nexus mod archive. Your character saves have not been moved or deleted.";
+        "The normal Reimagined installation could not be recovered. Use Reinstall on the Install/Update page to download the mod from Nexus Mods again before playing D2RLoader or Offline. You can also use Select Zip Manually with a Nexus mod archive. Your character saves have not been moved or deleted.";
 
     private static string ManagementRoot(string installDirectory) =>
         Path.Combine(installDirectory, ".reimagined-launcher");

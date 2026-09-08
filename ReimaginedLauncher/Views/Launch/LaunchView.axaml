@@ -82,7 +82,7 @@
                                 </Border>
                                 <StackPanel Grid.Column="1" Spacing="5">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <TextBlock Text="Online" FontFamily="Georgia" FontSize="19" FontWeight="SemiBold" />
+                                        <TextBlock Text="D2RLoader" FontFamily="Georgia" FontSize="19" FontWeight="SemiBold" />
                                         <Border Background="#342313" CornerRadius="10" Padding="8,3">
                                             <TextBlock Text="D2RLOADER" Classes="scope-label" />
                                         </Border>
@@ -127,7 +127,7 @@
                         <StackPanel Spacing="8">
                             <TextBlock Text="Normal mod recovery needed" FontWeight="SemiBold"
                                        Foreground="{StaticResource GoldTextBrush}" />
-                            <TextBlock Text="This installation needs a normal mod reinstall before Online or Offline play. Ladder play can continue if its save folder can be recovered automatically."
+                            <TextBlock Text="This installation needs a normal mod reinstall before D2RLoader or Offline play. Ladder play can continue if its save folder can be recovered automatically."
                                        TextWrapping="Wrap" />
                             <TextBlock Classes="muted" TextWrapping="Wrap"
                                        Text="Open Install/Update and choose Reinstall, or Select Zip Manually with a Nexus mod archive. Character saves are not changed." />

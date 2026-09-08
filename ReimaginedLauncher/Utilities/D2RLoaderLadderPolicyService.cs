@@ -113,7 +113,7 @@ public static partial class D2RLoaderService
         return new LadderD2RLoaderPolicyResult(unapprovedMoved, unselectedMoved, restoredCount);
     }
 
-    public static int RestoreLadderDisabledExtensions(string? installDirectory, LaunchExperience experience = LaunchExperience.Online)
+    public static int RestoreLadderDisabledExtensions(string? installDirectory, LaunchExperience experience = LaunchExperience.D2RLoader)
     {
         var inventory = Discover(installDirectory, experience);
         return RestoreDisabledRoot(inventory.GlobalRoot, inventory.ModRoot)

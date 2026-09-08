@@ -608,7 +608,7 @@ public class GameLauncherService
 
     private static bool UsesD2RLoader(InstallationProfile profile)
     {
-        return profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder;
+        return profile.LaunchExperience is LaunchExperience.D2RLoader or LaunchExperience.Ladder;
     }
 
     public string? GetExpectedGameExecutablePath()

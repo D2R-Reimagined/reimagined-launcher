@@ -58,7 +58,7 @@ public partial class SettingsView : UserControl
 
         var profile = MainWindow.Settings.CurrentProfile;
         var isD2Rmm = profile.Type == InstallationType.D2RMM;
-        var isOnline = profile.LaunchExperience == LaunchExperience.Online;
+        var isOnline = profile.LaunchExperience == LaunchExperience.D2RLoader;
         LaunchParametersPanel.IsEnabled = !isD2Rmm;
         D2RmmLaunchParamsNotice.IsVisible = isD2Rmm;
         OnlineLaunchParamsNotice.IsVisible = !isD2Rmm && isOnline;
