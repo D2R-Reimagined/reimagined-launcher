@@ -490,8 +490,8 @@ public class GameLauncherService
     }
 
     /// <summary>
-    /// Lutris is started through its own URI handler, which takes no game
-    /// arguments, so launch parameters have to be set on the Lutris side.
+    /// The URI takes no game arguments, so the launch options are written into
+    /// the game's Lutris arguments just before this command runs.
     /// </summary>
     internal static string BuildLutrisLaunchCommand(InstallationProfile profile)
     {
@@ -500,11 +500,15 @@ public class GameLauncherService
             return "Lutris: no game selected yet. Choose your Diablo II: Resurrected entry in the Installation section.";
         }
 
+        var managedArguments = LutrisArgumentsService.BuildArgs(null, profile);
+
         return $"env LUTRIS_SKIP_INIT=1 lutris {LutrisService.BuildRunGameUri(gameId)}"
                + Environment.NewLine
                + Environment.NewLine
-               + "Add \"-mod Reimagined -txt\" to this game's arguments in Lutris, otherwise"
-               + " it starts without the Reimagined mod.";
+               + "Set in this game's Lutris arguments before launch: "
+               + (managedArguments.Length == 0 ? "none" : managedArguments)
+               + Environment.NewLine
+               + "Other arguments in Lutris are kept.";
     }
 
     public Process? LaunchGame(string? launchParamOverride = null, string? gamePathOverride = null)

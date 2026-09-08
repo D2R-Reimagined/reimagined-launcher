@@ -21,16 +21,6 @@ public sealed class LutrisLaunchCommandTests
     }
 
     [Fact]
-    public void LutrisLaunchCommandNamesTheArgumentLutrisHasToSupply()
-    {
-        var profile = new InstallationProfile { Type = InstallationType.Lutris, LutrisGameId = 145 };
-
-        var command = GameLauncherService.BuildLutrisLaunchCommand(profile);
-
-        Assert.Contains("-mod Reimagined -txt", command);
-    }
-
-    [Fact]
     public void LutrisLaunchCommandAsksForAGameWhenNoneIsSelected()
     {
         var profile = new InstallationProfile { Type = InstallationType.Lutris };
@@ -42,10 +32,8 @@ public sealed class LutrisLaunchCommandTests
     }
 
     [Fact]
-    public void LutrisProfilesDoNotGetLauncherBuiltParameters()
+    public void LutrisLaunchCommandListsTheOptionsWrittenIntoTheLutrisArguments()
     {
-        // The launch parameters the launcher builds cannot reach the game through
-        // the Lutris URI handler, so the command must not imply that they do.
         var profile = new InstallationProfile
         {
             Type = InstallationType.Lutris,
@@ -57,8 +45,18 @@ public sealed class LutrisLaunchCommandTests
 
         var command = GameLauncherService.BuildLutrisLaunchCommand(profile);
 
-        Assert.DoesNotContain("-nosound", command);
-        Assert.DoesNotContain("-enablerespec", command);
-        Assert.DoesNotContain("-players", command);
+        Assert.Contains("-nosound", command);
+        Assert.Contains("-enablerespec", command);
+        Assert.Contains("-players 8", command);
+    }
+
+    [Fact]
+    public void LutrisLaunchCommandSaysWhenNoOptionsAreWritten()
+    {
+        var profile = new InstallationProfile { Type = InstallationType.Lutris, LutrisGameId = 145 };
+
+        var command = GameLauncherService.BuildLutrisLaunchCommand(profile);
+
+        Assert.Contains("before launch: none", command);
     }
 }

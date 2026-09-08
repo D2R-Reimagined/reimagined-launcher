@@ -1556,6 +1556,23 @@ public partial class LaunchView : UserControl
         }
     }
 
+    /// <summary>
+    /// Lutris reloads the game config on every launch, so the options have to
+    /// be written immediately before the game starts.
+    /// </summary>
+    private void ApplyLutrisLaunchOptions(InstallationProfile profile)
+    {
+        SetLaunchStatus("Applying launch options to Lutris...");
+
+        if (!LutrisArgumentsService.ApplyToGameConfig(profile.LutrisGameSlug, profile))
+        {
+            Notifications.SendNotification(
+                "Could not write the launch options into the Lutris game configuration. "
+                + "The game starts with whatever arguments are already set in Lutris.",
+                "Warning");
+        }
+    }
+
     private async void OnRefreshLutrisGamesClick(object? sender, RoutedEventArgs e)
     {
         RefreshLutrisGamesButton.IsEnabled = false;
@@ -1578,6 +1595,8 @@ public partial class LaunchView : UserControl
         var profile = MainWindow.Settings.CurrentProfile;
         if (profile.Type != InstallationType.Lutris) return;
 
+        var isDifferentGame = profile.LutrisGameId != game.Id;
+
         profile.LutrisGameId = game.Id;
         profile.LutrisGameSlug = game.Slug;
         profile.LutrisGameName = game.Name;
@@ -1592,6 +1611,13 @@ public partial class LaunchView : UserControl
         LaunchDiagnostics.Log(
             $"Lutris game '{game.Slug}' resolved to '{profile.InstallDirectory ?? "<none>"}' "
             + $"(valid={profile.IsInstallDirectoryValidated}).");
+
+        // Only on a real switch: re-importing the selected game would wipe
+        // options set in Settings since.
+        if (isDifferentGame)
+        {
+            LutrisArgumentsService.ImportInto(profile, LutrisService.TryResolveGameArgs(game.Slug));
+        }
 
         await SettingsManager.SaveAsync(MainWindow.Settings);
 
@@ -1838,6 +1864,11 @@ public partial class LaunchView : UserControl
                 }
                 else
                 {
+                    if (profile.Type == InstallationType.Lutris)
+                    {
+                        ApplyLutrisLaunchOptions(profile);
+                    }
+
                     LaunchDiagnostics.Log("Calling GameLauncherService.LaunchGame.");
                     SetLaunchStatus(profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder
                         ? "Starting D2RLoader..."

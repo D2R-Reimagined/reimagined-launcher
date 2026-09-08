@@ -21,15 +21,17 @@ The launcher detects native and Flatpak Steam installations in their standard lo
 
 ## Lutris
 
-Pick **Lutris** as the installation type on the Launch page (Linux only - the item is disabled on Windows) and select your Diablo II: Resurrected entry from the dropdown. The install directory and Wine prefix are read from Lutris, so there is nothing to browse for; the selected entry still goes through the same `D2R.exe` check as any other install directory. Nothing under `~/.local/share/lutris` is written to.
+Pick **Lutris** as the installation type on the Launch page (Linux only - the item is disabled on Windows) and select your Diablo II: Resurrected entry from the dropdown. The install directory and Wine prefix are read from Lutris, so there is nothing to browse for; the selected entry still goes through the same `D2R.exe` check as any other install directory.
 
-Set your launch parameters (`-mod Reimagined -txt`) in Lutris itself:
+Whichever executable the Lutris entry points at is what runs - `D2R.exe` or `D2RLoader.exe`. The dropdown names it after the game. Saves and backups resolve through the prefix recorded in the game's Lutris config.
 
-> Lutris → right-click the game → Configure → Game options → Arguments
+### Launch options
 
-The launcher's parameter field is disabled for Lutris profiles because Lutris' `lutris:rungameid/<id>` URI accepts no game arguments.
+Lutris' `lutris:rungameid/<id>` URI accepts no game arguments, so the launcher writes the Settings launch options into the selected game's Lutris arguments (Configure → Game options → Arguments) just before launching. Only its own options are touched - `-enablerespec`, `-resetofflinemaps`, `-players`, `-norumble`, `-forcedesktop`, `-nosound` and `-seed`; anything else in that field keeps its place. This is the only thing the launcher writes under `~/.local/share/lutris`.
 
-Whichever executable the Lutris entry points at is what runs - `D2R.exe` or `D2RLoader.exe`. Saves and backups resolve through the prefix recorded in the game's Lutris config.
+Picking a game in the dropdown imports the options already in its arguments, so a flag you set in Lutris shows up ticked in Settings instead of being dropped. After that, Settings is the source of truth.
+
+Selecting the mod is separate, and the launcher never touches it in the Lutris arguments. A `D2RLoader.exe` entry is already covered: the launcher writes `default_mod = "Reimagined"` into `d2rloader/config/d2rloader.toml` before every launch. Putting `-mod Reimagined` in the Lutris arguments works too - D2RLoader accepts it on the command line and merges it with its own `launch_arguments`. An entry that starts `D2R.exe` directly needs `-mod Reimagined -txt` in the Lutris arguments.
 
 ## Steps
 

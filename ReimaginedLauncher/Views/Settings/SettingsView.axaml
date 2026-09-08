@@ -65,7 +65,7 @@
                                Classes="muted"
                                IsVisible="False"
                                TextWrapping="Wrap"
-                               Text="Launch parameters are not available for Lutris installations. Lutris starts the game through its own URI handler, which accepts no arguments, so set them on the game's arguments in Lutris - including &quot;-mod Reimagined -txt&quot;, without which the Reimagined mod is not loaded." />
+                               Text="Lutris starts the game through its own URI handler, which accepts no arguments, so these options are written into the selected Lutris game's arguments just before it launches. Any other argument set in Lutris is left exactly as it is." />
                     <Border x:Name="OnlineLaunchParamsNotice"
                             Classes="warning-banner"
                             Padding="12"
