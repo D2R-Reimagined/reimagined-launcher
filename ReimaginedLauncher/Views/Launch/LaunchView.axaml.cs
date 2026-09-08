@@ -1639,6 +1639,12 @@ public partial class LaunchView : UserControl
                 return;
             }
 
+            // After server-saves, and outside it, because global chat is not a
+            // ladder feature: PrepareServerSavesAsync turns everything off for a
+            // non-ladder launch, which is right for the save plugin and the
+            // Discord relay and wrong for a chat room the whole community uses.
+            await ConfigureGlobalChatAsync(profile);
+
             if (profile.AutomaticBackupsEnabled)
             {
                 LaunchDiagnostics.Log("Starting backup.");
@@ -1782,6 +1788,74 @@ public partial class LaunchView : UserControl
         catch (Exception exception)
         {
             LaunchDiagnostics.Log($"chat-relay: configuration failed ({exception.Message}); the Discord chat bridge is off for this launch.");
+        }
+    }
+
+    /// <summary>
+    /// Points an already-installed global-chat plugin at the API, for any
+    /// signed-in D2RLoader launch, ladder or not.
+    /// </summary>
+    /// <remarks>
+    /// Never blocks the launch, for the same reason ConfigureChatRelayAsync does
+    /// not: losing global chat costs a convenience, and refusing to start the
+    /// game over it would cost the session. Every failure path leaves the plugin
+    /// disabled and says so in the log.
+    ///
+    /// Unlike chat-relay this runs for LaunchExperience.Online too, so it cannot
+    /// lean on PrepareServerSavesAsync having fetched a token - that only
+    /// happens on the ladder path. It fetches its own, and treats "not signed
+    /// in" as an ordinary off switch rather than a failure: playing offline
+    /// without an account is a supported thing to do.
+    /// </remarks>
+    private async Task ConfigureGlobalChatAsync(InstallationProfile profile)
+    {
+        try
+        {
+            if (!GlobalChatConfigService.IsEligible(profile.Type, profile.LaunchExperience))
+            {
+                await GlobalChatConfigService.DisableAsync(profile.InstallDirectory);
+                return;
+            }
+
+            var accessToken = await _launcherAuthenticationService.GetAccessTokenAsync();
+            if (string.IsNullOrWhiteSpace(accessToken))
+            {
+                // Clearing rather than leaving the last launch's token behind:
+                // a signed-out session must not keep talking under that name.
+                await GlobalChatConfigService.DisableAsync(profile.InstallDirectory);
+                LaunchDiagnostics.Log("global-chat: no signed-in account; global chat is off for this launch.");
+                return;
+            }
+
+            // The launcher never installs this plugin - it only ever configures
+            // one the player already has. It arrives either in the ladder bundle
+            // or as an approved extension, or the player downloads it from the
+            // website and drops it into their own mod install. So a missing
+            // plugin is an ordinary outcome, not a failure: nothing to say to
+            // the player, and nothing to install on their behalf.
+            if (!GlobalChatConfigService.IsPluginInstalled(profile.InstallDirectory, profile.LaunchExperience))
+            {
+                // Clear any config a previous install left behind, so a token
+                // does not sit in a file for a plugin that is no longer there.
+                await GlobalChatConfigService.DisableAsync(profile.InstallDirectory);
+                LaunchDiagnostics.Log("global-chat is not installed; this launch has no global chat.");
+                return;
+            }
+
+            var settings = new GlobalChatLaunchSettings(
+                _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority),
+                accessToken);
+            if (!await GlobalChatConfigService.EnableAsync(profile.InstallDirectory, settings, profile.LaunchExperience))
+            {
+                LaunchDiagnostics.Log("global-chat: the plugin configuration could not be written; global chat is off for this launch.");
+                return;
+            }
+
+            LaunchDiagnostics.Log($"global-chat configured for a {profile.LaunchExperience} launch.");
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.Log($"global-chat: configuration failed ({exception.Message}); global chat is off for this launch.");
         }
     }
 
