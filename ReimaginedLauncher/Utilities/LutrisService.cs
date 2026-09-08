@@ -33,7 +33,8 @@ public sealed record LutrisGame(int Id, string Slug, string Name, string Runner,
 /// <summary>
 /// Read-only view of a local Lutris installation. Paths come from the game's
 /// YAML config because <c>lutris -loj</c> reports a null directory for most
-/// entries. Nothing under the Lutris data directory is ever written.
+/// entries. Nothing here writes; the game's <c>args</c> are the one exception,
+/// in <see cref="LutrisArgumentsService"/>.
 /// </summary>
 public static class LutrisService
 {
@@ -170,6 +171,9 @@ public static class LutrisService
     /// </summary>
     public static string? TryResolveGameExePath(string? slug)
         => ReadGameConfig(GamesConfigDirectory, slug, ExtractGameExePath);
+
+    public static string? TryResolveGameArgs(string? slug)
+        => ReadGameConfig(GamesConfigDirectory, slug, ExtractGameArgs);
 
     /// <summary>
     /// Lowest pid whose command line references <paramref name="exePath"/>.
@@ -389,6 +393,8 @@ public static class LutrisService
 
     internal static string? ExtractGamePrefixPath(string? yaml) => ExtractGameValue(yaml, "prefix");
 
+    internal static string? ExtractGameArgs(string? yaml) => ExtractGameValue(yaml, "args");
+
     /// <summary>
     /// Reads one key from the <c>game:</c> section. PyYAML wraps long plain
     /// scalars at 80 columns, breaking on spaces, so a value may continue on
@@ -465,7 +471,7 @@ public static class LutrisService
         return long.TryParse(suffix, out var stamp) ? stamp : null;
     }
 
-    private static int IndentOf(string line)
+    internal static int IndentOf(string line)
     {
         var index = 0;
         while (index < line.Length && line[index] == ' ')
@@ -476,7 +482,7 @@ public static class LutrisService
         return index;
     }
 
-    private static bool IsKeyLine(string line)
+    internal static bool IsKeyLine(string line)
     {
         var trimmed = line.TrimStart();
         var colon = trimmed.IndexOf(':');
