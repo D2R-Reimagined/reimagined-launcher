@@ -261,6 +261,7 @@
                                 <TextBlock x:Name="LadderBundleStatusText" Classes="muted" TextWrapping="Wrap"
                                            Text="Checking the signed ladder package..." />
                             </StackPanel>
+                            <StackPanel x:Name="LadderBundleProblemsPanel" Spacing="12" IsVisible="False" />
                             <StackPanel x:Name="LadderBundleProgressPanel" Spacing="4" IsVisible="False">
                                 <ProgressBar x:Name="LadderBundleProgressBar" Height="6" Minimum="0" Maximum="100" />
                                 <TextBlock x:Name="LadderBundleProgressText" Classes="muted" FontSize="12"

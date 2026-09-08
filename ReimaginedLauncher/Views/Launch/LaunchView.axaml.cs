@@ -948,6 +948,58 @@ public partial class LaunchView : UserControl
 
     private int _ladderPolicyGeneration;
 
+    private void ShowLadderBundleReadiness(LadderBundleReadiness readiness)
+    {
+        LadderBundleProblemsPanel.Children.Clear();
+        LadderBundleProblemsPanel.IsVisible = readiness.Problems.Count > 0;
+        LadderBundleStatusText.Text = readiness.Problems.Count == 0
+            ? readiness.Status
+            : !readiness.IsInstalled && readiness.CanRepair
+                ? "Ladder package needs to be downloaded."
+                : readiness.CanRepair
+                    ? "Ladder package needs attention. Update it before launching."
+                    : "Ladder launch is blocked. Resolve the issues below.";
+
+        var categories = new[]
+        {
+            (Suffix: " was modified after installation.", Title: "Modified files"),
+            (Suffix: " is missing.", Title: "Missing files"),
+            (Suffix: " is not declared by the signed ladder package.", Title: "Files outside the signed package"),
+            (Suffix: " needs to be removed from the active mod folder.", Title: "Files to remove from the active mod folder"),
+            (Suffix: " needs to be downloaded or updated.", Title: "Extensions to download or update")
+        };
+        var groups = readiness.Problems.Select(problem =>
+        {
+            var category = categories.FirstOrDefault(candidate => problem.EndsWith(candidate.Suffix, StringComparison.Ordinal));
+            var label = category.Suffix is null
+                ? problem
+                : Path.GetFileName(problem[..^category.Suffix.Length].Replace('\\', '/'));
+            return new { Title = category.Title ?? "Other requirements", Label = label, Detail = problem };
+        }).GroupBy(problem => problem.Title);
+
+        foreach (var group in groups)
+        {
+            var section = new StackPanel { Spacing = 4 };
+            section.Children.Add(new TextBlock
+            {
+                Text = $"{group.Key} ({group.Count()})",
+                FontWeight = FontWeight.SemiBold,
+                TextWrapping = TextWrapping.Wrap
+            });
+            foreach (var problem in group)
+            {
+                var row = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), ColumnSpacing = 8 };
+                row.Children.Add(new TextBlock { Text = "•", Classes = { "muted" } });
+                var label = new TextBlock { Text = problem.Label, TextWrapping = TextWrapping.Wrap, Classes = { "muted" } };
+                ToolTip.SetTip(label, problem.Detail);
+                Grid.SetColumn(label, 1);
+                row.Children.Add(label);
+                section.Children.Add(row);
+            }
+            LadderBundleProblemsPanel.Children.Add(section);
+        }
+    }
+
     private async Task RefreshLadderExtensionPolicyAsync()
     {
         var generation = ++_ladderPolicyGeneration;
@@ -956,6 +1008,10 @@ public partial class LaunchView : UserControl
         _missingRequiredLadderExtensions = [];
         _ladderBundleReadiness = null;
         var ladder = SelectedLadder;
+        LadderBundleProblemsPanel.Children.Clear();
+        LadderBundleProblemsPanel.IsVisible = false;
+        UnapprovedLadderExtensionsSummaryBanner.IsVisible = false;
+        UnapprovedLadderExtensionsBanner.IsVisible = false;
         if (ladder is null)
         {
             _ladderExtensionChoices = [];
@@ -981,7 +1037,7 @@ public partial class LaunchView : UserControl
                 selectedExtensionIds: GetEffectiveSelectedLadderExtensionIds(ladder));
             if (generation != _ladderPolicyGeneration) return;
             _ladderBundleReadiness = readiness;
-            LadderBundleStatusText.Text = _ladderBundleReadiness.Status;
+            ShowLadderBundleReadiness(readiness);
 
             var approvals = MapApprovals(ladder);
             var preview = await D2RLoaderService.PreviewLadderPolicyAsync(
@@ -1041,7 +1097,7 @@ public partial class LaunchView : UserControl
             LadderExtensionPolicyStatusText.Text = approvals.Count == 0
                 ? "No D2RLoader plugins or patches are approved for this ladder. All installed extensions will be disabled."
                 : _missingRequiredLadderExtensions.Count > 0
-                    ? $"Ladder launch is blocked. Required extension(s) missing or hash-mismatched: {string.Join(", ", _missingRequiredLadderExtensions)}."
+                    ? "Ladder launch is blocked. Required extensions need attention below."
                     : $"{requiredCount} required and {optionalCount} optional extension(s). Required extensions are enabled automatically; select any optional extensions you want to use.";
             var hasUnapprovedExtensions = preview.UnapprovedExtensions.Count > 0;
             UnapprovedLadderExtensionsBanner.IsVisible = hasUnapprovedExtensions;
@@ -1049,12 +1105,8 @@ public partial class LaunchView : UserControl
             if (_missingRequiredLadderExtensions.Count > 0)
             {
                 policyWarnings.Add(
-                    $"Install the exact required extension file(s) before launching: {string.Join(", ", _missingRequiredLadderExtensions)}.");
-            }
-
-            if (_ladderBundleReadiness is { IsReady: false } bundleReadiness)
-            {
-                policyWarnings.Add(bundleReadiness.Status);
+                    "Required extensions to install or update:" + Environment.NewLine
+                    + string.Join(Environment.NewLine, _missingRequiredLadderExtensions.Select(name => $"• {name}")));
             }
 
             if (hasUnapprovedExtensions)
@@ -1064,7 +1116,7 @@ public partial class LaunchView : UserControl
                     $"{preview.UnapprovedExtensions.Count} installed {extensionLabel} not approved for this ladder and will be disabled for launch. Expand the policy details to review them.");
             }
             UnapprovedLadderExtensionsSummaryBanner.IsVisible = policyWarnings.Count > 0;
-            UnapprovedLadderExtensionsSummaryText.Text = string.Join(" ", policyWarnings);
+            UnapprovedLadderExtensionsSummaryText.Text = string.Join(Environment.NewLine + Environment.NewLine, policyWarnings);
             var pendingUnapproved = preview.UnapprovedExtensions
                 .Where(extension => !extension.IsLadderDisabled)
                 .Select(extension => extension.FileName)
@@ -1074,15 +1126,17 @@ public partial class LaunchView : UserControl
                 .Select(extension => extension.FileName)
                 .ToArray();
             UnapprovedLadderExtensionsText.Text = string.Join(
-                " ",
+                Environment.NewLine + Environment.NewLine,
                 new[]
                 {
                     pendingUnapproved.Length == 0
                         ? null
-                        : "Not approved and will be moved before launch: " + string.Join(", ", pendingUnapproved) + ".",
+                        : "Will be disabled before launch:" + Environment.NewLine
+                          + string.Join(Environment.NewLine, pendingUnapproved.Select(name => $"• {name}")),
                     alreadyDisabled.Length == 0
                         ? null
-                        : "Already ladder-disabled: " + string.Join(", ", alreadyDisabled) + "."
+                        : "Already disabled for ladder:" + Environment.NewLine
+                          + string.Join(Environment.NewLine, alreadyDisabled.Select(name => $"• {name}"))
                 }.OfType<string>());
             _ladderPolicyVerified = _missingRequiredLadderExtensions.Count == 0
                                     && (_ladderBundleReadiness is { IsReady: true }
