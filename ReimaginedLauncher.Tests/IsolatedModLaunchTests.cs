@@ -15,7 +15,10 @@ public sealed class IsolatedModLaunchTests : IDisposable
     {
         const string original = "[other]\r\ndefault_mod = \"Unrelated\"\r\n[d2rloader] # settings\r\ndefault_mod = \"Old\"\r\nlaunch_arguments = \"-w\"\r\n[d2rloader.advanced]\r\nallow_global_extensions = false\r\n";
         var updated = D2RLoaderService.UpdateDefaultMod(original, experience);
-        Assert.Equal(original.Replace("default_mod = \"Old\"", $"default_mod = \"{mod}\""), updated);
+        var expected = original.Replace("default_mod = \"Old\"", $"default_mod = \"{mod}\"");
+        if (experience is LaunchExperience.Ladder or LaunchExperience.Online)
+            expected = expected.Replace("[d2rloader] # settings\r\n", "[d2rloader] # settings\r\nshow_tcpip_button = true\r\n");
+        Assert.Equal(expected, updated);
         Assert.Equal(updated, D2RLoaderService.UpdateDefaultMod(updated, experience));
     }
 
@@ -32,6 +35,46 @@ public sealed class IsolatedModLaunchTests : IDisposable
         Assert.True(loader >= 0 && setting > loader);
         Assert.True(next < 0 || setting < next);
         Assert.Equal(updated, D2RLoaderService.UpdateDefaultMod(updated, LaunchExperience.Ladder));
+    }
+
+    [Fact]
+    public void OfflinePreservesTcpIpButtonPreference()
+    {
+        const string original = "[d2rloader]\ndefault_mod = \"Reimagined\"\nshow_tcpip_button = false\n";
+        Assert.Equal(original, D2RLoaderService.UpdateDefaultMod(original, LaunchExperience.Offline));
+    }
+
+    [Theory]
+    [InlineData(LaunchExperience.Ladder)]
+    [InlineData(LaunchExperience.Online)]
+    public void MultiplayerModesPersistAndReapplyTcpIpButtonSetting(LaunchExperience experience)
+    {
+        var path = Path.Combine(_root, "d2rloader", "config", "d2rloader.toml");
+        foreach (var original in new[]
+                 {
+                     "",
+                     "[other]\nshow_tcpip_button = false\n",
+                     "[d2rloader]\n# show_tcpip_button = false\n[d2rloader.advanced]\nshow_tcpip_button = false\n",
+                     "[d2rloader]\r\n  show_tcpip_button = false # default\r\nlaunch_arguments = \"-w\"\r\n",
+                     "[d2rloader]\nshow_tcpip_button = true"
+                 })
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, original);
+            D2RLoaderService.SetDefaultMod(_root, experience);
+            var updated = File.ReadAllText(path);
+            Assert.Contains("show_tcpip_button = true", updated);
+            if (original.Contains("[other]")) Assert.Contains("[other]\nshow_tcpip_button = false\n", updated);
+            if (original.Contains("[d2rloader.advanced]"))
+                Assert.Contains("[d2rloader.advanced]\nshow_tcpip_button = false\n", updated);
+            if (original.Contains("launch_arguments")) Assert.Contains("launch_arguments = \"-w\"\r\n", updated);
+            D2RLoaderService.SetDefaultMod(_root, experience);
+            Assert.Equal(updated, File.ReadAllText(path));
+            File.WriteAllText(path, updated.Replace("show_tcpip_button = true", "show_tcpip_button = false"));
+            D2RLoaderService.SetDefaultMod(_root, experience);
+            Assert.Equal(updated, File.ReadAllText(path));
+        }
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(path)!, "*.partial"));
     }
 
     [Fact]

@@ -28,18 +28,26 @@ public static partial class D2RLoaderService
 
     internal static string UpdateDefaultMod(string toml, LaunchExperience experience)
     {
+        var updated = UpdateLoaderSetting(toml, "default_mod", $"\"{ModInstallationPaths.ModName(experience)}\"");
+        return experience is LaunchExperience.Ladder or LaunchExperience.Online
+            ? UpdateLoaderSetting(updated, "show_tcpip_button", "true")
+            : updated;
+    }
+
+    private static string UpdateLoaderSetting(string toml, string key, string value)
+    {
         var newline = toml.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
-        var assignment = $"default_mod = \"{ModInstallationPaths.ModName(experience)}\"";
+        var assignment = $"{key} = {value}";
         var section = Regex.Match(toml, @"(?m)^[ \t]*\[d2rloader\][ \t]*(?:#[^\r\n]*)?\r?$", RegexOptions.CultureInvariant);
         if (!section.Success)
             return toml + (toml.Length > 0 && !toml.EndsWith('\n') ? newline : string.Empty)
                    + "[d2rloader]" + newline + assignment + newline;
 
-        var start = section.Index + section.Length;
+        var start = section.Index + section.Length - (section.Value.EndsWith('\r') ? 1 : 0);
         var nextSection = Regex.Match(toml[start..], @"(?m)^[ \t]*\[", RegexOptions.CultureInvariant);
         var end = nextSection.Success ? start + nextSection.Index : toml.Length;
         var body = toml[start..end];
-        var setting = Regex.Match(body, @"(?m)^[ \t]*default_mod[ \t]*=[^\r\n]*", RegexOptions.CultureInvariant);
+        var setting = Regex.Match(body, $@"(?m)^[ \t]*{Regex.Escape(key)}[ \t]*=[^\r\n]*", RegexOptions.CultureInvariant);
         if (setting.Success)
             return toml[..(start + setting.Index)] + assignment + toml[(start + setting.Index + setting.Length)..];
         return toml[..start] + newline + assignment + toml[start..];

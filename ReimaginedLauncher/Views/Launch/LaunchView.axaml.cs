@@ -1645,6 +1645,10 @@ public partial class LaunchView : UserControl
             // Discord relay and wrong for a chat room the whole community uses.
             await ConfigureGlobalChatAsync(profile);
 
+            // Outside PrepareServerSavesAsync for the same reason as global chat:
+            // that turns everything off for a non-ladder launch.
+            await ConfigureHardcoreDeathsAsync(profile);
+
             if (profile.AutomaticBackupsEnabled)
             {
                 LaunchDiagnostics.Log("Starting backup.");
@@ -1856,6 +1860,60 @@ public partial class LaunchView : UserControl
         catch (Exception exception)
         {
             LaunchDiagnostics.Log($"global-chat: configuration failed ({exception.Message}); global chat is off for this launch.");
+        }
+    }
+
+    /// <summary>
+    /// Points the hardcore death announcer at the API for a signed-in Online or
+    /// Ladder launch.
+    /// </summary>
+    /// <remarks>
+    /// The same shape as ConfigureGlobalChatAsync: fetches its own token because
+    /// PrepareServerSavesAsync only runs on the ladder path, treats "not signed
+    /// in" as an ordinary off switch, and never blocks the launch.
+    /// </remarks>
+    private async Task ConfigureHardcoreDeathsAsync(InstallationProfile profile)
+    {
+        try
+        {
+            if (!HardcoreDeathsConfigService.IsEligible(profile.Type, profile.LaunchExperience))
+            {
+                await HardcoreDeathsConfigService.DisableAsync(profile.InstallDirectory);
+                return;
+            }
+
+            var accessToken = await _launcherAuthenticationService.GetAccessTokenAsync();
+            if (string.IsNullOrWhiteSpace(accessToken))
+            {
+                // A signed-out session must not keep the previous account's token.
+                await HardcoreDeathsConfigService.DisableAsync(profile.InstallDirectory);
+                LaunchDiagnostics.Log("hardcore-deaths: no signed-in account; death announcements are off for this launch.");
+                return;
+            }
+
+            // The launcher never installs this plugin, so a missing one is an
+            // ordinary outcome rather than a failure.
+            if (!HardcoreDeathsConfigService.IsPluginInstalled(profile.InstallDirectory, profile.LaunchExperience))
+            {
+                await HardcoreDeathsConfigService.DisableAsync(profile.InstallDirectory);
+                LaunchDiagnostics.Log("hardcore-deaths is not installed; this launch has no death announcements.");
+                return;
+            }
+
+            var settings = new HardcoreDeathsLaunchSettings(
+                _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority),
+                accessToken);
+            if (!await HardcoreDeathsConfigService.EnableAsync(profile.InstallDirectory, settings, profile.LaunchExperience))
+            {
+                LaunchDiagnostics.Log("hardcore-deaths: the plugin configuration could not be written; death announcements are off for this launch.");
+                return;
+            }
+
+            LaunchDiagnostics.Log($"hardcore-deaths configured for a {profile.LaunchExperience} launch.");
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.Log($"hardcore-deaths: configuration failed ({exception.Message}); death announcements are off for this launch.");
         }
     }
 
