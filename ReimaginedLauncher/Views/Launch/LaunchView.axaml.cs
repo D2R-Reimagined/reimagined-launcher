@@ -27,6 +27,7 @@ public partial class LaunchView : UserControl
     private readonly LadderBundleService _ladderBundleService;
     private bool _isLaunching;
     private bool _isLoaderInstallPromptOpen;
+    private bool _hasPromptedForMissingLoader;
     private string? _loaderUpdatePromptedVersion;
     private bool _isRefreshingLadders;
     private bool _isRefreshingLadderControls;
@@ -72,6 +73,7 @@ public partial class LaunchView : UserControl
         _d2rLoaderInstallerService = Program.ServiceProvider.GetRequiredService<D2RLoaderInstallerService>();
         _ladderBundleService = Program.ServiceProvider.GetRequiredService<LadderBundleService>();
         SizeChanged += (_, _) => UpdateResponsiveLayout();
+        Loaded += async (_, _) => await PromptForMissingD2RLoaderAsync();
         _ladderScheduleTimer.Tick += OnLadderScheduleTick;
 
         RefreshInstallDirectoryState();
@@ -119,6 +121,7 @@ public partial class LaunchView : UserControl
                             mw.RefreshLocalModState();
                             await mw.RefreshUpdateStateAsync();
                         }
+                        await PromptForMissingD2RLoaderAsync();
                     });
                 });
             }
@@ -594,10 +597,29 @@ public partial class LaunchView : UserControl
             RefreshInstallDirectoryState();
         }
 
-        if (isLadderTransition && experience is LaunchExperience.Online or LaunchExperience.Ladder)
+        if (experience is LaunchExperience.Online or LaunchExperience.Ladder)
         {
             await PromptInstallD2RLoaderAsync(profile);
         }
+    }
+
+    private async Task PromptForMissingD2RLoaderAsync()
+    {
+        var profile = MainWindow.Settings.CurrentProfile;
+        if (_hasPromptedForMissingLoader || _isLoaderInstallPromptOpen || !IsLoaded
+            || _isLaunching || _isRunningLadderAction || MainWindow.IsInstallInProgress
+            || MainWindow.IsGameRunning() || !OperatingSystem.IsWindows()
+            || profile.Type == InstallationType.D2RMM
+            || profile.LaunchExperience is not (LaunchExperience.Online or LaunchExperience.Ladder)
+            || !InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory)
+            || D2RLoaderService.IsInstalled(profile.InstallDirectory)
+            || TopLevel.GetTopLevel(this) is not Window { IsVisible: true })
+        {
+            return;
+        }
+
+        _hasPromptedForMissingLoader = true;
+        await PromptInstallD2RLoaderAsync(profile);
     }
 
     private async Task PromptInstallD2RLoaderAsync(InstallationProfile profile)
@@ -1500,107 +1522,106 @@ public partial class LaunchView : UserControl
         }
 
         var profile = MainWindow.Settings.CurrentProfile;
-
-        if (profile.LaunchExperience == LaunchExperience.Ladder
-            && !await EnsureLadderAuthenticationAsync())
-        {
-            return;
-        }
-
-        if (profile.LaunchExperience == LaunchExperience.Ladder)
-        {
-            if (_isRefreshingLadders) return;
-            var requestedLadderId = SelectedLadder?.Id;
-            await RefreshLadderStateAsync();
-            if (requestedLadderId != SelectedLadder?.Id || _ladderSchedule?.IsLive(SelectedLadder) != true)
-            {
-                Notifications.SendNotification("The selected ladder has not been confirmed live. Wait for the countdown and live-status check.", "Ladder unavailable");
-                return;
-            }
-        }
-
-        if (!profile.IsInstallDirectoryValidated)
-        {
-            LaunchDiagnostics.Log("Action blocked because install directory is not validated.");
-            Notifications.SendNotification(
-                "Install directory not validated",
-                "Choose the Diablo II: Resurrected folder that contains D2R.exe.");
-            return;
-        }
-
-        if (profile.LaunchExperience != LaunchExperience.Ladder && !MainWindow.IsLocalModDetected)
-        {
-            LaunchDiagnostics.Log("Action blocked because the local mod was not detected.");
-            Notifications.SendNotification(
-                "D2R Reimagined mod not detected",
-                "Install the mod in the selected directory before launching/installing.");
-
-            if (MainWindow.Instance is { } mainWindow)
-            {
-                await mainWindow.PromptInstallForMissingModAsync();
-            }
-
-            return;
-        }
-
-        if (profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder)
-        {
-            await PromptInstallD2RLoaderAsync(profile);
-        }
-
-        if (profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder
-            && !D2RLoaderService.CanUseOnlineExperience(profile, out var loaderUnavailableReason))
-        {
-            LaunchDiagnostics.Log($"D2RLoader launch blocked: {loaderUnavailableReason}");
-            Notifications.SendNotification(loaderUnavailableReason ?? "D2RLoader is unavailable.", "Warning");
-            return;
-        }
-
-        if (profile.LaunchExperience == LaunchExperience.Ladder)
-        {
-            await RefreshLadderExtensionPolicyAsync();
-
-            // The refresh may have found a newer revision than the one this
-            // click was made against. Hand the player the setup step the button
-            // now offers instead of pushing on into a launch that will fail.
-            if (_ladderAction is LadderAction.Download or LadderAction.Update or LadderAction.Restore)
-            {
-                Notifications.SendNotification(
-                    _ladderAction == LadderAction.Restore
-                        ? "Use Restore Ladder to activate the cached ladder package before playing."
-                        : _ladderAction == LadderAction.Download
-                        ? "This ladder needs its package downloaded first. Use the Download button."
-                        : "This ladder has a newer package. Use the Update button before playing.",
-                    "Ladder setup needed");
-                return;
-            }
-        }
-
-        if (profile.LaunchExperience == LaunchExperience.Ladder && _ladderSchedule?.IsLive(SelectedLadder) != true)
-        {
-            var unavailableMessage = GetLadderUnavailableMessage();
-            LaunchDiagnostics.Log($"Ladder launch blocked: {unavailableMessage}");
-            Notifications.SendNotification(unavailableMessage, "Warning");
-            return;
-        }
-
-        if (profile.LaunchExperience == LaunchExperience.Ladder && !_ladderPolicyVerified)
-        {
-            var message = GetLadderPolicyUnavailableMessage();
-            LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
-            Notifications.SendNotification(message, "Warning");
-            return;
-        }
-
-
         _isLaunching = true;
         StartGameButton.IsEnabled = false;
         var actionName = profile.Type == InstallationType.D2RMM ? "Installation" : "Launch";
-        SetLaunchStatus($"Preparing {actionName.ToLower()}...");
-        var progress = new Progress<string>(status => SetLaunchStatus(status));
 
         try
         {
+            if (profile.LaunchExperience == LaunchExperience.Ladder
+                && !await EnsureLadderAuthenticationAsync())
+            {
+                return;
+            }
+
+            if (profile.LaunchExperience == LaunchExperience.Ladder)
+            {
+                if (_isRefreshingLadders) return;
+                var requestedLadderId = SelectedLadder?.Id;
+                await RefreshLadderStateAsync();
+                if (requestedLadderId != SelectedLadder?.Id || _ladderSchedule?.IsLive(SelectedLadder) != true)
+                {
+                    Notifications.SendNotification("The selected ladder has not been confirmed live. Wait for the countdown and live-status check.", "Ladder unavailable");
+                    return;
+                }
+            }
+
+            if (!profile.IsInstallDirectoryValidated)
+            {
+                LaunchDiagnostics.Log("Action blocked because install directory is not validated.");
+                Notifications.SendNotification(
+                    "Install directory not validated",
+                    "Choose the Diablo II: Resurrected folder that contains D2R.exe.");
+                return;
+            }
+
+            if (profile.LaunchExperience != LaunchExperience.Ladder && !MainWindow.IsLocalModDetected)
+            {
+                LaunchDiagnostics.Log("Action blocked because the local mod was not detected.");
+                Notifications.SendNotification(
+                    "D2R Reimagined mod not detected",
+                    "Install the mod in the selected directory before launching/installing.");
+
+                if (MainWindow.Instance is { } mainWindow)
+                {
+                    await mainWindow.PromptInstallForMissingModAsync();
+                }
+
+                return;
+            }
+
+            if (profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder)
+            {
+                await PromptInstallD2RLoaderAsync(profile);
+            }
+
+            if (profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder
+                && !D2RLoaderService.CanUseOnlineExperience(profile, out var loaderUnavailableReason))
+            {
+                LaunchDiagnostics.Log($"D2RLoader launch blocked: {loaderUnavailableReason}");
+                Notifications.SendNotification(loaderUnavailableReason ?? "D2RLoader is unavailable.", "Warning");
+                return;
+            }
+
+            if (profile.LaunchExperience == LaunchExperience.Ladder)
+            {
+                await RefreshLadderExtensionPolicyAsync();
+
+                // The refresh may have found a newer revision than the one this
+                // click was made against. Hand the player the setup step the button
+                // now offers instead of pushing on into a launch that will fail.
+                if (_ladderAction is LadderAction.Download or LadderAction.Update or LadderAction.Restore)
+                {
+                    Notifications.SendNotification(
+                        _ladderAction == LadderAction.Restore
+                            ? "Use Restore Ladder to activate the cached ladder package before playing."
+                            : _ladderAction == LadderAction.Download
+                            ? "This ladder needs its package downloaded first. Use the Download button."
+                            : "This ladder has a newer package. Use the Update button before playing.",
+                        "Ladder setup needed");
+                    return;
+                }
+            }
+
+            if (profile.LaunchExperience == LaunchExperience.Ladder && _ladderSchedule?.IsLive(SelectedLadder) != true)
+            {
+                var unavailableMessage = GetLadderUnavailableMessage();
+                LaunchDiagnostics.Log($"Ladder launch blocked: {unavailableMessage}");
+                Notifications.SendNotification(unavailableMessage, "Warning");
+                return;
+            }
+
+            if (profile.LaunchExperience == LaunchExperience.Ladder && !_ladderPolicyVerified)
+            {
+                var message = GetLadderPolicyUnavailableMessage();
+                LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
+                Notifications.SendNotification(message, "Warning");
+                return;
+            }
+
+            SetLaunchStatus($"Preparing {actionName.ToLower()}...");
+            var progress = new Progress<string>(status => SetLaunchStatus(status));
+
             // Put the mod back on its normal save folder before anything else
             // runs. Mod tweaks and the launch backup both resolve the save
             // directory out of modinfo.json, and every step below here can bail
