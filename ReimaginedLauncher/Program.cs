@@ -24,7 +24,8 @@ class Program
         services.AddHttpClient<GitHubAnnouncementsHttpClient>();
         services.AddHttpClient<GitHubDiscussionPluginsHttpClient>();
         services.AddHttpClient<NexusModsHttpClient>();
-        services.AddHttpClient<ReimaginedApiHttpClient>();
+        services.AddHttpClient<ReimaginedApiHttpClient>().ConfigurePrimaryHttpMessageHandler(() =>
+            new System.Net.Http.HttpClientHandler { AutomaticDecompression = System.Net.DecompressionMethods.All });
         services.AddHttpClient<D2RLoaderInstallerService>();
         services.AddHttpClient<ModReleaseInstallerService>();
         services.AddSingleton<LauncherAuthenticationService>();

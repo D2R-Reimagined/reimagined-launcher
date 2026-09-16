@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Net.Http.Headers;
@@ -34,6 +36,8 @@ public sealed class ReimaginedApiHttpClient
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
 
     private readonly HttpClient _httpClient;
+    private readonly SemaphoreSlim _scheduleGate = new(1, 1);
+    private readonly Dictionary<Guid, (string Version, LadderResponse Policy)> _schedulePolicies = [];
 
     public ReimaginedApiHttpClient(HttpClient httpClient)
     {
@@ -53,18 +57,48 @@ public sealed class ReimaginedApiHttpClient
     public async Task<LadderLaunchSchedule> GetLadderLaunchScheduleAsync(
         CancellationToken cancellationToken = default)
     {
-        using var timeout = CreateRequestTimeout(cancellationToken);
-        using var scheduleRequest = new HttpRequestMessage(HttpMethod.Get, "ladders");
-        scheduleRequest.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
-        using var scheduleResponse = await _httpClient.SendAsync(scheduleRequest, timeout.Token);
-        scheduleResponse.EnsureSuccessStatusCode();
-        var ladders = await scheduleResponse.Content.ReadFromJsonAsync<List<LadderResponse>>(JsonOptions, timeout.Token) ?? [];
-        using var request = new HttpRequestMessage(HttpMethod.Get, "ladders/active");
-        request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
-        using var response = await _httpClient.SendAsync(request, timeout.Token);
-        response.EnsureSuccessStatusCode();
-        var live = await response.Content.ReadFromJsonAsync<List<LadderResponse>>(JsonOptions, timeout.Token) ?? [];
-        return new LadderLaunchSchedule(ladders, live, response.Headers.Date ?? DateTimeOffset.UtcNow);
+        await _scheduleGate.WaitAsync(cancellationToken);
+        try
+        {
+            using var timeout = CreateRequestTimeout(cancellationToken);
+            using var request = new HttpRequestMessage(HttpMethod.Get, "ladders/schedule");
+            request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
+            using var response = await _httpClient.SendAsync(request, timeout.Token);
+            response.EnsureSuccessStatusCode();
+            var schedule = await response.Content.ReadFromJsonAsync<LadderScheduleResponse>(JsonOptions, timeout.Token)
+                ?? throw new InvalidDataException("The ladder schedule response was empty.");
+            var receivedAt = Stopwatch.GetTimestamp();
+            var available = schedule.Ladders.Where(entry => entry.EndDateUtc > schedule.ServerTimeUtc
+                && entry.StartDateUtc <= schedule.ServerTimeUtc.AddHours(1)).ToArray();
+            foreach (var id in _schedulePolicies.Keys.Where(id => !available.Any(entry => entry.Id == id)).ToArray())
+                _schedulePolicies.Remove(id);
+            var ladders = new List<LadderResponse>();
+            var live = new List<LadderResponse>();
+            foreach (var entry in available)
+            {
+                if (!_schedulePolicies.TryGetValue(entry.Id, out var cached) || cached.Version != entry.PolicyVersion)
+                {
+                    using var policyRequest = new HttpRequestMessage(HttpMethod.Get, $"ladders/{entry.Id}/client-policy");
+                    policyRequest.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
+                    using var policyResponse = await _httpClient.SendAsync(policyRequest, timeout.Token);
+                    policyResponse.EnsureSuccessStatusCode();
+                    if (!policyResponse.Headers.TryGetValues("X-Ladder-Policy-Version", out var versions)
+                        || versions.SingleOrDefault() != entry.PolicyVersion)
+                        throw new InvalidDataException("The ladder policy changed during refresh. Refresh the ladder and try again.");
+                    var policy = await policyResponse.Content.ReadFromJsonAsync<LadderResponse>(JsonOptions, timeout.Token)
+                        ?? throw new InvalidDataException("The ladder policy response was empty.");
+                    if (policy.Id != entry.Id || policy.StartDateUtc != entry.StartDateUtc || policy.EndDateUtc != entry.EndDateUtc)
+                        throw new InvalidDataException("The ladder policy does not match its schedule.");
+                    cached = (entry.PolicyVersion, policy);
+                    _schedulePolicies[entry.Id] = cached;
+                }
+                ladders.Add(cached.Policy);
+                if (entry.IsLive) live.Add(cached.Policy);
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            return new LadderLaunchSchedule(ladders, live, schedule.ServerTimeUtc + Stopwatch.GetElapsedTime(receivedAt));
+        }
+        finally { _scheduleGate.Release(); }
     }
 
     public async Task<IReadOnlyList<LadderResponse>> GetActiveLaddersAsync(

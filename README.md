@@ -108,6 +108,15 @@ Nothing is deleted outright. Anything displaced is copied into `.server-saves/ba
 
 ## API configuration
 
+The launcher uses `/ladders/schedule` for small, fresh schedule/live checks and
+caches full client policies until their server-issued version changes. Deploy the
+API with that endpoint before releasing this launcher. JSON responses support HTTP
+compression. Schedule polling uses five minutes outside Ladder mode or without an
+available ladder, 30 seconds for an available ladder, and shorter intervals near
+its start. Entering Ladder mode and launching refresh immediately; cached policy
+metadata never replaces current server authorization. Schedule/policy failures
+block ladder readiness rather than reusing an old live confirmation.
+
 ### Ladder download recovery
 
 Ladder package downloads persist under

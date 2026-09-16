@@ -64,6 +64,7 @@ internal sealed class LadderBundleDownloader(HttpClient client)
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
             timeout.CancelAfter(RequestTimeout);
             using var probeRequest = new HttpRequestMessage(HttpMethod.Get, source);
+            probeRequest.Headers.AcceptEncoding.ParseAdd("identity, gzip;q=0, deflate;q=0, br;q=0");
             probeRequest.Headers.Range = new RangeHeaderValue(0, 0);
             using var probe = await client.SendAsync(probeRequest, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
             probe.EnsureSuccessStatusCode();
@@ -173,6 +174,7 @@ internal sealed class LadderBundleDownloader(HttpClient client)
                 timeout.CancelAfter(RequestTimeout);
                 var offset = start + output.Length;
                 using var request = new HttpRequestMessage(HttpMethod.Get, source);
+                request.Headers.AcceptEncoding.ParseAdd("identity, gzip;q=0, deflate;q=0, br;q=0");
                 request.Headers.Range = new RangeHeaderValue(offset, end);
                 using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
                 if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized)

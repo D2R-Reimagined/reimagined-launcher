@@ -568,7 +568,7 @@ public partial class LaunchView : UserControl
             await SettingsManager.SaveAsync(MainWindow.Settings);
             MainWindow.Instance?.RefreshLocalModState();
             if (experience == LaunchExperience.Ladder)
-                await RefreshLadderExtensionPolicyAsync();
+                await RefreshLadderStateAsync();
             RefreshInstallDirectoryState();
         }
 
@@ -900,12 +900,11 @@ public partial class LaunchView : UserControl
         finally
         {
             _isRefreshingLadders = false;
-            var remaining = SelectedLadder?.StartDateUtc - _ladderSchedule?.Now;
             _lastLadderRefresh = Stopwatch.GetTimestamp();
-            _ladderRefreshInterval = TimeSpan.FromSeconds(
-                _ladderLoadError is not null ? 5
-                    : remaining is { TotalSeconds: > 0 and < 30 } ? Math.Max(1, remaining.Value.TotalSeconds)
-                    : _ladderAction == LadderAction.Waiting && remaining is { TotalSeconds: <= 0 } ? 5 : 30);
+            _ladderRefreshInterval = LadderLaunchSchedule.RefreshInterval(
+                MainWindow.Settings.CurrentProfile.LaunchExperience == LaunchExperience.Ladder,
+                _ladderLoadError is not null, SelectedLadder?.StartDateUtc,
+                _ladderSchedule?.Now ?? DateTimeOffset.UtcNow);
             RefreshInstallDirectoryState();
         }
     }
