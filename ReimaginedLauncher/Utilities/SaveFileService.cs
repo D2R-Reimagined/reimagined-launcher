@@ -35,6 +35,19 @@ public class SaveFileService
 
         var candidates = new List<string>();
 
+        // 0. Linux: the Lutris prefix. It sits beside the game rather than above
+        // it, so neither the steamapps walk nor FindWinePrefix below can reach it.
+        if (OperatingSystem.IsLinux() && MainWindow.Settings.CurrentProfile.Type == InstallationType.Lutris)
+        {
+            var lutrisPrefix = LutrisService.TryResolveWinePrefix(
+                MainWindow.Settings.CurrentProfile.LutrisGameSlug);
+            if (!string.IsNullOrWhiteSpace(lutrisPrefix))
+            {
+                candidates.Add(Path.Combine(lutrisPrefix, "drive_c", "users", "steamuser", "Saved Games"));
+                candidates.Add(Path.Combine(lutrisPrefix, "drive_c", "users", Environment.UserName, "Saved Games"));
+            }
+        }
+
         // 1. Linux: Steam Proton prefix paths (prioritize on Linux)
         if (OperatingSystem.IsLinux() && !string.IsNullOrWhiteSpace(userProfile))
         {
