@@ -145,7 +145,7 @@ jobs:
             --mainExe "ReimaginedLauncher.exe" `
             --packTitle "D2R Reimagined Launcher" `
             --packAuthors "D2R Reimagined" `
-            --icon "ReimaginedLauncher/Assets/ReimaginedLauncher.ico" `
+            --icon "ReimaginedLauncher/Assets/ReimaginedLauncherDesktop.ico" `
             --runtime "win-x64" `
             --channel "win" `
             --outputDir "${{ github.workspace }}\artifacts\velopack\win-x64"
@@ -160,7 +160,7 @@ jobs:
             --mainExe "ReimaginedLauncher" `
             --packTitle "D2R Reimagined Launcher" `
             --packAuthors "D2R Reimagined" `
-            --icon "ReimaginedLauncher/Assets/ReimaginedLauncher.png" `
+            --icon "ReimaginedLauncher/Assets/ReimaginedLauncherDesktop.png" `
             --runtime "linux-x64" `
             --channel "linux" `
             --categories "Game;Utility" `

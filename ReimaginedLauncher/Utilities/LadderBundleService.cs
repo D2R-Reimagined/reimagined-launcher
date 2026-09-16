@@ -243,7 +243,6 @@ public sealed class LadderBundleService(
         }
 
         var archiveBytes = await ReadCachedArchiveAsync(normalized, bundle, cancellationToken);
-        var usedCache = archiveBytes is not null;
         if (archiveBytes is null)
         {
             var downloadMessage = $"Downloading signed ladder package r{bundle.Revision}...";
@@ -257,7 +256,8 @@ public sealed class LadderBundleService(
                     downloadMessage,
                     update.Percentage,
                     FormatDownloadDetails(update)))),
-                cancellationToken);
+                cancellationToken,
+                GetArchiveCachePath(normalized, bundle));
         }
         else
         {
@@ -274,8 +274,6 @@ public sealed class LadderBundleService(
 
         progress?.Report(new LadderBundleProgress("Verifying ladder package signature and contents..."));
         var downloaded = VerifyArchive(bundle, archiveBytes);
-        if (!usedCache)
-            await CacheArchiveAsync(normalized, bundle, archiveBytes, cancellationToken);
         progress?.Report(new LadderBundleProgress("Installing ladder package..."));
         await InstallVerifiedAsync(normalized, bundle, downloaded, cancellationToken);
 
@@ -334,21 +332,6 @@ public sealed class LadderBundleService(
         var bytes = await File.ReadAllBytesAsync(path, cancellationToken);
         return string.Equals(Convert.ToHexString(SHA256.HashData(bytes)), bundle.ArtifactSha256,
             StringComparison.OrdinalIgnoreCase) ? bytes : null;
-    }
-
-    private static async Task CacheArchiveAsync(
-        string installDirectory,
-        LadderBundleResponse bundle,
-        byte[] archiveBytes,
-        CancellationToken cancellationToken)
-    {
-        var path = GetArchiveCachePath(installDirectory, bundle);
-        if (path is null) return;
-
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var partial = path + ".partial-" + Guid.NewGuid().ToString("N");
-        await File.WriteAllBytesAsync(partial, archiveBytes, cancellationToken);
-        File.Move(partial, path, overwrite: true);
     }
 
     private static string FormatBytes(double bytes)

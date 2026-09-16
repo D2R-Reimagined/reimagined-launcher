@@ -7,7 +7,7 @@
         <VelopackVersion>1.2.0</VelopackVersion>
         <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
         <ApplicationManifest>app.manifest</ApplicationManifest>
-        <ApplicationIcon>Assets\ReimaginedLauncher.ico</ApplicationIcon>
+        <ApplicationIcon>Assets\ReimaginedLauncherDesktop.ico</ApplicationIcon>
         <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
         <RuntimeIdentifiers>win-x64;linux-x64</RuntimeIdentifiers>
     </PropertyGroup>
@@ -45,6 +45,7 @@
     </ItemGroup>
 
      <ItemGroup>
+       <None Include="Assets\ReimaginedLauncherDesktop.ico"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory><CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory></None>
        <None Include="Assets\ReimaginedLauncher.ico">
          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
        </None>

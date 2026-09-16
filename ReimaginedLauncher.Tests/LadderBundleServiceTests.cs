@@ -43,6 +43,27 @@ public sealed class LadderBundleServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task FailureAfterDownloadReusesCachedPackageWithANewService()
+    {
+        var fixture = CreateBundle(("maps", "d2rl-maps.dll", "map-code"u8.ToArray()));
+        await Assert.ThrowsAsync<IOException>(() => CreateService(fixture.Archive).InstallOrRepairAsync(
+            _installDirectory, fixture.Descriptor, new FailBeforeInstallProgress()));
+        Assert.True(LadderBundleService.HasCachedPackage(_installDirectory, fixture.Descriptor));
+        // An empty HTTP response makes an accidental network download fail verification.
+        var retry = CreateService([]);
+        await retry.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+        Assert.True((await retry.GetReadinessAsync(_installDirectory, fixture.Descriptor)).IsReady);
+    }
+
+    private sealed class FailBeforeInstallProgress : IProgress<LadderBundleProgress>
+    {
+        public void Report(LadderBundleProgress value)
+        {
+            if (value.Message == "Installing ladder package...") throw new IOException("Simulated install failure");
+        }
+    }
+
+    [Fact]
     public void VerifyArchiveRejectsPayloadThatDoesNotMatchTheSignedHash()
     {
         var fixture = CreateBundle(

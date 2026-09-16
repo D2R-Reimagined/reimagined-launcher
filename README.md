@@ -108,6 +108,32 @@ Nothing is deleted outright. Anything displaced is copied into `.server-saves/ba
 
 ## API configuration
 
+### Ladder download recovery
+
+Ladder package downloads persist under
+`<D2R install>/.reimagined-launcher/ladder-bundles/downloads/`. The archive SHA-256
+identifies each package: `<hash>.zip` holds the complete hash-verified archive and
+`<hash>.zip.parts/` holds interrupted download chunks. Retrying, canceling and
+reopening the launcher preserve partial progress. Completed chunks are reused;
+incomplete chunks resume at their saved byte offsets when the server supports
+HTTP ranges. Timeout and connection failures retry up to four attempts per chunk.
+An expired storage URL is refreshed through the API on retry.
+
+The initial range probe requests one byte. A server that ignores ranges instead
+supplies a single full response; interrupted downloads from such a server must
+restart. Unexpected ranges or sizes fail instead of installing incorrect bytes.
+Every assembled archive must match the current API descriptor's hash, and every
+installation still verifies the bundle signature and file contents. Corrupt
+partial data is discarded for a fresh retry. A complete archive is saved before
+verification/installation so later failures do not require another download.
+
+Partial files are removed after the complete archive is saved. Archives and
+unfinished downloads from older revisions are retained for reuse and consume disk
+space; with the launcher closed, deleting this `downloads` folder clears only the
+download cache (future repairs will download again). Do not delete the surrounding
+ladder state or installed mod directories. This recovery applies to ladder bundle
+packages, not the separate prerequisite installers or optional-file downloads.
+
 Debug builds query the local Reimagined API at `http://localhost:5000/`. Other builds query `https://api.d2r-reimagined.com/`. Set `D2R_REIMAGINED_API_BASE_URL` to an absolute HTTP or HTTPS URL to override either default; for example, `$env:D2R_REIMAGINED_API_BASE_URL = "http://localhost:5000/"` in PowerShell before starting the launcher.
 
 Launcher account sign-in opens the website in the system browser and returns through a random loopback port using a one-use PKCE authorization code. Debug builds open `http://localhost:9500/`; other builds open `https://www.d2r-reimagined.com/`. Set `D2R_REIMAGINED_WEBSITE_BASE_URL` to override the website origin during local integration testing.

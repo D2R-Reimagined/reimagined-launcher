@@ -62,9 +62,6 @@ public partial class LaunchView : UserControl
         Play
     }
 
-    private bool IsLadderExperienceEnabled => MainWindow.Settings.LadderPlayModeUnlocked || HasAvailableLadder
-        || MainWindow.Settings.CurrentProfile.LaunchExperience == LaunchExperience.Ladder;
-
     public LaunchView()
     {
         InitializeComponent();
@@ -171,20 +168,13 @@ public partial class LaunchView : UserControl
 
         _isCompactLayout = isCompact;
 
-        var experienceCount = IsLadderExperienceEnabled ? 3 : 2;
+        const int experienceCount = 3;
         ConfigureGrid(ExperienceGrid, isCompact ? 1 : experienceCount, isCompact ? experienceCount : 1);
         ExperienceGrid.ColumnSpacing = isCompact ? 0 : 12;
         ExperienceGrid.RowSpacing = isCompact ? 12 : 0;
         PositionGridChild(OfflineExperienceButton, 0, 0);
         PositionGridChild(OnlineExperienceButton, isCompact ? 0 : 1, isCompact ? 1 : 0);
-        if (IsLadderExperienceEnabled)
-        {
-            PositionGridChild(LadderExperienceButton, isCompact ? 0 : 2, isCompact ? 2 : 0);
-        }
-        else
-        {
-            PositionGridChild(LadderExperienceButton, 0, 0);
-        }
+        PositionGridChild(LadderExperienceButton, isCompact ? 0 : 2, isCompact ? 2 : 0);
 
         ConfigureTwoPanelGrid(
             LaunchSetupGrid,
@@ -246,22 +236,10 @@ public partial class LaunchView : UserControl
     {
         var settings = MainWindow.Settings;
         var profile = settings.CurrentProfile;
-        var ladderExperienceEnabled = IsLadderExperienceEnabled;
-        if (LadderExperienceButton.IsVisible != ladderExperienceEnabled)
-        {
-            LadderExperienceButton.IsVisible = ladderExperienceEnabled;
-            _isCompactLayout = null;
-            UpdateResponsiveLayout();
-        }
-
-        if (ladderExperienceEnabled && !_ladderStatusLoaded && !_isRefreshingLadders)
+        LadderExperienceButton.IsVisible = true;
+        if (!_ladderStatusLoaded && !_isRefreshingLadders)
         {
             _ = RefreshLadderStateAsync();
-        }
-
-        if (!ladderExperienceEnabled && profile.LaunchExperience == LaunchExperience.Ladder)
-        {
-            profile.LaunchExperience = LaunchExperience.Online;
         }
 
         var isOnlineExperience = profile.LaunchExperience == LaunchExperience.Online;
@@ -336,7 +314,7 @@ public partial class LaunchView : UserControl
         OnlineExperienceButton.Classes.Set("selected", isOnlineExperience);
         LadderExperienceButton.Classes.Set("selected", isLadderExperience);
         OnlineExperienceButton.IsEnabled = profile.Type != InstallationType.D2RMM;
-        LadderExperienceButton.IsEnabled = profile.Type != InstallationType.D2RMM && ladderAvailable;
+        LadderExperienceButton.IsEnabled = profile.Type != InstallationType.D2RMM;
         OnlineExperiencePanel.IsVisible = isOnlineExperience && profile.Type != InstallationType.D2RMM;
         LadderPolicyPanel.IsVisible = isLadderExperience && profile.Type != InstallationType.D2RMM;
         LadderAuthenticationWarningBanner.IsVisible = isLadderExperience && !isReimaginedSignedIn;
@@ -528,10 +506,7 @@ public partial class LaunchView : UserControl
 
     private async void OnLadderExperienceClick(object? sender, RoutedEventArgs e)
     {
-        if (IsLadderExperienceEnabled && HasAvailableLadder)
-        {
-            await SetLaunchExperienceAsync(LaunchExperience.Ladder);
-        }
+        await SetLaunchExperienceAsync(LaunchExperience.Ladder);
     }
 
     private async Task SetLaunchExperienceAsync(LaunchExperience experience)

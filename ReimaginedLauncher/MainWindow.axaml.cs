@@ -40,7 +40,6 @@ public partial class MainWindow : Window
     private const int NexusModId = 503;
     private const string LauncherFileMarker = "launcher";
     private const string MainReleaseNamePrefix = "D2R Reimagined - ";
-    private const int LadderPlayModeUnlockClickCount = 3;
     // Make URLs readonly for safe reuse across the file
     private const string WebsiteUrl = "https://www.d2r-reimagined.com";
     private const string WikiUrl = "https://wiki.d2r-reimagined.com";
@@ -80,7 +79,6 @@ public partial class MainWindow : Window
     private bool _isExiting;
     private readonly DispatcherTimer _saveWindowStateTimer;
     private DispatcherTimer? _launcherUpdateCheckTimer;
-    private int _launcherVersionClickCount;
     private bool _isRestoringWindowState;
     // Hourly auto-poll cadence for launcher update checks. The same check is also runnable on
     // demand by clicking the "Launcher v#.#.#" label in the navigation panel.
@@ -114,7 +112,7 @@ public partial class MainWindow : Window
         _ = NavigateToLaunchViewAsync();
         
         // Set the window icon
-        Icon = new WindowIcon(iconPath);
+        Icon = new WindowIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "ReimaginedLauncherDesktop.ico"));
         InitializeTrayIcon();
         _saveWindowStateTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _saveWindowStateTimer.Tick += async (_, _) =>
@@ -1332,29 +1330,8 @@ public partial class MainWindow : Window
         _launcherUpdateCheckTimer.Start();
     }
 
-    // The version label also carries the one-time ladder unlock gesture. Once unlocked, its usual
-    // update-check behavior remains unchanged.
     private async void OnLauncherVersionClicked(object? sender, Avalonia.Input.PointerPressedEventArgs e)
     {
-        if (!Settings.LadderPlayModeUnlocked)
-        {
-            _launcherVersionClickCount++;
-            if (_launcherVersionClickCount >= LadderPlayModeUnlockClickCount)
-            {
-                Settings.LadderPlayModeUnlocked = true;
-                await SettingsManager.SaveAsync(Settings);
-                if (ContentArea.Content is LaunchView launchView)
-                {
-                    launchView.RefreshInstallDirectoryState();
-                }
-
-                Notifications.SendNotification(
-                    "Ladder play mode is now unlocked and will remain available.",
-                    "Ladder unlocked");
-                return;
-            }
-        }
-
         if (LauncherUpdateService.AreUpdatesDisabled)
         {
             Notifications.SendNotification(
