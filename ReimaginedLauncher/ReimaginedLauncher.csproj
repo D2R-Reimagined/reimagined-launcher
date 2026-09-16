@@ -45,7 +45,11 @@
     </ItemGroup>
 
      <ItemGroup>
-       <None Include="Assets\ReimaginedLauncherDesktop.ico"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory><CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory></None>
+       <None Include="Assets\ReimaginedLauncherDesktop.ico">
+         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+         <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+         <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+       </None>
        <None Include="Assets\ReimaginedLauncher.ico">
          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
        </None>
