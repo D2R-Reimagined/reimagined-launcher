@@ -101,6 +101,17 @@ jobs:
           -r win-x64
           --output "${{ github.workspace }}\artifacts\ReimaginedLauncher\win-x64"
 
+      - name: Verify Windows runtime icons
+        shell: pwsh
+        run: |
+          $publishDirectory = '${{ github.workspace }}\artifacts\ReimaginedLauncher\win-x64'
+          foreach ($relativePath in @('Assets\ReimaginedLauncher.ico', 'Assets\ReimaginedLauncherDesktop.ico')) {
+            $path = Join-Path $publishDirectory $relativePath
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Required runtime icon is missing from the Windows publish output: $relativePath"
+            }
+          }
+
       - name: Restore Linux target
         run: dotnet restore ReimaginedLauncher.sln -p:Configuration=Production -r linux-x64
 
@@ -114,6 +125,17 @@ jobs:
           --no-build
           -r linux-x64
           --output "${{ github.workspace }}\artifacts\ReimaginedLauncher\linux-x64"
+
+      - name: Verify Linux runtime icons
+        shell: pwsh
+        run: |
+          $publishDirectory = '${{ github.workspace }}\artifacts\ReimaginedLauncher\linux-x64'
+          foreach ($relativePath in @('Assets/ReimaginedLauncher.ico', 'Assets/ReimaginedLauncherDesktop.ico')) {
+            $path = Join-Path $publishDirectory $relativePath
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Required runtime icon is missing from the Linux publish output: $relativePath"
+            }
+          }
 
       - name: Download previous Windows Velopack releases
         continue-on-error: true
