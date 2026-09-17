@@ -56,9 +56,28 @@ dotnet publish ReimaginedLauncher/ReimaginedLauncher.csproj -c Production -r lin
 
 Output will be in `ReimaginedLauncher/bin/Production/net10.0/linux-x64/publish/`.
 
+## D2RLoader Online / Ladder on Linux
+
+The Online and Ladder experiences are supported on Linux through **Lutris**.
+
+### Setup
+
+1. Install **Battle.net via Lutris** using the standard Lutris installer.
+2. Inside Battle.net, install **Diablo II: Resurrected**.
+3. In the launcher, pick **Lutris** as the installation type and select your D2R entry.
+4. Switch the experience to **Online** or **Ladder**.
+5. The launcher will prompt to install **D2RLoader** if it is not present. Let it download and extract into the D2R folder.
+6. In **Lutris**, edit the D2R game entry:
+   - Change the **Executable** from `D2R.exe` to **`D2RLoader.exe`**.
+   - Remove any `-mod Reimagined -txt` arguments if you added them manually — D2RLoader handles mod selection.
+7. Launch from the launcher. Lutris will start `D2RLoader.exe` with Reimagined selected.
+
+### Why Lutris is required for Online
+
+D2RLoader needs to communicate with the Steam client for authentication. Running it through standalone Wine does not provide that integration. Lutris handles the Wine/Proton runtime setup that bridges D2RLoader to Steam.
+
 ## Notes
 
-- The D2RLoader Online experience is currently Windows-only. Linux profiles continue to use the Offline launch path until Loader startup through Proton/Wine has been validated end to end.
 - Launcher self-updates are supported by the packaged AppImage.
 - Steam launches use app ID `2536520` and pass the same Reimagined launch parameters as Windows.
 - Battle.net installations are launched through Wine. When the selected game is inside a Wine prefix, the launcher derives and supplies `WINEPREFIX` automatically.

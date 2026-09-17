@@ -123,11 +123,17 @@ public static class LutrisArgumentsService
     {
         var foreign = StripManagedFlags(Tokenize(existingArgs));
         var managed = new List<string>();
+        var isOffline = profile.LaunchExperience == LaunchExperience.Offline;
 
-        if (profile.EnableRespec) managed.Add(EnableRespecFlag);
-        if (profile.ResetOfflineMaps) managed.Add(ResetOfflineMapsFlag);
+        if (isOffline && profile.EnableRespec) managed.Add(EnableRespecFlag);
 
-        if (profile.PlayersCount is >= 2 and <= 8)
+        if (profile.LaunchExperience == LaunchExperience.Ladder ||
+            (isOffline && profile.ResetOfflineMaps))
+        {
+            managed.Add(ResetOfflineMapsFlag);
+        }
+
+        if (isOffline && profile.PlayersCount is >= 2 and <= 8)
         {
             managed.Add(PlayersFlag);
             managed.Add(profile.PlayersCount.Value.ToString(CultureInfo.InvariantCulture));
@@ -137,7 +143,7 @@ public static class LutrisArgumentsService
         if (profile.ForceDesktop) managed.Add(ForceDesktopFlag);
         if (profile.NoSound) managed.Add(NoSoundFlag);
 
-        if (profile.CustomMapSeedEnabled)
+        if (isOffline && profile.CustomMapSeedEnabled)
         {
             managed.Add(SeedFlag);
             managed.Add(profile.CustomMapSeed.ToString(CultureInfo.InvariantCulture));

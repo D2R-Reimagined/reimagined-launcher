@@ -627,7 +627,7 @@ public sealed class LadderBundleService(
         }
         else
         {
-            var loaderVersion = FileVersionInfo.GetVersionInfo(loaderPath).FileVersion;
+            var loaderVersion = D2RLoaderService.ReadFileVersion(loaderPath);
             if (TryParseVersionCore(bundle.Compatibility.RequiredD2RLoaderVersion, out var requiredLoader)
                 && requiredLoader > new Version(0, 0, 0)
                 && (!TryParseVersionCore(loaderVersion, out var currentLoader) || currentLoader < requiredLoader))
@@ -675,7 +675,14 @@ public sealed class LadderBundleService(
             && File.Exists(gamePath))
         {
             var gameVersion = FileVersionInfo.GetVersionInfo(gamePath).FileVersion ?? string.Empty;
-            if (!gameVersion.StartsWith(bundle.Compatibility.SupportedGameVersion, StringComparison.OrdinalIgnoreCase))
+            // FileVersionInfo cannot read PE metadata on Linux; fall back to the
+            // same binary reader the launcher uses for D2RLoader.exe.
+            if (string.IsNullOrWhiteSpace(gameVersion) && OperatingSystem.IsLinux())
+            {
+                gameVersion = D2RLoaderService.ReadFileVersion(gamePath) ?? string.Empty;
+            }
+            if (!string.IsNullOrWhiteSpace(gameVersion)
+                && !gameVersion.StartsWith(bundle.Compatibility.SupportedGameVersion, StringComparison.OrdinalIgnoreCase))
             {
                 problems.Add($"D2R game version {bundle.Compatibility.SupportedGameVersion} is required; {gameVersion} is installed.");
             }
@@ -1136,9 +1143,19 @@ public sealed class LadderBundleService(
     /// </summary>
     private static string? ReadInstalledModVersion(string installDirectory)
     {
-        var modRoot = ModInstallationPaths.LadderModRoot(installDirectory);
-        return ReadJsonString(Path.Combine(modRoot, "modinfo.json"), "version")
-               ?? ReadJsonString(Path.Combine(modRoot, ModInstallationPaths.LadderModName + ".mpq", "modinfo.json"), "version");
+        var ladderRoot = ModInstallationPaths.LadderModRoot(installDirectory);
+        var ladderVersion = ReadJsonString(Path.Combine(ladderRoot, "modinfo.json"), "version")
+               ?? ReadJsonString(Path.Combine(ladderRoot, ModInstallationPaths.LadderModName + ".mpq", "modinfo.json"), "version");
+        if (!string.IsNullOrWhiteSpace(ladderVersion))
+        {
+            return ladderVersion;
+        }
+
+        // Fall back to the normal mod location before the ladder bundle has
+        // been downloaded and installed.
+        var normalRoot = Path.Combine(installDirectory, "mods", ModInstallationPaths.NormalModName);
+        return ReadJsonString(Path.Combine(normalRoot, "modinfo.json"), "version")
+               ?? ReadJsonString(Path.Combine(normalRoot, ModInstallationPaths.NormalModName + ".mpq", "modinfo.json"), "version");
     }
 
     private static string? ReadJsonString(string path, string propertyName)

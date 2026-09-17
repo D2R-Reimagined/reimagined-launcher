@@ -581,6 +581,16 @@ public partial class MainWindow : Window
                 _localModVersion = SelectInstalledModVersion(modInfoVersion, panelVersion);
 
                 IsLocalModDetected = Directory.Exists(modRootDirectory) || File.Exists(modInfoPath) || File.Exists(modInfoPathInMpq);
+
+                // Ladder installs the mod under ReimaginedLadder, so the normal
+                // check above would miss it. Detect the ladder mod too.
+                if (!IsLocalModDetected)
+                {
+                    var ladderModRoot = Path.Combine(installDir, "mods", "ReimaginedLadder");
+                    var ladderModInfo = Path.Combine(ladderModRoot, "modinfo.json");
+                    var ladderModInfoInMpq = Path.Combine(ladderModRoot, "ReimaginedLadder.mpq", "modinfo.json");
+                    IsLocalModDetected = Directory.Exists(ladderModRoot) || File.Exists(ladderModInfo) || File.Exists(ladderModInfoInMpq);
+                }
             }
         }
 

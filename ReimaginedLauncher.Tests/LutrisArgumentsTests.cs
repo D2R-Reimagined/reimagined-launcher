@@ -101,6 +101,48 @@ public sealed class LutrisArgumentsTests : IDisposable
     }
 
     [Fact]
+    public void BuildArgsForcesResetOfflineMapsForLadder()
+    {
+        var profile = new InstallationProfile
+        {
+            LaunchExperience = LaunchExperience.Ladder,
+            ResetOfflineMaps = false
+        };
+
+        Assert.Equal("-resetofflinemaps", LutrisArgumentsService.BuildArgs(null, profile));
+    }
+
+    [Fact]
+    public void BuildArgsOmitsOfflineOnlyFlagsForOnline()
+    {
+        var profile = new InstallationProfile
+        {
+            LaunchExperience = LaunchExperience.Online,
+            EnableRespec = true,
+            PlayersCount = 8,
+            CustomMapSeedEnabled = true,
+            CustomMapSeed = 1234
+        };
+
+        Assert.Equal(string.Empty, LutrisArgumentsService.BuildArgs(null, profile));
+    }
+
+    [Fact]
+    public void BuildArgsOmitsOfflineOnlyFlagsForLadder()
+    {
+        var profile = new InstallationProfile
+        {
+            LaunchExperience = LaunchExperience.Ladder,
+            EnableRespec = true,
+            PlayersCount = 8,
+            CustomMapSeedEnabled = true,
+            CustomMapSeed = 1234
+        };
+
+        Assert.Equal("-resetofflinemaps", LutrisArgumentsService.BuildArgs(null, profile));
+    }
+
+    [Fact]
     public void ImportReadsTheOptionsAlreadyPresent()
     {
         var profile = new InstallationProfile();
