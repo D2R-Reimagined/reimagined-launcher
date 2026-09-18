@@ -616,12 +616,8 @@ public class GameLauncherService
         LaunchDiagnostics.Log($"Resolved executable path: {executablePath}");
         LaunchDiagnostics.Log($"Launch parameters: {finalArgs}");
 
-        var processStartInfo = new ProcessStartInfo(executablePath)
-        {
-            UseShellExecute = !OperatingSystem.IsLinux(),
-            Arguments = finalArgs,
-            WorkingDirectory = workingDirectory ?? string.Empty
-        };
+        var processStartInfo = CreateProcessStartInfo(executablePath, finalArgs, workingDirectory);
+        LaunchDiagnostics.Log($"Working directory: {processStartInfo.WorkingDirectory}");
 
         if (!string.IsNullOrWhiteSpace(winePrefix))
         {
@@ -654,6 +650,19 @@ public class GameLauncherService
             Notifications.SendNotification($"Failed to start {Path.GetFileName(executablePath)}: {ex.Message}", "Warning");
             return null;
         }
+    }
+
+    internal static ProcessStartInfo CreateProcessStartInfo(
+        string executablePath,
+        string arguments,
+        string? workingDirectory)
+    {
+        return new ProcessStartInfo(executablePath)
+        {
+            UseShellExecute = !OperatingSystem.IsLinux() && string.IsNullOrWhiteSpace(workingDirectory),
+            Arguments = arguments,
+            WorkingDirectory = workingDirectory ?? string.Empty
+        };
     }
 
     private string? ResolveExecutablePath(string? gamePathOverride = null)
