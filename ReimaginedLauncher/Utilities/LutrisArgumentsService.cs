@@ -20,12 +20,13 @@ public static class LutrisArgumentsService
     private const string NoRumbleFlag = "-norumble";
     private const string ForceDesktopFlag = "-forcedesktop";
     private const string NoSoundFlag = "-nosound";
+    private const string WindowedFlag = "-w";
     private const string PlayersFlag = "-players";
     private const string SeedFlag = "-seed";
 
     private static readonly string[] ToggleFlags =
     [
-        EnableRespecFlag, ResetOfflineMapsFlag, NoRumbleFlag, ForceDesktopFlag, NoSoundFlag
+        EnableRespecFlag, ResetOfflineMapsFlag, NoRumbleFlag, ForceDesktopFlag, NoSoundFlag, WindowedFlag
     ];
 
     private static readonly string[] ValueFlags = [PlayersFlag, SeedFlag];
@@ -42,6 +43,7 @@ public static class LutrisArgumentsService
         profile.ResetOfflineMaps = HasFlag(tokens, ResetOfflineMapsFlag);
         profile.NoRumble = HasFlag(tokens, NoRumbleFlag);
         profile.ForceDesktop = HasFlag(tokens, ForceDesktopFlag);
+        profile.WindowedMode = HasFlag(tokens, WindowedFlag);
         profile.NoSound = HasFlag(tokens, NoSoundFlag);
 
         var players = ReadValue(tokens, PlayersFlag);
@@ -135,6 +137,7 @@ public static class LutrisArgumentsService
 
         if (profile.NoRumble) managed.Add(NoRumbleFlag);
         if (profile.ForceDesktop) managed.Add(ForceDesktopFlag);
+        if (profile.WindowedMode) managed.Add(WindowedFlag);
         if (profile.NoSound) managed.Add(NoSoundFlag);
 
         if (profile.CustomMapSeedEnabled)

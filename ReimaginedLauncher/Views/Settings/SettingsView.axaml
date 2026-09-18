@@ -134,6 +134,15 @@
                                        Text="Forces the desktop mouse-and-keyboard UI on devices the game otherwise treats as handheld." />
                         </StackPanel>
                         <StackPanel Spacing="4">
+                            <CheckBox x:Name="WindowedModeCheckBox"
+                                      Content="-w"
+                                      IsCheckedChanged="OnLaunchSettingChanged"/>
+                            <TextBlock Classes="muted"
+                                       Margin="28,0,0,0"
+                                       TextWrapping="Wrap"
+                                       Text="Starts the game in windowed mode." />
+                        </StackPanel>
+                        <StackPanel Spacing="4">
                             <CheckBox x:Name="NoSoundCheckBox"
                                       Content="-nosound"
                                       IsCheckedChanged="OnLaunchSettingChanged"/>

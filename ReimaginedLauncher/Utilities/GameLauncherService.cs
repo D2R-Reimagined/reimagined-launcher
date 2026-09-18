@@ -429,6 +429,11 @@ public class GameLauncherService
             launchParameters.Add("-forcedesktop");
         }
 
+        if (profile.WindowedMode)
+        {
+            launchParameters.Add("-w");
+        }
+
         if (profile.NoSound)
         {
             launchParameters.Add("-nosound");

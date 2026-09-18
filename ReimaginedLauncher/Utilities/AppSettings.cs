@@ -64,6 +64,7 @@ public class InstallationProfile
     public bool NoSound { get; set; }
     public bool NoRumble { get; set; }
     public bool ForceDesktop { get; set; }
+    public bool WindowedMode { get; set; }
     public bool ResetOfflineMaps { get; set; }
     public bool EnableRespec { get; set; }
     public int? PlayersCount { get; set; }

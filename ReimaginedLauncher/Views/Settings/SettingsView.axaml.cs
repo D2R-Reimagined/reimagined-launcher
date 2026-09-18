@@ -75,6 +75,7 @@ public partial class SettingsView : UserControl
             NoSoundCheckBox.IsChecked = false;
             NoRumbleCheckBox.IsChecked = false;
             ForceDesktopCheckBox.IsChecked = false;
+            WindowedModeCheckBox.IsChecked = false;
             ResetOfflineMapsCheckBox.IsChecked = false;
             EnableRespecCheckBox.IsChecked = false;
             CustomMapSeedCheckBox.IsChecked = false;
@@ -85,6 +86,7 @@ public partial class SettingsView : UserControl
             NoSoundCheckBox.IsChecked = profile.NoSound;
             NoRumbleCheckBox.IsChecked = profile.NoRumble;
             ForceDesktopCheckBox.IsChecked = profile.ForceDesktop;
+            WindowedModeCheckBox.IsChecked = profile.WindowedMode;
             ResetOfflineMapsCheckBox.IsChecked = profile.ResetOfflineMaps;
             EnableRespecCheckBox.IsChecked = profile.EnableRespec;
             CustomMapSeedCheckBox.IsChecked = profile.CustomMapSeedEnabled;
@@ -114,6 +116,7 @@ public partial class SettingsView : UserControl
         profile.NoSound = NoSoundCheckBox.IsChecked ?? false;
         profile.NoRumble = NoRumbleCheckBox.IsChecked ?? false;
         profile.ForceDesktop = ForceDesktopCheckBox.IsChecked ?? false;
+        profile.WindowedMode = WindowedModeCheckBox.IsChecked ?? false;
         profile.ResetOfflineMaps = ResetOfflineMapsCheckBox.IsChecked ?? false;
         profile.EnableRespec = EnableRespecCheckBox.IsChecked ?? false;
         profile.CustomMapSeedEnabled = CustomMapSeedCheckBox.IsChecked ?? false;

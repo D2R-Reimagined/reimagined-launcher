@@ -59,4 +59,19 @@ public sealed class LutrisLaunchCommandTests
 
         Assert.Contains("before launch: none", command);
     }
+
+    [Fact]
+    public void LutrisLaunchCommandIncludesWindowedModeWhenEnabled()
+    {
+        var profile = new InstallationProfile
+        {
+            Type = InstallationType.Lutris,
+            LutrisGameId = 145,
+            WindowedMode = true
+        };
+
+        var command = GameLauncherService.BuildLutrisLaunchCommand(profile);
+
+        Assert.Contains("before launch: -w", command);
+    }
 }
