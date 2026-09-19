@@ -26,6 +26,7 @@ public static class PluginStateSanitizer
 
             var knownIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             knownIds.Add(ModTweaksService.DisableExtraBloodBackupClaimId);
+            knownIds.Add(ModTweaksService.RemoveItemLightBeamsBackupClaimId);
             var knownFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var profile in settings.Profiles)
