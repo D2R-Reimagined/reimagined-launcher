@@ -338,8 +338,8 @@ public partial class LaunchView : UserControl
         OfflineExperienceButton.Classes.Set("selected", profile.LaunchExperience == LaunchExperience.Offline);
         OnlineExperienceButton.Classes.Set("selected", isOnlineExperience);
         LadderExperienceButton.Classes.Set("selected", isLadderExperience);
-        // Neither type lets the launcher substitute D2RLoader.exe for D2R.exe.
-        var supportsD2RLoader = profile.Type is not (InstallationType.D2RMM or InstallationType.Lutris);
+        // D2RMM is the only type that does not support D2RLoader.
+        var supportsD2RLoader = profile.Type is not InstallationType.D2RMM;
         OnlineExperienceButton.IsEnabled = supportsD2RLoader;
         LadderExperienceButton.IsEnabled = supportsD2RLoader;
         OnlineExperiencePanel.IsVisible = isOnlineExperience && supportsD2RLoader;
@@ -615,7 +615,7 @@ public partial class LaunchView : UserControl
         var profile = MainWindow.Settings.CurrentProfile;
         if (_hasPromptedForMissingLoader || _isLoaderInstallPromptOpen || !IsLoaded
             || _isLaunching || _isRunningLadderAction || MainWindow.IsInstallInProgress
-            || MainWindow.IsGameRunning() || !OperatingSystem.IsWindows()
+            || MainWindow.IsGameRunning()
             || profile.Type == InstallationType.D2RMM
             || profile.LaunchExperience is not (LaunchExperience.Online or LaunchExperience.Ladder)
             || !InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory)
@@ -632,7 +632,6 @@ public partial class LaunchView : UserControl
     private async Task PromptInstallD2RLoaderAsync(InstallationProfile profile)
     {
         if (_isLoaderInstallPromptOpen
-            || !OperatingSystem.IsWindows()
             || !InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory)
             || TopLevel.GetTopLevel(this) is not Window owner)
         {
@@ -2239,10 +2238,13 @@ public partial class LaunchView : UserControl
 
             if (!ServerSavesConfigService.IsPluginInstalled(profile.InstallDirectory))
             {
-                var localPreparation = await LadderSaveDirectoryService.PrepareAsync(profile.InstallDirectory, ladder.Id, ladder.Name);
-                if (localPreparation.DirectoryPath is null)
-                    Notifications.SendNotification(localPreparation.ErrorMessage!, "Ladder save preparation failed");
-                return localPreparation.DirectoryPath is not null;
+                if (!await ServerSavesConfigService.EnsureInstalledAsync(profile.InstallDirectory))
+                {
+                    const string message = "The server-saves plugin could not be installed.";
+                    LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
+                    Notifications.SendNotification(message, "Warning");
+                    return false;
+                }
             }
 
             var accessToken = await _launcherAuthenticationService.GetAccessTokenAsync();

@@ -472,7 +472,16 @@ public class GameLauncherService
                 return $"D2RLoader unavailable: {reason}";
             }
 
-            return $"\"{D2RLoaderService.GetLoaderPath(profile.InstallDirectory)}\" {launchParameters}";
+            var loaderPath = D2RLoaderService.GetLoaderPath(profile.InstallDirectory)!;
+            if (OperatingSystem.IsLinux())
+            {
+                var winePath = FindExecutableOnPath("wine") ?? "wine";
+                var winePrefix = FindWinePrefix(loaderPath);
+                var prefix = winePrefix is null ? string.Empty : $"WINEPREFIX=\"{winePrefix}\" ";
+                return $"{prefix}\"{winePath}\" \"{loaderPath}\" {launchParameters}";
+            }
+
+            return $"\"{loaderPath}\" {launchParameters}";
         }
 
         if (profile.Type == InstallationType.Steam)
@@ -568,8 +577,25 @@ public class GameLauncherService
                 return null;
             }
 
-            executablePath = D2RLoaderService.GetLoaderPath(profile.InstallDirectory)!;
-            finalArgs = launchParameters;
+            var loaderPath = D2RLoaderService.GetLoaderPath(profile.InstallDirectory)!;
+            if (OperatingSystem.IsLinux())
+            {
+                executablePath = FindExecutableOnPath("wine") ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(executablePath))
+                {
+                    Notifications.SendNotification("Wine was not found. Install Wine to use D2RLoader.", "Warning");
+                    return null;
+                }
+
+                winePrefix = FindWinePrefix(loaderPath);
+                finalArgs = $"\"{loaderPath}\" {launchParameters}";
+            }
+            else
+            {
+                executablePath = loaderPath;
+                finalArgs = launchParameters;
+            }
+
             workingDirectory = profile.InstallDirectory;
         }
         else if (profile.Type == InstallationType.Steam)

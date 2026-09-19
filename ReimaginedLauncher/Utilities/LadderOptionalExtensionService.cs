@@ -170,10 +170,17 @@ public static partial class LadderOptionalExtensionService
         var path = Path.GetFullPath(Path.Combine(fullRoot, relative.Replace('/', Path.DirectorySeparatorChar)));
         if (!path.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Optional extension path escapes the installation.");
-        for (var current = path; current is not null; current = Path.GetDirectoryName(current))
+        // Reparse-point / junction traversal is a Windows concern. Linux symlinks
+        // are a normal part of the filesystem (Wine prefixes use them heavily) and
+        // Path.GetFullPath already resolves them, so the prefix check above is
+        // sufficient protection.
+        if (OperatingSystem.IsWindows())
         {
-            if ((File.Exists(current) || Directory.Exists(current)) && (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
-                throw new InvalidDataException("Optional extension paths cannot contain symbolic links or junctions.");
+            for (var current = path; current is not null; current = Path.GetDirectoryName(current))
+            {
+                if ((File.Exists(current) || Directory.Exists(current)) && (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                    throw new InvalidDataException("Optional extension paths cannot contain symbolic links or junctions.");
+            }
         }
         return path;
     }
