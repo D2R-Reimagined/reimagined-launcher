@@ -56,7 +56,7 @@
        <None Include="Assets\Plugins\**\*">
          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
        </None>
-       <None Include="Assets\D2RLoaderPlugins\**\*">
+       <None Include="Assets\D2RLoaderPlugins\**\*" Exclude="Assets\D2RLoaderPlugins\server-saves\**\*">
          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
        </None>
        <None Include="Assets\LadderBundleSigningKeys\**\*">

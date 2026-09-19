@@ -1086,12 +1086,9 @@ public partial class LaunchView : UserControl
                                                        state.Approval.Sha256,
                                                        state.Approval.Kind)
                                                    || (state.Approval.Kind == D2RLoaderExtensionKind.Plugin
-                                                       && (ServerSavesConfigService.CanSupplyApprovedPlugin(
+                                                       && ChatRelayConfigService.CanSupplyApprovedPlugin(
                                                        state.Approval.FileName,
-                                                       state.Approval.Sha256)
-                                                   || ChatRelayConfigService.CanSupplyApprovedPlugin(
-                                                       state.Approval.FileName,
-                                                       state.Approval.Sha256))));
+                                                       state.Approval.Sha256)));
                     return new LadderExtensionChoice
                     {
                         ApprovalId = state.Approval.Id,
@@ -2303,13 +2300,10 @@ public partial class LaunchView : UserControl
 
             if (!ServerSavesConfigService.IsPluginInstalled(profile.InstallDirectory))
             {
-                if (!await ServerSavesConfigService.EnsureInstalledAsync(profile.InstallDirectory))
-                {
-                    const string message = "The server-saves plugin could not be installed.";
-                    LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
-                    Notifications.SendNotification(message, "Warning");
-                    return false;
-                }
+                const string message = "Server Saves is missing from the ladder installation. Repair the ladder package before playing.";
+                LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
+                Notifications.SendNotification(message, "Warning");
+                return false;
             }
 
             var accessToken = await _launcherAuthenticationService.GetAccessTokenAsync();

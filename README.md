@@ -14,7 +14,7 @@ Source code for the mod can be found here: [https://github.com/D2R-Reimagined/d2
 * Easy Launch Parameter Editing
 * Per-installation Offline, Online (D2RLoader TCP/IP), and active Ladder experiences
 * Active ladder schedules loaded from the D2R Reimagined API
-* Ladder characters stored server-side, in their own save folder, with the bundled `server-saves` plugin installed automatically
+* Ladder characters stored server-side, in their own save folder, with the signed ladder package's `server-saves` plugin installed automatically
 * Ladder-safe clean-file restoration with launcher tweaks/plugins disabled and SHA-256-verified D2RLoader extension choices
 * D2RLoader plugin and patch discovery for global and Reimagined-specific extensions
 * Modify Skill Hard Point Caps
@@ -62,11 +62,9 @@ Every non-ladder launch restores the normal `savepath`, as does every ladder-lau
 
 ### The server-saves plugin
 
-Players do not need to download this plugin. The launcher ships its own copy under `Assets/D2RLoaderPlugins/server-saves/` and installs it into `mods/Reimagined/d2rloader/plugins/` before every ladder launch, replacing it whenever the bundled build differs. A newer plugin shipped in a launcher update therefore rolls out automatically.
+Server Saves comes from the signed ladder package and is installed into `mods/ReimaginedLadder/d2rloader/plugins/`. The launcher does not ship or install its own Server Saves DLL. Updating the launcher cannot change the ladder's plugin version.
 
-Installation happens *before* the ladder extension policy runs, so the policy still decides whether the plugin is actually allowed. Like any other extension it must match the active ladder's allowlist by kind, filename, and SHA-256, and it must be checked in the ladder extension list. If it is not approved or not checked, it is moved to `ladder-disabled/` and the launch proceeds on local characters — the same outcome as a ladder with no server saves configured.
-
-> **Note for maintainers:** the allowlist matches on content hash, so a rebuilt `d2rl-server-saves.dll` is an unapproved DLL until the `LadderAllowedExtension` row's SHA-256 is updated for every ladder that approves it.
+The signed package and extension policy validate the installed files before launch. A missing Server Saves plugin blocks launch and requires repairing the ladder package. The launcher only writes its launch-time configuration.
 
 ### Who talks to the API
 
@@ -83,7 +81,7 @@ The only thing they share is the access token: the launcher obtains and refreshe
 
 ```
 Launcher, before the game starts
-  1. D2RLoader extensions   install the bundled server-saves plugin, then apply the
+  1. D2RLoader extensions   verify the signed ladder package, then apply the
                             ladder allowlist (unapproved/unchecked -> ladder-disabled/)
   2. Mod tweaks             restore clean Reimagined files, add the ladder banner
   3. Server saves           refresh the access token, write server-saves.toml,

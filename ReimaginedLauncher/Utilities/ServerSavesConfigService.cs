@@ -13,17 +13,8 @@ public sealed record ServerSavesLaunchSettings(
     string StatusSessionId = "");
 
 /// <summary>
-/// Installs the server-saves D2RLoader plugin from the launcher's own bundled
-/// copy and writes the launch-time settings it needs into its TOML config. The
-/// plugin stores a player's characters on the Reimagined API and hides the
-/// local ones, so it must only ever be enabled for a signed-in ladder launch.
+/// Configures the Server Saves plugin supplied by the signed ladder package.
 /// </summary>
-/// <remarks>
-/// The installing and TOML rewriting live in <see cref="D2RLoaderPluginPackage"/>,
-/// shared with the other bundled plugins. What stays here is what is specific to
-/// this one: the settings it owns, and the rule that it is never enabled without
-/// both an API address and a token.
-/// </remarks>
 public static class ServerSavesConfigService
 {
     public const string PluginId = "server-saves";
@@ -44,25 +35,6 @@ public static class ServerSavesConfigService
     public static bool IsPluginInstalled(string? installDirectory)
     {
         return Package.IsInstalled(installDirectory);
-    }
-
-    internal static bool CanSupplyApprovedPlugin(
-        string fileName,
-        string sha256,
-        string? bundledPluginPath = null)
-    {
-        return Package.CanSupplyApproved(fileName, sha256, bundledPluginPath);
-    }
-
-    /// <summary>
-    /// Copies the launcher's bundled plugin into the mod's plugin folder if it
-    /// is missing or out of date, so players never have to source the DLL
-    /// themselves. Returns false only on a real failure - a copy that was
-    /// already current is success, not a no-op to warn about.
-    /// </summary>
-    public static Task<bool> EnsureInstalledAsync(string? installDirectory, string? bundledPluginPath = null)
-    {
-        return Package.EnsureInstalledAsync(installDirectory, bundledPluginPath);
     }
 
     /// <summary>
