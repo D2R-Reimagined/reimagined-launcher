@@ -53,6 +53,13 @@ public sealed class ReimaginedApiHttpClient
 
     /// <summary>The resolved API origin, for components that talk to it outside this client.</summary>
     public Uri BaseAddress => _httpClient.BaseAddress!;
+    public Func<CancellationToken, Task<string?>>? AccessTokenProvider { get; set; }
+
+    private async Task AuthorizeAsync(HttpRequestMessage request, CancellationToken token)
+    {
+        var accessToken = AccessTokenProvider is null ? null : await AccessTokenProvider(token);
+        if (accessToken is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+    }
 
     public async Task<LadderLaunchSchedule> GetLadderLaunchScheduleAsync(
         CancellationToken cancellationToken = default)
@@ -63,6 +70,7 @@ public sealed class ReimaginedApiHttpClient
             using var timeout = CreateRequestTimeout(cancellationToken);
             using var request = new HttpRequestMessage(HttpMethod.Get, "ladders/schedule");
             request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
+            await AuthorizeAsync(request, timeout.Token);
             using var response = await _httpClient.SendAsync(request, timeout.Token);
             response.EnsureSuccessStatusCode();
             var schedule = await response.Content.ReadFromJsonAsync<LadderScheduleResponse>(JsonOptions, timeout.Token)
@@ -80,6 +88,7 @@ public sealed class ReimaginedApiHttpClient
                 {
                     using var policyRequest = new HttpRequestMessage(HttpMethod.Get, $"ladders/{entry.Id}/client-policy");
                     policyRequest.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
+                    await AuthorizeAsync(policyRequest, timeout.Token);
                     using var policyResponse = await _httpClient.SendAsync(policyRequest, timeout.Token);
                     policyResponse.EnsureSuccessStatusCode();
                     if (!policyResponse.Headers.TryGetValues("X-Ladder-Policy-Version", out var versions)
@@ -133,7 +142,8 @@ public sealed class ReimaginedApiHttpClient
         cachePath ??= System.IO.Path.Combine(System.IO.Path.GetTempPath(), "reimagined-downloads", Guid.NewGuid().ToString("N"), "bundle.zip");
         try
         {
-            return await new LadderBundleDownloader(_httpClient).DownloadAsync(bundle.DownloadPath,
+            var accessToken = AccessTokenProvider is null ? null : await AccessTokenProvider(cancellationToken);
+            return await new LadderBundleDownloader(_httpClient, accessToken).DownloadAsync(bundle.DownloadPath,
                 bundle.ArtifactSizeBytes, bundle.ArtifactSha256, cachePath, progress, cancellationToken);
         }
         finally
@@ -157,9 +167,9 @@ public sealed class ReimaginedApiHttpClient
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromMinutes(5));
         var token = timeout.Token;
-        using var response = await _httpClient.GetAsync(
-            $"ladders/{ladderId}/optional-extensions/{extension.Id}/download",
-            HttpCompletionOption.ResponseHeadersRead, token);
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"ladders/{ladderId}/optional-extensions/{extension.Id}/download");
+        await AuthorizeAsync(request, token);
+        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
         response.EnsureSuccessStatusCode();
         if (response.Content.Headers.ContentLength is { } length && length != extension.SizeBytes)
             throw new System.IO.InvalidDataException("The optional file changed on the server. Refresh the ladder and try again.");

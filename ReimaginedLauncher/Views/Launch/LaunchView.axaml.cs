@@ -448,6 +448,7 @@ public partial class LaunchView : UserControl
 
     public void RefreshAuthenticationState()
     {
+        _ = RefreshLadderStateAsync();
         RefreshInstallDirectoryState();
     }
 
@@ -1816,6 +1817,7 @@ public partial class LaunchView : UserControl
             // Outside PrepareServerSavesAsync for the same reason as global chat:
             // that turns everything off for a non-ladder launch.
             await ConfigureHardcoreDeathsAsync(profile);
+            await ConfigureTradeNotificationsAsync(profile);
 
             if (profile.AutomaticBackupsEnabled)
             {
@@ -1972,6 +1974,38 @@ public partial class LaunchView : UserControl
         catch (Exception exception)
         {
             LaunchDiagnostics.Log($"chat-relay: configuration failed ({exception.Message}); the Discord chat bridge is off for this launch.");
+        }
+    }
+
+    private async Task ConfigureTradeNotificationsAsync(InstallationProfile profile)
+    {
+        try
+        {
+            await TradeNotificationsConfigService.DisableAsync(profile.InstallDirectory);
+            if (!TradeNotificationsConfigService.IsEligible(profile.Type, profile.LaunchExperience)) return;
+            if (!TradeNotificationsConfigService.IsPluginInstalled(profile.InstallDirectory, profile.LaunchExperience))
+            {
+                var modName = profile.LaunchExperience == LaunchExperience.Ladder
+                    ? ModInstallationPaths.LadderModName : "Reimagined";
+                LaunchDiagnostics.Log($"trade-notifications: {TradeNotificationsConfigService.PluginFileName} is missing from mods/{modName}/d2rloader/plugins; in-game trade notifications are off. Install the plugin through the ladder's approved extensions or include it in the bundle.");
+                return;
+            }
+            var token = await _launcherAuthenticationService.GetAccessTokenAsync();
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                LaunchDiagnostics.Log("trade-notifications: no signed-in account; in-game trade notifications are off for this launch.");
+                return;
+            }
+            var settings = new TradeNotificationsLaunchSettings(
+                _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority), token);
+            if (!await TradeNotificationsConfigService.EnableAsync(profile.InstallDirectory, settings, profile.LaunchExperience))
+                LaunchDiagnostics.Log("trade-notifications: configuration could not be written.");
+            else
+                LaunchDiagnostics.Log($"trade-notifications configured for {profile.LaunchExperience} at {settings.ApiBaseUrl}.");
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.Log($"trade-notifications: configuration failed ({exception.Message}).");
         }
     }
 
