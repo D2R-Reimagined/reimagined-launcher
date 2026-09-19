@@ -2138,6 +2138,7 @@ public partial class LaunchView : UserControl
     {
         using var monitoring = new CancellationTokenSource();
         var monitorTask = serverSaves is null ? Task.CompletedTask : MonitorServerSavesAsync(serverSaves, monitoring.Token);
+        var gameExitConfirmed = false;
         try
         {
             if (lutrisGameExePath is not null)
@@ -2156,11 +2157,11 @@ public partial class LaunchView : UserControl
             }
             else if (minimizeTarget is not null)
             {
-                await minimizeTarget.MinimizeToTrayAndWaitForExitAsync(gameProcess, expectedExePath);
+                gameExitConfirmed = await minimizeTarget.MinimizeToTrayAndWaitForExitAsync(gameProcess, expectedExePath);
             }
             else
             {
-                await MainWindow.WaitForGameExitAsync(gameProcess, expectedExePath);
+                gameExitConfirmed = await MainWindow.WaitForGameExitAsync(gameProcess, expectedExePath);
             }
 
         }
@@ -2170,14 +2171,20 @@ public partial class LaunchView : UserControl
         }
         finally
         {
+            if (serverSaves is not null)
+            {
+                await ServerSaveSessionMonitor.WaitForInactiveAsync(
+                    () => ServerSaveStatus.ReadAsync(serverSaves, CancellationToken.None),
+                    () => DateTimeOffset.UtcNow,
+                    () => Task.Delay(TimeSpan.FromSeconds(2)));
+            }
             monitoring.Cancel();
             await monitorTask;
             if (serverSaves is not null)
             {
                 var status = await ServerSaveStatus.ReadAsync(serverSaves, CancellationToken.None);
-                await ShowServerSaveStatusAsync(status?.Describe(DateTimeOffset.UtcNow, sessionEnded: true)
-                    ?? new ServerSaveStatusDisplay("The game closed without a confirmed save status. Check your server save before continuing.",
-                        "No final save acknowledgement is available.", true, "status_missing"));
+                await ShowServerSaveStatusAsync(ServerSaveSessionMonitor.DescribeAfterWatch(
+                    status, DateTimeOffset.UtcNow, gameExitConfirmed));
             }
         }
     }
