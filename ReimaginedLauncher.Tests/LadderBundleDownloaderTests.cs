@@ -58,6 +58,18 @@ public sealed class LadderBundleDownloaderTests : IDisposable
     }
 
     [Fact]
+    public async Task TesterTokenIsSentToApiButNeverToCdn()
+    {
+        using var handler = new Handler { ExpireCdnUrl = true };
+        using var client = new HttpClient(handler) { BaseAddress = new Uri("https://api.example.com/") };
+        var downloader = new LadderBundleDownloader(client, "tester-token") { RetryDelay = TimeSpan.Zero };
+        Assert.Equal(Payload, await downloader.DownloadAsync("bundle/download", Payload.Length, Hash, CachePath, null, default));
+        Assert.Contains(handler.Tokens, request => request.Host == "api.example.com" && request.Token == "tester-token");
+        Assert.Contains(handler.Tokens, request => request.Host == "cdn.example.com");
+        Assert.All(handler.Tokens.Where(request => request.Host == "cdn.example.com"), request => Assert.Null(request.Token));
+    }
+
+    [Fact]
     public async Task CancellationRetainsWrittenBytesAndResumesOnNextAttempt()
     {
         using var cancellation = new CancellationTokenSource();
@@ -127,6 +139,7 @@ public sealed class LadderBundleDownloaderTests : IDisposable
         public int FirstChunkRequests;
         public ConcurrentBag<(long Start, long End)> Ranges { get; } = [];
         public ConcurrentBag<string> Hosts { get; } = [];
+        public ConcurrentBag<(string Host, string? Token)> Tokens { get; } = [];
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var range = Assert.Single(request.Headers.Range!.Ranges);
@@ -134,6 +147,7 @@ public sealed class LadderBundleDownloaderTests : IDisposable
             var end = range.To!.Value;
             Ranges.Add((start, end));
             Hosts.Add(request.RequestUri!.Host);
+            Tokens.Add((request.RequestUri.Host, request.Headers.Authorization?.Parameter));
             if (FailAll) throw new HttpRequestException("offline");
             var probe = start == 0 && end == 0;
             if (ExpireCdnUrl && request.RequestUri.Host == "cdn.example.com")

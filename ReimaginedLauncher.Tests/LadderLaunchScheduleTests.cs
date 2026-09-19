@@ -81,6 +81,26 @@ public sealed class LadderLaunchScheduleTests
     }
 
     [Fact]
+    public async Task AuthenticatedDiscoverySendsCurrentTokenAndDropsHiddenPolicyAfterSignOut()
+    {
+        using var handler = new ScheduleHandler(Ladder(Now.AddMinutes(-1)));
+        var client = new ReimaginedApiHttpClient(new HttpClient(handler));
+        string? token = "tester-token";
+        client.AccessTokenProvider = _ => Task.FromResult<string?>(token);
+        Assert.Single((await client.GetLadderLaunchScheduleAsync()).Available);
+        Assert.Equal(new[] { "tester-token", "tester-token" }, handler.Tokens);
+        token = null;
+        handler.Empty = true;
+        Assert.Empty((await client.GetLadderLaunchScheduleAsync()).Available);
+        Assert.Null(handler.Tokens.Last());
+        token = "new-tester-token";
+        handler.Empty = false;
+        Assert.Single((await client.GetLadderLaunchScheduleAsync()).Available);
+        Assert.Equal(2, handler.Paths.Count(path => path.EndsWith("/client-policy")));
+        Assert.Equal("new-tester-token", handler.Tokens.Last());
+    }
+
+    [Fact]
     public async Task UnchangedSchedulesReusePolicyButAlwaysRefreshLiveConfirmation()
     {
         var ladder = Ladder(Now.AddMinutes(-1));
@@ -137,12 +157,14 @@ public sealed class LadderLaunchScheduleTests
     private sealed class ScheduleHandler(LadderResponse ladder) : HttpMessageHandler
     {
         public List<string> Paths { get; } = [];
+        public List<string?> Tokens { get; } = [];
         public bool Live, FailSchedule, MismatchedVersion, Empty;
         public string Version = "version-1";
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var path = request.RequestUri!.AbsolutePath;
             Paths.Add(path);
+            Tokens.Add(request.Headers.Authorization?.Parameter);
             Assert.True(request.Headers.CacheControl?.NoCache);
             var response = new HttpResponseMessage(FailSchedule && path == "/ladders/schedule"
                 ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.OK)

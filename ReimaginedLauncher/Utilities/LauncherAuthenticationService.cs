@@ -34,6 +34,7 @@ public sealed class LauncherAuthenticationService(ReimaginedApiHttpClient apiCli
         CancellationToken cancellationToken = default)
     {
         _settings = settings;
+        apiClient.AccessTokenProvider = GetAccessTokenAsync;
         if (string.IsNullOrWhiteSpace(settings.D2RReimaginedRefreshToken))
         {
             return;

@@ -85,6 +85,14 @@ public sealed class LutrisArgumentsTests : IDisposable
     }
 
     [Fact]
+    public void BuildArgsKeepsASingleWindowedFlag()
+    {
+        var profile = new InstallationProfile { WindowedMode = true };
+
+        Assert.Equal("--offline -w", LutrisArgumentsService.BuildArgs("--offline -W -w", profile));
+    }
+
+    [Fact]
     public void BuildArgsIgnoresAnOutOfRangePlayerCount()
     {
         var profile = new InstallationProfile { PlayersCount = 99 };
@@ -147,10 +155,11 @@ public sealed class LutrisArgumentsTests : IDisposable
     {
         var profile = new InstallationProfile();
 
-        LutrisArgumentsService.ImportInto(profile, "--offline -enablerespec -players 4 -seed 7 -nosound");
+        LutrisArgumentsService.ImportInto(profile, "--offline -enablerespec -players 4 -seed 7 -w -nosound");
 
         Assert.True(profile.EnableRespec);
         Assert.True(profile.NoSound);
+        Assert.True(profile.WindowedMode);
         Assert.Equal(4, profile.PlayersCount);
         Assert.True(profile.CustomMapSeedEnabled);
         Assert.Equal(7u, profile.CustomMapSeed);
@@ -165,6 +174,7 @@ public sealed class LutrisArgumentsTests : IDisposable
         var profile = new InstallationProfile
         {
             EnableRespec = true,
+            WindowedMode = true,
             PlayersCount = 8,
             CustomMapSeedEnabled = true,
             CustomMapSeed = 99
@@ -173,6 +183,7 @@ public sealed class LutrisArgumentsTests : IDisposable
         LutrisArgumentsService.ImportInto(profile, "--offline");
 
         Assert.False(profile.EnableRespec);
+        Assert.False(profile.WindowedMode);
         Assert.Null(profile.PlayersCount);
         Assert.False(profile.CustomMapSeedEnabled);
     }

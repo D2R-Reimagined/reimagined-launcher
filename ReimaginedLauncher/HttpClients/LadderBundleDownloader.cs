@@ -12,8 +12,15 @@ using System.Threading.Tasks;
 
 namespace ReimaginedLauncher.HttpClients;
 
-internal sealed class LadderBundleDownloader(HttpClient client)
+internal sealed class LadderBundleDownloader(HttpClient client, string? accessToken = null)
 {
+    private void Authorize(HttpRequestMessage request)
+    {
+        if (accessToken is not null && request.RequestUri is { } uri && client.BaseAddress is { } api
+            && uri.Scheme == api.Scheme && uri.Host == api.Host && uri.Port == api.Port)
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+    }
+
     internal const int ChunkBytes = 8 * 1024 * 1024;
     internal TimeSpan RequestTimeout { get; init; } = TimeSpan.FromMinutes(5);
     internal TimeSpan RetryDelay { get; init; } = TimeSpan.FromSeconds(1);
@@ -64,6 +71,7 @@ internal sealed class LadderBundleDownloader(HttpClient client)
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
             timeout.CancelAfter(RequestTimeout);
             using var probeRequest = new HttpRequestMessage(HttpMethod.Get, source);
+            Authorize(probeRequest);
             probeRequest.Headers.AcceptEncoding.ParseAdd("identity, gzip;q=0, deflate;q=0, br;q=0");
             probeRequest.Headers.Range = new RangeHeaderValue(0, 0);
             using var probe = await client.SendAsync(probeRequest, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
@@ -174,6 +182,7 @@ internal sealed class LadderBundleDownloader(HttpClient client)
                 timeout.CancelAfter(RequestTimeout);
                 var offset = start + output.Length;
                 using var request = new HttpRequestMessage(HttpMethod.Get, source);
+                Authorize(request);
                 request.Headers.AcceptEncoding.ParseAdd("identity, gzip;q=0, deflate;q=0, br;q=0");
                 request.Headers.Range = new RangeHeaderValue(offset, end);
                 using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);

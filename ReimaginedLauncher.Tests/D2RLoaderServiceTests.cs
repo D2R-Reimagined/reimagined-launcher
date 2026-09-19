@@ -99,12 +99,13 @@ public sealed class D2RLoaderServiceTests : IDisposable
             PlayersCount = 8,
             CustomMapSeedEnabled = true,
             CustomMapSeed = 123,
+            WindowedMode = true,
             NoSound = true
         };
 
         var parameters = GameLauncherService.BuildLaunchParameters(profile);
 
-        Assert.Equal("-mod Reimagined -txt -nosound", parameters);
+        Assert.Equal("-mod Reimagined -txt -w -nosound", parameters);
     }
 
     [Fact]
@@ -122,6 +123,7 @@ public sealed class D2RLoaderServiceTests : IDisposable
 
         var parameters = GameLauncherService.BuildLaunchParameters(profile);
 
+        Assert.DoesNotContain("-w", parameters);
         Assert.Contains("-enablerespec", parameters);
         Assert.Contains("-resetofflinemaps", parameters);
         Assert.Contains("-players 3", parameters);

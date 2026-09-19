@@ -43,6 +43,7 @@ public static class SettingsManager
             if (root.TryGetProperty("NoSound", out prop)) profile.NoSound = prop.GetBoolean();
             if (root.TryGetProperty("NoRumble", out prop)) profile.NoRumble = prop.GetBoolean();
             if (root.TryGetProperty("ForceDesktop", out prop)) profile.ForceDesktop = prop.GetBoolean();
+            if (root.TryGetProperty("WindowedMode", out prop)) profile.WindowedMode = prop.GetBoolean();
             if (root.TryGetProperty("ResetOfflineMaps", out prop)) profile.ResetOfflineMaps = prop.GetBoolean();
             if (root.TryGetProperty("EnableRespec", out prop)) profile.EnableRespec = prop.GetBoolean();
             if (root.TryGetProperty("PlayersCount", out prop)) profile.PlayersCount = prop.ValueKind == JsonValueKind.Number ? prop.GetInt32() : null;
