@@ -162,6 +162,13 @@
                                         Click="OnLadderSignInClick" />
                             </Grid>
                         </Border>
+                        <Border x:Name="ServerSaveStatusPanel" Classes="warning-banner" Padding="12" IsVisible="False">
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="Server Saves" FontWeight="SemiBold" />
+                                <TextBlock x:Name="ServerSaveStatusText" TextWrapping="Wrap" />
+                                <TextBlock x:Name="ServerSaveConfirmedText" Classes="muted" TextWrapping="Wrap" FontSize="12" />
+                            </StackPanel>
+                        </Border>
                         <StackPanel x:Name="LaunchActionsPanel" Orientation="Horizontal" Spacing="16">
                             <Button x:Name="StartGameButton" Classes="accent" Content="Start Game" Click="OnRunClick"
                                     Width="220" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"

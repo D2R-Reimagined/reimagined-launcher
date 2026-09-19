@@ -9,7 +9,8 @@ public sealed record ServerSavesLaunchSettings(
     string ApiBaseUrl,
     string AccessToken,
     Guid? LadderId,
-    string LadderLaunchTicket);
+    string LadderLaunchTicket,
+    string StatusSessionId = "");
 
 /// <summary>
 /// Installs the server-saves D2RLoader plugin from the launcher's own bundled
@@ -32,7 +33,7 @@ public static class ServerSavesConfigService
         "# server-saves - launcher-managed settings.\n"
         + "#\n"
         + "# The Reimagined launcher rewrites enabled, api_base_url, access_token,\n"
-        + "# ladder_id and ladder_launch_ticket every launch. Anything else you set\n"
+        + "# ladder_id, ladder_launch_ticket and status_session_id every launch. Anything else you set\n"
         + "# here is preserved, and any\n"
         + "# setting left out uses the plugin's built-in default.\n"
         + "\n";
@@ -93,7 +94,8 @@ public static class ServerSavesConfigService
             ["api_base_url"] = D2RLoaderPluginPackage.Quote(D2RLoaderPluginPackage.NormalizeBaseUrl(settings.ApiBaseUrl)),
             ["access_token"] = D2RLoaderPluginPackage.Quote(settings.AccessToken),
             ["ladder_id"] = D2RLoaderPluginPackage.Quote(settings.LadderId is { } ladderId ? ladderId.ToString() : string.Empty),
-            ["ladder_launch_ticket"] = D2RLoaderPluginPackage.Quote(settings.LadderLaunchTicket)
+            ["ladder_launch_ticket"] = D2RLoaderPluginPackage.Quote(settings.LadderLaunchTicket),
+            ["status_session_id"] = D2RLoaderPluginPackage.Quote(settings.StatusSessionId)
         };
 
         return await Package.WriteAsync(installDirectory, values, requireInstalled: true, cancellationToken);
@@ -113,7 +115,8 @@ public static class ServerSavesConfigService
             ["enabled"] = "false",
             ["access_token"] = "\"\"",
             ["ladder_id"] = "\"\"",
-            ["ladder_launch_ticket"] = "\"\""
+            ["ladder_launch_ticket"] = "\"\"",
+            ["status_session_id"] = "\"\""
         };
 
         var normalDisabled = await NormalPackage.WriteAsync(installDirectory, values, requireInstalled: false, cancellationToken);

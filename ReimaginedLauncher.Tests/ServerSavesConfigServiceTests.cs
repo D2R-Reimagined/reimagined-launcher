@@ -117,7 +117,7 @@ public sealed class ServerSavesConfigServiceTests : IDisposable
 
         var enabled = await ServerSavesConfigService.EnableAsync(
             _installDirectory,
-            new ServerSavesLaunchSettings("http://localhost:5000/", "token-abc", Ladder, "ticket-abc"));
+            new ServerSavesLaunchSettings("http://localhost:5000/", "token-abc", Ladder, "ticket-abc", "session-abc"));
 
         Assert.True(enabled);
         var toml = await File.ReadAllTextAsync(ModConfigPath);
@@ -126,6 +126,7 @@ public sealed class ServerSavesConfigServiceTests : IDisposable
         Assert.Contains("access_token = \"token-abc\"", toml);
         Assert.Contains($"ladder_id = \"{Ladder}\"", toml);
         Assert.Contains("ladder_launch_ticket = \"ticket-abc\"", toml);
+        Assert.Contains("status_session_id = \"session-abc\"", toml);
     }
 
     [Fact]
