@@ -1816,6 +1816,7 @@ public partial class LaunchView : UserControl
             // that turns everything off for a non-ladder launch.
             await ConfigureHardcoreDeathsAsync(profile);
             await ConfigureTradeNotificationsAsync(profile);
+            await ConfigureAnnouncementsAsync(profile);
 
             if (profile.AutomaticBackupsEnabled)
             {
@@ -1972,6 +1973,33 @@ public partial class LaunchView : UserControl
         catch (Exception exception)
         {
             LaunchDiagnostics.Log($"chat-relay: configuration failed ({exception.Message}); the Discord chat bridge is off for this launch.");
+        }
+    }
+
+    private async Task ConfigureAnnouncementsAsync(InstallationProfile profile)
+    {
+        try
+        {
+            await AnnouncementsConfigService.DisableAsync(profile.InstallDirectory);
+            if (!AnnouncementsConfigService.IsEligible(profile.Type, profile.LaunchExperience)) return;
+            if (!AnnouncementsConfigService.IsPluginInstalled(profile.InstallDirectory, profile.LaunchExperience))
+            {
+                var modName = profile.LaunchExperience == LaunchExperience.Ladder
+                    ? ModInstallationPaths.LadderModName : "Reimagined";
+                LaunchDiagnostics.Log($"announcements: {AnnouncementsConfigService.PluginFileName} is missing from mods/{modName}/d2rloader/plugins; in-game announcements are off.");
+                return;
+            }
+            var token = await _launcherAuthenticationService.GetAccessTokenAsync();
+            var settings = new AnnouncementsLaunchSettings(
+                _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority), token, profile.SelectedLadderId?.ToString());
+            if (!await AnnouncementsConfigService.EnableAsync(profile.InstallDirectory, settings, profile.LaunchExperience))
+                LaunchDiagnostics.Log("announcements: configuration could not be written.");
+            else
+                LaunchDiagnostics.Log($"announcements configured for {profile.LaunchExperience} at {settings.ApiBaseUrl}.");
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.Log($"announcements: configuration failed ({exception.Message}).");
         }
     }
 

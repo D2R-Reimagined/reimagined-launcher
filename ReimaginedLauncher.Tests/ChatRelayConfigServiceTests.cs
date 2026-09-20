@@ -6,7 +6,7 @@ namespace ReimaginedLauncher.Tests;
 
 public sealed class ChatRelayConfigServiceTests : IDisposable
 {
-    private const string ApiBaseUrl = "https://api.d2rreimagined.com";
+    private const string ApiBaseUrl = "https://api.d2r-reimagined.com";
     private const string AccessToken = "token-abc-123";
 
     private readonly string _installDirectory = Path.Combine(

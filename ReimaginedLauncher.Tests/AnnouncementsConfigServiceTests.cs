@@ -3,18 +3,18 @@ using Xunit;
 
 namespace ReimaginedLauncher.Tests;
 
-public sealed class TradeNotificationsConfigServiceTests : IDisposable
+public sealed class AnnouncementsConfigServiceTests : IDisposable
 {
     private const string ApiBaseUrl = "https://api.d2r-reimagined.com";
     private const string AccessToken = "token-abc-123";
 
     private readonly string _installDirectory = Path.Combine(
         Path.GetTempPath(),
-        $"reimagined-trade-notifications-tests-{Guid.NewGuid():N}");
+        $"reimagined-announcements-tests-{Guid.NewGuid():N}");
 
     private string NormalLoaderRoot => Path.Combine(_installDirectory, "mods", "Reimagined", "d2rloader");
     private string LadderLoaderRoot => Path.Combine(_installDirectory, "mods", "ReimaginedLadder", "d2rloader");
-    private static string ConfigPathIn(string loaderRoot) => Path.Combine(loaderRoot, "config", "trade-notifications.toml");
+    private static string ConfigPathIn(string loaderRoot) => Path.Combine(loaderRoot, "config", "announcements.toml");
     [Theory]
     [InlineData(InstallationType.BattleNet, LaunchExperience.Online, true)]
     [InlineData(InstallationType.BattleNet, LaunchExperience.Ladder, true)]
@@ -25,18 +25,18 @@ public sealed class TradeNotificationsConfigServiceTests : IDisposable
     public void EligibilityCoversSignedInD2RLoaderLaunches(
         InstallationType type, LaunchExperience experience, bool expected)
     {
-        Assert.Equal(expected, TradeNotificationsConfigService.IsEligible(type, experience));
+        Assert.Equal(expected, AnnouncementsConfigService.IsEligible(type, experience));
     }
     [Fact]
     public void InstallationIsDetectedInTheModFolderTheExperienceWillLoad()
     {
         InstallPlugin(NormalLoaderRoot);
 
-        Assert.True(TradeNotificationsConfigService.IsPluginInstalled(_installDirectory, LaunchExperience.Online));
-        Assert.False(TradeNotificationsConfigService.IsPluginInstalled(_installDirectory, LaunchExperience.Ladder));
+        Assert.True(AnnouncementsConfigService.IsPluginInstalled(_installDirectory, LaunchExperience.Online));
+        Assert.False(AnnouncementsConfigService.IsPluginInstalled(_installDirectory, LaunchExperience.Ladder));
 
         InstallPlugin(LadderLoaderRoot);
-        Assert.True(TradeNotificationsConfigService.IsPluginInstalled(_installDirectory, LaunchExperience.Ladder));
+        Assert.True(AnnouncementsConfigService.IsPluginInstalled(_installDirectory, LaunchExperience.Ladder));
     }
 
     [Fact]
@@ -44,9 +44,9 @@ public sealed class TradeNotificationsConfigServiceTests : IDisposable
     {
         InstallPlugin(NormalLoaderRoot);
 
-        Assert.True(await TradeNotificationsConfigService.EnableAsync(
+        Assert.True(await AnnouncementsConfigService.EnableAsync(
             _installDirectory,
-            new TradeNotificationsLaunchSettings(ApiBaseUrl, AccessToken),
+            new AnnouncementsLaunchSettings(ApiBaseUrl, AccessToken),
             LaunchExperience.Online));
 
         var toml = await File.ReadAllTextAsync(ConfigPathIn(NormalLoaderRoot));
@@ -55,27 +55,44 @@ public sealed class TradeNotificationsConfigServiceTests : IDisposable
         Assert.Contains($"access_token = \"{AccessToken}\"", toml, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task EnablingRefusesWithoutATokenBecauseTheEndpointIsAuthenticated()
+    [Theory]
+    [InlineData(LaunchExperience.Online)]
+    [InlineData(LaunchExperience.Ladder)]
+    public async Task SignedOutLaunchClearsStaleTokenAndStillReceivesPublicAnnouncements(LaunchExperience experience)
     {
-        InstallPlugin(NormalLoaderRoot);
+        var root = experience == LaunchExperience.Ladder ? LadderLoaderRoot : NormalLoaderRoot;
+        InstallPlugin(root);
+        await AnnouncementsConfigService.EnableAsync(_installDirectory,
+            new AnnouncementsLaunchSettings(ApiBaseUrl, AccessToken, "old-ladder"), experience);
+        Assert.True(await AnnouncementsConfigService.EnableAsync(_installDirectory,
+            new AnnouncementsLaunchSettings(ApiBaseUrl, null), experience));
+        var toml = await File.ReadAllTextAsync(ConfigPathIn(root));
+        Assert.Contains("enabled = true", toml);
+        Assert.Contains("access_token = \"\"", toml);
+        Assert.Contains("ladder_id = \"\"", toml);
+        Assert.DoesNotContain(AccessToken, toml);
+    }
 
-        Assert.False(await TradeNotificationsConfigService.EnableAsync(
-            _installDirectory,
-            new TradeNotificationsLaunchSettings(ApiBaseUrl, "   "),
-            LaunchExperience.Online));
-
-        Assert.False(await TradeNotificationsConfigService.EnableAsync(
-            _installDirectory,
-            new TradeNotificationsLaunchSettings("  ", AccessToken),
-            LaunchExperience.Online));
+    [Theory]
+    [InlineData(LaunchExperience.Online, "")]
+    [InlineData(LaunchExperience.Ladder, "selected-ladder")]
+    public async Task LaunchUsesSelectedApiAndOnlyIncludesLadderForLadderMode(LaunchExperience experience, string expectedLadder)
+    {
+        var root = experience == LaunchExperience.Ladder ? LadderLoaderRoot : NormalLoaderRoot;
+        InstallPlugin(root);
+        Assert.True(await AnnouncementsConfigService.EnableAsync(_installDirectory,
+            new AnnouncementsLaunchSettings("http://localhost:5000/", AccessToken, "selected-ladder"), experience));
+        var toml = await File.ReadAllTextAsync(ConfigPathIn(root));
+        Assert.Contains("api_base_url = \"http://localhost:5000\"", toml);
+        Assert.Contains($"access_token = \"{AccessToken}\"", toml);
+        Assert.Contains($"ladder_id = \"{expectedLadder}\"", toml);
     }
     [Fact]
     public async Task EnablingRequiresThePluginToBeInstalledAndWritesNothingWithoutIt()
     {
-        Assert.False(await TradeNotificationsConfigService.EnableAsync(
+        Assert.False(await AnnouncementsConfigService.EnableAsync(
             _installDirectory,
-            new TradeNotificationsLaunchSettings(ApiBaseUrl, AccessToken),
+            new AnnouncementsLaunchSettings(ApiBaseUrl, AccessToken),
             LaunchExperience.Online));
 
         Assert.False(File.Exists(ConfigPathIn(NormalLoaderRoot)));
@@ -85,9 +102,9 @@ public sealed class TradeNotificationsConfigServiceTests : IDisposable
     {
         InstallPlugin(LadderLoaderRoot);
 
-        Assert.False(await TradeNotificationsConfigService.EnableAsync(
+        Assert.False(await AnnouncementsConfigService.EnableAsync(
             _installDirectory,
-            new TradeNotificationsLaunchSettings(ApiBaseUrl, AccessToken),
+            new AnnouncementsLaunchSettings(ApiBaseUrl, AccessToken),
             LaunchExperience.Online));
 
         Assert.False(File.Exists(ConfigPathIn(NormalLoaderRoot)));
@@ -98,12 +115,12 @@ public sealed class TradeNotificationsConfigServiceTests : IDisposable
     {
         InstallPlugin(NormalLoaderRoot);
         InstallPlugin(LadderLoaderRoot);
-        await TradeNotificationsConfigService.EnableAsync(
-            _installDirectory, new TradeNotificationsLaunchSettings(ApiBaseUrl, AccessToken), LaunchExperience.Online);
-        await TradeNotificationsConfigService.EnableAsync(
-            _installDirectory, new TradeNotificationsLaunchSettings(ApiBaseUrl, AccessToken), LaunchExperience.Ladder);
+        await AnnouncementsConfigService.EnableAsync(
+            _installDirectory, new AnnouncementsLaunchSettings(ApiBaseUrl, AccessToken), LaunchExperience.Online);
+        await AnnouncementsConfigService.EnableAsync(
+            _installDirectory, new AnnouncementsLaunchSettings(ApiBaseUrl, AccessToken), LaunchExperience.Ladder);
 
-        Assert.True(await TradeNotificationsConfigService.DisableAsync(_installDirectory));
+        Assert.True(await AnnouncementsConfigService.DisableAsync(_installDirectory));
 
         foreach (var root in new[] { NormalLoaderRoot, LadderLoaderRoot })
         {
@@ -117,7 +134,7 @@ public sealed class TradeNotificationsConfigServiceTests : IDisposable
     [Fact]
     public async Task DisablingAConfigThatWasNeverWrittenIsNotAFailure()
     {
-        Assert.True(await TradeNotificationsConfigService.DisableAsync(_installDirectory));
+        Assert.True(await AnnouncementsConfigService.DisableAsync(_installDirectory));
     }
     [Fact]
     public async Task EnablingPreservesTheRestOfThePlayersConfig()
@@ -128,9 +145,9 @@ public sealed class TradeNotificationsConfigServiceTests : IDisposable
         await File.WriteAllTextAsync(configPath,
             "# my notes\nchannel_tag = \"[World]\"\nglobal_color = 9\naccess_token = \"stale\"\n");
 
-        Assert.True(await TradeNotificationsConfigService.EnableAsync(
+        Assert.True(await AnnouncementsConfigService.EnableAsync(
             _installDirectory,
-            new TradeNotificationsLaunchSettings(ApiBaseUrl, AccessToken),
+            new AnnouncementsLaunchSettings(ApiBaseUrl, AccessToken),
             LaunchExperience.Online));
 
         var toml = await File.ReadAllTextAsync(configPath);
@@ -145,7 +162,7 @@ public sealed class TradeNotificationsConfigServiceTests : IDisposable
     {
         var directory = Path.Combine(loaderRoot, "plugins");
         Directory.CreateDirectory(directory);
-        File.WriteAllBytes(Path.Combine(directory, TradeNotificationsConfigService.PluginFileName), [0x4D, 0x5A]);
+        File.WriteAllBytes(Path.Combine(directory, AnnouncementsConfigService.PluginFileName), [0x4D, 0x5A]);
     }
 
     public void Dispose()
@@ -162,3 +179,4 @@ public sealed class TradeNotificationsConfigServiceTests : IDisposable
         }
     }
 }
+
