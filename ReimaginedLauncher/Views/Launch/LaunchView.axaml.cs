@@ -1817,6 +1817,7 @@ public partial class LaunchView : UserControl
             await ConfigureHardcoreDeathsAsync(profile);
             await ConfigureTradeNotificationsAsync(profile);
             await ConfigureAnnouncementsAsync(profile);
+            await ConfigureSupporterPortalsAsync(profile);
 
             if (profile.AutomaticBackupsEnabled)
             {
@@ -2032,6 +2033,38 @@ public partial class LaunchView : UserControl
         catch (Exception exception)
         {
             LaunchDiagnostics.Log($"trade-notifications: configuration failed ({exception.Message}).");
+        }
+    }
+
+    private async Task ConfigureSupporterPortalsAsync(InstallationProfile profile)
+    {
+        try
+        {
+            await SupporterPortalsConfigService.DisableAsync(profile.InstallDirectory);
+            if (!SupporterPortalsConfigService.IsEligible(profile.Type, profile.LaunchExperience)) return;
+            if (!SupporterPortalsConfigService.IsPluginInstalled(profile.InstallDirectory, profile.LaunchExperience))
+            {
+                var modName = profile.LaunchExperience == LaunchExperience.Ladder
+                    ? ModInstallationPaths.LadderModName : "Reimagined";
+                LaunchDiagnostics.Log($"supporter-portals: {SupporterPortalsConfigService.PluginFileName} is missing from mods/{modName}/d2rloader/plugins; supporter portals are unavailable for this launch.");
+                return;
+            }
+            var token = await _launcherAuthenticationService.GetAccessTokenAsync();
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                LaunchDiagnostics.Log("supporter-portals: no signed-in account; supporter portals have no account credentials for this launch.");
+                return;
+            }
+            var settings = new SupporterPortalsLaunchSettings(
+                _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority), token);
+            if (!await SupporterPortalsConfigService.EnableAsync(profile.InstallDirectory, settings, profile.LaunchExperience))
+                LaunchDiagnostics.Log("supporter-portals: configuration could not be written.");
+            else
+                LaunchDiagnostics.Log($"supporter-portals configured for {profile.LaunchExperience} at {settings.ApiBaseUrl}.");
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.Log($"supporter-portals: configuration failed ({exception.Message}).");
         }
     }
 
