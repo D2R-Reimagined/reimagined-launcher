@@ -142,9 +142,31 @@ public partial class MainWindow : Window
     
     private async Task LoadSettingsAsync()
     {
+        try
+        {
+            await LoadSettingsCoreAsync();
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.LogException("Startup settings load failed", exception);
+        }
+        finally
+        {
+            Opacity = 1;
+        }
+    }
+
+    private async Task LoadSettingsCoreAsync()
+    {
         Settings = await SettingsManager.LoadAsync();
         RestoreWindowState();
         Opacity = 1;
+        if (SettingsManager.RecoveredFromCorruptSettings)
+        {
+            Notifications.SendNotification(
+                "Your launcher settings file was damaged and has been reset. A copy was kept in the launcher's AppData folder.",
+                "Warning");
+        }
         Settings.UiScale = ClampUiScale(Settings.UiScale);
         var profile = Settings.CurrentProfile;
         profile.InstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(profile.InstallDirectory);

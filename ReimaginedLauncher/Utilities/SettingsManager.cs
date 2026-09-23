@@ -15,13 +15,26 @@ public static class SettingsManager
     private static readonly string SettingsFilePath = Path.Combine(AppDir, "settings.json");
     public static string AppDirectoryPath => AppDir;
 
+    // Set when settings.json was unreadable this session and defaults were used instead.
+    public static bool RecoveredFromCorruptSettings { get; private set; }
+    public static string? QuarantinedSettingsFilePath { get; private set; }
+
     public static async Task<AppSettings> LoadAsync()
     {
         if (!File.Exists(SettingsFilePath))
             return new AppSettings();
 
         var json = await File.ReadAllTextAsync(SettingsFilePath);
-        var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+        AppSettings settings;
+        try
+        {
+            settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+        }
+        catch (JsonException exception)
+        {
+            QuarantineCorruptSettingsFile(exception);
+            return new AppSettings();
+        }
 
         // Migration for old settings format
         if (settings.Profiles.Count == 0)
@@ -78,6 +91,53 @@ public static class SettingsManager
             Directory.CreateDirectory(AppDir);
 
         var json = JsonSerializer.Serialize(settings, SerializerOptions.Indented);
-        await File.WriteAllTextAsync(SettingsFilePath, json);
+
+        // Write to a unique temp file and swap it in, so an interrupted save can't truncate settings.json.
+        var tempPath = $"{SettingsFilePath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            await using (var stream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                             bufferSize: 4096, FileOptions.Asynchronous))
+            {
+                await using var writer = new StreamWriter(stream);
+                await writer.WriteAsync(json);
+                await writer.FlushAsync();
+                stream.Flush(flushToDisk: true);
+            }
+
+            File.Move(tempPath, SettingsFilePath, overwrite: true);
+        }
+        catch
+        {
+            TryDeleteFile(tempPath);
+            throw;
+        }
+    }
+
+    private static void QuarantineCorruptSettingsFile(JsonException exception)
+    {
+        RecoveredFromCorruptSettings = true;
+        var quarantinePath = Path.Combine(AppDir, $"settings.corrupt-{DateTime.Now:yyyyMMdd-HHmmss}.json");
+        try
+        {
+            File.Move(SettingsFilePath, quarantinePath, overwrite: true);
+            QuarantinedSettingsFilePath = quarantinePath;
+            LaunchDiagnostics.LogException($"settings.json was unreadable and was moved to '{quarantinePath}'", exception);
+        }
+        catch (Exception moveException) when (moveException is IOException or UnauthorizedAccessException)
+        {
+            LaunchDiagnostics.LogException("settings.json was unreadable and could not be moved aside", moveException);
+        }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 }

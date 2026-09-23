@@ -24,6 +24,12 @@ public static class PluginStateSanitizer
         {
             var settings = await SettingsManager.LoadAsync().ConfigureAwait(false);
 
+            // Default settings list no plugins, so reconciling would drop every plugin's backup claims.
+            if (SettingsManager.RecoveredFromCorruptSettings)
+            {
+                return;
+            }
+
             var knownIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             knownIds.Add(ModTweaksService.DisableExtraBloodBackupClaimId);
             var knownFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
