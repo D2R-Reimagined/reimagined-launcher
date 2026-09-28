@@ -1816,6 +1816,7 @@ public partial class LaunchView : UserControl
             // that turns everything off for a non-ladder launch.
             await ConfigureHardcoreDeathsAsync(profile);
             await ConfigureTradeNotificationsAsync(profile);
+            await ConfigureReimaginedFeedbackAsync(profile);
             await ConfigureAnnouncementsAsync(profile);
             await ConfigureSupporterPortalsAsync(profile);
 
@@ -2033,6 +2034,40 @@ public partial class LaunchView : UserControl
         catch (Exception exception)
         {
             LaunchDiagnostics.Log($"trade-notifications: configuration failed ({exception.Message}).");
+        }
+    }
+
+    // The API only takes feedback from signed-in accounts, so the plugin gets
+    // the same launcher token as the other online plugins, or stays disabled.
+    private async Task ConfigureReimaginedFeedbackAsync(InstallationProfile profile)
+    {
+        try
+        {
+            await ReimaginedFeedbackConfigService.DisableAsync(profile.InstallDirectory);
+            if (!ReimaginedFeedbackConfigService.IsEligible(profile.Type, profile.LaunchExperience)) return;
+            if (!ReimaginedFeedbackConfigService.IsPluginInstalled(profile.InstallDirectory, profile.LaunchExperience))
+            {
+                var modName = profile.LaunchExperience == LaunchExperience.Ladder
+                    ? ModInstallationPaths.LadderModName : "Reimagined";
+                LaunchDiagnostics.Log($"reimagined-feedback: {ReimaginedFeedbackConfigService.PluginFileName} is missing from mods/{modName}/d2rloader/plugins; in-game /bug and /suggest are off.");
+                return;
+            }
+            var token = await _launcherAuthenticationService.GetAccessTokenAsync();
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                LaunchDiagnostics.Log("reimagined-feedback: no signed-in account; in-game /bug and /suggest are off for this launch.");
+                return;
+            }
+            var settings = new ReimaginedFeedbackLaunchSettings(
+                _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority), token);
+            if (!await ReimaginedFeedbackConfigService.EnableAsync(profile.InstallDirectory, settings, profile.LaunchExperience))
+                LaunchDiagnostics.Log("reimagined-feedback: configuration could not be written.");
+            else
+                LaunchDiagnostics.Log($"reimagined-feedback configured for {profile.LaunchExperience} at {settings.ApiBaseUrl}.");
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.Log($"reimagined-feedback: configuration failed ({exception.Message}).");
         }
     }
 
