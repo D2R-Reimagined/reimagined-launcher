@@ -167,13 +167,13 @@ public class AppSettings
     /// </summary>
     public void EnsureLutrisProfile()
     {
+        // Seeds the default profiles when the settings file is brand new.
+        _ = CurrentProfile;
+
         if (!InstallationTypes.IsAvailable(InstallationType.Lutris))
         {
             return;
         }
-
-        // Seeds the default profiles when the settings file is brand new.
-        _ = CurrentProfile;
 
         if (!Profiles.Exists(profile => profile.Type == InstallationType.Lutris))
         {

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Net.Http;
 using Avalonia;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -21,16 +22,7 @@ class Program
         VelopackApp.Build().Run();
 
         var services = new ServiceCollection();
-        services.AddHttpClient<GitHubAnnouncementsHttpClient>();
-        services.AddHttpClient<GitHubDiscussionPluginsHttpClient>();
-        services.AddHttpClient<NexusModsHttpClient>();
-        services.AddHttpClient<ReimaginedApiHttpClient>().ConfigurePrimaryHttpMessageHandler(() =>
-            new System.Net.Http.HttpClientHandler { AutomaticDecompression = System.Net.DecompressionMethods.All });
-        services.AddHttpClient<D2RLoaderInstallerService>();
-        services.AddHttpClient<ModReleaseInstallerService>();
-        services.AddSingleton<LauncherAuthenticationService>();
-        services.AddSingleton<LadderBundleService>();
-        
+        AddLauncherServices(services);
         ServiceProvider = services.BuildServiceProvider();
 
         // Reconcile plugin state and purge stray files before the UI comes
@@ -40,6 +32,22 @@ class Program
         PluginStateSanitizer.RunStartupSanitizationAsync().GetAwaiter().GetResult();
 
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+    }
+
+    internal static void AddLauncherServices(IServiceCollection services)
+    {
+        services.AddHttpClient<GitHubAnnouncementsHttpClient>();
+        services.AddHttpClient<GitHubDiscussionPluginsHttpClient>();
+        services.AddHttpClient<NexusModsHttpClient>();
+        services.AddHttpClient(nameof(ReimaginedApiHttpClient)).ConfigurePrimaryHttpMessageHandler(() =>
+            new System.Net.Http.HttpClientHandler { AutomaticDecompression = System.Net.DecompressionMethods.All });
+        // Shared so every consumer gets the access token provider sign-in sets.
+        services.AddSingleton(provider => new ReimaginedApiHttpClient(
+            provider.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(ReimaginedApiHttpClient))));
+        services.AddHttpClient<D2RLoaderInstallerService>();
+        services.AddHttpClient<ModReleaseInstallerService>();
+        services.AddSingleton<LauncherAuthenticationService>();
+        services.AddSingleton<LadderBundleService>();
     }
 
     public static AppBuilder BuildAvaloniaApp()
