@@ -31,6 +31,7 @@ public partial class LaunchView : UserControl
     private bool _hasPromptedForMissingLoader;
     private string? _loaderUpdatePromptedVersion;
     private bool _isRefreshingLadders;
+    private bool _ladderAuthenticationRefreshPending;
     private bool _isRefreshingLadderControls;
     private bool _ladderStatusLoaded;
     private bool _ladderPolicyVerified;
@@ -450,7 +451,10 @@ public partial class LaunchView : UserControl
 
     public void RefreshAuthenticationState()
     {
-        _ = RefreshLadderStateAsync();
+        if (_isRefreshingLadders)
+            _ladderAuthenticationRefreshPending = true;
+        else
+            _ = RefreshLadderStateAsync();
         RefreshInstallDirectoryState();
     }
 
@@ -899,7 +903,7 @@ public partial class LaunchView : UserControl
             ActiveLadderComboBox.SelectedItem = SelectedLadder;
             _isRefreshingLadderControls = false;
             LadderStatusText.Text = _activeLadders.Count == 0
-                ? "No live ladders or ladders starting within an hour."
+                ? "No live ladders or ladders starting within 2 hours."
                 : _activeLadders.Count == 1
                     ? "Live or upcoming ladder:"
                     : "Live and upcoming ladders:";
@@ -939,6 +943,11 @@ public partial class LaunchView : UserControl
                 _ladderLoadError is not null, SelectedLadder?.StartDateUtc,
                 _ladderSchedule?.Now ?? DateTimeOffset.UtcNow);
             RefreshInstallDirectoryState();
+        }
+        if (_ladderAuthenticationRefreshPending)
+        {
+            _ladderAuthenticationRefreshPending = false;
+            await RefreshLadderStateAsync();
         }
     }
 

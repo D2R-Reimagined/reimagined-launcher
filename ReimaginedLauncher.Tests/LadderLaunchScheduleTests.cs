@@ -15,10 +15,10 @@ public sealed class LadderLaunchScheduleTests
         new(Guid.NewGuid(), "Scheduled ladder", start, end ?? start.AddDays(30), [], null);
 
     [Fact]
-    public void DiscoveryOpensExactlyOneHourBeforeStartAndExcludesEndedLadders()
+    public void DiscoveryOpensExactlyTwoHoursBeforeStartAndExcludesEndedLadders()
     {
-        Assert.True(LadderLaunchSchedule.IsAvailable(Ladder(Now.AddHours(1)), Now));
-        Assert.False(LadderLaunchSchedule.IsAvailable(Ladder(Now.AddHours(1).AddTicks(1)), Now));
+        Assert.True(LadderLaunchSchedule.IsAvailable(Ladder(Now.AddHours(2)), Now));
+        Assert.False(LadderLaunchSchedule.IsAvailable(Ladder(Now.AddHours(2).AddTicks(1)), Now));
         Assert.False(LadderLaunchSchedule.IsAvailable(Ladder(Now.AddDays(-1), Now), Now));
         Assert.True(LadderLaunchSchedule.IsAvailable(Ladder(Now.AddMinutes(-1)), Now));
     }
@@ -57,10 +57,13 @@ public sealed class LadderLaunchScheduleTests
         Assert.Equal("Checking live status...", LadderLaunchSchedule.Countdown(Now.AddSeconds(-1), Now));
     }
 
-    [Fact]
-    public async Task DiscoveryUsesServerTimeAndRequiresLiveConfirmation()
+    [Theory]
+    [InlineData(30)]
+    [InlineData(90)]
+    [InlineData(120)]
+    public async Task DiscoveryUsesServerTimeAndRequiresLiveConfirmation(int minutesUntilStart)
     {
-        var ladder = Ladder(Now.AddMinutes(30));
+        var ladder = Ladder(Now.AddMinutes(minutesUntilStart));
         using var handler = new ScheduleHandler(ladder);
         using var http = new HttpClient(handler);
         var client = new ReimaginedApiHttpClient(http);
@@ -83,18 +86,18 @@ public sealed class LadderLaunchScheduleTests
     [Fact]
     public async Task AuthenticatedDiscoverySendsCurrentTokenAndDropsHiddenPolicyAfterSignOut()
     {
-        using var handler = new ScheduleHandler(Ladder(Now.AddMinutes(-1)));
+        using var handler = new ScheduleHandler(Ladder(Now.AddMinutes(-1))) { Hidden = true };
         var client = new ReimaginedApiHttpClient(new HttpClient(handler));
-        string? token = "tester-token";
+        string? token = null;
         client.AccessTokenProvider = _ => Task.FromResult<string?>(token);
+        Assert.Empty((await client.GetLadderLaunchScheduleAsync()).Available);
+        token = "tester-token";
         Assert.Single((await client.GetLadderLaunchScheduleAsync()).Available);
-        Assert.Equal(new[] { "tester-token", "tester-token" }, handler.Tokens);
+        Assert.Equal(new[] { null, "tester-token", "tester-token" }, handler.Tokens);
         token = null;
-        handler.Empty = true;
         Assert.Empty((await client.GetLadderLaunchScheduleAsync()).Available);
         Assert.Null(handler.Tokens.Last());
         token = "new-tester-token";
-        handler.Empty = false;
         Assert.Single((await client.GetLadderLaunchScheduleAsync()).Available);
         Assert.Equal(2, handler.Paths.Count(path => path.EndsWith("/client-policy")));
         Assert.Equal("new-tester-token", handler.Tokens.Last());
@@ -142,6 +145,15 @@ public sealed class LadderLaunchScheduleTests
         Assert.Equal(new[] { "/ladders/schedule" }, handler.Paths);
     }
 
+    [Fact]
+    public async Task DiscoveryDoesNotFetchPolicyJustOutsideTwoHourWindow()
+    {
+        using var handler = new ScheduleHandler(Ladder(Now.AddHours(2).AddTicks(1)));
+        var client = new ReimaginedApiHttpClient(new HttpClient(handler));
+        Assert.Empty((await client.GetLadderLaunchScheduleAsync()).Available);
+        Assert.Equal(new[] { "/ladders/schedule" }, handler.Paths);
+    }
+
     [Theory]
     [InlineData(false, false, 0, 300)]
     [InlineData(true, true, 0, 30)]
@@ -158,7 +170,7 @@ public sealed class LadderLaunchScheduleTests
     {
         public List<string> Paths { get; } = [];
         public List<string?> Tokens { get; } = [];
-        public bool Live, FailSchedule, MismatchedVersion, Empty;
+        public bool Live, FailSchedule, MismatchedVersion, Empty, Hidden;
         public string Version = "version-1";
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -170,7 +182,7 @@ public sealed class LadderLaunchScheduleTests
                 ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.OK)
             {
                 Content = path == "/ladders/schedule"
-                    ? JsonContent.Create(new LadderScheduleResponse(Now, Empty ? [] :
+                    ? JsonContent.Create(new LadderScheduleResponse(Now, Empty || (Hidden && request.Headers.Authorization is null) ? [] :
                         [new(ladder.Id, ladder.Name, ladder.StartDateUtc, ladder.EndDateUtc, Version, Live)]))
                     : JsonContent.Create(ladder)
             };

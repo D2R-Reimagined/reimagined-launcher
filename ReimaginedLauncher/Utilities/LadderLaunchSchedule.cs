@@ -11,6 +11,7 @@ public sealed class LadderLaunchSchedule(
     IReadOnlyList<LadderResponse> liveLadders,
     DateTimeOffset serverTime)
 {
+    public static readonly TimeSpan PreloadWindow = TimeSpan.FromHours(2);
     private readonly long _receivedAt = Stopwatch.GetTimestamp();
     public DateTimeOffset Now => serverTime + Stopwatch.GetElapsedTime(_receivedAt);
     public IReadOnlyList<LadderResponse> Available => ladders
@@ -24,7 +25,7 @@ public sealed class LadderLaunchSchedule(
         && ladder.StartDateUtc <= Now && ladder.EndDateUtc > Now;
 
     public static bool IsAvailable(LadderResponse ladder, DateTimeOffset now) =>
-        ladder.StartDateUtc <= now.AddHours(1) && ladder.EndDateUtc > now;
+        ladder.StartDateUtc <= now + PreloadWindow && ladder.EndDateUtc > now;
 
     internal static TimeSpan RefreshInterval(bool ladderMode, bool failed, DateTimeOffset? start, DateTimeOffset now)
     {

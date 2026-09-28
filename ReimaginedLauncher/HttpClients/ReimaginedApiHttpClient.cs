@@ -77,7 +77,7 @@ public sealed class ReimaginedApiHttpClient
                 ?? throw new InvalidDataException("The ladder schedule response was empty.");
             var receivedAt = Stopwatch.GetTimestamp();
             var available = schedule.Ladders.Where(entry => entry.EndDateUtc > schedule.ServerTimeUtc
-                && entry.StartDateUtc <= schedule.ServerTimeUtc.AddHours(1)).ToArray();
+                && entry.StartDateUtc <= schedule.ServerTimeUtc + LadderLaunchSchedule.PreloadWindow).ToArray();
             foreach (var id in _schedulePolicies.Keys.Where(id => !available.Any(entry => entry.Id == id)).ToArray())
                 _schedulePolicies.Remove(id);
             var ladders = new List<LadderResponse>();
