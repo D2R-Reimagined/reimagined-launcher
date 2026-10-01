@@ -1825,6 +1825,7 @@ public partial class LaunchView : UserControl
             // that turns everything off for a non-ladder launch.
             await ConfigureHardcoreDeathsAsync(profile);
             await ConfigureTradeNotificationsAsync(profile);
+            await ConfigureTradePriceCheckAsync(profile);
             await ConfigureReimaginedFeedbackAsync(profile);
             await ConfigureAnnouncementsAsync(profile);
             await ConfigureSupporterPortalsAsync(profile);
@@ -2043,6 +2044,37 @@ public partial class LaunchView : UserControl
         catch (Exception exception)
         {
             LaunchDiagnostics.Log($"trade-notifications: configuration failed ({exception.Message}).");
+        }
+    }
+
+    // Market search is anonymous on the API, so a launch with nobody signed in
+    // still configures the plugin - with an empty token rather than none at all.
+    private async Task ConfigureTradePriceCheckAsync(InstallationProfile profile)
+    {
+        try
+        {
+            await TradePriceCheckConfigService.DisableAsync(profile.InstallDirectory);
+            if (!TradePriceCheckConfigService.IsEligible(profile.Type, profile.LaunchExperience)) return;
+            if (!TradePriceCheckConfigService.IsPluginInstalled(profile.InstallDirectory, profile.LaunchExperience))
+            {
+                var modName = profile.LaunchExperience == LaunchExperience.Ladder
+                    ? ModInstallationPaths.LadderModName : "Reimagined";
+                LaunchDiagnostics.Log($"trade-price-check: {TradePriceCheckConfigService.PluginFileName} is missing from mods/{modName}/d2rloader/plugins; in-game price checks are off.");
+                return;
+            }
+            var token = await _launcherAuthenticationService.GetAccessTokenAsync();
+            if (string.IsNullOrWhiteSpace(token))
+                LaunchDiagnostics.Log("trade-price-check: no signed-in account; market searches will be anonymous.");
+            var settings = new TradePriceCheckLaunchSettings(
+                _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority), token, profile.SelectedLadderId?.ToString());
+            if (!await TradePriceCheckConfigService.EnableAsync(profile.InstallDirectory, settings, profile.LaunchExperience))
+                LaunchDiagnostics.Log("trade-price-check: configuration could not be written.");
+            else
+                LaunchDiagnostics.Log($"trade-price-check configured for {profile.LaunchExperience} at {settings.ApiBaseUrl}.");
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.Log($"trade-price-check: configuration failed ({exception.Message}).");
         }
     }
 
