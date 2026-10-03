@@ -132,12 +132,6 @@ public static partial class D2RLoaderService
             return false;
         }
 
-        if (OperatingSystem.IsLinux() && profile.Type == InstallationType.Steam)
-        {
-            reason = "Steam profiles on Linux require Lutris for D2RLoader.";
-            return false;
-        }
-
         if (!InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory))
         {
             reason = "Select the Diablo II: Resurrected folder that contains D2R.exe.";

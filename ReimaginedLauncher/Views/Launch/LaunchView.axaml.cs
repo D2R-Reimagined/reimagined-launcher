@@ -265,6 +265,9 @@ public partial class LaunchView : UserControl
         DetectionLoadingIndicator.IsVisible = LauncherService.IsDetecting;
 
         SteamExtraPanel.IsVisible = profile.Type == InstallationType.Steam;
+        SteamProtonPanel.IsVisible = profile.Type == InstallationType.Steam
+                                     && OperatingSystem.IsLinux()
+                                     && (isOnlineExperience || isLadderExperience);
         LutrisExtraPanel.IsVisible = profile.Type == InstallationType.Lutris;
 
         // The Lutris game is the source of the install path.
@@ -278,6 +281,7 @@ public partial class LaunchView : UserControl
         SteamPathTextBox.Text = profile.SteamDirectory ?? string.Empty;
         SteamPathTextBox.PlaceholderText = OperatingSystem.IsLinux() ? "Steam or Flatpak executable" : "Steam.exe Path";
         LocateSteamButton.Content = OperatingSystem.IsLinux() ? "Locate Steam" : "Locate Steam.exe";
+        ProtonPathTextBox.Text = profile.ProtonExecutable ?? string.Empty;
 
         // Auto-detect Steam path if not set or if it's currently Steam type
         if (profile.Type == InstallationType.Steam)
@@ -350,6 +354,10 @@ public partial class LaunchView : UserControl
         LadderAuthenticationWarningBanner.IsVisible = isLadderExperience && !isReimaginedSignedIn;
         RefreshLadderAuthenticationState();
 
+        var isOnlineSteamFlatpak = isOnlineExperience
+                                   && profile.Type == InstallationType.Steam
+                                   && GameLauncherService.IsSteamFlatpakInstall();
+        
         if (profile.Type == InstallationType.D2RMM)
         {
             StartGameButton.Content = "Install Tweaks";
@@ -384,10 +392,12 @@ public partial class LaunchView : UserControl
                                             && loaderAvailable
                                             && _ladderAction is not (LadderAction.Blocked or LadderAction.Waiting));
 
-            if (!isOnlineExperience
-                && !isLadderExperience
-                && profile.Type == InstallationType.Steam
-                && string.IsNullOrWhiteSpace(profile.SteamDirectory))
+            var isOfflineSteamMissingDirectory = !isOnlineExperience
+                                                  && !isLadderExperience
+                                                  && profile.Type == InstallationType.Steam
+                                                  && string.IsNullOrWhiteSpace(profile.SteamDirectory);
+            
+            if (isOfflineSteamMissingDirectory || isOnlineSteamFlatpak)
             {
                 StartGameButton.IsEnabled = false;
             }
@@ -400,6 +410,7 @@ public partial class LaunchView : UserControl
                                      || !isModDetected && !IsLadderSetupAction(isLadderExperience)
                                      || isOnlineExperience && !loaderAvailable
                                      || isLadderExperience
+                                     || isOnlineSteamFlatpak
                                      && (!ladderAvailable
                                          || !loaderAvailable
                                          || _ladderAction == LadderAction.Blocked);
@@ -427,6 +438,7 @@ public partial class LaunchView : UserControl
                     : GetLadderUnavailableMessage(loaderAvailable ? null : loaderUnavailableReason)
                 : isOnlineExperience && isValidated && isModDetected && !loaderAvailable
                 ? loaderUnavailableReason ?? "D2RLoader is unavailable for this profile."
+                : isOnlineSteamFlatpak ? "Flatpak Steam is not supported for D2RLoader. Only native Steam installation is supported."
                 : !isValidated
                 ? profile.Type == InstallationType.Lutris
                     ? string.IsNullOrWhiteSpace(profile.InstallDirectory)
@@ -1640,6 +1652,34 @@ public partial class LaunchView : UserControl
         }
     }
 
+    private async void OnLocateProtonClick(object? sender, RoutedEventArgs e)
+    {
+        if (TopLevel.GetTopLevel(this) is Window window)
+        {
+            var files = await window.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "Locate Proton executable",
+                AllowMultiple = false,
+                FileTypeFilter =
+                [
+                    new FilePickerFileType("Proton Executable")
+                    {
+                        Patterns = ["proton"]
+                    }
+                ]
+            });
+
+            if (files.Count > 0)
+            {
+                var selectedPath = files[0].Path.LocalPath;
+
+                MainWindow.Settings.CurrentProfile.ProtonExecutable = selectedPath;
+                await SettingsManager.SaveAsync(MainWindow.Settings);
+                RefreshInstallDirectoryState();
+            }
+        }
+    }
+
 
     private void SetLaunchStatus(string status, bool isVisible = true)
     {
@@ -1870,12 +1910,12 @@ public partial class LaunchView : UserControl
                     LaunchDiagnostics.Log("GameLauncherService.LaunchGame returned without throwing.");
                     SetLaunchStatus($"{actionName} command sent.");
 
-                    string? expectedExePath = null;
-                    if (profile.Type == InstallationType.Steam
-                        || profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder)
-                    {
-                        expectedExePath = LauncherService.GetExpectedGameExecutablePath();
-                    }
+                    var needsExePath = profile.Type == InstallationType.Steam
+                        ? !GameLauncherService.UsesD2RLoader(profile)
+                        : GameLauncherService.UsesD2RLoader(profile);
+                    var expectedExePath = needsExePath
+                        ? LauncherService.GetExpectedGameExecutablePath()
+                        : null;
 
                     // Lutris hands off to its own wrapper and the exe is commonly
                     // D2RLoader.exe, so the session is found by path instead of
