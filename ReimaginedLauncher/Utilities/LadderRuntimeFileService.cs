@@ -104,8 +104,11 @@ internal static class LadderRuntimeFileService
             return false;
         }
 
+        // D2RLoader names the config after the plugin's own ID ("author.name"),
+        // while approved IDs are derived from the DLL filename ("author-name").
         var pluginId = Path.GetFileNameWithoutExtension(normalized);
-        return approvedPluginIds.Contains(pluginId);
+        return approvedPluginIds.Contains(pluginId)
+               || approvedPluginIds.Contains(pluginId.Replace('.', '-'));
     }
 
     internal static void DeleteBaselines(string installDirectory)

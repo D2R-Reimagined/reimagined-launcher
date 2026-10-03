@@ -392,7 +392,8 @@ public sealed class LadderBundleServiceTests : IDisposable
         var files = new[]
         {
             ("layout", "characterselectpanelhd.json", original),
-            ("announcements", "d2rl-announcements.dll", "plugin"u8.ToArray())
+            ("announcements", "d2rl-announcements.dll", "plugin"u8.ToArray()),
+            ("celestialrayone-left-click-auras", "d2rl-celestialrayone-left-click-auras.dll", "plugin"u8.ToArray())
         };
         var targetPath = "mods/Reimagined/Reimagined.mpq/data/global/ui/layouts/characterselectpanelhd.json";
         var fixture = CreateBundle(
@@ -429,6 +430,12 @@ public sealed class LadderBundleServiceTests : IDisposable
 
         var readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
 
+        Assert.True(readiness.IsReady, readiness.Status);
+
+        await File.WriteAllTextAsync(
+            Path.Combine(Path.GetDirectoryName(config)!, "celestialrayone.left-click-auras.toml"),
+            "enabled = true");
+        readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
         Assert.True(readiness.IsReady, readiness.Status);
 
         var unapprovedConfig = Path.Combine(Path.GetDirectoryName(config)!, "unapproved.toml");
