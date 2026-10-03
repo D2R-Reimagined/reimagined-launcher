@@ -1584,6 +1584,9 @@ public partial class MainWindow : Window
             {
                 // When launched via Steam, the returned process is Steam.exe, not the game.
                 // Poll briefly to find the actual D2R.exe process by its executable path.
+                //
+                // When launched via Proton, the returned process is python*, not the game, but it's a specific instance
+                // so it's ok to wait for its exit.
                 processToWatch = gameProcess;
                 if (!string.IsNullOrEmpty(expectedExePath))
                 {

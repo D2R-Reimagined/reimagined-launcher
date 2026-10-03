@@ -58,9 +58,18 @@ Output will be in `ReimaginedLauncher/bin/Production/net10.0/linux-x64/publish/`
 
 ## D2RLoader Online / Ladder on Linux
 
-The Online and Ladder experiences are supported on Linux through **Lutris**.
+The Online and Ladder experiences are supported on Linux through **Steam** and **Lutris**.
 
-### Setup
+### Steam Setup
+In order for **Steam** to work, the desired **Proton** executable must be selected.
+
+This is because **Steam** does not allow the **D2RLoader** executable to run in **D2R**'s game context directly. To circumvent this, **Proton** is run with all the arguments that **Steam** would have passed to it, plus the executable set to **D2RLoader.exe** instead of **D2R.exe**. 
+
+> **Note:** Flatpak Steam is not supported for Online/Ladder. D2RLoader needs to
+> reach the Steam client, and a Proton process started outside the Flatpak sandbox
+> cannot do so. More investigation is needed to see how to run it inside the Flatpak sandbox. In the meantime use native Steam or Lutris instead.
+
+### Lutris Setup
 
 1. Install **Battle.net via Lutris** using the standard Lutris installer.
 2. Inside Battle.net, install **Diablo II: Resurrected**.
@@ -72,7 +81,7 @@ The Online and Ladder experiences are supported on Linux through **Lutris**.
    - Remove any `-mod Reimagined -txt` arguments if you added them manually — D2RLoader handles mod selection.
 7. Launch from the launcher. Lutris will start `D2RLoader.exe` with Reimagined selected.
 
-### Why Lutris is required for Online
+### Why Lutris works for Online while Wine doesn't
 
 D2RLoader needs to communicate with the Steam client for authentication. Running it through standalone Wine does not provide that integration. Lutris handles the Wine/Proton runtime setup that bridges D2RLoader to Steam.
 

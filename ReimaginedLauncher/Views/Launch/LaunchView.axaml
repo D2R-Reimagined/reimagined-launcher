@@ -198,7 +198,7 @@
                 </Border>
 
                 <Border x:Name="InstallDirectoryPanel" Grid.Column="1" Classes="panel" Padding="18">
-                    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="12">
+                    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="12">
                         <StackPanel Spacing="4">
                             <TextBlock x:Name="InstallDirectoryTitle" Classes="section-title" Text="Installation" />
                             <TextBlock x:Name="InstallDirectoryDescription" Classes="muted" TextWrapping="Wrap" />
@@ -251,6 +251,10 @@
                         <Grid x:Name="SteamExtraPanel" Grid.Row="4" ColumnDefinitions="*,Auto" ColumnSpacing="8" IsVisible="False">
                             <TextBox x:Name="SteamPathTextBox" IsReadOnly="True" PlaceholderText="Steam executable path" />
                             <Button x:Name="LocateSteamButton" Grid.Column="1" Content="Locate Steam" Click="OnLocateSteamClick" />
+                        </Grid>
+                        <Grid x:Name="SteamProtonPanel" Grid.Row="5" ColumnDefinitions="*,Auto" ColumnSpacing="8" IsVisible="False">
+                            <TextBox x:Name="ProtonPathTextBox" IsReadOnly="True" PlaceholderText="Proton executable path" />
+                            <Button x:Name="LocateProtonButton" Grid.Column="1" Content="Locate Proton" Click="OnLocateProtonClick" />
                         </Grid>
                     </Grid>
                 </Border>
