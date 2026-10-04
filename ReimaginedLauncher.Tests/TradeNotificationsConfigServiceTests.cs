@@ -52,7 +52,8 @@ public sealed class TradeNotificationsConfigServiceTests : IDisposable
         var toml = await File.ReadAllTextAsync(ConfigPathIn(NormalLoaderRoot));
         Assert.Contains("enabled = true", toml, StringComparison.Ordinal);
         Assert.Contains($"api_base_url = \"{ApiBaseUrl}\"", toml, StringComparison.Ordinal);
-        Assert.Contains($"access_token = \"{AccessToken}\"", toml, StringComparison.Ordinal);
+        Assert.Contains("access_token = \"\"", toml, StringComparison.Ordinal);
+        Assert.DoesNotContain(AccessToken, toml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -137,7 +138,8 @@ public sealed class TradeNotificationsConfigServiceTests : IDisposable
         Assert.Contains("# my notes", toml, StringComparison.Ordinal);
         Assert.Contains("channel_tag = \"[World]\"", toml, StringComparison.Ordinal);
         Assert.Contains("global_color = 9", toml, StringComparison.Ordinal);
-        Assert.Contains($"access_token = \"{AccessToken}\"", toml, StringComparison.Ordinal);
+        Assert.Contains("access_token = \"\"", toml, StringComparison.Ordinal);
+        Assert.DoesNotContain(AccessToken, toml, StringComparison.Ordinal);
         Assert.DoesNotContain("\"stale\"", toml, StringComparison.Ordinal);
     }
 

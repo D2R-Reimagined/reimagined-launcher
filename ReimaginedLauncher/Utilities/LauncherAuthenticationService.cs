@@ -13,6 +13,13 @@ using ReimaginedLauncher.HttpClients.Models;
 
 namespace ReimaginedLauncher.Utilities;
 
+/// <summary>The token one game session's plugins use, and when it stops working.</summary>
+/// <param name="IsUserTokenFallback">
+/// True when the API had no game-token endpoint and this is the launcher's own
+/// account token. It must never be sent to the game-token revoke endpoint.
+/// </param>
+public sealed record GameSessionToken(string AccessToken, DateTimeOffset ExpiresAtUtc, bool IsUserTokenFallback);
+
 public sealed class LauncherAuthenticationService(ReimaginedApiHttpClient apiClient)
 {
     private const string WebsiteBaseAddressEnvironmentVariable = "D2R_REIMAGINED_WEBSITE_BASE_URL";
@@ -25,6 +32,7 @@ public sealed class LauncherAuthenticationService(ReimaginedApiHttpClient apiCli
     private readonly SemaphoreSlim _sessionLock = new(1, 1);
     private AppSettings? _settings;
     private LauncherTokenResponse? _session;
+    private GameSessionToken? _activeGameToken;
 
     public ReimaginedUserResponse? CurrentUser => _session?.User;
     public bool IsSignedIn => CurrentUser is not null;
@@ -186,8 +194,116 @@ public sealed class LauncherAuthenticationService(ReimaginedApiHttpClient apiCli
         }
     }
 
+    /// <summary>
+    /// Gets the one token a game launch hands to its plugins: a narrow,
+    /// short-lived game token minted by the API, never the launcher's own
+    /// account token - unless the API predates game tokens (404), in which case
+    /// this falls back to the account token and its expiry and logs a warning,
+    /// so the launcher and API can deploy in either order. Null when nobody is
+    /// signed in or minting failed for any other reason; callers treat that
+    /// exactly like being signed out.
+    /// </summary>
+    public async Task<GameSessionToken?> CreateGameTokenAsync(CancellationToken cancellationToken = default)
+    {
+        string? userToken;
+        try
+        {
+            userToken = await GetAccessTokenAsync(cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            LaunchDiagnostics.Log($"game token: could not validate the Reimagined API session ({exception.Message}).");
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(userToken) || _session is not { } session)
+        {
+            return null;
+        }
+
+        var token = await ResolveGameTokenAsync(
+            ct => apiClient.CreateGameTokenAsync(userToken, ct),
+            userToken,
+            session.ExpiresAtUtc,
+            cancellationToken);
+        if (token is { IsUserTokenFallback: false })
+        {
+            _activeGameToken = token;
+        }
+
+        return token;
+    }
+
+    /// <summary>
+    /// The 404 fallback and failure handling for <see cref="CreateGameTokenAsync"/>,
+    /// separated so it can be tested without a signed-in session.
+    /// </summary>
+    internal static async Task<GameSessionToken?> ResolveGameTokenAsync(
+        Func<CancellationToken, Task<GameTokenResponse?>> mint,
+        string userToken,
+        DateTime userTokenExpiresAtUtc,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var minted = await mint(cancellationToken);
+            if (minted is null)
+            {
+                LaunchDiagnostics.Log(
+                    "WARNING game token: the API has no auth/launcher/game-token endpoint (404). "
+                    + "Falling back to the launcher's own account token for this game session.");
+                return new GameSessionToken(userToken, AsUtc(userTokenExpiresAtUtc), IsUserTokenFallback: true);
+            }
+
+            return new GameSessionToken(minted.AccessToken, AsUtc(minted.ExpiresAtUtc), IsUserTokenFallback: false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            LaunchDiagnostics.Log($"game token: could not mint a game token ({exception.Message}); plugins get no account for this launch.");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Revokes a minted game token. A fallback account token is never sent to
+    /// the revoke endpoint - it is the launcher's own session. Failures are
+    /// logged, never thrown: the token expires on its own.
+    /// </summary>
+    public async Task RevokeGameTokenAsync(GameSessionToken? token, CancellationToken cancellationToken = default)
+    {
+        if (token is null || token.IsUserTokenFallback)
+        {
+            return;
+        }
+
+        Interlocked.CompareExchange(ref _activeGameToken, null, token);
+        try
+        {
+            await apiClient.RevokeGameTokenAsync(token.AccessToken, cancellationToken);
+            LaunchDiagnostics.Log("game token: revoked.");
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.Log($"game token: could not revoke ({exception.Message}); it will expire at {token.ExpiresAtUtc:u}.");
+        }
+    }
+
+    private static DateTimeOffset AsUtc(DateTime value)
+    {
+        return value.Kind switch
+        {
+            DateTimeKind.Utc => new DateTimeOffset(value),
+            DateTimeKind.Local => new DateTimeOffset(value.ToUniversalTime()),
+            _ => new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Utc))
+        };
+    }
+
     public async Task SignOutAsync(CancellationToken cancellationToken = default)
     {
+        // The game token outlives nothing it should: signing out ends the
+        // session the game was given too.
+        await RevokeGameTokenAsync(Volatile.Read(ref _activeGameToken), cancellationToken);
+
         var settings = _settings;
         if (settings is null)
         {

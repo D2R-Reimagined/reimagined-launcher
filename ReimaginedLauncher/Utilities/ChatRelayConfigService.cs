@@ -21,8 +21,15 @@ public sealed record ChatRelayLaunchSettings(string ApiBaseUrl, string AccessTok
 /// session happened earlier.
 ///
 /// The API names the sender from the token, not from the message, so the token
-/// written here decides whose name appears in Discord. Writing another account's
-/// token would publish this player's words under that name.
+/// decides whose name appears in Discord. Writing another account's token would
+/// publish this player's words under that name.
+///
+/// No token is written into this config any more: secrets moved to
+/// <see cref="GameSessionSecretsService"/>'s session file outside mods/. The
+/// bundled chat-relay DLL predates that file and cannot read it, so it has no
+/// token after this change. Its source was removed from the plugins repo as
+/// unused; the AccessToken setting is still required so the existing "only
+/// for a signed-in ladder launch" rule holds.
 /// </remarks>
 public static class ChatRelayConfigService
 {
@@ -32,8 +39,12 @@ public static class ChatRelayConfigService
     private const string ManagedHeader =
         "# chat-relay - launcher-managed settings.\n"
         + "#\n"
-        + "# The Reimagined launcher rewrites enabled, api_base_url and access_token\n"
-        + "# every launch. Anything else you set here is preserved, and any setting\n"
+        + "# The Reimagined launcher rewrites enabled and api_base_url every launch,\n"
+        + "# and always leaves access_token empty: account secrets come from\n"
+        + "# <install>/reimagined-secrets/session.toml, outside mods/, so they are never\n"
+        + "# shared with other players.\n"
+        + "#\n"
+        + "# Anything else you set here is preserved, and any setting\n"
         + "# left out uses the plugin's built-in default - including relay_whispers,\n"
         + "# which stays off unless you deliberately turn it on.\n"
         + "\n";
@@ -90,7 +101,7 @@ public static class ChatRelayConfigService
         {
             ["enabled"] = "true",
             ["api_base_url"] = D2RLoaderPluginPackage.Quote(D2RLoaderPluginPackage.NormalizeBaseUrl(settings.ApiBaseUrl)),
-            ["access_token"] = D2RLoaderPluginPackage.Quote(settings.AccessToken)
+            ["access_token"] = D2RLoaderPluginPackage.BlankSecret
         };
 
         return await Package.WriteAsync(installDirectory, values, requireInstalled: true, cancellationToken);
@@ -107,7 +118,7 @@ public static class ChatRelayConfigService
         var values = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["enabled"] = "false",
-            ["access_token"] = "\"\""
+            ["access_token"] = D2RLoaderPluginPackage.BlankSecret
         };
 
         var normalDisabled = await NormalPackage.WriteAsync(installDirectory, values, requireInstalled: false, cancellationToken);

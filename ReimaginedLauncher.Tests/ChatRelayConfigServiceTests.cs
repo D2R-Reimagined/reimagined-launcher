@@ -71,7 +71,8 @@ public sealed class ChatRelayConfigServiceTests : IDisposable
         var toml = await File.ReadAllTextAsync(ModConfigPath);
         Assert.Contains("enabled = true", toml);
         Assert.Contains($"api_base_url = \"{ApiBaseUrl}\"", toml);
-        Assert.Contains($"access_token = \"{AccessToken}\"", toml);
+        Assert.Contains("access_token = \"\"", toml);
+        Assert.DoesNotContain(AccessToken, toml);
     }
 
     [Fact]
@@ -155,7 +156,8 @@ public sealed class ChatRelayConfigServiceTests : IDisposable
         Assert.Contains("relay_whispers = true", toml);
         Assert.Contains("verbose = true", toml);
         Assert.Contains("enabled = true", toml);
-        Assert.Contains($"access_token = \"{AccessToken}\"", toml);
+        Assert.Contains("access_token = \"\"", toml);
+        Assert.DoesNotContain(AccessToken, toml);
         Assert.DoesNotContain("stale", toml);
     }
 
@@ -179,7 +181,9 @@ public sealed class ChatRelayConfigServiceTests : IDisposable
         // would keep seeing the original value.
         Assert.Single(lines, line => line.StartsWith("access_token =", StringComparison.Ordinal));
         Assert.Single(lines, line => line.StartsWith("enabled =", StringComparison.Ordinal));
-        Assert.Contains("access_token = \"second-token\"", await File.ReadAllTextAsync(ModConfigPath));
+        var toml = await File.ReadAllTextAsync(ModConfigPath);
+        Assert.Contains("access_token = \"\"", toml);
+        Assert.DoesNotContain("second-token", toml);
     }
 
     [Fact]
@@ -195,9 +199,10 @@ public sealed class ChatRelayConfigServiceTests : IDisposable
 
         // A stale config in the global scope would otherwise keep an old token
         // alive somewhere the player cannot see.
-        Assert.Contains(
-            $"access_token = \"{AccessToken}\"",
-            await File.ReadAllTextAsync(Path.Combine(globalRoot, "config", "chat-relay.toml")));
+        var toml = await File.ReadAllTextAsync(Path.Combine(globalRoot, "config", "chat-relay.toml"));
+        Assert.Contains("enabled = true", toml);
+        Assert.Contains("access_token = \"\"", toml);
+        Assert.DoesNotContain(AccessToken, toml);
     }
 
     private string CreateBundledPlugin(byte[] contents)

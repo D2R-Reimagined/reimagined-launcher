@@ -63,7 +63,8 @@ public sealed class HardcoreDeathsConfigServiceTests : IDisposable
         var toml = await File.ReadAllTextAsync(ConfigPathIn(root));
         Assert.Contains("enabled = true", toml, StringComparison.Ordinal);
         Assert.Contains($"api_base_url = \"{ApiBaseUrl}\"", toml, StringComparison.Ordinal);
-        Assert.Contains($"access_token = \"{AccessToken}\"", toml, StringComparison.Ordinal);
+        Assert.Contains("access_token = \"\"", toml, StringComparison.Ordinal);
+        Assert.DoesNotContain(AccessToken, toml, StringComparison.Ordinal);
     }
 
     // Without a token the plugin would connect, listen, and be refused
@@ -167,7 +168,8 @@ public sealed class HardcoreDeathsConfigServiceTests : IDisposable
         Assert.Contains("killer_prefix = \" slain by \"", toml, StringComparison.Ordinal);
         Assert.Contains("channel_tag = \"[Fallen]\"", toml, StringComparison.Ordinal);
         Assert.Contains("death_color = 9", toml, StringComparison.Ordinal);
-        Assert.Contains($"access_token = \"{AccessToken}\"", toml, StringComparison.Ordinal);
+        Assert.Contains("access_token = \"\"", toml, StringComparison.Ordinal);
+        Assert.DoesNotContain(AccessToken, toml, StringComparison.Ordinal);
         Assert.DoesNotContain("\"stale\"", toml, StringComparison.Ordinal);
     }
 

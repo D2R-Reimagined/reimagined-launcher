@@ -32,7 +32,7 @@ public sealed class ServerSavesConfigServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task EnablingWritesTheLaunchSettingsWhenThePluginIsInstalled()
+    public async Task EnablingWritesTheLaunchSettingsButNeverTheSecretsWhenThePluginIsInstalled()
     {
         InstallPlugin(ModLoaderRoot);
 
@@ -44,10 +44,14 @@ public sealed class ServerSavesConfigServiceTests : IDisposable
         var toml = await File.ReadAllTextAsync(ModConfigPath);
         Assert.Contains("enabled = true", toml);
         Assert.Contains("api_base_url = \"http://localhost:5000\"", toml);
-        Assert.Contains("access_token = \"token-abc\"", toml);
         Assert.Contains($"ladder_id = \"{Ladder}\"", toml);
-        Assert.Contains("ladder_launch_ticket = \"ticket-abc\"", toml);
-        Assert.Contains("status_session_id = \"session-abc\"", toml);
+        // Secrets live in <install>/reimagined-secrets/session.toml, never under mods/.
+        Assert.Contains("access_token = \"\"", toml);
+        Assert.Contains("ladder_launch_ticket = \"\"", toml);
+        Assert.Contains("status_session_id = \"\"", toml);
+        Assert.DoesNotContain("token-abc", toml);
+        Assert.DoesNotContain("ticket-abc", toml);
+        Assert.DoesNotContain("session-abc", toml);
     }
 
     [Fact]

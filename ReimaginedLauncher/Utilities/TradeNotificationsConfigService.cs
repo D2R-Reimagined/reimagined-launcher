@@ -14,8 +14,12 @@ public static class TradeNotificationsConfigService
     private const string ManagedHeader =
         "# trade-notifications - launcher-managed settings.\n"
         + "#\n"
-        + "# The Reimagined launcher rewrites enabled, api_base_url and access_token\n"
-        + "# every launch. Anything else you set here is preserved, and any setting\n"
+        + "# The Reimagined launcher rewrites enabled and api_base_url every launch,\n"
+        + "# and always leaves access_token empty: account secrets come from\n"
+        + "# <install>/reimagined-secrets/session.toml, outside mods/, so they are never\n"
+        + "# shared with other players.\n"
+        + "#\n"
+        + "# Anything else you set here is preserved, and any setting\n"
         + "# left out uses the plugin's built-in default - including default_sender,\n"
         + "# max_queued_messages and the colour bytes.\n"
         + "\n";
@@ -54,7 +58,7 @@ public static class TradeNotificationsConfigService
         {
             ["enabled"] = "true",
             ["api_base_url"] = D2RLoaderPluginPackage.Quote(D2RLoaderPluginPackage.NormalizeBaseUrl(settings.ApiBaseUrl)),
-            ["access_token"] = D2RLoaderPluginPackage.Quote(settings.AccessToken)
+            ["access_token"] = D2RLoaderPluginPackage.BlankSecret
         };
 
         return await PackageFor(experience).WriteAsync(installDirectory, values, requireInstalled: true, cancellationToken);
@@ -66,7 +70,7 @@ public static class TradeNotificationsConfigService
         var values = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["enabled"] = "false",
-            ["access_token"] = "\"\""
+            ["access_token"] = D2RLoaderPluginPackage.BlankSecret
         };
 
         var normalDisabled = await NormalPackage.WriteAsync(installDirectory, values, requireInstalled: false, cancellationToken);

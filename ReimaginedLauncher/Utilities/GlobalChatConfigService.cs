@@ -19,8 +19,9 @@ public sealed record GlobalChatLaunchSettings(string ApiBaseUrl, string AccessTo
 /// launcher build and is copied into place on launch. Global chat does not: it
 /// arrives in the ladder bundle or as an approved extension, or the player
 /// downloads it from the website and drops it into their own mod install. The
-/// launcher's whole job here is to notice that the plugin is present and write
-/// the token into its config. A missing plugin is an ordinary outcome, not a
+/// launcher's whole job here is to notice that the plugin is present and point
+/// it at the API (the token itself goes in the session secrets file, never in
+/// this config). A missing plugin is an ordinary outcome, not a
 /// failure - which is why there is no EnsureInstalledAsync and no bundled asset
 /// for this plugin, and why <see cref="EnableAsync"/> requires the plugin to be
 /// installed before it will write anything.</para>
@@ -51,8 +52,12 @@ public static class GlobalChatConfigService
     private const string ManagedHeader =
         "# global-chat - launcher-managed settings.\n"
         + "#\n"
-        + "# The Reimagined launcher rewrites enabled, api_base_url and access_token\n"
-        + "# every launch. Anything else you set here is preserved, and any setting\n"
+        + "# The Reimagined launcher rewrites enabled and api_base_url every launch,\n"
+        + "# and always leaves access_token empty: account secrets come from\n"
+        + "# <install>/reimagined-secrets/session.toml, outside mods/, so they are never\n"
+        + "# shared with other players.\n"
+        + "#\n"
+        + "# Anything else you set here is preserved, and any setting\n"
         + "# left out uses the plugin's built-in default - including channel_tag,\n"
         + "# history_lines and the colour bytes.\n"
         + "\n";
@@ -109,7 +114,7 @@ public static class GlobalChatConfigService
         {
             ["enabled"] = "true",
             ["api_base_url"] = D2RLoaderPluginPackage.Quote(D2RLoaderPluginPackage.NormalizeBaseUrl(settings.ApiBaseUrl)),
-            ["access_token"] = D2RLoaderPluginPackage.Quote(settings.AccessToken)
+            ["access_token"] = D2RLoaderPluginPackage.BlankSecret
         };
 
         return await PackageFor(experience).WriteAsync(installDirectory, values, requireInstalled: true, cancellationToken);
@@ -130,7 +135,7 @@ public static class GlobalChatConfigService
         var values = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["enabled"] = "false",
-            ["access_token"] = "\"\""
+            ["access_token"] = D2RLoaderPluginPackage.BlankSecret
         };
 
         var normalDisabled = await NormalPackage.WriteAsync(installDirectory, values, requireInstalled: false, cancellationToken);

@@ -14,9 +14,12 @@ public static class ReimaginedFeedbackConfigService
     private const string ManagedHeader =
         "# reimagined-feedback - launcher-managed settings.\n"
         + "#\n"
-        + "# The Reimagined launcher rewrites api_base_url and access_token every\n"
-        + "# launch; an empty access_token keeps the plugin disabled. Anything else\n"
-        + "# you set here is preserved, and any setting left out uses the plugin's\n"
+        + "# The Reimagined launcher rewrites api_base_url every launch, and always\n"
+        + "# leaves access_token empty: account secrets come from\n"
+        + "# <install>/reimagined-secrets/session.toml, outside mods/, so they are never\n"
+        + "# shared with other players.\n"
+        + "#\n"
+        + "# Anything else you set here is preserved, and any setting left out uses the plugin's\n"
         + "# built-in default - including endpoint_path, timeout_ms, min_interval_ms\n"
         + "# and max_length.\n"
         + "\n";
@@ -62,7 +65,7 @@ public static class ReimaginedFeedbackConfigService
         var values = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["api_base_url"] = D2RLoaderPluginPackage.Quote(D2RLoaderPluginPackage.NormalizeBaseUrl(settings.ApiBaseUrl)),
-            ["access_token"] = D2RLoaderPluginPackage.Quote(settings.AccessToken)
+            ["access_token"] = D2RLoaderPluginPackage.BlankSecret
         };
 
         return await PackageFor(experience).WriteAsync(installDirectory, values, requireInstalled: true, cancellationToken);
@@ -80,7 +83,7 @@ public static class ReimaginedFeedbackConfigService
     {
         var values = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["access_token"] = "\"\""
+            ["access_token"] = D2RLoaderPluginPackage.BlankSecret
         };
 
         var normalDisabled = await NormalPackage.WriteAsync(installDirectory, values, requireInstalled: false, cancellationToken);

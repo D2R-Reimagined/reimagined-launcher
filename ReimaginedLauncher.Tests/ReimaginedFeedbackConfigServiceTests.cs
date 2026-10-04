@@ -55,7 +55,8 @@ public sealed class ReimaginedFeedbackConfigServiceTests : IDisposable
         var toml = await File.ReadAllTextAsync(ConfigPathIn(root));
         Assert.DoesNotContain("enabled =", toml, StringComparison.Ordinal);
         Assert.Contains($"api_base_url = \"{ApiBaseUrl}\"", toml, StringComparison.Ordinal);
-        Assert.Contains($"access_token = \"{AccessToken}\"", toml, StringComparison.Ordinal);
+        Assert.Contains("access_token = \"\"", toml, StringComparison.Ordinal);
+        Assert.DoesNotContain(AccessToken, toml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -103,7 +104,8 @@ public sealed class ReimaginedFeedbackConfigServiceTests : IDisposable
 
         var toml = await File.ReadAllTextAsync(ConfigPathIn(NormalLoaderRoot));
         Assert.Contains($"api_base_url = \"{apiBaseUrl}\"", toml, StringComparison.Ordinal);
-        Assert.Contains($"access_token = \"{AccessToken}\"", toml, StringComparison.Ordinal);
+        Assert.Contains("access_token = \"\"", toml, StringComparison.Ordinal);
+        Assert.DoesNotContain(AccessToken, toml, StringComparison.Ordinal);
     }
     [Fact]
     public async Task EnablingRequiresThePluginToBeInstalledAndWritesNothingWithoutIt()
@@ -159,7 +161,8 @@ public sealed class ReimaginedFeedbackConfigServiceTests : IDisposable
         Assert.Contains("# my notes", toml, StringComparison.Ordinal);
         Assert.Contains("max_length = 500", toml, StringComparison.Ordinal);
         Assert.Contains($"api_base_url = \"{ApiBaseUrl}\"", toml, StringComparison.Ordinal);
-        Assert.Contains($"access_token = \"{AccessToken}\"", toml, StringComparison.Ordinal);
+        Assert.Contains("access_token = \"\"", toml, StringComparison.Ordinal);
+        Assert.DoesNotContain(AccessToken, toml, StringComparison.Ordinal);
         Assert.DoesNotContain("d2rreimagined.com", toml, StringComparison.Ordinal);
         Assert.DoesNotContain("\"stale\"", toml, StringComparison.Ordinal);
     }

@@ -24,8 +24,12 @@ public static class TradePriceCheckConfigService
     private const string ManagedHeader =
         "# trade-price-check - launcher-managed settings.\n"
         + "#\n"
-        + "# The Reimagined launcher rewrites api_base_url, access_token and ladder_id\n"
-        + "# every launch. Anything else you set here is preserved, and any setting\n"
+        + "# The Reimagined launcher rewrites api_base_url and ladder_id every launch,\n"
+        + "# and always leaves access_token empty: account secrets come from\n"
+        + "# <install>/reimagined-secrets/session.toml, outside mods/, so they are never\n"
+        + "# shared with other players.\n"
+        + "#\n"
+        + "# Anything else you set here is preserved, and any setting\n"
         + "# left out uses the plugin's built-in default - including hotkey_vk,\n"
         + "# hotkey_ctrl and max_results.\n"
         + "\n";
@@ -65,7 +69,7 @@ public static class TradePriceCheckConfigService
         var values = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["api_base_url"] = D2RLoaderPluginPackage.Quote(D2RLoaderPluginPackage.NormalizeBaseUrl(settings.ApiBaseUrl)),
-            ["access_token"] = D2RLoaderPluginPackage.Quote(settings.AccessToken?.Trim() ?? string.Empty),
+            ["access_token"] = D2RLoaderPluginPackage.BlankSecret,
             // Only a ladder launch narrows the search to one ladder; an online
             // launch searches every active listing.
             ["ladder_id"] = D2RLoaderPluginPackage.Quote(experience == LaunchExperience.Ladder ? settings.LadderId ?? string.Empty : string.Empty)
@@ -80,7 +84,7 @@ public static class TradePriceCheckConfigService
     {
         var values = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["access_token"] = "\"\"",
+            ["access_token"] = D2RLoaderPluginPackage.BlankSecret,
             ["ladder_id"] = "\"\""
         };
 
