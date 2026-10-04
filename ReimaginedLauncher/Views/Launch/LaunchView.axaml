@@ -198,7 +198,7 @@
                 </Border>
 
                 <Border x:Name="InstallDirectoryPanel" Grid.Column="1" Classes="panel" Padding="18">
-                    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="12">
+                    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="12">
                         <StackPanel Spacing="4">
                             <TextBlock x:Name="InstallDirectoryTitle" Classes="section-title" Text="Installation" />
                             <TextBlock x:Name="InstallDirectoryDescription" Classes="muted" TextWrapping="Wrap" />
@@ -256,6 +256,18 @@
                             <TextBox x:Name="ProtonPathTextBox" IsReadOnly="True" PlaceholderText="Proton executable path" />
                             <Button x:Name="LocateProtonButton" Grid.Column="1" Content="Locate Proton" Click="OnLocateProtonClick" />
                         </Grid>
+                        <StackPanel x:Name="SteamSetupPanel" Grid.Row="6" Spacing="8" IsVisible="False">
+                            <TextBlock Text="Steam shortcuts" FontWeight="SemiBold" />
+                            <TextBlock Classes="muted" TextWrapping="Wrap"
+                                       Text="Stay in Desktop Mode and choose Steam → Exit before setup. The launcher will create its own Steam entries for Gaming Mode." />
+                            <ComboBox x:Name="SteamSetupAccountComboBox" HorizontalAlignment="Stretch"
+                                      PlaceholderText="Select your Steam account" />
+                            <CheckBox x:Name="SteamResetMouseLayoutCheckBox" Content="Reset launcher layout to Mouse Only" IsChecked="True" />
+                            <TextBlock Classes="muted" TextWrapping="Wrap"
+                                       Text="Applies Mouse Only to the launcher. Uncheck to keep a custom launcher layout. Game controls are unchanged." />
+                            <Button x:Name="SteamSetupButton" Content="Set up Steam shortcuts" Click="OnSetupSteamShortcutsClick" />
+                            <TextBlock x:Name="SteamSetupStatusText" Classes="muted" TextWrapping="Wrap" />
+                        </StackPanel>
                     </Grid>
                 </Border>
             </Grid>

@@ -27,6 +27,7 @@ public partial class LaunchView : UserControl
     private readonly D2RLoaderInstallerService _d2rLoaderInstallerService;
     private readonly LadderBundleService _ladderBundleService;
     private bool _isLaunching;
+    private bool _isSteamSetupRunning;
     private bool _isLoaderInstallPromptOpen;
     private bool _hasPromptedForMissingLoader;
     private string? _loaderUpdatePromptedVersion;
@@ -265,9 +266,29 @@ public partial class LaunchView : UserControl
         DetectionLoadingIndicator.IsVisible = LauncherService.IsDetecting;
 
         SteamExtraPanel.IsVisible = profile.Type == InstallationType.Steam;
+        SteamSetupPanel.IsVisible = profile.Type == InstallationType.Steam && OperatingSystem.IsLinux();
+        SteamSetupButton.IsEnabled = !_isSteamSetupRunning && !_isLaunching && !MainWindow.IsInstallInProgress;
+        if (SteamSetupPanel.IsVisible)
+        {
+            try
+            {
+                var selectedId = (SteamSetupAccountComboBox.SelectedItem as SteamSetupAccount)?.UserId;
+                var root = GameLauncherService.GetSteamInstallPath();
+                var accounts = root is null ? [] : SteamGameHandoff.GetSetupAccounts(root);
+                SteamSetupAccountComboBox.ItemsSource = accounts;
+                var recent = accounts.Where(account => account.MostRecent).ToArray();
+                SteamSetupAccountComboBox.SelectedItem = accounts.FirstOrDefault(account => account.UserId == selectedId)
+                    ?? (accounts.Length == 1 ? accounts[0] : recent.Length == 1 ? recent[0] : null);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                SteamSetupStatusText.Text = "Could not read Steam accounts: " + exception.Message;
+            }
+        }
         SteamProtonPanel.IsVisible = profile.Type == InstallationType.Steam
                                      && OperatingSystem.IsLinux()
-                                     && (isOnlineExperience || isLadderExperience);
+                                     && (isOnlineExperience || isLadderExperience || SteamGameHandoff.IsGamingMode
+                                         || File.Exists(Path.Combine(SteamGameHandoff.StateDirectory, "registration.json")));
         LutrisExtraPanel.IsVisible = profile.Type == InstallationType.Lutris;
 
         // The Lutris game is the source of the install path.
@@ -281,6 +302,8 @@ public partial class LaunchView : UserControl
         SteamPathTextBox.Text = profile.SteamDirectory ?? string.Empty;
         SteamPathTextBox.PlaceholderText = OperatingSystem.IsLinux() ? "Steam or Flatpak executable" : "Steam.exe Path";
         LocateSteamButton.Content = OperatingSystem.IsLinux() ? "Locate Steam" : "Locate Steam.exe";
+        if (OperatingSystem.IsLinux())
+            GameLauncherService.TryDetectSteamProtonExecutable(profile);
         ProtonPathTextBox.Text = profile.ProtonExecutable ?? string.Empty;
 
         // Auto-detect Steam path if not set or if it's currently Steam type
@@ -409,9 +432,8 @@ public partial class LaunchView : UserControl
         ValidationBanner.IsVisible = !isValidated
                                      || !isModDetected && !IsLadderSetupAction(isLadderExperience)
                                      || isOnlineExperience && !loaderAvailable
-                                     || isLadderExperience
                                      || isOnlineSteamFlatpak
-                                     && (!ladderAvailable
+                                     || isLadderExperience && (!ladderAvailable
                                          || !loaderAvailable
                                          || _ladderAction == LadderAction.Blocked);
         
@@ -1652,6 +1674,43 @@ public partial class LaunchView : UserControl
         }
     }
 
+    private async void OnSetupSteamShortcutsClick(object? sender, RoutedEventArgs e)
+    {
+        if (_isSteamSetupRunning || _isLaunching || MainWindow.IsInstallInProgress) return;
+        if (SteamSetupAccountComboBox.SelectedItem is not SteamSetupAccount account)
+        {
+            SteamSetupStatusText.Text = "Select your Steam account. If none are listed, sign into native Steam first, then exit Steam and return here.";
+            return;
+        }
+        _isSteamSetupRunning = true;
+        SteamSetupButton.IsEnabled = false;
+        StartGameButton.IsEnabled = false;
+        SteamSetupStatusText.Text = "Setting up Steam shortcuts...";
+        try
+        {
+            var root = GameLauncherService.GetSteamInstallPath()
+                ?? throw new InvalidOperationException("Native Steam could not be found.");
+            await SettingsManager.SaveAsync(MainWindow.Settings);
+            var resetMouseOnly = SteamResetMouseLayoutCheckBox.IsChecked == true;
+            await Task.Run(() => SteamGameHandoff.InstallFromLauncher(root, account.UserId, resetMouseOnly));
+            SteamSetupStatusText.Text = "Setup complete. Close this launcher and restart Steam. In Gaming Mode, open Diablo II: Reimagined (Native Launcher). "
+                + (resetMouseOnly ? "Mouse Only was requested in place of the saved launcher layout. "
+                    : "Saved launcher layouts are preserved; Mouse Only is selected for an unset Steam Deck layout. ")
+                + "If the trackpad does not control the mouse, select Mouse Only in Steam Controller Settings. Keep the game session on its gamepad layout.";
+            RefreshInstallDirectoryState();
+        }
+        catch (Exception exception)
+        {
+            SteamSetupStatusText.Text = "Setup failed: " + exception.Message;
+            LaunchDiagnostics.LogException("Steam shortcut setup failed", exception);
+        }
+        finally
+        {
+            _isSteamSetupRunning = false;
+            RefreshInstallDirectoryState();
+        }
+    }
+
     private async void OnLocateProtonClick(object? sender, RoutedEventArgs e)
     {
         if (TopLevel.GetTopLevel(this) is Window window)
@@ -1710,7 +1769,7 @@ public partial class LaunchView : UserControl
         LaunchDiagnostics.ResetSession();
         LaunchDiagnostics.Log("Launch/Install button clicked.");
 
-        if (_isLaunching || _isRunningLadderAction || MainWindow.IsInstallInProgress || MainWindow.IsGameRunning())
+        if (_isLaunching || _isSteamSetupRunning || _isRunningLadderAction || MainWindow.IsInstallInProgress || MainWindow.IsGameRunning())
         {
             LaunchDiagnostics.Log("Action ignored because an action is already in progress.");
             return;
@@ -1924,8 +1983,10 @@ public partial class LaunchView : UserControl
                         ? LutrisService.TryResolveGameExePath(profile.LutrisGameSlug)
                         : null;
 
-                    var minimizeTarget = MainWindow.Settings.MinimizeToTray ? MainWindow.Instance : null;
-                    _ = WatchGameExitAsync(gameProcess, expectedExePath, minimizeTarget, lutrisGameExePath, _preparedServerSaves);
+                    var steamHandoff = LauncherService.ActiveSteamHandoff;
+                    var minimizeTarget = MainWindow.Settings.MinimizeToTray || (steamHandoff is not null && SteamGameHandoff.IsGamingMode)
+                        ? MainWindow.Instance : null;
+                    _ = WatchGameExitAsync(gameProcess, expectedExePath, minimizeTarget, lutrisGameExePath, _preparedServerSaves, steamHandoff);
                 }
             }
             catch (Exception ex)
@@ -2311,14 +2372,22 @@ public partial class LaunchView : UserControl
         string? expectedExePath,
         MainWindow? minimizeTarget,
         string? lutrisGameExePath = null,
-        ServerSaveMonitor? serverSaves = null)
+        ServerSaveMonitor? serverSaves = null,
+        SteamGameHandoff? steamHandoff = null)
     {
         using var monitoring = new CancellationTokenSource();
         var monitorTask = serverSaves is null ? Task.CompletedTask : MonitorServerSavesAsync(serverSaves, monitoring.Token);
         var gameExitConfirmed = false;
         try
         {
-            if (lutrisGameExePath is not null)
+            if (steamHandoff is not null)
+            {
+                gameProcess.Dispose();
+                minimizeTarget?.MinimizeToTray();
+                try { gameExitConfirmed = await steamHandoff.WaitForExitAsync(); }
+                finally { minimizeTarget?.RestoreFromTray(); steamHandoff.Dispose(); }
+            }
+            else if (lutrisGameExePath is not null)
             {
                 // The lutris process hands off and may exit immediately or outlive
                 // the session, so it is never waited on.
@@ -2345,6 +2414,7 @@ public partial class LaunchView : UserControl
         catch (Exception exception)
         {
             LaunchDiagnostics.LogException("Could not finish watching the game process", exception);
+            if (steamHandoff is not null) Notifications.SendNotification(exception.Message, "Warning");
         }
         finally
         {

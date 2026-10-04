@@ -1537,6 +1537,8 @@ public partial class MainWindow : Window
         _saveWindowStateTimer?.Start();
     }
 
+    private void OnExitLauncherClick(object? sender, RoutedEventArgs e) => ExitFromTray();
+
     private void ExitFromTray()
     {
         Dispatcher.UIThread.Post(() =>
@@ -1622,6 +1624,16 @@ public partial class MainWindow : Window
     {
         try
         {
+            if (OperatingSystem.IsLinux())
+            {
+                foreach (var profile in Settings.Profiles)
+                {
+                    if (string.IsNullOrWhiteSpace(profile.InstallDirectory)) continue;
+                    if (SteamGameHandoff.FindGameProcesses(Path.Combine(profile.InstallDirectory, "D2R.exe")).Length != 0
+                        || SteamGameHandoff.FindGameProcesses(Path.Combine(profile.InstallDirectory, "D2RLoader.exe")).Length != 0)
+                        return true;
+                }
+            }
             var running = Process.GetProcessesByName("D2R");
             foreach (var process in running)
             {

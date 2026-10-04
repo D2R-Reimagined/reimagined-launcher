@@ -20,6 +20,7 @@ public class GameLauncherService
     public bool IsDetecting { get; private set; }
     public string? GamePathOverride { get; set; } = string.Empty;
     public string LaunchParameters => BuildLaunchParameters();
+    internal SteamGameHandoff? ActiveSteamHandoff { get; private set; }
     
     public string? InstallDirectory
     {
@@ -491,11 +492,11 @@ public class GameLauncherService
                 return $"D2RLoader unavailable: {reason}";
             }
 
-            if (profile.Type == InstallationType.Steam)
+            if (OperatingSystem.IsLinux() && profile.Type == InstallationType.Steam)
             {
                 return IsFlatpakInstall(GetSteamInstallPath()) 
                     ? "Flatpak Steam is not supported for D2RLoader. Only native Steam installation is supported."
-                    : BuildOnlineNativeSteamLaunchCommand(profile);
+                    : BuildOnlineNativeSteamLaunchCommand(profile, launchParameters);
             }
 
             var loaderPath = D2RLoaderService.GetLoaderPath(profile.InstallDirectory)!;
@@ -512,6 +513,9 @@ public class GameLauncherService
 
         if (profile.Type == InstallationType.Steam)
         {
+            if (OperatingSystem.IsLinux() && (SteamGameHandoff.IsGamingMode
+                || File.Exists(Path.Combine(SteamGameHandoff.StateDirectory, "registration.json"))))
+                return BuildSteamHandoffPreview(Path.Combine(profile.InstallDirectory ?? "", "D2R.exe"), launchParameters);
             var steamPath = profile.SteamDirectory ?? FindSteamExecutable(profile.InstallDirectory) ?? GetDefaultSteamCommand();
             var steamPrefix = GetSteamArgumentPrefix(steamPath);
             return $"\"{steamPath}\" {steamPrefix}-silent -applaunch {SteamAppId} {launchParameters}";
@@ -556,7 +560,7 @@ public class GameLauncherService
     /// </summary>
     /// <param name="profile">The object containing information regarding the current installation type.</param>
     /// <returns>Text to be displayed as launch details. Can be either an executable command, or an error message.</returns>
-    private static string BuildOnlineNativeSteamLaunchCommand(InstallationProfile profile)
+    private static string BuildOnlineNativeSteamLaunchCommand(InstallationProfile profile, string launchParameters)
     {
         var loaderPath = D2RLoaderService.GetLoaderPath(profile.InstallDirectory);
         var steamInstallPath = GetSteamInstallPath();
@@ -565,14 +569,18 @@ public class GameLauncherService
             return error;
         }
 
+        if (SteamGameHandoff.IsGamingMode || File.Exists(Path.Combine(SteamGameHandoff.StateDirectory, "registration.json")))
+            return BuildSteamHandoffPreview(loaderPath!, launchParameters);
+
         var steamApps = FileService.FindAncestorDirectory(profile.InstallDirectory, SteamAppsDirName);
         var steamProtonEnvVars = new Dictionary<string, string>();
         PopulateSteamProtonEnvVars(steamProtonEnvVars, profile, steamInstallPath!, steamApps);
         var envVarsExports = string.Join("\n", steamProtonEnvVars.Select(kvp => $"export {kvp.Key}=\"{kvp.Value}\""));
-        var modName = profile.LaunchExperience == LaunchExperience.Ladder ? "ReimaginedLadder" : "Reimagined";
-
-        return $"{envVarsExports}\n \"{profile.ProtonExecutable}\" run \"{loaderPath}\" -mod {modName} -txt";
+        return $"{envVarsExports}\n \"{profile.ProtonExecutable}\" {BuildSteamProtonArguments(loaderPath!, launchParameters)}";
     }
+
+    private static string BuildSteamHandoffPreview(string executable, string arguments)
+        => $"Steam-owned game session; request prepared when Launch is pressed.{Environment.NewLine}\"{executable}\" {arguments}";
 
     public Process? LaunchGame(string? launchParamOverride = null, string? gamePathOverride = null)
     {
@@ -595,6 +603,30 @@ public class GameLauncherService
         string? winePrefix = null;
         string? workingDirectory = null;
         var environmentOverrides = new Dictionary<string, string>();
+
+        if (OperatingSystem.IsLinux() && profile.Type == InstallationType.Steam
+            && (SteamGameHandoff.IsGamingMode || File.Exists(Path.Combine(SteamGameHandoff.StateDirectory, "registration.json"))))
+        {
+            try
+            {
+                if (UsesD2RLoader(profile) && !D2RLoaderService.CanUseOnlineExperience(profile, out var reason))
+                    throw new InvalidOperationException(reason ?? "D2RLoader is not available.");
+                if (!File.Exists(Path.Combine(SteamGameHandoff.StateDirectory, "registration.json")))
+                    throw new InvalidOperationException("Register the native launcher's Steam game session before playing in Gaming Mode. See LINUX.md for one-time setup.");
+                if (D2RLoaderService.IsInstalled(profile.InstallDirectory))
+                    D2RLoaderService.SetDefaultMod(profile.InstallDirectory!, profile.LaunchExperience);
+                var handoff = SteamGameHandoff.Start(profile, launchParameters);
+                ActiveSteamHandoff = handoff.Session;
+                return handoff.Command;
+            }
+            catch (Exception exception) when (exception is IOException or InvalidOperationException or UnauthorizedAccessException or ArgumentException)
+            {
+                Notifications.SendNotification(exception.Message, "Warning");
+                LaunchDiagnostics.LogException("Steam game handoff failed", exception);
+                return null;
+            }
+        }
+        ActiveSteamHandoff = null;
 
         if (profile.Type == InstallationType.Lutris)
         {
@@ -640,10 +672,8 @@ public class GameLauncherService
                     
                     var steamApps = FileService.FindAncestorDirectory(profile.InstallDirectory, SteamAppsDirName);
                     PopulateSteamProtonEnvVars(environmentOverrides, profile, steamInstallPath!, steamApps);
-                    var modName = profile.LaunchExperience == LaunchExperience.Ladder ? "ReimaginedLadder" : "Reimagined";
-                    
                     executablePath = profile.ProtonExecutable!;
-                    finalArgs = $"run \"{loaderPath}\" -mod {modName} -txt";
+                    finalArgs = BuildSteamProtonArguments(loaderPath, launchParameters);
                 }
                 else
                 {
@@ -754,7 +784,7 @@ public class GameLauncherService
     /// <param name="loaderPath">The path to the D2RLoader executable.</param>
     /// <param name="error">When validation fails, contains an error message explaining why; otherwise, <see cref="string.Empty"/>.</param>
     /// <returns><c>true</c>, if all validation checks pass; <c>false</c>, otherwise.</returns>
-    private static bool IsValidSteamProtonLaunch(
+    internal static bool IsValidSteamProtonLaunch(
         InstallationProfile profile,
         string? steamInstallPath,
         string? loaderPath,
@@ -776,7 +806,7 @@ public class GameLauncherService
 
         if (string.IsNullOrWhiteSpace(profile.ProtonExecutable) || !File.Exists(profile.ProtonExecutable))
         {
-            error = "Proton was not found. Proton is called directly when using Steam with D2RLoader.";
+            error = "Select the Proton executable used by your base Steam D2R installation.";
             return false;
         }
 
@@ -792,8 +822,67 @@ public class GameLauncherService
             return false;
         }
 
+        var steamApps = FileService.FindAncestorDirectory(profile.InstallDirectory, SteamAppsDirName);
+        if (steamApps is null || !File.Exists(Path.Combine(steamApps, $"appmanifest_{SteamAppId}.acf")))
+        {
+            error = "Select the official Steam Diablo II: Resurrected installation inside its Steam library.";
+            return false;
+        }
+
+        if (!Directory.Exists(Path.Combine(steamApps, "compatdata", SteamAppId, "pfx")))
+        {
+            error = "Launch Diablo II: Resurrected from Steam and sign in once to initialize its authenticated Proton prefix.";
+            return false;
+        }
+
         return true;
     }
+
+    internal static bool TryDetectSteamProtonExecutable(InstallationProfile profile)
+    {
+        if (profile.Type != InstallationType.Steam || !string.IsNullOrWhiteSpace(profile.ProtonExecutable)
+            || string.IsNullOrWhiteSpace(profile.InstallDirectory))
+            return false;
+
+        try
+        {
+            var steamApps = FileService.FindAncestorDirectory(profile.InstallDirectory, SteamAppsDirName);
+            if (steamApps is null || !File.Exists(Path.Combine(steamApps, $"appmanifest_{SteamAppId}.acf")))
+                return false;
+
+            var prefix = Path.Combine(steamApps, "compatdata", SteamAppId);
+            var metadata = Path.Combine(prefix, "config_info");
+            if (!Directory.Exists(Path.Combine(prefix, "pfx")) || !File.Exists(metadata))
+                return false;
+
+            string[] suffixes = [Path.Combine("files", "share", "default_pfx"),
+                Path.Combine("files", "share", "fonts"), Path.Combine("files", "lib")];
+            var candidates = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var line in File.ReadLines(metadata).Take(128))
+            {
+                var path = line.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (!Path.IsPathRooted(path)) continue;
+                foreach (var suffix in suffixes)
+                {
+                    var tail = Path.DirectorySeparatorChar + suffix;
+                    if (!path.EndsWith(tail, StringComparison.Ordinal)) continue;
+                    var executable = Path.Combine(path[..^tail.Length], "proton");
+                    if (File.Exists(executable)) candidates.Add(executable);
+                }
+            }
+
+            if (candidates.Count != 1) return false;
+            profile.ProtonExecutable = candidates.Single();
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    internal static string BuildSteamProtonArguments(string loaderPath, string launchParameters)
+        => $"run \"{loaderPath}\" {launchParameters}";
 
     /// <summary>
     /// Populates the given <c>environment</c> with Steam Proton environment variables.
@@ -802,13 +891,13 @@ public class GameLauncherService
     /// <param name="profile">The installation profile.</param>
     /// <param name="steamInstallPath">The Steam installation path.</param>
     /// <param name="steamApps">The Steam apps directory path.</param>
-    private static void PopulateSteamProtonEnvVars(Dictionary<string, string> environment, InstallationProfile profile,
+    internal static void PopulateSteamProtonEnvVars(Dictionary<string, string> environment, InstallationProfile profile,
         string steamInstallPath, string? steamApps)
     {
         environment["SteamAppId"] = $"{SteamAppId}";
         environment["STEAM_COMPAT_APP_ID"] = $"{SteamAppId}";
         environment["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = $"{steamInstallPath}";
-        environment["STEAM_COMPAT_DATA_PATH"] = $"{steamApps}/compatdata/{SteamAppId}";
+        environment["STEAM_COMPAT_DATA_PATH"] = Path.Combine(steamApps!, "compatdata", SteamAppId);
         environment["STEAM_COMPAT_INSTALL_PATH"] = $"{profile.InstallDirectory}";
         environment["STEAM_COMPAT_LIBRARY_PATHS"] = $"{steamApps}";
     }
@@ -975,9 +1064,9 @@ public class GameLauncherService
     /// Retrieves the Steam installation path for the current user, if Steam is installed natively (no Flatpak support).
     /// </summary>
     /// <returns>The path to the Steam installation directory, or <c>null</c> if none of the standard paths exist.</returns>
-    private static string? GetSteamInstallPath()
+    internal static string? GetSteamInstallPath(string? userHome = null)
     {
-        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var homeDir = userHome ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         if (!Directory.Exists(homeDir))
         {
             return null;
@@ -985,6 +1074,7 @@ public class GameLauncherService
 
         string[] candidates = [
             Path.Combine(homeDir, ".local", "share", "Steam"),
+            Path.Combine(homeDir, ".steam", "steam"),
             Path.Combine(homeDir, ".steam", "Steam"),
             Path.Combine(homeDir, ".var", "app", "com.valvesoftware.Steam", "data", "Steam")
         ];

@@ -41,6 +41,9 @@
     </Application.Resources>
     <Application.Styles>
         <FluentTheme />
+        <Style Selector="ScrollViewer">
+            <Setter Property="AllowAutoHide" Value="False" />
+        </Style>
         <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
         <Style Selector="Window">
             <Setter Property="Background" Value="{StaticResource WindowBackgroundBrush}" />
