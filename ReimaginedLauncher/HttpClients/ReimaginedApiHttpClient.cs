@@ -120,6 +120,38 @@ public sealed class ReimaginedApiHttpClient
             timeout.Token) ?? [];
     }
 
+    public async Task<IReadOnlyList<LobbyRegionResponse>> GetLobbyRegionsAsync(
+        Guid ladderId,
+        CancellationToken cancellationToken = default)
+    {
+        using var timeout = CreateRequestTimeout(cancellationToken);
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"lobby/ladders/{ladderId}/regions");
+        request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
+        using var response = await _httpClient.SendAsync(request, timeout.Token);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<List<LobbyRegionResponse>>(JsonOptions, timeout.Token) ?? [];
+    }
+
+    /// <summary>Null when the caller is not signed in as an admin.</summary>
+    public async Task<IReadOnlyList<LobbyAdminServerResponse>?> GetLobbyAdminServersAsync(
+        Guid ladderId,
+        CancellationToken cancellationToken = default)
+    {
+        using var timeout = CreateRequestTimeout(cancellationToken);
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"lobby/ladders/{ladderId}/servers");
+        request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
+        await AuthorizeAsync(request, timeout.Token);
+        if (request.Headers.Authorization is null) return null;
+        using var response = await _httpClient.SendAsync(request, timeout.Token);
+        if (response.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+        {
+            return null;
+        }
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<List<LobbyAdminServerResponse>>(JsonOptions, timeout.Token) ?? [];
+    }
+
     /// <summary>
     /// Per-call deadline for the short JSON requests. The client itself no
     /// longer sets one, because a client-wide timeout also applies while a

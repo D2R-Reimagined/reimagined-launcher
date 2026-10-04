@@ -10,7 +10,9 @@ public sealed record ServerSavesLaunchSettings(
     string AccessToken,
     Guid? LadderId,
     string LadderLaunchTicket,
-    string StatusSessionId = "");
+    string StatusSessionId = "",
+    IReadOnlyList<string>? LobbyRegionIds = null,
+    string? LobbyServerId = null);
 
 /// <summary>
 /// Configures the Server Saves plugin supplied by the signed ladder package.
@@ -24,7 +26,8 @@ public static class ServerSavesConfigService
         "# server-saves - launcher-managed settings.\n"
         + "#\n"
         + "# The Reimagined launcher rewrites enabled, api_base_url, access_token,\n"
-        + "# ladder_id, ladder_launch_ticket and status_session_id every launch. Anything else you set\n"
+        + "# ladder_id, ladder_launch_ticket, status_session_id, lobby_region_ids and\n"
+        + "# lobby_server_id every launch. Anything else you set\n"
         + "# here is preserved, and any\n"
         + "# setting left out uses the plugin's built-in default.\n"
         + "\n";
@@ -67,7 +70,9 @@ public static class ServerSavesConfigService
             ["access_token"] = D2RLoaderPluginPackage.Quote(settings.AccessToken),
             ["ladder_id"] = D2RLoaderPluginPackage.Quote(settings.LadderId is { } ladderId ? ladderId.ToString() : string.Empty),
             ["ladder_launch_ticket"] = D2RLoaderPluginPackage.Quote(settings.LadderLaunchTicket),
-            ["status_session_id"] = D2RLoaderPluginPackage.Quote(settings.StatusSessionId)
+            ["status_session_id"] = D2RLoaderPluginPackage.Quote(settings.StatusSessionId),
+            ["lobby_region_ids"] = D2RLoaderPluginPackage.Quote(string.Join(",", settings.LobbyRegionIds ?? [])),
+            ["lobby_server_id"] = D2RLoaderPluginPackage.Quote(settings.LobbyServerId ?? string.Empty)
         };
 
         return await Package.WriteAsync(installDirectory, values, requireInstalled: true, cancellationToken);
@@ -88,7 +93,9 @@ public static class ServerSavesConfigService
             ["access_token"] = "\"\"",
             ["ladder_id"] = "\"\"",
             ["ladder_launch_ticket"] = "\"\"",
-            ["status_session_id"] = "\"\""
+            ["status_session_id"] = "\"\"",
+            ["lobby_region_ids"] = "\"\"",
+            ["lobby_server_id"] = "\"\""
         };
 
         var normalDisabled = await NormalPackage.WriteAsync(installDirectory, values, requireInstalled: false, cancellationToken);

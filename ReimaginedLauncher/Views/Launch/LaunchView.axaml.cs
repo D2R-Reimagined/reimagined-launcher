@@ -931,6 +931,7 @@ public partial class LaunchView : UserControl
 
         try
         {
+            _ = RefreshLadderRegionsAsync();
             if (_ladderLoadError is null)
                 await RefreshLadderExtensionPolicyAsync();
         }
@@ -985,6 +986,290 @@ public partial class LaunchView : UserControl
     }
 
     private int _ladderPolicyGeneration;
+    private static readonly TimeSpan LobbyPreferenceBudget = TimeSpan.FromSeconds(2);
+    private int _ladderRegionsGeneration;
+    private Guid? _ladderRegionsLadderId;
+    private IReadOnlyList<LobbyRegionResponse> _ladderRegions = [];
+    private IReadOnlyDictionary<string, double?> _ladderRegionPings = new Dictionary<string, double?>();
+    private IReadOnlyList<LobbyAdminServerResponse>? _ladderAdminServers;
+    private bool _isRefreshingRegionControls;
+
+    /// <summary>Never throws: the region picker is optional and must not disturb the ladder refresh.</summary>
+    private async Task RefreshLadderRegionsAsync(bool retest = false)
+    {
+        var generation = ++_ladderRegionsGeneration;
+        var ladder = SelectedLadder;
+        if (ladder is null)
+        {
+            _ladderRegionsLadderId = null;
+            _ladderRegions = [];
+            _ladderAdminServers = null;
+            ShowLadderRegions();
+            return;
+        }
+
+        try
+        {
+            var regions = await _apiHttpClient.GetLobbyRegionsAsync(ladder.Id);
+            if (generation != _ladderRegionsGeneration) return;
+            if (_ladderRegionsLadderId != ladder.Id) _ladderAdminServers = null;
+            _ladderRegionsLadderId = ladder.Id;
+            _ladderRegions = regions;
+            _ladderRegionPings = RegionPingService.Shared.GetLastKnown(regions);
+            ShowLadderRegions();
+            if (regions.Count == 0) return;
+
+            var adminServers = LoadLobbyAdminServersAsync(ladder.Id);
+            RetestRegionsButton.IsEnabled = false;
+            RetestRegionsButton.Content = "Testing...";
+            try
+            {
+                var pings = await RegionPingService.Shared.MeasureAsync(regions, retest);
+                if (generation != _ladderRegionsGeneration) return;
+                _ladderRegionPings = pings;
+                ShowLadderRegions();
+            }
+            finally
+            {
+                RetestRegionsButton.IsEnabled = true;
+                RetestRegionsButton.Content = "Re-test";
+            }
+
+            var servers = await adminServers;
+            if (generation != _ladderRegionsGeneration) return;
+            _ladderAdminServers = servers;
+            ShowLadderServerPin();
+        }
+        catch (Exception exception)
+        {
+            if (generation != _ladderRegionsGeneration) return;
+            _ladderRegionsLadderId = null;
+            _ladderRegions = [];
+            _ladderAdminServers = null;
+            ShowLadderRegions();
+            LaunchDiagnostics.LogException("Failed to load lobby regions", exception);
+        }
+    }
+
+    private async Task<IReadOnlyList<LobbyAdminServerResponse>?> LoadLobbyAdminServersAsync(
+        Guid ladderId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await _apiHttpClient.GetLobbyAdminServersAsync(ladderId, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            LaunchDiagnostics.Log($"Lobby admin servers unavailable: {exception.Message}");
+            return null;
+        }
+    }
+
+    private void ShowLadderRegions()
+    {
+        if (SelectedLadder is not { } ladder || _ladderRegionsLadderId != ladder.Id || _ladderRegions.Count == 0)
+        {
+            LadderRegionsItemsControl.ItemsSource = null;
+            LadderRegionsPanel.IsVisible = false;
+            LadderServerPinPanel.IsVisible = false;
+            return;
+        }
+
+        var stored = GetStoredLadderRegions(ladder.Id);
+        var selected = LobbyRegionSelection.Effective(_ladderRegions, _ladderRegionPings, stored);
+        LadderRegionsItemsControl.ItemsSource = _ladderRegions
+            .Select(region => new LobbyRegionChoice
+            {
+                Id = region.Id,
+                Name = region.Name,
+                IsAvailable = region.Available,
+                IsMeasured = _ladderRegionPings.ContainsKey(region.Id),
+                PingMs = _ladderRegionPings.GetValueOrDefault(region.Id),
+                IsSelected = selected.Contains(region.Id),
+                CanToggle = !(selected.Count == 1 && selected.Contains(region.Id))
+            })
+            .ToArray();
+        var isCustom = LobbyRegionSelection.IsCustom(_ladderRegions, stored);
+        LadderRegionsModeText.Text = isCustom
+            ? "Custom selection"
+            : $"Automatic: the {LobbyRegionSelection.AutomaticRegionCount} fastest regions";
+        UseFastestRegionsButton.IsVisible = isCustom;
+        LadderRegionsPanel.IsVisible = true;
+        ShowLadderServerPin();
+    }
+
+    private void ShowLadderServerPin()
+    {
+        if (_ladderAdminServers is null || !LadderRegionsPanel.IsVisible || SelectedLadder is not { } ladder)
+        {
+            LadderServerPinPanel.IsVisible = false;
+            return;
+        }
+
+        var regionNames = _ladderRegions
+            .GroupBy(region => region.Id, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First().Name, StringComparer.Ordinal);
+        var choices = new List<LobbyServerChoice> { LobbyServerChoice.Automatic };
+        choices.AddRange(_ladderAdminServers.Select(server => LobbyServerChoice.From(server, regionNames)));
+        var pinned = GetPinnedLadderServer(ladder.Id);
+        var current = LadderServerPinComboBox.ItemsSource as IReadOnlyList<LobbyServerChoice>;
+        _isRefreshingRegionControls = true;
+        try
+        {
+            if (current is null || !current.Select(choice => (choice.Id, choice.Label))
+                    .SequenceEqual(choices.Select(choice => (choice.Id, choice.Label))))
+            {
+                LadderServerPinComboBox.ItemsSource = choices;
+                current = choices;
+            }
+
+            LadderServerPinComboBox.SelectedItem = current.FirstOrDefault(choice => choice.Id == pinned) ?? current[0];
+        }
+        finally
+        {
+            _isRefreshingRegionControls = false;
+        }
+
+        LadderServerPinPanel.IsVisible = true;
+    }
+
+    private async void OnLadderRegionSelectionChanged(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not CheckBox { DataContext: LobbyRegionChoice choice } checkBox
+            || SelectedLadder is not { } ladder
+            || _ladderRegionsLadderId != ladder.Id)
+        {
+            return;
+        }
+
+        var selected = LobbyRegionSelection.Effective(
+            _ladderRegions, _ladderRegionPings, GetStoredLadderRegions(ladder.Id));
+        var next = LobbyRegionSelection.Toggle(selected, choice.Id, checkBox.IsChecked == true);
+        if (next is null)
+        {
+            checkBox.IsChecked = true;
+            return;
+        }
+
+        var profile = MainWindow.Settings.CurrentProfile;
+        profile.SelectedLadderRegions ??= [];
+        profile.SelectedLadderRegions[ladder.Id.ToString("N")] = next;
+        ShowLadderRegions();
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private async void OnUseFastestRegionsClick(object? sender, RoutedEventArgs e)
+    {
+        if (SelectedLadder is not { } ladder) return;
+        MainWindow.Settings.CurrentProfile.SelectedLadderRegions?.Remove(ladder.Id.ToString("N"));
+        ShowLadderRegions();
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private async void OnRetestRegionsClick(object? sender, RoutedEventArgs e)
+    {
+        await RefreshLadderRegionsAsync(retest: true);
+    }
+
+    private async void OnLadderServerPinSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_isRefreshingRegionControls
+            || LadderServerPinComboBox.SelectedItem is not LobbyServerChoice choice
+            || SelectedLadder is not { } ladder)
+        {
+            return;
+        }
+
+        var profile = MainWindow.Settings.CurrentProfile;
+        profile.PinnedLadderServers ??= [];
+        var key = ladder.Id.ToString("N");
+        if (choice.Id is null)
+        {
+            if (!profile.PinnedLadderServers.Remove(key)) return;
+        }
+        else
+        {
+            if (profile.PinnedLadderServers.GetValueOrDefault(key) == choice.Id) return;
+            profile.PinnedLadderServers[key] = choice.Id;
+        }
+
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private static List<string>? GetStoredLadderRegions(Guid ladderId)
+    {
+        var selections = MainWindow.Settings.CurrentProfile.SelectedLadderRegions ??= [];
+        return selections.GetValueOrDefault(ladderId.ToString("N"));
+    }
+
+    private static string? GetPinnedLadderServer(Guid ladderId)
+    {
+        var pins = MainWindow.Settings.CurrentProfile.PinnedLadderServers ??= [];
+        return pins.GetValueOrDefault(ladderId.ToString("N"));
+    }
+
+    /// <summary>
+    /// The lobby preference handed to the plugin. Bounded so it never holds the
+    /// launch up for long, and any failure just leaves both values empty.
+    /// </summary>
+    private async Task<(IReadOnlyList<string> RegionIds, string ServerId)> ResolveLobbyPreferenceAsync(LadderResponse ladder)
+    {
+        try
+        {
+            using var budget = new CancellationTokenSource(LobbyPreferenceBudget);
+            var pinned = GetPinnedLadderServer(ladder.Id);
+            var adminServers = string.IsNullOrWhiteSpace(pinned)
+                ? Task.FromResult<IReadOnlyList<LobbyAdminServerResponse>?>(null)
+                : LoadLobbyAdminServersAsync(ladder.Id, budget.Token);
+
+            IReadOnlyList<string> regionIds = [];
+            try
+            {
+                var regions = _ladderRegionsLadderId == ladder.Id
+                    ? _ladderRegions
+                    : await _apiHttpClient.GetLobbyRegionsAsync(ladder.Id, budget.Token);
+                if (regions.Count > 0)
+                {
+                    IReadOnlyDictionary<string, double?> pings;
+                    try
+                    {
+                        pings = await RegionPingService.Shared.MeasureAsync(regions).WaitAsync(budget.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        pings = RegionPingService.Shared.GetLastKnown(regions);
+                    }
+
+                    var selected = LobbyRegionSelection.Effective(regions, pings, GetStoredLadderRegions(ladder.Id));
+                    regionIds = LobbyRegionSelection.OrderForLaunch(selected, regions, pings);
+                }
+            }
+            catch (Exception exception)
+            {
+                LaunchDiagnostics.Log($"Lobby regions unavailable at launch: {exception.Message}");
+            }
+
+            var serverId = string.Empty;
+            try
+            {
+                if (await adminServers is { } servers && servers.Any(server => server.Id == pinned))
+                    serverId = pinned!;
+            }
+            catch (OperationCanceledException)
+            {
+                LaunchDiagnostics.Log("Lobby admin servers did not answer in time; the server pin is skipped.");
+            }
+
+            LaunchDiagnostics.Log($"Lobby preference: regions [{string.Join(",", regionIds)}], server \"{serverId}\".");
+            return (regionIds, serverId);
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.LogException("Failed to resolve the lobby region preference", exception);
+            return ([], string.Empty);
+        }
+    }
 
     private void ShowLadderBundleReadiness(LadderBundleReadiness readiness)
     {
@@ -1336,6 +1621,7 @@ public partial class LaunchView : UserControl
 
         MainWindow.Settings.CurrentProfile.SelectedLadderId = ladder.Id;
         await SettingsManager.SaveAsync(MainWindow.Settings);
+        _ = RefreshLadderRegionsAsync();
         await RefreshLadderExtensionPolicyAsync();
         RefreshInstallDirectoryState();
     }
@@ -2474,12 +2760,15 @@ public partial class LaunchView : UserControl
                 accessToken);
 
             var statusSessionId = Guid.NewGuid().ToString("N");
+            var lobbyPreference = await ResolveLobbyPreferenceAsync(ladder);
             var settings = new ServerSavesLaunchSettings(
                 _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority),
                 accessToken,
                 ladder.Id,
                 launchTicket.LaunchTicket,
-                statusSessionId);
+                statusSessionId,
+                lobbyPreference.RegionIds,
+                lobbyPreference.ServerId);
             if (!await ServerSavesConfigService.EnableAsync(profile.InstallDirectory, settings))
             {
                 const string message = "The server-saves plugin configuration could not be written.";

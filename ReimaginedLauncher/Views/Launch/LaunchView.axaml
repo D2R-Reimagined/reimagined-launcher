@@ -299,6 +299,56 @@
                             </StackPanel>
                         </StackPanel>
                     </Border>
+                    <Border x:Name="LadderRegionsPanel" Classes="extension-card" Padding="12" IsVisible="False">
+                        <StackPanel Spacing="8">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                <StackPanel Spacing="3">
+                                    <TextBlock Text="Server regions" FontWeight="SemiBold" />
+                                    <WrapPanel Orientation="Horizontal">
+                                        <TextBlock x:Name="LadderRegionsModeText" Classes="muted" TextWrapping="Wrap"
+                                                   VerticalAlignment="Center" Margin="0,0,8,0" />
+                                        <Button x:Name="UseFastestRegionsButton" Content="Use the 2 fastest"
+                                                Padding="8,2" FontSize="12" IsVisible="False"
+                                                Click="OnUseFastestRegionsClick" />
+                                    </WrapPanel>
+                                </StackPanel>
+                                <Button x:Name="RetestRegionsButton" Grid.Column="1" Content="Re-test"
+                                        VerticalAlignment="Top" Click="OnRetestRegionsClick" />
+                            </Grid>
+                            <ItemsControl x:Name="LadderRegionsItemsControl">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="httpModels:LobbyRegionChoice">
+                                        <CheckBox IsChecked="{Binding IsSelected, Mode=OneWay}"
+                                                  IsEnabled="{Binding CanToggle}"
+                                                  Click="OnLadderRegionSelectionChanged">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                <Border Background="{StaticResource AccentSoftBrush}" CornerRadius="8" Padding="6,2"
+                                                        IsVisible="{Binding IsAvailable}">
+                                                    <TextBlock Text="{Binding Badge}" Classes="scope-label" />
+                                                </Border>
+                                                <Border Background="#4A241C" CornerRadius="8" Padding="6,2"
+                                                        IsVisible="{Binding IsOffline}">
+                                                    <TextBlock Text="{Binding Badge}" Classes="scope-label" />
+                                                </Border>
+                                            </StackPanel>
+                                        </CheckBox>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <StackPanel x:Name="LadderServerPinPanel" Orientation="Horizontal" Spacing="10" IsVisible="False">
+                                <TextBlock Text="Pin server" Classes="muted" VerticalAlignment="Center" />
+                                <ComboBox x:Name="LadderServerPinComboBox" MinWidth="280"
+                                          SelectionChanged="OnLadderServerPinSelectionChanged">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate x:DataType="httpModels:LobbyServerChoice">
+                                            <TextBlock Text="{Binding Label}" />
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
                     <TextBlock x:Name="LadderExtensionPolicyStatusText" Classes="muted" TextWrapping="Wrap"
                                Text="Checking installed D2RLoader extensions..." />
                     <Border x:Name="UnapprovedLadderExtensionsSummaryBanner" Classes="warning-banner"

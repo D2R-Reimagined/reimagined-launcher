@@ -51,6 +51,53 @@ public sealed class ServerSavesConfigServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task EnablingWritesTheLobbyRegionPreferenceAndServerPin()
+    {
+        InstallPlugin(ModLoaderRoot);
+
+        Assert.True(await ServerSavesConfigService.EnableAsync(
+            _installDirectory,
+            new ServerSavesLaunchSettings("http://localhost:5000", "token-abc", Ladder, "ticket-abc", "session-abc",
+                ["na-east", "eu-west"], "vps2")));
+
+        var toml = await File.ReadAllTextAsync(ModConfigPath);
+        Assert.Contains("lobby_region_ids = \"na-east,eu-west\"", toml);
+        Assert.Contains("lobby_server_id = \"vps2\"", toml);
+    }
+
+    [Fact]
+    public async Task EnablingWithoutALobbyPreferenceWritesEmptyStrings()
+    {
+        InstallPlugin(ModLoaderRoot);
+
+        Assert.True(await ServerSavesConfigService.EnableAsync(
+            _installDirectory,
+            new ServerSavesLaunchSettings("http://localhost:5000", "token-abc", Ladder, "ticket-abc")));
+
+        var toml = await File.ReadAllTextAsync(ModConfigPath);
+        Assert.Contains("lobby_region_ids = \"\"", toml);
+        Assert.Contains("lobby_server_id = \"\"", toml);
+    }
+
+    [Fact]
+    public async Task DisablingClearsTheLobbyPreference()
+    {
+        InstallPlugin(ModLoaderRoot);
+        await ServerSavesConfigService.EnableAsync(
+            _installDirectory,
+            new ServerSavesLaunchSettings("http://localhost:5000", "token-abc", Ladder, "ticket-abc", "",
+                ["na-east"], "vps2"));
+
+        Assert.True(await ServerSavesConfigService.DisableAsync(_installDirectory));
+
+        var toml = await File.ReadAllTextAsync(ModConfigPath);
+        Assert.Contains("lobby_region_ids = \"\"", toml);
+        Assert.Contains("lobby_server_id = \"\"", toml);
+        Assert.DoesNotContain("na-east", toml);
+        Assert.DoesNotContain("vps2", toml);
+    }
+
+    [Fact]
     public async Task EnablingIsRefusedWhenThePluginIsNotInstalled()
     {
         Assert.False(await ServerSavesConfigService.EnableAsync(
