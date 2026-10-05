@@ -416,6 +416,9 @@ public sealed class LadderBundleServiceTests : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(config)!);
         await File.WriteAllTextAsync(config, "enabled = true");
         await File.WriteAllTextAsync(
+            Path.Combine(Path.GetDirectoryName(config)!, "controller-qol-updates.toml"),
+            "enabled = true");
+        await File.WriteAllTextAsync(
             Path.Combine(Path.GetDirectoryName(config)!, "announcements.toml"),
             "enabled = true");
         var logs = Path.Combine(
