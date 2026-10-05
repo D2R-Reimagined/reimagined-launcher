@@ -1573,7 +1573,7 @@ public partial class LaunchView : UserControl
             var readiness = await _ladderBundleService.GetReadinessAsync(installDirectory, bundle,
                 allowedExtensions: ladder.AllowedExtensions, selectedExtensionIds: selectedIds);
             if (readiness.RequiresBundleRepair)
-                await _ladderBundleService.InstallOrRepairAsync(installDirectory, bundle, progress);
+                await Task.Run(() => _ladderBundleService.InstallOrRepairAsync(installDirectory, bundle, progress));
             await LadderOptionalExtensionService.SynchronizeAsync(installDirectory!, bundle,
                 ladder.AllowedExtensions, selectedIds,
                 (extension, token) => _apiHttpClient.DownloadOptionalExtensionAsync(ladder.Id, extension, progress, token), progress);
