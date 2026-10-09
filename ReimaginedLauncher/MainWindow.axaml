@@ -59,6 +59,7 @@
                             <TextBlock Text="Launcher"
                                        FontWeight="SemiBold"
                                        Foreground="{StaticResource GoldBrush}" />
+                            <Button Content="Exit Launcher" Click="OnExitLauncherClick" />
                         </StackPanel>
 
                         <Border Grid.Row="1"

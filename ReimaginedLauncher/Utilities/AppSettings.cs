@@ -50,6 +50,7 @@ public class InstallationProfile
     public Dictionary<string, string> PinnedLadderServers { get; set; } = [];
     public string? InstallDirectory { get; set; }
     public string? SteamDirectory { get; set; }
+    public string? ProtonExecutable { get; set; }
 
     // The id drives the launch URI; the slug locates the game's YAML config.
     public int? LutrisGameId { get; set; }

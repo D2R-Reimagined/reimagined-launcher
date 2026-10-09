@@ -180,23 +180,31 @@ public partial class MainWindow : Window
         //
         // Skipped while D2R is running: that session read modinfo.json at startup
         // and may be a ladder session still writing into the ladder folder.
-        if (!IsGameRunning())
+        async Task RestoreStartupFilesAsync()
         {
-            if (profile.LaunchExperience != LaunchExperience.Ladder && profile.InstallDirectory is not null)
+            if (!IsGameRunning())
             {
-                try
+                if (profile.LaunchExperience != LaunchExperience.Ladder && profile.InstallDirectory is not null)
                 {
-                    NormalModInstallationService.Restore(profile.InstallDirectory);
+                    try
+                    {
+                        NormalModInstallationService.Restore(profile.InstallDirectory);
+                    }
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+                    {
+                        LaunchDiagnostics.LogException("Could not restore the normal mod installation during startup", exception);
+                    }
                 }
-                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
-                {
-                    LaunchDiagnostics.LogException("Could not restore the normal mod installation during startup", exception);
-                }
+                await LadderSaveDirectoryService.RestoreIfRedirectedAsync(profile.InstallDirectory);
             }
-            await LadderSaveDirectoryService.RestoreIfRedirectedAsync(profile.InstallDirectory);
+
+            await CleanUpSessionSecretsAsync(deleteSessionFiles: !IsGameRunning());
         }
 
-        await CleanUpSessionSecretsAsync(deleteSessionFiles: !IsGameRunning());
+        if (OperatingSystem.IsLinux())
+            await SteamGameHandoff.RunStartupMaintenanceAsync(RestoreStartupFilesAsync);
+        else
+            await RestoreStartupFilesAsync();
 
         // Resolve local mod state and refresh the current view immediately,
         // before any potentially-slow network calls.
@@ -1585,6 +1593,8 @@ public partial class MainWindow : Window
         _saveWindowStateTimer?.Start();
     }
 
+    private void OnExitLauncherClick(object? sender, RoutedEventArgs e) => ExitFromTray();
+
     private void ExitFromTray()
     {
         Dispatcher.UIThread.Post(() =>
@@ -1632,6 +1642,9 @@ public partial class MainWindow : Window
             {
                 // When launched via Steam, the returned process is Steam.exe, not the game.
                 // Poll briefly to find the actual D2R.exe process by its executable path.
+                //
+                // When launched via Proton, the returned process is python*, not the game, but it's a specific instance
+                // so it's ok to wait for its exit.
                 processToWatch = gameProcess;
                 if (!string.IsNullOrEmpty(expectedExePath))
                 {
@@ -1667,6 +1680,16 @@ public partial class MainWindow : Window
     {
         try
         {
+            if (OperatingSystem.IsLinux())
+            {
+                foreach (var profile in Settings.Profiles)
+                {
+                    if (string.IsNullOrWhiteSpace(profile.InstallDirectory)) continue;
+                    if (SteamGameHandoff.FindGameProcesses(Path.Combine(profile.InstallDirectory, "D2R.exe")).Length != 0
+                        || SteamGameHandoff.FindGameProcesses(Path.Combine(profile.InstallDirectory, "D2RLoader.exe")).Length != 0)
+                        return true;
+                }
+            }
             // Under Wine the game usually shows up as "D2R.exe", which a
             // "D2R" lookup misses - and the startup cleanup would then delete a
             // live session's secrets file.

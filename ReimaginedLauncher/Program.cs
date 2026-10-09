@@ -19,6 +19,23 @@ class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        if (OperatingSystem.IsLinux() && args.Length > 0 && args[0] is "--steam-game" or "--install-steam-handoff")
+        {
+            try
+            {
+                if (args[0] == "--steam-game" && args.Length == 2)
+                    Environment.ExitCode = SteamGameHandoff.RunGame(args[1]);
+                else if (args[0] == "--install-steam-handoff" && args.Length == 4)
+                    SteamGameHandoff.Install(args[1], args[2], args[3]);
+                else throw new ArgumentException("Invalid Steam handoff command arguments.");
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine(exception.Message);
+                Environment.ExitCode = 1;
+            }
+            return;
+        }
         VelopackApp.Build().Run();
 
         var services = new ServiceCollection();
