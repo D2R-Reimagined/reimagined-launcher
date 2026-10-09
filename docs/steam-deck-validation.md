@@ -30,3 +30,11 @@ The Mouse Only option is now checked by default and has been compiled; the under
 - A background NonSteamLaunchers scanner on the test Deck treated non-executable shortcut files as uninitialized. Preserving the original Linux file permissions during atomic replacement prevented its rewrite. The fix is generic and requires no NonSteamLaunchers installation.
 
 Temporary tracing, Decky-dependent diagnostic shortcuts, machine-specific shortcut IDs, and manual Gamescope focus changes are not runtime dependencies. Flatpak Steam Online/Ladder and Gaming Mode shortcut registration remain unsupported. Follow [the setup guide](steam-deck-setup.md).
+
+## 2026-10-09: integration with current main
+
+Merged main at `46cd21a` (release CI version 0.16.11). Kept the project version exactly as main; future version changes remain owned by release CI. Combined profile-path Wine detection with main's D2R/D2R.exe fallback. The Steam handoff now retains main's token-ownership assignment and passes the installation directory and game token to the exit watcher. Confirmed handoff exit participates in main's session-secret cleanup; unconfirmed exit preserves the existing upstream policy. Non-handoff executable tracking retains main's implementation.
+
+The Deck was unavailable and the tester requested skipping live validation. Earlier Deck results above apply to the earlier build; this new integration is covered by automated tests and Linux publishing, without a new live launch/return claim.
+
+Final merged-build validation: all 512 tests passed, and self-contained Linux Production publish succeeded. No live Deck test was performed for this integration.

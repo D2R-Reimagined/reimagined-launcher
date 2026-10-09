@@ -14,8 +14,12 @@ public static class AnnouncementsConfigService
     private const string ManagedHeader =
         "# announcements - launcher-managed settings.\n"
         + "#\n"
-        + "# The Reimagined launcher rewrites enabled, api_base_url, access_token and ladder_id\n"
-        + "# every launch. Anything else you set here is preserved, and any setting\n"
+        + "# The Reimagined launcher rewrites enabled, api_base_url and ladder_id every\n"
+        + "# launch, and always leaves access_token empty: account secrets come from\n"
+        + "# <install>/reimagined-secrets/session.toml, outside mods/, so they are never\n"
+        + "# shared with other players.\n"
+        + "#\n"
+        + "# Anything else you set here is preserved, and any setting\n"
         + "# left out uses the plugin's built-in default - including default_sender,\n"
         + "# max_queued_messages and the colour bytes.\n"
         + "\n";
@@ -54,7 +58,7 @@ public static class AnnouncementsConfigService
         {
             ["enabled"] = "true",
             ["api_base_url"] = D2RLoaderPluginPackage.Quote(D2RLoaderPluginPackage.NormalizeBaseUrl(settings.ApiBaseUrl)),
-            ["access_token"] = D2RLoaderPluginPackage.Quote(settings.AccessToken ?? string.Empty),
+            ["access_token"] = D2RLoaderPluginPackage.BlankSecret,
             ["ladder_id"] = D2RLoaderPluginPackage.Quote(experience == LaunchExperience.Ladder ? settings.LadderId ?? string.Empty : string.Empty)
         };
 
@@ -67,7 +71,7 @@ public static class AnnouncementsConfigService
         var values = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["enabled"] = "false",
-            ["access_token"] = "\"\""
+            ["access_token"] = D2RLoaderPluginPackage.BlankSecret
         };
 
         var normalDisabled = await NormalPackage.WriteAsync(installDirectory, values, requireInstalled: false, cancellationToken);

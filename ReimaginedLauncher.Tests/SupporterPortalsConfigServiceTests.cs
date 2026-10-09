@@ -54,7 +54,8 @@ public sealed class SupporterPortalsConfigServiceTests : IDisposable
 
         var toml = await File.ReadAllTextAsync(ConfigPathIn(loaderRoot));
         Assert.Contains($"api_base_url = \"{ApiBaseUrl}\"", toml, StringComparison.Ordinal);
-        Assert.Contains($"access_token = \"{AccessToken}\"", toml, StringComparison.Ordinal);
+        Assert.Contains("access_token = \"\"", toml, StringComparison.Ordinal);
+        Assert.DoesNotContain(AccessToken, toml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -138,7 +139,8 @@ public sealed class SupporterPortalsConfigServiceTests : IDisposable
         Assert.Contains("# my notes", toml, StringComparison.Ordinal);
         Assert.Contains("custom_setting = \"preserved\"", toml, StringComparison.Ordinal);
         Assert.Contains("custom_number = 9", toml, StringComparison.Ordinal);
-        Assert.Contains($"access_token = \"{AccessToken}\"", toml, StringComparison.Ordinal);
+        Assert.Contains("access_token = \"\"", toml, StringComparison.Ordinal);
+        Assert.DoesNotContain(AccessToken, toml, StringComparison.Ordinal);
         Assert.DoesNotContain("\"stale\"", toml, StringComparison.Ordinal);
     }
 

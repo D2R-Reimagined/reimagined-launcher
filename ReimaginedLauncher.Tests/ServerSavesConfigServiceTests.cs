@@ -32,7 +32,7 @@ public sealed class ServerSavesConfigServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task EnablingWritesTheLaunchSettingsWhenThePluginIsInstalled()
+    public async Task EnablingWritesTheLaunchSettingsButNeverTheSecretsWhenThePluginIsInstalled()
     {
         InstallPlugin(ModLoaderRoot);
 
@@ -44,10 +44,61 @@ public sealed class ServerSavesConfigServiceTests : IDisposable
         var toml = await File.ReadAllTextAsync(ModConfigPath);
         Assert.Contains("enabled = true", toml);
         Assert.Contains("api_base_url = \"http://localhost:5000\"", toml);
-        Assert.Contains("access_token = \"token-abc\"", toml);
         Assert.Contains($"ladder_id = \"{Ladder}\"", toml);
-        Assert.Contains("ladder_launch_ticket = \"ticket-abc\"", toml);
-        Assert.Contains("status_session_id = \"session-abc\"", toml);
+        // Secrets live in <install>/reimagined-secrets/session.toml, never under mods/.
+        Assert.Contains("access_token = \"\"", toml);
+        Assert.Contains("ladder_launch_ticket = \"\"", toml);
+        Assert.Contains("status_session_id = \"\"", toml);
+        Assert.DoesNotContain("token-abc", toml);
+        Assert.DoesNotContain("ticket-abc", toml);
+        Assert.DoesNotContain("session-abc", toml);
+    }
+
+    [Fact]
+    public async Task EnablingWritesTheLobbyRegionPreferenceAndServerPin()
+    {
+        InstallPlugin(ModLoaderRoot);
+
+        Assert.True(await ServerSavesConfigService.EnableAsync(
+            _installDirectory,
+            new ServerSavesLaunchSettings("http://localhost:5000", "token-abc", Ladder, "ticket-abc", "session-abc",
+                ["na-east", "eu-west"], "vps2")));
+
+        var toml = await File.ReadAllTextAsync(ModConfigPath);
+        Assert.Contains("lobby_region_ids = \"na-east,eu-west\"", toml);
+        Assert.Contains("lobby_server_id = \"vps2\"", toml);
+    }
+
+    [Fact]
+    public async Task EnablingWithoutALobbyPreferenceWritesEmptyStrings()
+    {
+        InstallPlugin(ModLoaderRoot);
+
+        Assert.True(await ServerSavesConfigService.EnableAsync(
+            _installDirectory,
+            new ServerSavesLaunchSettings("http://localhost:5000", "token-abc", Ladder, "ticket-abc")));
+
+        var toml = await File.ReadAllTextAsync(ModConfigPath);
+        Assert.Contains("lobby_region_ids = \"\"", toml);
+        Assert.Contains("lobby_server_id = \"\"", toml);
+    }
+
+    [Fact]
+    public async Task DisablingClearsTheLobbyPreference()
+    {
+        InstallPlugin(ModLoaderRoot);
+        await ServerSavesConfigService.EnableAsync(
+            _installDirectory,
+            new ServerSavesLaunchSettings("http://localhost:5000", "token-abc", Ladder, "ticket-abc", "",
+                ["na-east"], "vps2"));
+
+        Assert.True(await ServerSavesConfigService.DisableAsync(_installDirectory));
+
+        var toml = await File.ReadAllTextAsync(ModConfigPath);
+        Assert.Contains("lobby_region_ids = \"\"", toml);
+        Assert.Contains("lobby_server_id = \"\"", toml);
+        Assert.DoesNotContain("na-east", toml);
+        Assert.DoesNotContain("vps2", toml);
     }
 
     [Fact]

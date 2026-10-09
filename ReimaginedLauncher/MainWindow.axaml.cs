@@ -196,6 +196,8 @@ public partial class MainWindow : Window
             await LadderSaveDirectoryService.RestoreIfRedirectedAsync(profile.InstallDirectory);
         }
 
+        await CleanUpSessionSecretsAsync(deleteSessionFiles: !IsGameRunning());
+
         // Resolve local mod state and refresh the current view immediately,
         // before any potentially-slow network calls.
         var installDir = Settings.CurrentProfile.InstallDirectory;
@@ -1271,7 +1273,53 @@ public partial class MainWindow : Window
         }
         finally
         {
+            // Signing out ends the account's game session too, running or not.
+            foreach (var installDirectory in KnownInstallDirectories())
+            {
+                GameSessionSecretsService.Delete(installDirectory);
+            }
+
             RefreshReimaginedAccountUI();
+        }
+    }
+
+    /// <summary>
+    /// Every install directory a profile points at, so cleanup reaches installs
+    /// the player is not currently using.
+    /// </summary>
+    private static List<string> KnownInstallDirectories()
+    {
+        return Settings.Profiles
+            .Select(profile => InstallDirectoryValidator.NormalizeInstallDirectory(profile.InstallDirectory))
+            .Where(directory => !string.IsNullOrWhiteSpace(directory))
+            .Select(directory => directory!)
+            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Blanks account secrets an older launcher left in plugin configs under
+    /// mods/ - D2RLoader can hand that folder to joining players - and, when no
+    /// game is running, deletes a session secrets file a crash or a closed
+    /// launcher left behind. The file is kept while a game runs, because that
+    /// session's plugins are still reading it.
+    /// </summary>
+    private static async Task CleanUpSessionSecretsAsync(bool deleteSessionFiles)
+    {
+        foreach (var installDirectory in KnownInstallDirectories())
+        {
+            try
+            {
+                await GameSessionSecretsService.ScrubPluginConfigsAsync(installDirectory);
+                if (deleteSessionFiles)
+                {
+                    GameSessionSecretsService.Delete(installDirectory);
+                }
+            }
+            catch (Exception exception)
+            {
+                LaunchDiagnostics.LogException("Could not clean up session secrets during startup", exception);
+            }
         }
     }
 
@@ -1634,13 +1682,21 @@ public partial class MainWindow : Window
                         return true;
                 }
             }
-            var running = Process.GetProcessesByName("D2R");
-            foreach (var process in running)
+            // Under Wine the game usually shows up as "D2R.exe", which a
+            // "D2R" lookup misses - and the startup cleanup would then delete a
+            // live session's secrets file.
+            var count = 0;
+            foreach (var name in OperatingSystem.IsWindows() ? new[] { "D2R" } : new[] { "D2R", "D2R.exe" })
             {
-                process.Dispose();
+                var running = Process.GetProcessesByName(name);
+                count += running.Length;
+                foreach (var process in running)
+                {
+                    process.Dispose();
+                }
             }
 
-            return running.Length > 0;
+            return count > 0;
         }
         catch (InvalidOperationException)
         {
@@ -1652,13 +1708,15 @@ public partial class MainWindow : Window
     /// The Lutris client the launcher starts may exit immediately after handing
     /// off or outlive the session, so the game process is watched instead.
     /// </summary>
-    public async Task MinimizeToTrayAndWaitForLutrisExitAsync(string? gameExePath)
+    /// <returns>True only when the game session was found and its end observed.</returns>
+    public async Task<bool> MinimizeToTrayAndWaitForLutrisExitAsync(string? gameExePath)
     {
         MinimizeToTray();
 
+        var exited = false;
         try
         {
-            await LutrisService.WaitForGameSessionAsync(gameExePath, TimeSpan.FromMinutes(2));
+            exited = await LutrisService.WaitForGameSessionAsync(gameExePath, TimeSpan.FromMinutes(2));
         }
         catch (Exception ex)
         {
@@ -1666,6 +1724,7 @@ public partial class MainWindow : Window
         }
 
         RestoreFromTray();
+        return exited;
     }
 
     private static Process? WaitForProcessByPath(string exePath, TimeSpan timeout)

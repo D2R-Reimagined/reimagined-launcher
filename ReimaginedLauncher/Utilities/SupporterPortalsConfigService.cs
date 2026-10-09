@@ -12,7 +12,13 @@ public static class SupporterPortalsConfigService
     public const string PluginFileName = "d2rl-supporter-portals.dll";
 
     private const string ManagedHeader =
-        "# supporter-portals - launcher-managed API address and access token.\n\n";
+        "# supporter-portals - launcher-managed API address.\n"
+        + "#\n"
+        + "# The Reimagined launcher rewrites api_base_url every launch, and always\n"
+        + "# leaves access_token empty: account secrets come from\n"
+        + "# <install>/reimagined-secrets/session.toml, outside mods/, so they are never\n"
+        + "# shared with other players.\n"
+        + "\n";
 
     private static readonly D2RLoaderPluginPackage NormalPackage = new(PluginId, PluginFileName, ManagedHeader);
     private static readonly D2RLoaderPluginPackage LadderPackage = new(PluginId, PluginFileName, ManagedHeader, modName: ModInstallationPaths.LadderModName);
@@ -47,7 +53,7 @@ public static class SupporterPortalsConfigService
         var values = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["api_base_url"] = D2RLoaderPluginPackage.Quote(D2RLoaderPluginPackage.NormalizeBaseUrl(settings.ApiBaseUrl)),
-            ["access_token"] = D2RLoaderPluginPackage.Quote(settings.AccessToken)
+            ["access_token"] = D2RLoaderPluginPackage.BlankSecret
         };
 
         return await PackageFor(experience).WriteAsync(installDirectory, values, requireInstalled: true, cancellationToken);
@@ -58,7 +64,7 @@ public static class SupporterPortalsConfigService
     {
         var values = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["access_token"] = "\"\""
+            ["access_token"] = D2RLoaderPluginPackage.BlankSecret
         };
 
         var normalDisabled = await NormalPackage.WriteAsync(installDirectory, values, requireInstalled: false, cancellationToken);

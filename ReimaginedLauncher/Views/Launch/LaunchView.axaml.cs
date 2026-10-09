@@ -47,6 +47,11 @@ public partial class LaunchView : UserControl
     private bool? _isCompactLayout;
     private readonly DispatcherTimer _ladderScheduleTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private ServerSaveMonitor? _preparedServerSaves;
+    // The secrets this launch hands to the game, gathered while preparing and
+    // written to the session file (outside mods/) just before the process starts.
+    private GameSessionToken? _launchGameToken;
+    private string? _launchLadderTicket;
+    private string? _launchStatusSessionId;
     private LadderLaunchSchedule? _ladderSchedule;
     private long _lastLadderRefresh;
     private TimeSpan _ladderRefreshInterval;
@@ -965,6 +970,7 @@ public partial class LaunchView : UserControl
 
         try
         {
+            _ = RefreshLadderRegionsAsync();
             if (_ladderLoadError is null)
                 await RefreshLadderExtensionPolicyAsync();
         }
@@ -1019,6 +1025,290 @@ public partial class LaunchView : UserControl
     }
 
     private int _ladderPolicyGeneration;
+    private static readonly TimeSpan LobbyPreferenceBudget = TimeSpan.FromSeconds(2);
+    private int _ladderRegionsGeneration;
+    private Guid? _ladderRegionsLadderId;
+    private IReadOnlyList<LobbyRegionResponse> _ladderRegions = [];
+    private IReadOnlyDictionary<string, double?> _ladderRegionPings = new Dictionary<string, double?>();
+    private IReadOnlyList<LobbyAdminServerResponse>? _ladderAdminServers;
+    private bool _isRefreshingRegionControls;
+
+    /// <summary>Never throws: the region picker is optional and must not disturb the ladder refresh.</summary>
+    private async Task RefreshLadderRegionsAsync(bool retest = false)
+    {
+        var generation = ++_ladderRegionsGeneration;
+        var ladder = SelectedLadder;
+        if (ladder is null)
+        {
+            _ladderRegionsLadderId = null;
+            _ladderRegions = [];
+            _ladderAdminServers = null;
+            ShowLadderRegions();
+            return;
+        }
+
+        try
+        {
+            var regions = await _apiHttpClient.GetLobbyRegionsAsync(ladder.Id);
+            if (generation != _ladderRegionsGeneration) return;
+            if (_ladderRegionsLadderId != ladder.Id) _ladderAdminServers = null;
+            _ladderRegionsLadderId = ladder.Id;
+            _ladderRegions = regions;
+            _ladderRegionPings = RegionPingService.Shared.GetLastKnown(regions);
+            ShowLadderRegions();
+            if (regions.Count == 0) return;
+
+            var adminServers = LoadLobbyAdminServersAsync(ladder.Id);
+            RetestRegionsButton.IsEnabled = false;
+            RetestRegionsButton.Content = "Testing...";
+            try
+            {
+                var pings = await RegionPingService.Shared.MeasureAsync(regions, retest);
+                if (generation != _ladderRegionsGeneration) return;
+                _ladderRegionPings = pings;
+                ShowLadderRegions();
+            }
+            finally
+            {
+                RetestRegionsButton.IsEnabled = true;
+                RetestRegionsButton.Content = "Re-test";
+            }
+
+            var servers = await adminServers;
+            if (generation != _ladderRegionsGeneration) return;
+            _ladderAdminServers = servers;
+            ShowLadderServerPin();
+        }
+        catch (Exception exception)
+        {
+            if (generation != _ladderRegionsGeneration) return;
+            _ladderRegionsLadderId = null;
+            _ladderRegions = [];
+            _ladderAdminServers = null;
+            ShowLadderRegions();
+            LaunchDiagnostics.LogException("Failed to load lobby regions", exception);
+        }
+    }
+
+    private async Task<IReadOnlyList<LobbyAdminServerResponse>?> LoadLobbyAdminServersAsync(
+        Guid ladderId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await _apiHttpClient.GetLobbyAdminServersAsync(ladderId, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            LaunchDiagnostics.Log($"Lobby admin servers unavailable: {exception.Message}");
+            return null;
+        }
+    }
+
+    private void ShowLadderRegions()
+    {
+        if (SelectedLadder is not { } ladder || _ladderRegionsLadderId != ladder.Id || _ladderRegions.Count == 0)
+        {
+            LadderRegionsItemsControl.ItemsSource = null;
+            LadderRegionsPanel.IsVisible = false;
+            LadderServerPinPanel.IsVisible = false;
+            return;
+        }
+
+        var stored = GetStoredLadderRegions(ladder.Id);
+        var selected = LobbyRegionSelection.Effective(_ladderRegions, _ladderRegionPings, stored);
+        LadderRegionsItemsControl.ItemsSource = _ladderRegions
+            .Select(region => new LobbyRegionChoice
+            {
+                Id = region.Id,
+                Name = region.Name,
+                IsAvailable = region.Available,
+                IsMeasured = _ladderRegionPings.ContainsKey(region.Id),
+                PingMs = _ladderRegionPings.GetValueOrDefault(region.Id),
+                IsSelected = selected.Contains(region.Id),
+                CanToggle = !(selected.Count == 1 && selected.Contains(region.Id))
+            })
+            .ToArray();
+        var isCustom = LobbyRegionSelection.IsCustom(_ladderRegions, stored);
+        LadderRegionsModeText.Text = isCustom
+            ? "Custom selection"
+            : $"Automatic: the {LobbyRegionSelection.AutomaticRegionCount} fastest regions";
+        UseFastestRegionsButton.IsVisible = isCustom;
+        LadderRegionsPanel.IsVisible = true;
+        ShowLadderServerPin();
+    }
+
+    private void ShowLadderServerPin()
+    {
+        if (_ladderAdminServers is null || !LadderRegionsPanel.IsVisible || SelectedLadder is not { } ladder)
+        {
+            LadderServerPinPanel.IsVisible = false;
+            return;
+        }
+
+        var regionNames = _ladderRegions
+            .GroupBy(region => region.Id, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First().Name, StringComparer.Ordinal);
+        var choices = new List<LobbyServerChoice> { LobbyServerChoice.Automatic };
+        choices.AddRange(_ladderAdminServers.Select(server => LobbyServerChoice.From(server, regionNames)));
+        var pinned = GetPinnedLadderServer(ladder.Id);
+        var current = LadderServerPinComboBox.ItemsSource as IReadOnlyList<LobbyServerChoice>;
+        _isRefreshingRegionControls = true;
+        try
+        {
+            if (current is null || !current.Select(choice => (choice.Id, choice.Label))
+                    .SequenceEqual(choices.Select(choice => (choice.Id, choice.Label))))
+            {
+                LadderServerPinComboBox.ItemsSource = choices;
+                current = choices;
+            }
+
+            LadderServerPinComboBox.SelectedItem = current.FirstOrDefault(choice => choice.Id == pinned) ?? current[0];
+        }
+        finally
+        {
+            _isRefreshingRegionControls = false;
+        }
+
+        LadderServerPinPanel.IsVisible = true;
+    }
+
+    private async void OnLadderRegionSelectionChanged(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not CheckBox { DataContext: LobbyRegionChoice choice } checkBox
+            || SelectedLadder is not { } ladder
+            || _ladderRegionsLadderId != ladder.Id)
+        {
+            return;
+        }
+
+        var selected = LobbyRegionSelection.Effective(
+            _ladderRegions, _ladderRegionPings, GetStoredLadderRegions(ladder.Id));
+        var next = LobbyRegionSelection.Toggle(selected, choice.Id, checkBox.IsChecked == true);
+        if (next is null)
+        {
+            checkBox.IsChecked = true;
+            return;
+        }
+
+        var profile = MainWindow.Settings.CurrentProfile;
+        profile.SelectedLadderRegions ??= [];
+        profile.SelectedLadderRegions[ladder.Id.ToString("N")] = next;
+        ShowLadderRegions();
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private async void OnUseFastestRegionsClick(object? sender, RoutedEventArgs e)
+    {
+        if (SelectedLadder is not { } ladder) return;
+        MainWindow.Settings.CurrentProfile.SelectedLadderRegions?.Remove(ladder.Id.ToString("N"));
+        ShowLadderRegions();
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private async void OnRetestRegionsClick(object? sender, RoutedEventArgs e)
+    {
+        await RefreshLadderRegionsAsync(retest: true);
+    }
+
+    private async void OnLadderServerPinSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_isRefreshingRegionControls
+            || LadderServerPinComboBox.SelectedItem is not LobbyServerChoice choice
+            || SelectedLadder is not { } ladder)
+        {
+            return;
+        }
+
+        var profile = MainWindow.Settings.CurrentProfile;
+        profile.PinnedLadderServers ??= [];
+        var key = ladder.Id.ToString("N");
+        if (choice.Id is null)
+        {
+            if (!profile.PinnedLadderServers.Remove(key)) return;
+        }
+        else
+        {
+            if (profile.PinnedLadderServers.GetValueOrDefault(key) == choice.Id) return;
+            profile.PinnedLadderServers[key] = choice.Id;
+        }
+
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private static List<string>? GetStoredLadderRegions(Guid ladderId)
+    {
+        var selections = MainWindow.Settings.CurrentProfile.SelectedLadderRegions ??= [];
+        return selections.GetValueOrDefault(ladderId.ToString("N"));
+    }
+
+    private static string? GetPinnedLadderServer(Guid ladderId)
+    {
+        var pins = MainWindow.Settings.CurrentProfile.PinnedLadderServers ??= [];
+        return pins.GetValueOrDefault(ladderId.ToString("N"));
+    }
+
+    /// <summary>
+    /// The lobby preference handed to the plugin. Bounded so it never holds the
+    /// launch up for long, and any failure just leaves both values empty.
+    /// </summary>
+    private async Task<(IReadOnlyList<string> RegionIds, string ServerId)> ResolveLobbyPreferenceAsync(LadderResponse ladder)
+    {
+        try
+        {
+            using var budget = new CancellationTokenSource(LobbyPreferenceBudget);
+            var pinned = GetPinnedLadderServer(ladder.Id);
+            var adminServers = string.IsNullOrWhiteSpace(pinned)
+                ? Task.FromResult<IReadOnlyList<LobbyAdminServerResponse>?>(null)
+                : LoadLobbyAdminServersAsync(ladder.Id, budget.Token);
+
+            IReadOnlyList<string> regionIds = [];
+            try
+            {
+                var regions = _ladderRegionsLadderId == ladder.Id
+                    ? _ladderRegions
+                    : await _apiHttpClient.GetLobbyRegionsAsync(ladder.Id, budget.Token);
+                if (regions.Count > 0)
+                {
+                    IReadOnlyDictionary<string, double?> pings;
+                    try
+                    {
+                        pings = await RegionPingService.Shared.MeasureAsync(regions).WaitAsync(budget.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        pings = RegionPingService.Shared.GetLastKnown(regions);
+                    }
+
+                    var selected = LobbyRegionSelection.Effective(regions, pings, GetStoredLadderRegions(ladder.Id));
+                    regionIds = LobbyRegionSelection.OrderForLaunch(selected, regions, pings);
+                }
+            }
+            catch (Exception exception)
+            {
+                LaunchDiagnostics.Log($"Lobby regions unavailable at launch: {exception.Message}");
+            }
+
+            var serverId = string.Empty;
+            try
+            {
+                if (await adminServers is { } servers && servers.Any(server => server.Id == pinned))
+                    serverId = pinned!;
+            }
+            catch (OperationCanceledException)
+            {
+                LaunchDiagnostics.Log("Lobby admin servers did not answer in time; the server pin is skipped.");
+            }
+
+            LaunchDiagnostics.Log($"Lobby preference: regions [{string.Join(",", regionIds)}], server \"{serverId}\".");
+            return (regionIds, serverId);
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.LogException("Failed to resolve the lobby region preference", exception);
+            return ([], string.Empty);
+        }
+    }
 
     private void ShowLadderBundleReadiness(LadderBundleReadiness readiness)
     {
@@ -1317,7 +1607,7 @@ public partial class LaunchView : UserControl
             var readiness = await _ladderBundleService.GetReadinessAsync(installDirectory, bundle,
                 allowedExtensions: ladder.AllowedExtensions, selectedExtensionIds: selectedIds);
             if (readiness.RequiresBundleRepair)
-                await _ladderBundleService.InstallOrRepairAsync(installDirectory, bundle, progress);
+                await Task.Run(() => _ladderBundleService.InstallOrRepairAsync(installDirectory, bundle, progress));
             await LadderOptionalExtensionService.SynchronizeAsync(installDirectory!, bundle,
                 ladder.AllowedExtensions, selectedIds,
                 (extension, token) => _apiHttpClient.DownloadOptionalExtensionAsync(ladder.Id, extension, progress, token), progress);
@@ -1370,6 +1660,7 @@ public partial class LaunchView : UserControl
 
         MainWindow.Settings.CurrentProfile.SelectedLadderId = ladder.Id;
         await SettingsManager.SaveAsync(MainWindow.Settings);
+        _ = RefreshLadderRegionsAsync();
         await RefreshLadderExtensionPolicyAsync();
         RefreshInstallDirectoryState();
     }
@@ -1779,6 +2070,13 @@ public partial class LaunchView : UserControl
         _isLaunching = true;
         StartGameButton.IsEnabled = false;
         var actionName = profile.Type == InstallationType.D2RMM ? "Installation" : "Launch";
+        _launchGameToken = null;
+        _launchLadderTicket = null;
+        _launchStatusSessionId = null;
+        // Set once the game process owns the token, so the finally block knows
+        // whether a minted token was abandoned by a failed launch.
+        GameSessionToken? tokenHandedToGame = null;
+        var sessionFileWritten = false;
 
         try
         {
@@ -1876,6 +2174,12 @@ public partial class LaunchView : UserControl
             SetLaunchStatus($"Preparing {actionName.ToLower()}...");
             var progress = new Progress<string>(status => SetLaunchStatus(status));
 
+            // Older launchers wrote account tokens straight into the plugin
+            // configs under mods/, which D2RLoader can hand to joining players.
+            // Blank any that are still there - disabled plugins included -
+            // before anything else reads the install.
+            await GameSessionSecretsService.ScrubPluginConfigsAsync(profile.InstallDirectory);
+
             // Put the mod back on its normal save folder before anything else
             // runs. Mod tweaks and the launch backup both resolve the save
             // directory out of modinfo.json, and every step below here can bail
@@ -1908,6 +2212,23 @@ public partial class LaunchView : UserControl
                 return;
             }
 
+            // One game token per launch, shared by every plugin. It is never
+            // the launcher's own account token unless the API predates game
+            // tokens; null means plugins run as if nobody were signed in.
+            if (profile.Type != InstallationType.D2RMM
+                && profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder)
+            {
+                _launchGameToken = await _launcherAuthenticationService.CreateGameTokenAsync();
+                LaunchDiagnostics.Log(_launchGameToken switch
+                {
+                    null => "game token: none for this launch.",
+                    { IsUserTokenFallback: true } => "game token: using the account token (API has no game tokens yet).",
+                    _ => $"game token: minted, expires {_launchGameToken.ExpiresAtUtc:u}."
+                });
+            }
+
+            var gameToken = _launchGameToken?.AccessToken;
+
             if (!await PrepareServerSavesAsync(profile))
             {
                 SetLaunchStatus($"{actionName} preparation failed.");
@@ -1918,16 +2239,16 @@ public partial class LaunchView : UserControl
             // ladder feature: PrepareServerSavesAsync turns everything off for a
             // non-ladder launch, which is right for the save plugin and the
             // Discord relay and wrong for a chat room the whole community uses.
-            await ConfigureGlobalChatAsync(profile);
+            await ConfigureGlobalChatAsync(profile, gameToken);
 
             // Outside PrepareServerSavesAsync for the same reason as global chat:
             // that turns everything off for a non-ladder launch.
-            await ConfigureHardcoreDeathsAsync(profile);
-            await ConfigureTradeNotificationsAsync(profile);
-            await ConfigureTradePriceCheckAsync(profile);
-            await ConfigureReimaginedFeedbackAsync(profile);
-            await ConfigureAnnouncementsAsync(profile);
-            await ConfigureSupporterPortalsAsync(profile);
+            await ConfigureHardcoreDeathsAsync(profile, gameToken);
+            await ConfigureTradeNotificationsAsync(profile, gameToken);
+            await ConfigureTradePriceCheckAsync(profile, gameToken);
+            await ConfigureReimaginedFeedbackAsync(profile, gameToken);
+            await ConfigureAnnouncementsAsync(profile, gameToken);
+            await ConfigureSupporterPortalsAsync(profile, gameToken);
 
             if (profile.AutomaticBackupsEnabled)
             {
@@ -1939,6 +2260,17 @@ public partial class LaunchView : UserControl
                     LaunchDiagnostics.Log("Backup returned false.");
                     Notifications.SendNotification("Backup failed. Continuing.", "Warning");
                 }
+            }
+
+            // Last step before the process starts, so the file holds exactly
+            // what this launch gathered - or is gone when there is nothing to hand
+            // over (offline, D2RMM, signed out).
+            var sessionSecrets = await WriteSessionSecretsAsync(profile);
+            sessionFileWritten = sessionSecrets.Written;
+            if (!sessionSecrets.Proceed)
+            {
+                SetLaunchStatus($"{actionName} preparation failed.");
+                return;
             }
 
             try
@@ -1969,12 +2301,12 @@ public partial class LaunchView : UserControl
                     LaunchDiagnostics.Log("GameLauncherService.LaunchGame returned without throwing.");
                     SetLaunchStatus($"{actionName} command sent.");
 
-                    var needsExePath = profile.Type == InstallationType.Steam
-                        ? !GameLauncherService.UsesD2RLoader(profile)
-                        : GameLauncherService.UsesD2RLoader(profile);
-                    var expectedExePath = needsExePath
-                        ? LauncherService.GetExpectedGameExecutablePath()
-                        : null;
+                    string? expectedExePath = null;
+                    if (profile.Type == InstallationType.Steam
+                        || profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder)
+                    {
+                        expectedExePath = LauncherService.GetExpectedGameExecutablePath();
+                    }
 
                     // Lutris hands off to its own wrapper and the exe is commonly
                     // D2RLoader.exe, so the session is found by path instead of
@@ -1986,7 +2318,9 @@ public partial class LaunchView : UserControl
                     var steamHandoff = LauncherService.ActiveSteamHandoff;
                     var minimizeTarget = MainWindow.Settings.MinimizeToTray || (steamHandoff is not null && SteamGameHandoff.IsGamingMode)
                         ? MainWindow.Instance : null;
-                    _ = WatchGameExitAsync(gameProcess, expectedExePath, minimizeTarget, lutrisGameExePath, _preparedServerSaves, steamHandoff);
+                    tokenHandedToGame = _launchGameToken;
+                    _ = WatchGameExitAsync(gameProcess, expectedExePath, minimizeTarget, lutrisGameExePath, _preparedServerSaves,
+                        profile.InstallDirectory, _launchGameToken, steamHandoff);
                 }
             }
             catch (Exception ex)
@@ -2001,6 +2335,18 @@ public partial class LaunchView : UserControl
         }
         finally
         {
+            // A launch that minted a token but never started the game must not
+            // leave it behind, on disk or live on the API.
+            if (_launchGameToken is { } abandoned && !ReferenceEquals(abandoned, tokenHandedToGame))
+            {
+                if (sessionFileWritten)
+                {
+                    GameSessionSecretsService.Delete(profile.InstallDirectory);
+                }
+
+                _ = _launcherAuthenticationService.RevokeGameTokenAsync(abandoned);
+            }
+
             LaunchDiagnostics.Log($"{actionName} flow completed.");
             _isLaunching = false;
             await Dispatcher.UIThread.InvokeAsync(async () =>
@@ -2048,6 +2394,54 @@ public partial class LaunchView : UserControl
     }
 
     /// <summary>
+    /// Writes &lt;install&gt;/reimagined-secrets/session.toml for a signed-in
+    /// Online/Ladder launch, or deletes it for every other launch.
+    /// </summary>
+    /// <returns>
+    /// Proceed is false only for a ladder launch whose file could not be
+    /// written: server-saves would start without its token and ticket, and the
+    /// session would silently fall back to local characters. Written says
+    /// whether a file now exists that a failed launch must clean up.
+    /// </returns>
+    private async Task<(bool Proceed, bool Written)> WriteSessionSecretsAsync(InstallationProfile profile)
+    {
+        var isOnlineLaunch = profile.Type != InstallationType.D2RMM
+                             && profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder;
+        if (!isOnlineLaunch || _launchGameToken is not { } token)
+        {
+            if (!GameSessionSecretsService.Delete(profile.InstallDirectory))
+            {
+                LaunchDiagnostics.Log("session secrets: a previous session file could not be deleted; it stops working once it expires.");
+            }
+
+            return (true, false);
+        }
+
+        var isLadderLaunch = profile.LaunchExperience == LaunchExperience.Ladder;
+        var secrets = new GameSessionSecrets(
+            token.AccessToken,
+            token.ExpiresAtUtc,
+            isLadderLaunch ? _launchLadderTicket : null,
+            isLadderLaunch ? _launchStatusSessionId : null);
+        if (await GameSessionSecretsService.WriteAsync(profile.InstallDirectory, secrets))
+        {
+            return (true, true);
+        }
+
+        GameSessionSecretsService.Delete(profile.InstallDirectory);
+        if (isLadderLaunch)
+        {
+            const string message = "The game session file could not be written next to D2R.exe, so Server Saves would have no account. Check the install folder's permissions and try again.";
+            LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
+            Notifications.SendNotification(message, "Warning");
+            return (false, false);
+        }
+
+        LaunchDiagnostics.Log("session secrets: the session file could not be written; online plugins have no account for this launch.");
+        return (true, false);
+    }
+
+    /// <summary>
     /// Points the chat-relay plugin at the API for a ladder launch.
     /// </summary>
     /// <remarks>
@@ -2056,8 +2450,10 @@ public partial class LaunchView : UserControl
     /// here leaves the plugin disabled and says so in the log.
     ///
     /// The token decides whose name Discord shows against the messages, because
-    /// the API reads the sender from the token rather than the payload - so this
-    /// writes the same signed-in account's token that server-saves just used.
+    /// the API reads the sender from the token rather than the payload. The
+    /// token is only checked here (signed-in ladder launches only); it is not
+    /// written to chat-relay.toml, and the bundled chat-relay DLL predates the
+    /// session secrets file, so it runs without one.
     /// </remarks>
     private async Task ConfigureChatRelayAsync(InstallationProfile profile, string accessToken)
     {
@@ -2089,7 +2485,7 @@ public partial class LaunchView : UserControl
         }
     }
 
-    private async Task ConfigureAnnouncementsAsync(InstallationProfile profile)
+    private async Task ConfigureAnnouncementsAsync(InstallationProfile profile, string? gameToken)
     {
         try
         {
@@ -2102,7 +2498,7 @@ public partial class LaunchView : UserControl
                 LaunchDiagnostics.Log($"announcements: {AnnouncementsConfigService.PluginFileName} is missing from mods/{modName}/d2rloader/plugins; in-game announcements are off.");
                 return;
             }
-            var token = await _launcherAuthenticationService.GetAccessTokenAsync();
+            var token = gameToken;
             var settings = new AnnouncementsLaunchSettings(
                 _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority), token, profile.SelectedLadderId?.ToString());
             if (!await AnnouncementsConfigService.EnableAsync(profile.InstallDirectory, settings, profile.LaunchExperience))
@@ -2116,7 +2512,7 @@ public partial class LaunchView : UserControl
         }
     }
 
-    private async Task ConfigureTradeNotificationsAsync(InstallationProfile profile)
+    private async Task ConfigureTradeNotificationsAsync(InstallationProfile profile, string? gameToken)
     {
         try
         {
@@ -2129,7 +2525,7 @@ public partial class LaunchView : UserControl
                 LaunchDiagnostics.Log($"trade-notifications: {TradeNotificationsConfigService.PluginFileName} is missing from mods/{modName}/d2rloader/plugins; in-game trade notifications are off. Install the plugin through the ladder's approved extensions or include it in the bundle.");
                 return;
             }
-            var token = await _launcherAuthenticationService.GetAccessTokenAsync();
+            var token = gameToken;
             if (string.IsNullOrWhiteSpace(token))
             {
                 LaunchDiagnostics.Log("trade-notifications: no signed-in account; in-game trade notifications are off for this launch.");
@@ -2150,7 +2546,7 @@ public partial class LaunchView : UserControl
 
     // Market search is anonymous on the API, so a launch with nobody signed in
     // still configures the plugin - with an empty token rather than none at all.
-    private async Task ConfigureTradePriceCheckAsync(InstallationProfile profile)
+    private async Task ConfigureTradePriceCheckAsync(InstallationProfile profile, string? gameToken)
     {
         try
         {
@@ -2163,7 +2559,7 @@ public partial class LaunchView : UserControl
                 LaunchDiagnostics.Log($"trade-price-check: {TradePriceCheckConfigService.PluginFileName} is missing from mods/{modName}/d2rloader/plugins; in-game price checks are off.");
                 return;
             }
-            var token = await _launcherAuthenticationService.GetAccessTokenAsync();
+            var token = gameToken;
             if (string.IsNullOrWhiteSpace(token))
                 LaunchDiagnostics.Log("trade-price-check: no signed-in account; market searches will be anonymous.");
             var settings = new TradePriceCheckLaunchSettings(
@@ -2181,7 +2577,7 @@ public partial class LaunchView : UserControl
 
     // The API only takes feedback from signed-in accounts, so the plugin gets
     // the same launcher token as the other online plugins, or stays disabled.
-    private async Task ConfigureReimaginedFeedbackAsync(InstallationProfile profile)
+    private async Task ConfigureReimaginedFeedbackAsync(InstallationProfile profile, string? gameToken)
     {
         try
         {
@@ -2194,7 +2590,7 @@ public partial class LaunchView : UserControl
                 LaunchDiagnostics.Log($"reimagined-feedback: {ReimaginedFeedbackConfigService.PluginFileName} is missing from mods/{modName}/d2rloader/plugins; in-game /bug and /suggest are off.");
                 return;
             }
-            var token = await _launcherAuthenticationService.GetAccessTokenAsync();
+            var token = gameToken;
             if (string.IsNullOrWhiteSpace(token))
             {
                 LaunchDiagnostics.Log("reimagined-feedback: no signed-in account; in-game /bug and /suggest are off for this launch.");
@@ -2213,7 +2609,7 @@ public partial class LaunchView : UserControl
         }
     }
 
-    private async Task ConfigureSupporterPortalsAsync(InstallationProfile profile)
+    private async Task ConfigureSupporterPortalsAsync(InstallationProfile profile, string? gameToken)
     {
         try
         {
@@ -2226,7 +2622,7 @@ public partial class LaunchView : UserControl
                 LaunchDiagnostics.Log($"supporter-portals: {SupporterPortalsConfigService.PluginFileName} is missing from mods/{modName}/d2rloader/plugins; supporter portals are unavailable for this launch.");
                 return;
             }
-            var token = await _launcherAuthenticationService.GetAccessTokenAsync();
+            var token = gameToken;
             if (string.IsNullOrWhiteSpace(token))
             {
                 LaunchDiagnostics.Log("supporter-portals: no signed-in account; supporter portals have no account credentials for this launch.");
@@ -2255,13 +2651,12 @@ public partial class LaunchView : UserControl
     /// game over it would cost the session. Every failure path leaves the plugin
     /// disabled and says so in the log.
     ///
-    /// Unlike chat-relay this runs for LaunchExperience.Online too, so it cannot
-    /// lean on PrepareServerSavesAsync having fetched a token - that only
-    /// happens on the ladder path. It fetches its own, and treats "not signed
-    /// in" as an ordinary off switch rather than a failure: playing offline
-    /// without an account is a supported thing to do.
+    /// Unlike chat-relay this runs for LaunchExperience.Online too. It gets the
+    /// launch's game token (null when nobody is signed in or minting failed),
+    /// and treats "no token" as an ordinary off switch rather than a failure:
+    /// playing offline without an account is a supported thing to do.
     /// </remarks>
-    private async Task ConfigureGlobalChatAsync(InstallationProfile profile)
+    private async Task ConfigureGlobalChatAsync(InstallationProfile profile, string? gameToken)
     {
         try
         {
@@ -2271,7 +2666,7 @@ public partial class LaunchView : UserControl
                 return;
             }
 
-            var accessToken = await _launcherAuthenticationService.GetAccessTokenAsync();
+            var accessToken = gameToken;
             if (string.IsNullOrWhiteSpace(accessToken))
             {
                 // Clearing rather than leaving the last launch's token behind:
@@ -2318,11 +2713,11 @@ public partial class LaunchView : UserControl
     /// Ladder launch.
     /// </summary>
     /// <remarks>
-    /// The same shape as ConfigureGlobalChatAsync: fetches its own token because
-    /// PrepareServerSavesAsync only runs on the ladder path, treats "not signed
-    /// in" as an ordinary off switch, and never blocks the launch.
+    /// The same shape as ConfigureGlobalChatAsync: takes the launch's game
+    /// token, treats "no token" as an ordinary off switch, and never blocks the
+    /// launch.
     /// </remarks>
-    private async Task ConfigureHardcoreDeathsAsync(InstallationProfile profile)
+    private async Task ConfigureHardcoreDeathsAsync(InstallationProfile profile, string? gameToken)
     {
         try
         {
@@ -2332,7 +2727,7 @@ public partial class LaunchView : UserControl
                 return;
             }
 
-            var accessToken = await _launcherAuthenticationService.GetAccessTokenAsync();
+            var accessToken = gameToken;
             if (string.IsNullOrWhiteSpace(accessToken))
             {
                 // A signed-out session must not keep the previous account's token.
@@ -2373,11 +2768,16 @@ public partial class LaunchView : UserControl
         MainWindow? minimizeTarget,
         string? lutrisGameExePath = null,
         ServerSaveMonitor? serverSaves = null,
+        string? installDirectory = null,
+        GameSessionToken? gameToken = null,
         SteamGameHandoff? steamHandoff = null)
     {
         using var monitoring = new CancellationTokenSource();
         var monitorTask = serverSaves is null ? Task.CompletedTask : MonitorServerSavesAsync(serverSaves, monitoring.Token);
         var gameExitConfirmed = false;
+        // Kept apart from gameExitConfirmed, which also drives the Server Saves
+        // wording and has never counted a Lutris session's end as confirmed.
+        var lutrisExitObserved = false;
         try
         {
             if (steamHandoff is not null)
@@ -2394,11 +2794,11 @@ public partial class LaunchView : UserControl
                 gameProcess.Dispose();
                 if (minimizeTarget is not null)
                 {
-                    await minimizeTarget.MinimizeToTrayAndWaitForLutrisExitAsync(lutrisGameExePath);
+                    lutrisExitObserved = await minimizeTarget.MinimizeToTrayAndWaitForLutrisExitAsync(lutrisGameExePath);
                 }
                 else
                 {
-                    await LutrisService.WaitForGameSessionAsync(lutrisGameExePath, TimeSpan.FromMinutes(2));
+                    lutrisExitObserved = await LutrisService.WaitForGameSessionAsync(lutrisGameExePath, TimeSpan.FromMinutes(2));
                 }
             }
             else if (minimizeTarget is not null)
@@ -2418,21 +2818,54 @@ public partial class LaunchView : UserControl
         }
         finally
         {
-            if (serverSaves is not null)
+            try
             {
-                await ServerSaveSessionMonitor.WaitForInactiveAsync(
-                    () => ServerSaveStatus.ReadAsync(serverSaves, CancellationToken.None),
-                    () => DateTimeOffset.UtcNow,
-                    () => Task.Delay(TimeSpan.FromSeconds(2)));
+                if (serverSaves is not null)
+                {
+                    await ServerSaveSessionMonitor.WaitForInactiveAsync(
+                        () => ServerSaveStatus.ReadAsync(serverSaves, CancellationToken.None),
+                        () => DateTimeOffset.UtcNow,
+                        () => Task.Delay(TimeSpan.FromSeconds(2)));
+                }
+                monitoring.Cancel();
+                await monitorTask;
+                if (serverSaves is not null)
+                {
+                    var status = await ServerSaveStatus.ReadAsync(serverSaves, CancellationToken.None);
+                    await ShowServerSaveStatusAsync(ServerSaveSessionMonitor.DescribeAfterWatch(
+                        status, DateTimeOffset.UtcNow, gameExitConfirmed));
+                }
             }
-            monitoring.Cancel();
-            await monitorTask;
-            if (serverSaves is not null)
+            finally
             {
-                var status = await ServerSaveStatus.ReadAsync(serverSaves, CancellationToken.None);
-                await ShowServerSaveStatusAsync(ServerSaveSessionMonitor.DescribeAfterWatch(
-                    status, DateTimeOffset.UtcNow, gameExitConfirmed));
+                EndGameSession(installDirectory, gameToken, gameExitConfirmed || lutrisExitObserved);
             }
+        }
+    }
+
+    /// <summary>
+    /// Removes the session secrets file and revokes the game token once the
+    /// game is known to be gone. An unconfirmed exit leaves both alone: deleting
+    /// the file under a live game would cut its plugins off mid-session. The
+    /// next launch rewrites or deletes it, launcher startup deletes it when no
+    /// game is running, and the plugins ignore it once it expires.
+    /// </summary>
+    private void EndGameSession(string? installDirectory, GameSessionToken? gameToken, bool exitConfirmed)
+    {
+        if (!exitConfirmed)
+        {
+            LaunchDiagnostics.Log("session secrets: the game's exit was not confirmed; the session file is left until the next launch or launcher start.");
+            return;
+        }
+
+        if (GameSessionSecretsService.Delete(installDirectory))
+        {
+            LaunchDiagnostics.Log("session secrets: removed after the game exited.");
+        }
+
+        if (gameToken is not null)
+        {
+            _ = _launcherAuthenticationService.RevokeGameTokenAsync(gameToken);
         }
     }
 
@@ -2560,10 +2993,20 @@ public partial class LaunchView : UserControl
                 return false;
             }
 
+            // The account token only authenticates the launcher's own call for
+            // the launch ticket below; the game gets the launch's game token.
             var accessToken = await _launcherAuthenticationService.GetAccessTokenAsync();
             if (string.IsNullOrWhiteSpace(accessToken))
             {
                 const string message = "Sign in to your Reimagined account to play on the ladder - your characters are stored on the server.";
+                LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
+                Notifications.SendNotification(message, "Warning");
+                return false;
+            }
+
+            if (_launchGameToken is not { } gameToken)
+            {
+                const string message = "The Reimagined API did not issue a game session token. Check your connection and try again.";
                 LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
                 Notifications.SendNotification(message, "Warning");
                 return false;
@@ -2584,12 +3027,15 @@ public partial class LaunchView : UserControl
                 accessToken);
 
             var statusSessionId = Guid.NewGuid().ToString("N");
+            var lobbyPreference = await ResolveLobbyPreferenceAsync(ladder);
             var settings = new ServerSavesLaunchSettings(
                 _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority),
-                accessToken,
+                gameToken.AccessToken,
                 ladder.Id,
                 launchTicket.LaunchTicket,
-                statusSessionId);
+                statusSessionId,
+                lobbyPreference.RegionIds,
+                lobbyPreference.ServerId);
             if (!await ServerSavesConfigService.EnableAsync(profile.InstallDirectory, settings))
             {
                 const string message = "The server-saves plugin configuration could not be written.";
@@ -2597,6 +3043,11 @@ public partial class LaunchView : UserControl
                 Notifications.SendNotification(message, "Warning");
                 return false;
             }
+
+            // Not in server-saves.toml any more - they go in the session file
+            // written just before the game starts.
+            _launchLadderTicket = launchTicket.LaunchTicket;
+            _launchStatusSessionId = statusSessionId;
 
             // Only now, with the plugin present and configured, is it safe to send
             // D2R at this ladder's own save folder.
@@ -2616,7 +3067,7 @@ public partial class LaunchView : UserControl
             _preparedServerSaves = new ServerSaveMonitor(
                 Path.Combine(preparation.DirectoryPath, ".server-saves", "status.json"), statusSessionId, ladder.Id);
 
-            await ConfigureChatRelayAsync(profile, accessToken);
+            await ConfigureChatRelayAsync(profile, gameToken.AccessToken);
             return true;
         }
         catch (Exception exception)

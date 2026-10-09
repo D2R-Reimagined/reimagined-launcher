@@ -44,6 +44,10 @@ public class InstallationProfile
     public LaunchExperience LaunchExperience { get; set; }
     public Guid? SelectedLadderId { get; set; }
     public Dictionary<string, List<Guid>> SelectedLadderExtensions { get; set; } = [];
+
+    // Keyed by ladder id ("N"). A missing region entry means automatic; pins are admin-only.
+    public Dictionary<string, List<string>> SelectedLadderRegions { get; set; } = [];
+    public Dictionary<string, string> PinnedLadderServers { get; set; } = [];
     public string? InstallDirectory { get; set; }
     public string? SteamDirectory { get; set; }
     public string? ProtonExecutable { get; set; }

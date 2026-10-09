@@ -214,7 +214,7 @@ public sealed class D2RLoaderPluginPackage
         return $"{rebuilt}{key} = {value}{lineEnding}";
     }
 
-    private static bool IsAssignmentOf(string line, string key)
+    internal static bool IsAssignmentOf(string line, string key)
     {
         var span = line.AsSpan().TrimStart();
         if (!span.StartsWith(key, StringComparison.Ordinal))
@@ -225,6 +225,14 @@ public sealed class D2RLoaderPluginPackage
         span = span[key.Length..].TrimStart();
         return span.Length > 0 && span[0] == '=';
     }
+
+    /// <summary>
+    /// The value written for every secret key (access_token, ladder_launch_ticket,
+    /// status_session_id) in a plugin config. Secrets live in
+    /// <see cref="GameSessionSecretsService"/>'s session file outside mods/,
+    /// because D2RLoader can hand a host's mod folder to a joining player.
+    /// </summary>
+    internal const string BlankSecret = "\"\"";
 
     internal static string Quote(string value)
     {

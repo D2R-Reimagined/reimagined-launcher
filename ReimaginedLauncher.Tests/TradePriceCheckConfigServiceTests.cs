@@ -53,7 +53,8 @@ public sealed class TradePriceCheckConfigServiceTests : IDisposable
 
         var toml = await File.ReadAllTextAsync(ConfigPathIn(NormalLoaderRoot));
         Assert.Contains($"api_base_url = \"{ApiBaseUrl}\"", toml, StringComparison.Ordinal);
-        Assert.Contains($"access_token = \"{AccessToken}\"", toml, StringComparison.Ordinal);
+        Assert.Contains("access_token = \"\"", toml, StringComparison.Ordinal);
+        Assert.DoesNotContain(AccessToken, toml, StringComparison.Ordinal);
         Assert.Contains("ladder_id = \"\"", toml, StringComparison.Ordinal);
         Assert.DoesNotContain("enabled", toml, StringComparison.Ordinal);
     }
@@ -69,7 +70,8 @@ public sealed class TradePriceCheckConfigServiceTests : IDisposable
             LaunchExperience.Ladder));
 
         var toml = await File.ReadAllTextAsync(ConfigPathIn(LadderLoaderRoot));
-        Assert.Contains($"access_token = \"{AccessToken}\"", toml, StringComparison.Ordinal);
+        Assert.Contains("access_token = \"\"", toml, StringComparison.Ordinal);
+        Assert.DoesNotContain(AccessToken, toml, StringComparison.Ordinal);
         Assert.Contains($"ladder_id = \"{LadderId}\"", toml, StringComparison.Ordinal);
     }
 
@@ -161,7 +163,8 @@ public sealed class TradePriceCheckConfigServiceTests : IDisposable
         Assert.Contains("# my notes", toml, StringComparison.Ordinal);
         Assert.Contains("hotkey_vk = 80", toml, StringComparison.Ordinal);
         Assert.Contains("max_results = 50", toml, StringComparison.Ordinal);
-        Assert.Contains($"access_token = \"{AccessToken}\"", toml, StringComparison.Ordinal);
+        Assert.Contains("access_token = \"\"", toml, StringComparison.Ordinal);
+        Assert.DoesNotContain(AccessToken, toml, StringComparison.Ordinal);
         Assert.DoesNotContain("\"stale\"", toml, StringComparison.Ordinal);
     }
 

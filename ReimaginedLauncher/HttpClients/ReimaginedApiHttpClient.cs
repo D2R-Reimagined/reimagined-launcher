@@ -120,6 +120,38 @@ public sealed class ReimaginedApiHttpClient
             timeout.Token) ?? [];
     }
 
+    public async Task<IReadOnlyList<LobbyRegionResponse>> GetLobbyRegionsAsync(
+        Guid ladderId,
+        CancellationToken cancellationToken = default)
+    {
+        using var timeout = CreateRequestTimeout(cancellationToken);
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"lobby/ladders/{ladderId}/regions");
+        request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
+        using var response = await _httpClient.SendAsync(request, timeout.Token);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<List<LobbyRegionResponse>>(JsonOptions, timeout.Token) ?? [];
+    }
+
+    /// <summary>Null when the caller is not signed in as an admin.</summary>
+    public async Task<IReadOnlyList<LobbyAdminServerResponse>?> GetLobbyAdminServersAsync(
+        Guid ladderId,
+        CancellationToken cancellationToken = default)
+    {
+        using var timeout = CreateRequestTimeout(cancellationToken);
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"lobby/ladders/{ladderId}/servers");
+        request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
+        await AuthorizeAsync(request, timeout.Token);
+        if (request.Headers.Authorization is null) return null;
+        using var response = await _httpClient.SendAsync(request, timeout.Token);
+        if (response.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+        {
+            return null;
+        }
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<List<LobbyAdminServerResponse>>(JsonOptions, timeout.Token) ?? [];
+    }
+
     /// <summary>
     /// Per-call deadline for the short JSON requests. The client itself no
     /// longer sets one, because a client-wide timeout also applies while a
@@ -215,6 +247,53 @@ public sealed class ReimaginedApiHttpClient
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<LadderLaunchTicketResponse>(JsonOptions, timeout.Token)
                ?? throw new InvalidOperationException("The API returned an empty ladder launch ticket response.");
+    }
+
+    /// <summary>
+    /// Mints a game-session token with the launcher's own user token. Returns
+    /// null when the endpoint answers 404 - an API that predates game tokens -
+    /// so the caller can fall back; every other failure throws.
+    /// </summary>
+    public async Task<GameTokenResponse?> CreateGameTokenAsync(
+        string userAccessToken,
+        CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "auth/launcher/game-token")
+        {
+            Content = new ByteArrayContent([])
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", userAccessToken);
+        request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
+        using var timeout = CreateRequestTimeout(cancellationToken);
+        using var response = await _httpClient.SendAsync(request, timeout.Token);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        response.EnsureSuccessStatusCode();
+        var minted = await response.Content.ReadFromJsonAsync<GameTokenResponse>(JsonOptions, timeout.Token);
+        if (minted is null || string.IsNullOrWhiteSpace(minted.AccessToken))
+        {
+            throw new InvalidDataException("The API returned an empty game token response.");
+        }
+
+        return minted;
+    }
+
+    /// <summary>Revokes a game-session token, authenticated with that token itself.</summary>
+    public async Task RevokeGameTokenAsync(
+        string gameToken,
+        CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "auth/launcher/game-token/revoke")
+        {
+            Content = new ByteArrayContent([])
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", gameToken);
+        using var timeout = CreateRequestTimeout(cancellationToken);
+        using var response = await _httpClient.SendAsync(request, timeout.Token);
+        response.EnsureSuccessStatusCode();
     }
 
     public async Task<LauncherTokenResponse?> ExchangeLauncherCodeAsync(

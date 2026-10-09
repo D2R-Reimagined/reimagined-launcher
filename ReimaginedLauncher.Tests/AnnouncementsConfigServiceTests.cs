@@ -52,7 +52,8 @@ public sealed class AnnouncementsConfigServiceTests : IDisposable
         var toml = await File.ReadAllTextAsync(ConfigPathIn(NormalLoaderRoot));
         Assert.Contains("enabled = true", toml, StringComparison.Ordinal);
         Assert.Contains($"api_base_url = \"{ApiBaseUrl}\"", toml, StringComparison.Ordinal);
-        Assert.Contains($"access_token = \"{AccessToken}\"", toml, StringComparison.Ordinal);
+        Assert.Contains("access_token = \"\"", toml, StringComparison.Ordinal);
+        Assert.DoesNotContain(AccessToken, toml, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -84,7 +85,8 @@ public sealed class AnnouncementsConfigServiceTests : IDisposable
             new AnnouncementsLaunchSettings("http://localhost:5000/", AccessToken, "selected-ladder"), experience));
         var toml = await File.ReadAllTextAsync(ConfigPathIn(root));
         Assert.Contains("api_base_url = \"http://localhost:5000\"", toml);
-        Assert.Contains($"access_token = \"{AccessToken}\"", toml);
+        Assert.Contains("access_token = \"\"", toml);
+        Assert.DoesNotContain(AccessToken, toml);
         Assert.Contains($"ladder_id = \"{expectedLadder}\"", toml);
     }
     [Fact]
@@ -154,7 +156,8 @@ public sealed class AnnouncementsConfigServiceTests : IDisposable
         Assert.Contains("# my notes", toml, StringComparison.Ordinal);
         Assert.Contains("channel_tag = \"[World]\"", toml, StringComparison.Ordinal);
         Assert.Contains("global_color = 9", toml, StringComparison.Ordinal);
-        Assert.Contains($"access_token = \"{AccessToken}\"", toml, StringComparison.Ordinal);
+        Assert.Contains("access_token = \"\"", toml, StringComparison.Ordinal);
+        Assert.DoesNotContain(AccessToken, toml, StringComparison.Ordinal);
         Assert.DoesNotContain("\"stale\"", toml, StringComparison.Ordinal);
     }
 

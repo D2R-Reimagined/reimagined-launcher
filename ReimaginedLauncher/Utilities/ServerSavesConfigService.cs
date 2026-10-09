@@ -10,7 +10,9 @@ public sealed record ServerSavesLaunchSettings(
     string AccessToken,
     Guid? LadderId,
     string LadderLaunchTicket,
-    string StatusSessionId = "");
+    string StatusSessionId = "",
+    IReadOnlyList<string>? LobbyRegionIds = null,
+    string? LobbyServerId = null);
 
 /// <summary>
 /// Configures the Server Saves plugin supplied by the signed ladder package.
@@ -23,9 +25,13 @@ public static class ServerSavesConfigService
     private const string ManagedHeader =
         "# server-saves - launcher-managed settings.\n"
         + "#\n"
-        + "# The Reimagined launcher rewrites enabled, api_base_url, access_token,\n"
-        + "# ladder_id, ladder_launch_ticket and status_session_id every launch. Anything else you set\n"
-        + "# here is preserved, and any\n"
+        + "# The Reimagined launcher rewrites enabled, api_base_url, ladder_id,\n"
+        + "# lobby_region_ids and lobby_server_id every launch, and always leaves\n"
+        + "# access_token, ladder_launch_ticket and status_session_id empty: those come\n"
+        + "# from <install>/reimagined-secrets/session.toml, outside mods/, so they are\n"
+        + "# never shared with other players.\n"
+        + "#\n"
+        + "# Anything else you set here is preserved, and any\n"
         + "# setting left out uses the plugin's built-in default.\n"
         + "\n";
 
@@ -64,10 +70,12 @@ public static class ServerSavesConfigService
         {
             ["enabled"] = "true",
             ["api_base_url"] = D2RLoaderPluginPackage.Quote(D2RLoaderPluginPackage.NormalizeBaseUrl(settings.ApiBaseUrl)),
-            ["access_token"] = D2RLoaderPluginPackage.Quote(settings.AccessToken),
+            ["access_token"] = D2RLoaderPluginPackage.BlankSecret,
             ["ladder_id"] = D2RLoaderPluginPackage.Quote(settings.LadderId is { } ladderId ? ladderId.ToString() : string.Empty),
-            ["ladder_launch_ticket"] = D2RLoaderPluginPackage.Quote(settings.LadderLaunchTicket),
-            ["status_session_id"] = D2RLoaderPluginPackage.Quote(settings.StatusSessionId)
+            ["ladder_launch_ticket"] = D2RLoaderPluginPackage.BlankSecret,
+            ["status_session_id"] = D2RLoaderPluginPackage.BlankSecret,
+            ["lobby_region_ids"] = D2RLoaderPluginPackage.Quote(string.Join(",", settings.LobbyRegionIds ?? [])),
+            ["lobby_server_id"] = D2RLoaderPluginPackage.Quote(settings.LobbyServerId ?? string.Empty)
         };
 
         return await Package.WriteAsync(installDirectory, values, requireInstalled: true, cancellationToken);
@@ -85,10 +93,12 @@ public static class ServerSavesConfigService
         var values = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["enabled"] = "false",
-            ["access_token"] = "\"\"",
+            ["access_token"] = D2RLoaderPluginPackage.BlankSecret,
             ["ladder_id"] = "\"\"",
-            ["ladder_launch_ticket"] = "\"\"",
-            ["status_session_id"] = "\"\""
+            ["ladder_launch_ticket"] = D2RLoaderPluginPackage.BlankSecret,
+            ["status_session_id"] = D2RLoaderPluginPackage.BlankSecret,
+            ["lobby_region_ids"] = "\"\"",
+            ["lobby_server_id"] = "\"\""
         };
 
         var normalDisabled = await NormalPackage.WriteAsync(installDirectory, values, requireInstalled: false, cancellationToken);

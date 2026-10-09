@@ -21,7 +21,8 @@ internal static class LadderRuntimeFileService
     private static readonly HashSet<string> GeneratedRuntimePaths = new(StringComparer.OrdinalIgnoreCase)
     {
         "mods/Reimagined/d2rloader/config/server-saves.toml",
-        "mods/Reimagined/d2rloader/config/chat-relay.toml"
+        "mods/Reimagined/d2rloader/config/chat-relay.toml",
+        "mods/Reimagined/d2rloader/config/controller-qol-updates.toml"
     };
 
     internal static string RestoreOrCaptureBaseline(string installDirectory, string targetPath)
