@@ -259,12 +259,7 @@ public class GameLauncherService
 
         if (OperatingSystem.IsLinux())
         {
-            if (IsFlatpakInstall(GetSteamInstallPath()))
-            {
-                return FindExecutableOnPath("flatpak");
-            }
-
-            return FindExecutableOnPath("steam") ?? FindExecutableOnPath("flatpak");
+            return FindLinuxSteamExecutable(targetD2rDir);
         }
 
         if (!string.IsNullOrEmpty(targetD2rDir) && IsSteamLibraryPath(targetD2rDir))
@@ -288,10 +283,31 @@ public class GameLauncherService
     /// Determines whether Steam installation is through Flatpak or native.
     /// </summary>
     /// <returns><c>true</c> if the installation is within the Flatpak sandbox; <c>false</c> otherwise.</returns>
-    public static bool IsSteamFlatpakInstall()
+    public static bool IsSteamFlatpakInstall(string? installDirectory = null, string? userHome = null)
     {
-        return IsFlatpakInstall(GetSteamInstallPath());
+        return IsFlatpakInstall(installDirectory)
+               || IsFlatpakInstall(GetSteamInstallPath(userHome, installDirectory));
     }
+
+    internal static string? FindLinuxSteamExecutable(string? installDirectory, string? userHome = null,
+        Func<string, string?>? findExecutable = null)
+    {
+        findExecutable ??= FindExecutableOnPath;
+        var steamRoot = GetSteamInstallPath(userHome, installDirectory);
+        if (IsFlatpakInstall(installDirectory) || IsFlatpakInstall(steamRoot))
+            return findExecutable("flatpak");
+        return findExecutable("steam") ?? (steamRoot is null ? findExecutable("flatpak") : null);
+    }
+
+    internal static bool UsesSteamHandoff(InstallationProfile profile)
+        => UsesSteamHandoff(profile, OperatingSystem.IsLinux(), SteamGameHandoff.IsGamingMode,
+            File.Exists(Path.Combine(SteamGameHandoff.StateDirectory, "registration.json")));
+
+    internal static bool UsesSteamHandoff(InstallationProfile profile, bool isLinux, bool isGamingMode,
+        bool hasRegistration, string? userHome = null)
+        => isLinux && profile.Type == InstallationType.Steam
+           && !IsSteamFlatpakInstall(profile.InstallDirectory, userHome)
+           && (isGamingMode || hasRegistration);
 
     /// <summary>
     /// Determines whether the specified directory path indicates a Flatpak Steam installation.
@@ -301,8 +317,10 @@ public class GameLauncherService
     private static bool IsFlatpakInstall(string? d2rDir)
     {
         return !string.IsNullOrWhiteSpace(d2rDir) &&
-               NormalizePathSeparators(d2rDir)
-                   .Contains("/.var/app/com.valvesoftware.Steam/", StringComparison.Ordinal);
+               (NormalizePathSeparators(d2rDir)
+                    .Contains("/.var/app/com.valvesoftware.Steam/", StringComparison.Ordinal)
+                || NormalizePathSeparators(SteamGameHandoff.ResolveFileSystemPath(d2rDir))
+                    .Contains("/.var/app/com.valvesoftware.Steam/", StringComparison.Ordinal));
     }
 
     private void CopyDirectory(string sourceDir, string targetDir)
@@ -494,7 +512,7 @@ public class GameLauncherService
 
             if (OperatingSystem.IsLinux() && profile.Type == InstallationType.Steam)
             {
-                return IsFlatpakInstall(GetSteamInstallPath()) 
+                return IsSteamFlatpakInstall(profile.InstallDirectory)
                     ? "Flatpak Steam is not supported for D2RLoader. Only native Steam installation is supported."
                     : BuildOnlineNativeSteamLaunchCommand(profile, launchParameters);
             }
@@ -513,8 +531,7 @@ public class GameLauncherService
 
         if (profile.Type == InstallationType.Steam)
         {
-            if (OperatingSystem.IsLinux() && (SteamGameHandoff.IsGamingMode
-                || File.Exists(Path.Combine(SteamGameHandoff.StateDirectory, "registration.json"))))
+            if (UsesSteamHandoff(profile))
                 return BuildSteamHandoffPreview(Path.Combine(profile.InstallDirectory ?? "", "D2R.exe"), launchParameters);
             var steamPath = profile.SteamDirectory ?? FindSteamExecutable(profile.InstallDirectory) ?? GetDefaultSteamCommand();
             var steamPrefix = GetSteamArgumentPrefix(steamPath);
@@ -563,13 +580,13 @@ public class GameLauncherService
     private static string BuildOnlineNativeSteamLaunchCommand(InstallationProfile profile, string launchParameters)
     {
         var loaderPath = D2RLoaderService.GetLoaderPath(profile.InstallDirectory);
-        var steamInstallPath = GetSteamInstallPath();
+        var steamInstallPath = GetSteamInstallPath(installDirectory: profile.InstallDirectory);
         if (!IsValidSteamProtonLaunch(profile, steamInstallPath, loaderPath, out var error))
         {
             return error;
         }
 
-        if (SteamGameHandoff.IsGamingMode || File.Exists(Path.Combine(SteamGameHandoff.StateDirectory, "registration.json")))
+        if (UsesSteamHandoff(profile))
             return BuildSteamHandoffPreview(loaderPath!, launchParameters);
 
         var steamApps = FileService.FindAncestorDirectory(profile.InstallDirectory, SteamAppsDirName);
@@ -583,6 +600,9 @@ public class GameLauncherService
         => $"Steam-owned game session; request prepared when Launch is pressed.{Environment.NewLine}\"{executable}\" {arguments}";
 
     public Process? LaunchGame(string? launchParamOverride = null, string? gamePathOverride = null)
+        => LaunchGame(null, launchParamOverride, gamePathOverride);
+
+    internal Process? LaunchGame(SteamGameHandoff? reservation, string? launchParamOverride = null, string? gamePathOverride = null)
     {
         var profile = MainWindow.Settings.CurrentProfile;
         
@@ -604,8 +624,7 @@ public class GameLauncherService
         string? workingDirectory = null;
         var environmentOverrides = new Dictionary<string, string>();
 
-        if (OperatingSystem.IsLinux() && profile.Type == InstallationType.Steam
-            && (SteamGameHandoff.IsGamingMode || File.Exists(Path.Combine(SteamGameHandoff.StateDirectory, "registration.json"))))
+        if (UsesSteamHandoff(profile))
         {
             try
             {
@@ -615,7 +634,7 @@ public class GameLauncherService
                     throw new InvalidOperationException("Register the native launcher's Steam game session before playing in Gaming Mode. See LINUX.md for one-time setup.");
                 if (D2RLoaderService.IsInstalled(profile.InstallDirectory))
                     D2RLoaderService.SetDefaultMod(profile.InstallDirectory!, profile.LaunchExperience);
-                var handoff = SteamGameHandoff.Start(profile, launchParameters);
+                var handoff = SteamGameHandoff.Start(profile, launchParameters, reservation);
                 ActiveSteamHandoff = handoff.Session;
                 return handoff.Command;
             }
@@ -663,7 +682,7 @@ public class GameLauncherService
             {
                 if (profile.Type == InstallationType.Steam)
                 {
-                    var steamInstallPath = GetSteamInstallPath();
+                    var steamInstallPath = GetSteamInstallPath(installDirectory: profile.InstallDirectory);
                     if (!IsValidSteamProtonLaunch(profile, steamInstallPath, loaderPath, out var error))
                     {
                         Notifications.SendNotification(error, "Warning");
@@ -798,7 +817,7 @@ public class GameLauncherService
             return false;
         }
 
-        if (IsFlatpakInstall(steamInstallPath))
+        if (IsFlatpakInstall(profile.InstallDirectory) || IsFlatpakInstall(steamInstallPath))
         {
             error = "Flatpak Steam is not supported for D2RLoader. Only native Steam installation is supported.";
             return false;
@@ -1049,9 +1068,9 @@ public class GameLauncherService
             : "steam";
     }
 
-    private static string GetSteamArgumentPrefix(string steamExecutable)
+    internal static string GetSteamArgumentPrefix(string steamExecutable, bool? isLinux = null)
     {
-        if (!OperatingSystem.IsLinux() ||
+        if (!(isLinux ?? OperatingSystem.IsLinux()) ||
             !string.Equals(Path.GetFileName(steamExecutable), "flatpak", StringComparison.Ordinal))
         {
             return string.Empty;
@@ -1061,10 +1080,10 @@ public class GameLauncherService
     }
 
     /// <summary>
-    /// Retrieves the Steam installation path for the current user, if Steam is installed natively (no Flatpak support).
+    /// Retrieves the selected library's Steam client root, or the first installed client when ownership is unknown.
     /// </summary>
     /// <returns>The path to the Steam installation directory, or <c>null</c> if none of the standard paths exist.</returns>
-    internal static string? GetSteamInstallPath(string? userHome = null)
+    internal static string? GetSteamInstallPath(string? userHome = null, string? installDirectory = null)
     {
         var homeDir = userHome ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         if (!Directory.Exists(homeDir))
@@ -1079,8 +1098,36 @@ public class GameLauncherService
             Path.Combine(homeDir, ".var", "app", "com.valvesoftware.Steam", "data", "Steam")
         ];
 
-        return candidates.FirstOrDefault(Directory.Exists);
+        var installedRoots = candidates.Where(Directory.Exists).ToArray();
+        if (!string.IsNullOrWhiteSpace(installDirectory))
+        {
+            try
+            {
+                var steamApps = FileService.FindAncestorDirectory(installDirectory, SteamAppsDirName);
+                if (steamApps is not null)
+                {
+                    foreach (var root in installedRoots)
+                        if (SameSteamDirectory(steamApps, Path.Combine(root, SteamAppsDirName))) return root;
+                    foreach (var root in installedRoots)
+                    {
+                        var libraries = new HashSet<string>(StringComparer.Ordinal);
+                        AddConfiguredSteamLibraries(root, libraries);
+                        if (libraries.Any(library => SameSteamDirectory(steamApps, Path.Combine(library, SteamAppsDirName))))
+                            return root;
+                    }
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+            }
+        }
+        return installedRoots.FirstOrDefault();
     }
+
+    private static bool SameSteamDirectory(string first, string second)
+        => string.Equals(SteamGameHandoff.ResolveFileSystemPath(first).TrimEnd(Path.DirectorySeparatorChar),
+            SteamGameHandoff.ResolveFileSystemPath(second).TrimEnd(Path.DirectorySeparatorChar),
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
     private static string? FindWinePrefix(string executablePath)
     {

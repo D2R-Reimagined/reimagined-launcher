@@ -38,3 +38,15 @@ Merged main at `46cd21a` (release CI version 0.16.11). Kept the project version 
 The Deck was unavailable and the tester requested skipping live validation. Earlier Deck results above apply to the earlier build; this new integration is covered by automated tests and Linux publishing, without a new live launch/return claim.
 
 Final merged-build validation: all 512 tests passed, and self-contained Linux Production publish succeeded. No live Deck test was performed for this integration.
+
+## 2026-10-09: review follow-up fixes
+
+Launch preparation now reserves the cross-instance Steam session before authentication, mod/config changes, or writing session secrets. The reservation remains held through delayed helper startup and through confirmed-exit credential cleanup, with failed preparation releasing it after cleanup. A surviving helper also prevents a new reservation. Regression fixtures verify rejected second preparation leaves the first configuration, request, and session token file byte-for-byte unchanged.
+
+Wine executable matching resolves parent-directory links on both expected and observed paths, including mapped drive roots and link traversal before `..`. Windows directory-junction fixtures validate both directions and reject separate executable copies. The same tests create directory symlinks on Linux; that branch has not been executed locally.
+
+Steam client discovery now follows the selected installation and its owning library, including external libraries listed by each client's libraryfolders.vdf. Mixed native/Flatpak regression fixtures verify Flatpak Offline selects the Flatpak command and cannot be captured by a native handoff registration. Native setup is hidden for Flatpak profiles; Flatpak Online/Ladder remains unsupported.
+
+No live Linux or Steam Deck retest was performed; the Deck remains unavailable. Automated fixture coverage does not replace a live Steam/Proton check.
+
+Second-GUI startup restoration and secret cleanup now use the same exclusive reservation. Regression fixtures verify pending credentials survive a second launcher start and failed maintenance releases ownership. Final validation: all 531 tests passed on Windows; Linux Production publish succeeded. No new live Linux/Deck test was performed.

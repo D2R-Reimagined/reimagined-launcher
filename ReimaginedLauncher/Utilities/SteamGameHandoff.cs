@@ -24,6 +24,8 @@ internal sealed class SteamGameHandoff : IDisposable
     private readonly FileStream _launchLock;
     private readonly string _directory;
     private readonly string _id;
+    private bool _disposed;
+    private bool _started;
     internal static string StateDirectory => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ReimaginedLauncher", "steam-handoff");
     internal static bool IsGamingMode => OperatingSystem.IsLinux()
@@ -153,7 +155,34 @@ internal sealed class SteamGameHandoff : IDisposable
         }
     }
 
-    internal static (SteamGameHandoff Session, Process Command) Start(InstallationProfile profile, string arguments)
+    internal static bool IsLaunchPendingOrRunning => IsReserved(StateDirectory);
+
+    internal static bool IsReserved(string directory)
+        => FileIsLocked(Path.Combine(directory, "launch.lock")) || FileIsLocked(Path.Combine(directory, "game.lock"));
+
+    internal static async Task RunStartupMaintenanceAsync(Func<Task> maintenance, string? directory = null)
+    {
+        SteamGameHandoff reservation;
+        try { reservation = Reserve(directory); }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or UnauthorizedAccessException) { return; }
+        using (reservation) await maintenance();
+    }
+    internal static SteamGameHandoff Reserve(string? directory = null)
+    {
+        directory ??= StateDirectory;
+        Directory.CreateDirectory(directory);
+        var launchLock = new FileStream(Path.Combine(directory, "launch.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        try
+        {
+            if (FileIsLocked(Path.Combine(directory, "game.lock")))
+                throw new InvalidOperationException("Wait for the current Steam game session to finish before launching again.");
+            return new SteamGameHandoff(directory, Guid.NewGuid().ToString("N"), launchLock);
+        }
+        catch { launchLock.Dispose(); throw; }
+    }
+
+    internal static (SteamGameHandoff Session, Process Command) Start(InstallationProfile profile, string arguments,
+        SteamGameHandoff? reservation = null)
     {
         var directory = StateDirectory;
         var registration = ReadJson<SteamHandoffRegistration>(Path.Combine(directory, "registration.json"));
@@ -165,10 +194,13 @@ internal sealed class SteamGameHandoff : IDisposable
         if (FindGameProcesses(Path.Combine(gameDirectory, "D2R.exe")).Length != 0
             || FindGameProcesses(Path.Combine(gameDirectory, "D2RLoader.exe")).Length != 0)
             throw new InvalidOperationException("Close the running D2R game before starting another session.");
-        var launchLock = new FileStream(Path.Combine(directory, "launch.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        var ownsReservation = reservation is null;
+        reservation ??= Reserve();
         try
         {
-            var id = Guid.NewGuid().ToString("N");
+            if (reservation._directory != directory || reservation._disposed || reservation._started)
+                throw new InvalidOperationException("The Steam game reservation is not available.");
+            var id = reservation._id;
             var request = new SteamHandoffRequest(id, DateTimeOffset.UtcNow, registration.SteamRoot, gameDirectory,
                 profile.ProtonExecutable!, executable, SplitArguments(arguments));
             WriteJson(Path.Combine(directory, "request.json"), request);
@@ -179,9 +211,10 @@ internal sealed class SteamGameHandoff : IDisposable
             foreach (var key in new[] { "SteamAppId", "SteamGameId", "SteamOverlayGameId", "LD_PRELOAD" }) command.Environment.Remove(key);
             var process = Process.Start(command) ?? throw new InvalidOperationException("Steam did not accept the game handoff.");
             LaunchDiagnostics.Log($"Steam handoff {id}: launcher-owned session {registration.AppId}, {Path.GetFileName(executable)} {arguments}");
-            return (new SteamGameHandoff(directory, id, launchLock), process);
+            reservation._started = true;
+            return (reservation, process);
         }
-        catch { launchLock.Dispose(); throw; }
+        catch { if (ownsReservation) reservation.Dispose(); throw; }
     }
 
     internal async Task<bool> WaitForExitAsync()
@@ -329,16 +362,52 @@ internal sealed class SteamGameHandoff : IDisposable
         if (argv0.Length >= 3 && argv0[1] == ':' && argv0[2] == '/')
         {
             if (drives is not null && drives.TryGetValue(char.ToUpperInvariant(argv0[0]), out var root))
-                argv0 = Path.GetFullPath(Path.Combine(root, argv0[3..]));
+                argv0 = Path.Combine(root, argv0[3..]);
             else if (argv0.StartsWith("Z:", StringComparison.OrdinalIgnoreCase)) argv0 = argv0[2..];
         }
-        return string.Equals(argv0.Replace('\\', '/'), executable.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase);
+        return string.Equals(ResolveFileSystemPath(argv0).Replace('\\', '/'),
+            ResolveFileSystemPath(executable).Replace('\\', '/'), StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static string ResolveFileSystemPath(string path) => ResolveFileSystemPath(path, 0);
+
+    private static string ResolveFileSystemPath(string path, int followedLinks)
+    {
+        if (!Path.IsPathFullyQualified(path)) return path;
+        if (followedLinks >= 64) return path;
+        var root = Path.GetPathRoot(path)!;
+        var components = path[root.Length..].Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries);
+        var resolved = root;
+        for (var index = 0; index < components.Length; index++)
+        {
+            if (components[index] == ".") continue;
+            if (components[index] == "..")
+            {
+                resolved = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(resolved)) ?? root;
+                continue;
+            }
+            var candidate = Path.Combine(resolved, components[index]);
+            FileSystemInfo entry = index == components.Length - 1 ? new FileInfo(candidate) : new DirectoryInfo(candidate);
+            try
+            {
+                resolved = entry.LinkTarget is { } target
+                    ? ResolveFileSystemPath(Path.IsPathFullyQualified(target) ? target : Path.Combine(resolved, target),
+                        followedLinks + 1) : candidate;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                resolved = candidate;
+            }
+        }
+        return resolved;
     }
 
     private static bool FileIsLocked(string path)
     {
         try { using var file = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None); return false; }
         catch (IOException) { return File.Exists(path); }
+        catch (UnauthorizedAccessException) { return true; }
     }
 
     private static T ReadJson<T>(string path) => JsonSerializer.Deserialize<T>(File.ReadAllText(path))
@@ -362,5 +431,10 @@ internal sealed class SteamGameHandoff : IDisposable
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
-    public void Dispose() => _launchLock.Dispose();
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _launchLock.Dispose();
+    }
 }

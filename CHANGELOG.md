@@ -10,3 +10,6 @@
 - Preserve generated/custom launch arguments, including Force Desktop and Ladder map reset; retain native Windows launch previews and validate the official Steam installation/prefix.
 - Keep launcher scrollbars expanded and add Exit Launcher to the main window.
 - Document player setup and automated/live validation; retain the existing Battle.net/Lutris launch flow.
+- Reserve Steam launches before preparing mod/session files and hold ownership through game-exit credential cleanup, preventing delayed-start overlapping launches from overwriting credentials.
+- Resolve filesystem aliases before matching Wine game processes, while distinguishing separate copies of the executable.
+- Select native/Flatpak Steam from the chosen installation and preserve Flatpak Offline routing when both clients coexist.

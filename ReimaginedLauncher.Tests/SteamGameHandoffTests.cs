@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using ReimaginedLauncher.Utilities;
 using Xunit;
@@ -193,6 +194,89 @@ public sealed class SteamGameHandoffTests
         Assert.True(SteamGameHandoff.MatchesGameCommandLine(command, executable, drives));
         Assert.False(SteamGameHandoff.MatchesGameCommandLine(command, executable));
         Assert.False(SteamGameHandoff.MatchesGameCommandLine(command, Path.Combine(root, "other", "D2RLoader.exe"), drives));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void GameMonitoringResolvesSteamRootAliasesInEitherDirection(bool observedAlias)
+    {
+        if (!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux()) return;
+        WithSteamRootAlias((root, actual, alias) =>
+        {
+            var relative = Path.Combine("steamapps", "common", "Diablo II Resurrected", "D2RLoader.exe");
+            var observed = Path.Combine(observedAlias ? alias : actual, relative);
+            var expected = Path.Combine(observedAlias ? actual : alias, relative);
+            Assert.True(SteamGameHandoff.MatchesGameCommandLine(observed + "\0-mod\0Reimagined", expected));
+            var unrelated = Path.Combine(root, "another installation", "D2RLoader.exe");
+            Directory.CreateDirectory(Path.GetDirectoryName(unrelated)!);
+            File.WriteAllText(unrelated, "game");
+            Assert.False(SteamGameHandoff.MatchesGameCommandLine(observed + "\0", unrelated));
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WineDriveMappingsResolveSteamRootAliasesInEitherDirection(bool mappedAlias)
+    {
+        if (!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux()) return;
+        WithSteamRootAlias((_, actual, alias) =>
+        {
+            var expected = Path.Combine(mappedAlias ? actual : alias, "steamapps", "common",
+                "Diablo II Resurrected", "D2RLoader.exe");
+            var drives = new Dictionary<char, string> { ['S'] = mappedAlias ? alias : actual };
+            Assert.True(SteamGameHandoff.MatchesGameCommandLine(
+                "S:\\steamapps\\common\\Diablo II Resurrected\\D2RLoader.exe\0-txt", expected, drives));
+        });
+    }
+
+    private static void WithSteamRootAlias(Action<string, string, string> test)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "steam-alias-" + Guid.NewGuid().ToString("N"));
+        var actual = Path.Combine(root, "actual Steam");
+        var alias = Path.Combine(root, "Steam aliases", "Steam alias");
+        var game = Path.Combine(actual, "steamapps", "common", "Diablo II Resurrected", "D2RLoader.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(game)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(alias)!);
+        File.WriteAllText(game, "game");
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                var info = new ProcessStartInfo("cmd.exe")
+                    { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+                foreach (var argument in new[] { "/d", "/c", "mklink", "/J", alias, actual }) info.ArgumentList.Add(argument);
+                using var process = Process.Start(info)!;
+                var output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+                Assert.True(process.WaitForExit(10000), "Directory junction creation timed out.");
+                Assert.True(process.ExitCode == 0, output);
+            }
+            else Directory.CreateSymbolicLink(alias, actual);
+            test(root, actual, alias);
+        }
+        finally
+        {
+            if (Directory.Exists(alias)) Directory.Delete(alias);
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public void ParentSegmentsAreResolvedAfterSteamRootAliases()
+    {
+        if (!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux()) return;
+        WithSteamRootAlias((root, _, alias) =>
+        {
+            var executable = Path.Combine(root, "D2RLoader.exe");
+            File.WriteAllText(executable, "game");
+            var lexicalPath = Path.Combine(Path.GetDirectoryName(alias)!, "D2RLoader.exe");
+            File.WriteAllText(lexicalPath, "another game");
+            Assert.True(SteamGameHandoff.MatchesGameCommandLine(Path.Combine(alias, "..", "D2RLoader.exe") + "\0", executable));
+            Assert.False(SteamGameHandoff.MatchesGameCommandLine(Path.Combine(alias, "..", "D2RLoader.exe") + "\0", lexicalPath));
+            Assert.True(SteamGameHandoff.MatchesGameCommandLine("S:\\..\\D2RLoader.exe\0", executable,
+                new Dictionary<char, string> { ['S'] = alias }));
+        });
     }
 
     [Theory]
