@@ -101,7 +101,7 @@ internal sealed class SteamGameHandoff : IDisposable
         if (GameLauncherService.IsSteamFlatpakInstall())
             throw new InvalidOperationException("Steam shortcut setup currently requires native Steam, not Flatpak Steam.");
         if (Process.GetProcessesByName("steam").Any(IsLiveSteamProcess))
-            throw new InvalidOperationException("In desktop Steam, choose Steam → Exit, then click Set up Steam shortcuts again.");
+            throw new InvalidOperationException("Exit Steam (Steam Deck users: stay in Desktop Mode), then click Set up Steam shortcuts again.");
         if (!GetSetupAccounts(steamRoot).Any(account => account.UserId == userId))
             throw new InvalidOperationException("Select an existing Steam account before setting up shortcuts.");
         var appImage = Environment.GetEnvironmentVariable("APPIMAGE");

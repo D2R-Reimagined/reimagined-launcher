@@ -273,7 +273,7 @@ public partial class LaunchView : UserControl
         SteamExtraPanel.IsVisible = profile.Type == InstallationType.Steam;
         SteamSetupPanel.IsVisible = profile.Type == InstallationType.Steam && OperatingSystem.IsLinux()
             && !GameLauncherService.IsSteamFlatpakInstall(profile.InstallDirectory);
-        SteamSetupButton.IsEnabled = !_isSteamSetupRunning && !_isLaunching && !MainWindow.IsInstallInProgress
+        SteamSetupShortcutsButton.IsEnabled = !_isSteamSetupRunning && !_isLaunching && !MainWindow.IsInstallInProgress
             && !SteamGameHandoff.IsLaunchPendingOrRunning;
         if (SteamSetupPanel.IsVisible)
         {
@@ -1979,7 +1979,7 @@ public partial class LaunchView : UserControl
             return;
         }
         _isSteamSetupRunning = true;
-        SteamSetupButton.IsEnabled = false;
+        SteamSetupShortcutsButton.IsEnabled = false;
         StartGameButton.IsEnabled = false;
         SteamSetupStatusText.Text = "Setting up Steam shortcuts...";
         try
@@ -1989,7 +1989,7 @@ public partial class LaunchView : UserControl
             await SettingsManager.SaveAsync(MainWindow.Settings);
             var resetMouseOnly = SteamResetMouseLayoutCheckBox.IsChecked == true;
             await Task.Run(() => SteamGameHandoff.InstallFromLauncher(root, account.UserId, resetMouseOnly));
-            SteamSetupStatusText.Text = "Setup complete. Close this launcher and restart Steam. In Gaming Mode, open Diablo II: Reimagined (Native Launcher). "
+            SteamSetupStatusText.Text = "Setup complete.\n\nSteam Deck users: Close this launcher and restart Steam. In Gaming Mode, open Diablo II: Reimagined (Native Launcher). "
                 + (resetMouseOnly ? "Mouse Only was requested in place of the saved launcher layout. "
                     : "Saved launcher layouts are preserved; Mouse Only is selected for an unset Steam Deck layout. ")
                 + "If the trackpad does not control the mouse, select Mouse Only in Steam Controller Settings. Keep the game session on its gamepad layout.";
@@ -2009,30 +2009,9 @@ public partial class LaunchView : UserControl
 
     private async void OnLocateProtonClick(object? sender, RoutedEventArgs e)
     {
-        if (TopLevel.GetTopLevel(this) is Window window)
-        {
-            var files = await window.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-            {
-                Title = "Locate Proton executable",
-                AllowMultiple = false,
-                FileTypeFilter =
-                [
-                    new FilePickerFileType("Proton Executable")
-                    {
-                        Patterns = ["proton"]
-                    }
-                ]
-            });
-
-            if (files.Count > 0)
-            {
-                var selectedPath = files[0].Path.LocalPath;
-
-                MainWindow.Settings.CurrentProfile.ProtonExecutable = selectedPath;
-                await SettingsManager.SaveAsync(MainWindow.Settings);
-                RefreshInstallDirectoryState();
-            }
-        }
+        GameLauncherService.TryDetectD2RProtonExecutable(MainWindow.Settings.CurrentProfile);
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+        RefreshInstallDirectoryState();
     }
 
 

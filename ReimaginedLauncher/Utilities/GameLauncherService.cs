@@ -865,39 +865,44 @@ public class GameLauncherService
 
         try
         {
-            var steamApps = FileService.FindAncestorDirectory(profile.InstallDirectory, SteamAppsDirName);
-            if (steamApps is null || !File.Exists(Path.Combine(steamApps, $"appmanifest_{SteamAppId}.acf")))
-                return false;
-
-            var prefix = Path.Combine(steamApps, "compatdata", SteamAppId);
-            var metadata = Path.Combine(prefix, "config_info");
-            if (!Directory.Exists(Path.Combine(prefix, "pfx")) || !File.Exists(metadata))
-                return false;
-
-            string[] suffixes = [Path.Combine("files", "share", "default_pfx"),
-                Path.Combine("files", "share", "fonts"), Path.Combine("files", "lib")];
-            var candidates = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var line in File.ReadLines(metadata).Take(128))
-            {
-                var path = line.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                if (!Path.IsPathRooted(path)) continue;
-                foreach (var suffix in suffixes)
-                {
-                    var tail = Path.DirectorySeparatorChar + suffix;
-                    if (!path.EndsWith(tail, StringComparison.Ordinal)) continue;
-                    var executable = Path.Combine(path[..^tail.Length], "proton");
-                    if (File.Exists(executable)) candidates.Add(executable);
-                }
-            }
-
-            if (candidates.Count != 1) return false;
-            profile.ProtonExecutable = candidates.Single();
-            return true;
+            return TryDetectD2RProtonExecutable(profile);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
             return false;
         }
+    }
+
+    internal static bool TryDetectD2RProtonExecutable(InstallationProfile profile)
+    {
+        var steamApps = FileService.FindAncestorDirectory(profile.InstallDirectory, SteamAppsDirName);
+        if (steamApps is null || !File.Exists(Path.Combine(steamApps, $"appmanifest_{SteamAppId}.acf")))
+            return false;
+
+        var prefix = Path.Combine(steamApps, "compatdata", SteamAppId);
+        var metadata = Path.Combine(prefix, "config_info");
+        if (!Directory.Exists(Path.Combine(prefix, "pfx")) || !File.Exists(metadata))
+            return false;
+
+        string[] suffixes = [Path.Combine("files", "share", "default_pfx"),
+            Path.Combine("files", "share", "fonts"), Path.Combine("files", "lib")];
+        var candidates = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var line in File.ReadLines(metadata).Take(128))
+        {
+            var path = line.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (!Path.IsPathRooted(path)) continue;
+            foreach (var suffix in suffixes)
+            {
+                var tail = Path.DirectorySeparatorChar + suffix;
+                if (!path.EndsWith(tail, StringComparison.Ordinal)) continue;
+                var executable = Path.Combine(path[..^tail.Length], "proton");
+                if (File.Exists(executable)) candidates.Add(executable);
+            }
+        }
+
+        if (candidates.Count != 1) return false;
+        profile.ProtonExecutable = candidates.Single();
+        return true;
     }
 
     internal static string BuildSteamProtonArguments(string loaderPath, string launchParameters)
