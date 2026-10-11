@@ -300,8 +300,23 @@ public class GameLauncherService
     }
 
     internal static bool UsesSteamHandoff(InstallationProfile profile)
-        => UsesSteamHandoff(profile, OperatingSystem.IsLinux(), SteamGameHandoff.IsGamingMode,
+        => !UsesSingleSteamSession(profile)
+           && UsesSteamHandoff(profile, OperatingSystem.IsLinux(), SteamGameHandoff.IsGamingMode,
             File.Exists(Path.Combine(SteamGameHandoff.StateDirectory, "registration.json")));
+
+    internal static bool UsesSingleSteamSession(InstallationProfile profile)
+        => UsesSingleSteamSession(profile, Environment.GetEnvironmentVariable("D2RR_SINGLE_STEAM_SESSION"),
+            Environment.GetEnvironmentVariable("SteamAppId"), Environment.GetEnvironmentVariable("SteamGameId"),
+            Environment.GetEnvironmentVariable("D2RR_SESSION_APP_ID"));
+
+    internal static bool UsesSingleSteamSession(InstallationProfile profile, string? enabled, string? appId,
+        string? gameId, string? sessionAppId = null, bool? isLinux = null)
+        => (isLinux ?? OperatingSystem.IsLinux()) && appId == SteamAppId && profile.Type == InstallationType.Steam
+           && !IsSteamFlatpakInstall(profile.InstallDirectory)
+           && !profile.UseSteamHelperFallback
+           && profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Offline or LaunchExperience.Ladder
+           && enabled == "dedicated" && uint.TryParse(sessionAppId, out var shortcut) && shortcut >= 0x80000000
+           && ulong.TryParse(gameId, out var game) && game == (((ulong)shortcut << 32) | 0x02000000);
 
     internal static bool UsesSteamHandoff(InstallationProfile profile, bool isLinux, bool isGamingMode,
         bool hasRegistration, string? userHome = null)
@@ -532,7 +547,7 @@ public class GameLauncherService
         if (profile.Type == InstallationType.Steam)
         {
             if (UsesSteamHandoff(profile))
-                return BuildSteamHandoffPreview(Path.Combine(profile.InstallDirectory ?? "", "D2R.exe"), launchParameters);
+                return BuildSteamHandoffPreview(Path.Combine(profile.InstallDirectory ?? "", "D2R.exe"), launchParameters, profile);
             var steamPath = profile.SteamDirectory ?? FindSteamExecutable(profile.InstallDirectory) ?? GetDefaultSteamCommand();
             var steamPrefix = GetSteamArgumentPrefix(steamPath);
             return $"\"{steamPath}\" {steamPrefix}-silent -applaunch {SteamAppId} {launchParameters}";
@@ -587,7 +602,7 @@ public class GameLauncherService
         }
 
         if (UsesSteamHandoff(profile))
-            return BuildSteamHandoffPreview(loaderPath!, launchParameters);
+            return BuildSteamHandoffPreview(loaderPath!, launchParameters, profile);
 
         var steamApps = FileService.FindAncestorDirectory(profile.InstallDirectory, SteamAppsDirName);
         var steamProtonEnvVars = new Dictionary<string, string>();
@@ -596,8 +611,15 @@ public class GameLauncherService
         return $"{envVarsExports}\n \"{profile.ProtonExecutable}\" {BuildSteamProtonArguments(loaderPath!, launchParameters)}";
     }
 
-    private static string BuildSteamHandoffPreview(string executable, string arguments)
-        => $"Steam-owned game session; request prepared when Launch is pressed.{Environment.NewLine}\"{executable}\" {arguments}";
+    private static string BuildDedicatedSteamPreview(string executable, string arguments, InstallationProfile profile)
+        => "Dedicated Steam launcher session (official D2R prefix)." + Environment.NewLine
+           + (profile.EnableLsfg ? "\"~/lsfg\" " : "")
+           + $"\"{profile.ProtonExecutable}\" {BuildSteamProtonArguments(executable, arguments)}";
+
+    private static string BuildSteamHandoffPreview(string executable, string arguments, InstallationProfile profile)
+        => $"Steam-owned game session; request prepared when Launch is pressed.{Environment.NewLine}"
+           + (profile.EnableLsfg ? "LSFG wrapper: ~/lsfg (game only)." + Environment.NewLine : "")
+           + $"\"{executable}\" {arguments}";
 
     public Process? LaunchGame(string? launchParamOverride = null, string? gamePathOverride = null)
         => LaunchGame(null, launchParamOverride, gamePathOverride);
@@ -715,6 +737,12 @@ public class GameLauncherService
 
             workingDirectory = profile.InstallDirectory;
         }
+        else if (UsesSingleSteamSession(profile))
+        {
+            executablePath = profile.ProtonExecutable ?? string.Empty;
+            finalArgs = BuildSteamProtonArguments(Path.Combine(profile.InstallDirectory!, "D2R.exe"), launchParameters);
+            workingDirectory = profile.InstallDirectory;
+        }
         else if (profile.Type == InstallationType.Steam)
         {
             executablePath = profile.SteamDirectory ?? FindSteamExecutable(profile.InstallDirectory) ?? string.Empty;
@@ -759,7 +787,12 @@ public class GameLauncherService
         LaunchDiagnostics.Log($"Resolved executable path: {executablePath}");
         LaunchDiagnostics.Log($"Launch parameters: {finalArgs}");
 
-        var processStartInfo = CreateProcessStartInfo(executablePath, finalArgs, workingDirectory);
+        var processStartInfo = UsesSingleSteamSession(profile)
+            ? SteamGameHandoff.CreateGameStartInfo(new SteamHandoffRequest("single-session", DateTimeOffset.UtcNow,
+                GetSteamInstallPath(installDirectory: profile.InstallDirectory)!, profile.InstallDirectory!, profile.ProtonExecutable!,
+                Path.Combine(profile.InstallDirectory!, UsesD2RLoader(profile) ? "D2RLoader.exe" : "D2R.exe"),
+                SteamGameHandoff.SplitArguments(launchParameters), profile.EnableLsfg))
+            : CreateProcessStartInfo(executablePath, finalArgs, workingDirectory);
         LaunchDiagnostics.Log($"Working directory: {processStartInfo.WorkingDirectory}");
 
         if (!string.IsNullOrWhiteSpace(winePrefix))
@@ -919,7 +952,10 @@ public class GameLauncherService
         string steamInstallPath, string? steamApps)
     {
         environment["SteamAppId"] = $"{SteamAppId}";
-        environment["STEAM_COMPAT_APP_ID"] = $"{SteamAppId}";
+        environment["STEAM_COMPAT_APP_ID"] = UsesSingleSteamSession(profile,
+            Environment.GetEnvironmentVariable("D2RR_SINGLE_STEAM_SESSION"), Environment.GetEnvironmentVariable("SteamAppId"),
+            Environment.GetEnvironmentVariable("SteamGameId"), Environment.GetEnvironmentVariable("D2RR_SESSION_APP_ID"))
+            ? Environment.GetEnvironmentVariable("D2RR_SESSION_APP_ID") ?? SteamAppId : SteamAppId;
         environment["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = $"{steamInstallPath}";
         environment["STEAM_COMPAT_DATA_PATH"] = Path.Combine(steamApps!, "compatdata", SteamAppId);
         environment["STEAM_COMPAT_INSTALL_PATH"] = $"{profile.InstallDirectory}";

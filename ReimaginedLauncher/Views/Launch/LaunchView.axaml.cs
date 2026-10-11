@@ -271,6 +271,12 @@ public partial class LaunchView : UserControl
         DetectionLoadingIndicator.IsVisible = LauncherService.IsDetecting;
 
         SteamExtraPanel.IsVisible = profile.Type == InstallationType.Steam;
+        LsfgPanel.IsVisible = profile.Type == InstallationType.Steam && OperatingSystem.IsLinux()
+                             && !GameLauncherService.IsSteamFlatpakInstall(profile.InstallDirectory);
+        SteamHelperFallbackCheckBox.IsChecked = profile.UseSteamHelperFallback;
+        SteamHelperFallbackCheckBox.IsEnabled = !_isLaunching && !SteamGameHandoff.IsLaunchPendingOrRunning;
+        EnableLsfgCheckBox.IsChecked = profile.EnableLsfg;
+        EnableLsfgCheckBox.IsEnabled = !_isLaunching && !SteamGameHandoff.IsLaunchPendingOrRunning;
         SteamSetupPanel.IsVisible = profile.Type == InstallationType.Steam && OperatingSystem.IsLinux()
             && !GameLauncherService.IsSteamFlatpakInstall(profile.InstallDirectory);
         SteamSetupShortcutsButton.IsEnabled = !_isSteamSetupRunning && !_isLaunching && !MainWindow.IsInstallInProgress
@@ -1990,9 +1996,9 @@ public partial class LaunchView : UserControl
             var resetMouseOnly = SteamResetMouseLayoutCheckBox.IsChecked == true;
             await Task.Run(() => SteamGameHandoff.InstallFromLauncher(root, account.UserId, resetMouseOnly));
             SteamSetupStatusText.Text = "Setup complete.\n\nSteam Deck users: Close this launcher and restart Steam. In Gaming Mode, open Diablo II: Reimagined (Native Launcher). "
-                + (resetMouseOnly ? "Mouse Only was requested in place of the saved launcher layout. "
-                    : "Saved launcher layouts are preserved; Mouse Only is selected for an unset Steam Deck layout. ")
-                + "If the trackpad does not control the mouse, select Mouse Only in Steam Controller Settings. Keep the game session on its gamepad layout.";
+                + (resetMouseOnly ? "Gamepad with Mouse Trackpad was requested in place of the saved layout. "
+                    : "Saved layouts are preserved; Gamepad with Mouse Trackpad is selected for an unset Steam Deck layout. ")
+                + "Use Gamepad With Mouse Trackpad in Steam Controller Settings if needed. The helper remains available as a compatibility fallback.";
             RefreshInstallDirectoryState();
         }
         catch (Exception exception)
@@ -2007,6 +2013,30 @@ public partial class LaunchView : UserControl
         }
     }
 
+    private async void OnSteamHelperFallbackChanged(object? sender, RoutedEventArgs e)
+    {
+        var profile = MainWindow.Settings.CurrentProfile;
+        var enabled = SteamHelperFallbackCheckBox.IsChecked == true;
+        if (profile.UseSteamHelperFallback == enabled) return;
+        profile.UseSteamHelperFallback = enabled;
+        try { await SettingsManager.SaveAsync(MainWindow.Settings); }
+        catch (Exception exception) { Notifications.SendNotification("Could not save the Steam fallback setting: " + exception.Message, "Warning"); }
+        RefreshInstallDirectoryState();
+    }
+
+    private async void OnLsfgChanged(object? sender, RoutedEventArgs e)
+    {
+        var profile = MainWindow.Settings.CurrentProfile;
+        var enabled = EnableLsfgCheckBox.IsChecked == true;
+        if (profile.EnableLsfg == enabled) return;
+        profile.EnableLsfg = enabled;
+        try { await SettingsManager.SaveAsync(MainWindow.Settings); }
+        catch (Exception exception)
+        {
+            Notifications.SendNotification("Could not save the LSFG setting: " + exception.Message, "Warning");
+        }
+        RefreshInstallDirectoryState();
+    }
     private async void OnLocateProtonClick(object? sender, RoutedEventArgs e)
     {
         GameLauncherService.TryDetectD2RProtonExecutable(MainWindow.Settings.CurrentProfile);
@@ -2052,10 +2082,18 @@ public partial class LaunchView : UserControl
         }
 
         var profile = MainWindow.Settings.CurrentProfile;
+        if (OperatingSystem.IsLinux() && profile.Type == InstallationType.Steam && profile.EnableLsfg
+            && !GameLauncherService.IsSteamFlatpakInstall(profile.InstallDirectory) && !GameLauncherService.UsesSteamHandoff(profile)
+            && !GameLauncherService.UsesSingleSteamSession(profile))
+        {
+            Notifications.SendNotification("Set up Steam shortcuts before using the launcher LSFG option.", "Warning");
+            return;
+        }
         SteamGameHandoff? reservation = null;
         try
         {
-            if (GameLauncherService.UsesSteamHandoff(profile)) reservation = SteamGameHandoff.Reserve();
+            if (GameLauncherService.UsesSteamHandoff(profile) || GameLauncherService.UsesSingleSteamSession(profile))
+                reservation = SteamGameHandoff.Reserve();
         }
         catch (Exception exception) when (exception is IOException or InvalidOperationException or UnauthorizedAccessException)
         {
@@ -2316,8 +2354,8 @@ public partial class LaunchView : UserControl
                         ? MainWindow.Instance : null;
                     tokenHandedToGame = _launchGameToken;
                     _ = WatchGameExitAsync(gameProcess, expectedExePath, minimizeTarget, lutrisGameExePath, _preparedServerSaves,
-                        profile.InstallDirectory, _launchGameToken, steamHandoff);
-                    reservationHandedToWatcher = steamHandoff is not null;
+                        profile.InstallDirectory, _launchGameToken, steamHandoff, steamHandoff is null ? reservation : null);
+                    reservationHandedToWatcher = reservation is not null;
                 }
             }
             catch (Exception ex)
@@ -2773,7 +2811,7 @@ public partial class LaunchView : UserControl
         ServerSaveMonitor? serverSaves = null,
         string? installDirectory = null,
         GameSessionToken? gameToken = null,
-        SteamGameHandoff? steamHandoff = null)
+        SteamGameHandoff? steamHandoff = null, SteamGameHandoff? sessionReservation = null)
     {
         using var monitoring = new CancellationTokenSource();
         var monitorTask = serverSaves is null ? Task.CompletedTask : MonitorServerSavesAsync(serverSaves, monitoring.Token);
@@ -2845,6 +2883,7 @@ public partial class LaunchView : UserControl
                 finally
                 {
                     steamHandoff?.Dispose();
+                    sessionReservation?.Dispose();
                     await Dispatcher.UIThread.InvokeAsync(RefreshInstallDirectoryState);
                 }
             }

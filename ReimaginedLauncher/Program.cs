@@ -36,6 +36,7 @@ class Program
             }
             return;
         }
+        SteamGameHandoff.TryInitializeLauncherSession();
         VelopackApp.Build().Run();
 
         var services = new ServiceCollection();

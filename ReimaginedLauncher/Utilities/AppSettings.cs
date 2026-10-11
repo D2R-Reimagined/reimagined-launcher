@@ -51,6 +51,8 @@ public class InstallationProfile
     public string? InstallDirectory { get; set; }
     public string? SteamDirectory { get; set; }
     public string? ProtonExecutable { get; set; }
+    public bool EnableLsfg { get; set; }
+    public bool UseSteamHelperFallback { get; set; }
 
     // The id drives the launch URI; the slug locates the game's YAML config.
     public int? LutrisGameId { get; set; }

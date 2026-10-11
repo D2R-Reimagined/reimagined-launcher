@@ -1,35 +1,50 @@
 # Steam Deck setup
 
-This setup supports the Steam edition of Diablo II: Resurrected through native Steam. Decky and Lutris are not required. The launcher includes the official v0.16.7 update. Battle.net installations using Lutris retain their existing setup.
+This flow supports Diablo II: Resurrected installed through native Steam. Game launching does not require Decky, CEF debugging, Lutris, SSH, or terminal commands. Existing Battle.net/Lutris and Windows flows remain available. The branch includes the official v0.16.7 changes and integration with main at v0.16.11; release versioning remains owned by the release workflow.
 
-## Desktop Mode
+## Prepare in Desktop Mode
 
-1. Install Diablo II: Resurrected through Steam, then switch to Desktop Mode. Browser sign-in and mod downloads should be completed here.
-2. Download the launcher AppImage, make it executable in its file properties, and open it.
-3. On **Launch**, select **Steam** and confirm the detected install directory. Connect Nexus through **Login with Nexus Mods**. Connect your Reimagined account if using Ladder.
-4. Use **Install/Update → Download and Install** and complete the Nexus download. The launcher can pick up and extract the completed archive automatically; **Select Zip Manually** is the fallback.
-5. **Stay in Desktop Mode.** Launch the original Diablo II: Resurrected entry from desktop Steam, sign in, reach character select, and exit through the game's menu. First launch can be slow while Proton initializes. This establishes the official prefix and authentication; repeat sign-in when the game requires authentication renewal.
-6. Back in the launcher, check **Launch → Install directory**. Proton is pre-filled when the initialized base-game prefix identifies one existing tool. Otherwise use **Locate Proton** to choose the same tool used by the base game.
-7. Select **D2RLoader** as Play Mode for Online/Ladder and accept its installation prompt if missing. Wait for installation to finish. Enable **Force Desktop (`-forcedesktop`)** under **Settings → Launch Parameters** for multiplayer options.
+1. Install D2R through Steam. Download the launcher AppImage, make it executable in its file properties, and open it.
+2. Under **Launch → Install directory**, select **Steam** and confirm the detected installation. Connect Nexus with **Login with Nexus Mods**. Connect your Reimagined account for Ladder.
+3. Use **Install/Update → Download and Install** and complete the Nexus browser download. The launcher detects and extracts the completed archive; **Select Zip Manually** is the fallback. Complete browser sign-in and downloads in Desktop Mode.
+4. **Stay in Desktop Mode.** Launch the official D2R entry from Steam, sign in, reach character select, then exit through the game menu. First launch can take time while Proton initializes. This establishes the official prefix and authentication.
+5. Back in **Launch → Install directory**, check Proton detection. **Locate Proton** retries automatic detection; it does not open a file picker. If detection fails, confirm the official game launched successfully with its selected Proton tool before retrying.
+6. Select **D2RLoader** for Online/Ladder and accept its installation prompt if needed. Enable **Force Desktop (`-forcedesktop`)** under **Settings → Launch Parameters** for multiplayer options.
 
-If Firefox sends you to your Reimagined profile after website login without connecting the launcher, return to the launcher's sign-in action and reopen authorization. This retry was needed during testing; the first-login redirect remains unresolved.
+During testing, Firefox redirected Reimagined sign-in to the profile page without completing launcher authorization. Reopening the launcher sign-in action completed it. This redirect issue remains unresolved.
 
-## Register Steam shortcuts
+## Register the launcher
 
-1. Under **Launch → Install directory → Steam shortcuts**, confirm the selected Steam account.
-2. In desktop Steam choose **Steam → Exit**. Clicking the window's **X does not fully exit Steam**. Keep the launcher open, or reopen the AppImage afterward.
-3. Leave **Reset launcher layout to Mouse Only** checked to configure trackpad movement and clicking for the launcher. Uncheck it to preserve a custom launcher layout. Game-session controls are separate.
-4. Click **Set up Steam shortcuts**. The launcher backs up existing shortcut/controller files, preserves unrelated entries, and copies its AppImage to a stable location. No SSH or terminal command is needed.
-5. After success, close the desktop launcher and select **Return to Gaming Mode**. This starts Steam with the new shortcuts.
+1. Under **Launch → Install directory → Steam shortcuts**, select the Steam account.
+2. Fully exit desktop Steam using **Steam → Exit**. Closing its window with **X is insufficient**. Keep the launcher open, or reopen the AppImage afterward.
+3. Leave **Reset layout to Gamepad with Mouse Trackpad** checked for the default layout. It preserves gamepad sticks, triggers and buttons, adds trackpad mouse movement, and maps trackpad press to left-click. R2 remains the normal game trigger. Uncheck reset to retain a custom controller layout.
+4. Click **Set up Steam shortcuts**. Setup backs up changed files, preserves unrelated shortcuts and preferences, and installs the AppImage at a stable location.
+5. Close the desktop launcher and select **Return to Gaming Mode**.
 
-Setup creates **Diablo II: Reimagined (Native Launcher)** and **Diablo II: Reimagined (Launcher Game Session)**. Open **Native Launcher**. The game-session entry is an internal helper; launch games through the GUI. Do not enable Proton compatibility on these native launcher entries.
+Open **Diablo II: Reimagined (Native Launcher)**. Setup also retains a hidden **Diablo II: Reimagined (Launcher Game Session)** for the compatibility fallback. Do not enable Proton compatibility on either native entry.
 
-## Gaming Mode
+The installed AppImage is `~/.local/share/ReimaginedLauncher/launcher/D2RReimagined.ReimaginedLauncher.AppImage`. Moving the Downloads copy does not break the registered entries. To install another AppImage manually, open it in Desktop Mode and rerun setup with Steam fully exited. Existing owned shortcut IDs are retained.
 
-Select the experience and press **Launch**. Steam switches to the game and its gamepad layout. Exit through D2R's menu to return to the launcher and its mouse layout. Steam can show both launcher entries and the base game during play; these represent the GUI, game-session helper, and game runtime.
+## Play and exit
 
-Use **Exit Launcher** to close the GUI, including when minimize-to-tray is enabled. Scrollbars remain expanded for trackpad use. If mouse input is unavailable, fully exit Steam in Desktop Mode and rerun setup with the reset option checked. Manual fallback: **Steam → Controller Settings → current layout → Templates → Mouse Only → Apply** for Native Launcher only.
+Select Online, Offline or Ladder and press **Launch**. The launcher and game normally share the dedicated Steam session and controller layout. Exit through the game menu to return to the persistent launcher. **Exit Launcher** closes it and returns to its Steam page, even when minimize-to-tray is enabled.
 
-The installed AppImage is at `~/.local/share/ReimaginedLauncher/launcher/D2RReimagined.ReimaginedLauncher.AppImage`. Moving the Downloads copy afterward does not break shortcuts. To install a newer AppImage, open it in Desktop Mode and rerun setup with Steam fully exited. Existing owned shortcut IDs are retained, including when migrating the previous D2R Reimagined names.
+If launcher clicking is unavailable, rerun setup with controller reset checked. Alternatively, edit the launcher layout in Steam Controller Settings: use **Gamepad with Mouse Trackpad**, then set **Right Trackpad → Click → Left Mouse Click**. The stock template binds trackpad press to right-stick click; selecting it alone does not provide mouse clicking.
 
-See [validation](steam-deck-validation.md) for checks and limitations.
+The official D2R entry and its launch options are unchanged. Use that entry for vanilla play and authentication renewal when D2R requests sign-in. Avoid running vanilla and Reimagined together because both use the existing official Proton prefix.
+
+## Optional LSFG
+
+Under **Launch → Install directory**, enable **Enable LSFG for the game** if an executable `~/lsfg` wrapper is already installed and configured, for example through Decky LSFG-VK. LSFG defaults off and affects only the game, not the launcher. No `%command%` launch-option edit is needed. The checkbox remains editable before shortcut setup; enabling LSFG without a supported Steam route or executable wrapper produces an actionable launch error.
+
+The launcher does not install LSFG. Decky is optional for the launcher itself; it is one way to install/configure the frame-generation wrapper.
+
+## Compatibility fallback
+
+Enable **Use separate game session (compatibility fallback)** under **Launch → Install directory** if the dedicated route has problems. The next launch uses the hidden helper, including LSFG when enabled. Close the game before switching routes. Uncheck fallback to return to the dedicated route.
+
+After a fallback launch, Steam can retain the Game Session page in navigation history, including after switching back to the dedicated route. Press Back to leave it. The page alone does not mean the helper is still running.
+
+Suspend/resume passed launch and input recovery on the test Deck, but temporary graphical glitches were observed until changing zones. Their cause is unconfirmed. Ladder requires an active connection and disconnected during sleep.
+
+See [validation results and limits](steam-deck-validation.md).

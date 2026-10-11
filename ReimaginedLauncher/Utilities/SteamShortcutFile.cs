@@ -6,7 +6,7 @@ using System.Text;
 
 namespace ReimaginedLauncher.Utilities;
 
-internal sealed record LauncherSteamShortcut(string Name, string Executable, string Arguments, string? LegacyName = null)
+internal sealed record LauncherSteamShortcut(string Name, string Executable, string Arguments, string? LegacyName = null, bool? Hidden = null)
 {
     public uint AppId => SteamShortcutFile.CalculateAppId(Executable, LegacyName ?? Name);
     public ulong GameId => ((ulong)AppId << 32) | 0x02000000;
@@ -33,7 +33,7 @@ internal static class SteamShortcutFile
         using var reader = new BinaryReader(input, Encoding.UTF8);
         if (reader.ReadByte() != 0 || ReadString(reader) != "shortcuts")
             throw new InvalidDataException("Unsupported Steam shortcut root; no changes were made.");
-        var entries = new List<(Dictionary<string, object> Fields, long NameStart, long NameEnd)>();
+        var entries = new List<(Dictionary<string, object> Fields, long NameStart, long NameEnd, long HiddenStart, long HiddenEnd)>();
         var nextIndex = 0;
         while (Peek(reader) != 8)
         {
@@ -42,19 +42,22 @@ internal static class SteamShortcutFile
             if (!int.TryParse(index, out var number) || number < 0 || number == int.MaxValue)
                 throw new InvalidDataException("Invalid Steam shortcut index.");
             nextIndex = Math.Max(nextIndex, number + 1);
-            long nameStart = 0, nameEnd = 0;
+            long nameStart = 0, nameEnd = 0, hiddenStart = 0, hiddenEnd = 0;
             var fields = ReadObject(reader, 0, (key, start, end) =>
             {
                 if (key.Equals("AppName", StringComparison.OrdinalIgnoreCase))
                     (nameStart, nameEnd) = (start, end);
+                if (key.Equals("IsHidden", StringComparison.OrdinalIgnoreCase))
+                    (hiddenStart, hiddenEnd) = (start, end);
             });
-            entries.Add((fields, nameStart, nameEnd));
+            if (hiddenEnd == 0) hiddenStart = hiddenEnd = input.Position - 1;
+            entries.Add((fields, nameStart, nameEnd, hiddenStart, hiddenEnd));
         }
         var appendAt = input.Position;
         if (reader.ReadByte() != 8 || reader.ReadByte() != 8 || input.Position != input.Length)
             throw new InvalidDataException("Unexpected Steam shortcut data; no changes were made.");
         using var output = new MemoryStream();
-        var renames = new List<(long Start, long End, string Name)>();
+        var updates = new List<(long Start, long End, string? Name, uint? Hidden)>();
         using var writer = new BinaryWriter(output, Encoding.UTF8, true);
         foreach (var shortcut in shortcuts)
         {
@@ -68,7 +71,15 @@ internal static class SteamShortcutFile
                     || !Equals(existing[0].Fields.GetValueOrDefault("LaunchOptions"), shortcut.Arguments))
                     throw new InvalidDataException("Steam shortcut ID collision; existing entries were preserved.");
                 if (!Equals(existing[0].Fields.GetValueOrDefault("AppName"), shortcut.Name))
-                    renames.Add((existing[0].NameStart, existing[0].NameEnd, shortcut.Name));
+                    updates.Add((existing[0].NameStart, existing[0].NameEnd, shortcut.Name, null));
+                if (shortcut.Hidden is { } hidden)
+                {
+                    var value = hidden ? 1u : 0u;
+                    if (existing[0].Fields.TryGetValue("IsHidden", out var old) && old is not uint)
+                        throw new InvalidDataException("Invalid shortcut visibility field; no changes were made.");
+                    if (!Equals(old, value))
+                        updates.Add((existing[0].HiddenStart, existing[0].HiddenEnd, null, value));
+                }
                 continue;
             }
             writer.Write((byte)0);
@@ -79,7 +90,8 @@ internal static class SteamShortcutFile
             WriteField(writer, "StartDir", "\"" + Path.GetDirectoryName(shortcut.Executable.Trim('"')) + "\"");
             WriteField(writer, "LaunchOptions", shortcut.Arguments);
             foreach (var field in new[] { "icon", "ShortcutPath", "DevkitGameID", "FlatpakAppID" }) WriteField(writer, field, "");
-            foreach (var field in new[] { "IsHidden", "OpenVR", "Devkit", "DevkitOverrideAppID", "LastPlayTime" }) WriteInt(writer, field, 0);
+            WriteInt(writer, "IsHidden", shortcut.Hidden == true ? 1u : 0u);
+            foreach (var field in new[] { "OpenVR", "Devkit", "DevkitOverrideAppID", "LastPlayTime" }) WriteInt(writer, field, 0);
             WriteInt(writer, "AllowDesktopConfig", 1);
             WriteInt(writer, "AllowOverlay", 1);
             writer.Write((byte)0);
@@ -93,11 +105,12 @@ internal static class SteamShortcutFile
         using var result = new MemoryStream();
         using var resultWriter = new BinaryWriter(result, Encoding.UTF8, true);
         var position = 0;
-        foreach (var rename in renames.OrderBy(rename => rename.Start))
+        foreach (var update in updates.OrderBy(update => update.Start))
         {
-            result.Write(original.AsSpan(position, (int)rename.Start - position));
-            WriteField(resultWriter, "AppName", rename.Name);
-            position = (int)rename.End;
+            result.Write(original.AsSpan(position, (int)update.Start - position));
+            if (update.Name is { } name) WriteField(resultWriter, "AppName", name);
+            else WriteInt(resultWriter, "IsHidden", update.Hidden!.Value);
+            position = (int)update.End;
         }
         result.Write(original.AsSpan(position, (int)appendAt - position));
         output.Position = 0;

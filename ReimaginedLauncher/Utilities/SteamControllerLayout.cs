@@ -12,12 +12,53 @@ internal static class SteamControllerLayout
     private sealed record Token(string Value, int Start, int End, bool Quoted);
     private sealed record Entry(string Name, int ValueStart, int End, bool Object);
 
-    internal static int SetUpLauncher(string steamRoot, string userId, string oldName, string newName, bool resetMouseOnly = false)
+    internal static string PrepareCombinedTemplate(string steamRoot)
+    {
+        const string name = "controller_neptune_reimagined.vdf";
+        var directory = Path.Combine(steamRoot, "controller_base", "templates");
+        var source = Path.Combine(directory, "controller_neptune_gamepad+mouse.vdf");
+        var updated = BuildCombinedTemplate(File.ReadAllText(source));
+        var destination = Path.Combine(directory, name);
+        if (File.Exists(destination) && File.ReadAllText(destination) == updated) return name;
+        if (File.Exists(destination)) File.Copy(destination, destination + ".reimagined-" + Guid.NewGuid().ToString("N") + ".bak");
+        SteamGameHandoff.WriteShortcutFile(destination, Encoding.UTF8.GetBytes(updated));
+        return name;
+    }
+
+    internal static string BuildCombinedTemplate(string text)
+    {
+        var tokens = new List<Token>();
+        var consumed = 0;
+        foreach (Match match in Regex.Matches(text, "\"(?:\\\\.|[^\"\\\\])*\"|[{}]|//[^\\r\\n]*|\\s+|\\uFEFF"))
+        {
+            if (match.Index != consumed) throw new InvalidDataException("Unsupported Steam controller template.");
+            consumed = match.Index + match.Length;
+            if (match.Value.StartsWith("//") || string.IsNullOrWhiteSpace(match.Value) || match.Value == "\uFEFF") continue;
+            var quoted = match.Value.StartsWith('"');
+            tokens.Add(new Token(quoted ? match.Value[1..^1] : match.Value, match.Index, consumed, quoted));
+        }
+        if (consumed != text.Length || tokens.Count < 3 || tokens[0].Value != "controller_mappings")
+            throw new InvalidDataException("Unsupported Steam controller template root.");
+        var position = 1;
+        var entries = ReadObject(tokens, ref position, 0, out _, true);
+        if (position != tokens.Count) throw new InvalidDataException("Unexpected Steam controller template data.");
+        var mouseGroups = entries.Where(entry => entry.Name == "group" && entry.Object
+            && Regex.IsMatch(text[entry.ValueStart..entry.End], "\"mode\"\\s*\"absolute_mouse\"")).ToArray();
+        if (mouseGroups.Length != 1) throw new InvalidDataException("Expected one mouse trackpad in the Steam controller template.");
+        var group = mouseGroups[0];
+        var bindings = Regex.Matches(text[group.ValueStart..group.End], "\"binding\"\\s*\"xinput_button JOYSTICK_RIGHT\"");
+        if (bindings.Count != 1) throw new InvalidDataException("The Steam mouse-trackpad click binding changed; configure left click manually.");
+        var binding = bindings[0];
+        return text.Remove(group.ValueStart + binding.Index, binding.Length)
+            .Insert(group.ValueStart + binding.Index, "\"binding\" \"mouse_button LEFT\"");
+    }
+
+    internal static int SetUpLauncher(string steamRoot, string userId, string oldName, string newName, bool resetMouseOnly = false, string templateName = "controller_neptune_mouse.vdf")
         => MigrateLauncherName(Path.Combine(steamRoot, "steamapps", "common", "Steam Controller Configs", userId, "config"),
-            oldName, newName, File.Exists(Path.Combine(steamRoot, "controller_base", "templates", "controller_neptune_mouse.vdf")), resetMouseOnly);
+            oldName, newName, File.Exists(Path.Combine(steamRoot, "controller_base", "templates", templateName)), resetMouseOnly, templateName);
 
     internal static int MigrateLauncherName(string configDirectory, string oldName, string newName, bool seedMouseOnly = false,
-        bool resetMouseOnly = false)
+        bool resetMouseOnly = false, string templateName = "controller_neptune_mouse.vdf")
     {
         if (!Directory.Exists(configDirectory))
         {
@@ -41,7 +82,7 @@ internal static class SteamControllerLayout
                     || File.Exists(preferences) && Regex.IsMatch(File.ReadAllText(preferences),
                         "\"name\"\\s*\"Steam Deck Controller\\s*\"", RegexOptions.IgnoreCase);
                 var updated = CarryForward(text, oldName, newName, seedMouseOnly && isDeckController,
-                    resetMouseOnly && seedMouseOnly && isDeckController);
+                    resetMouseOnly && seedMouseOnly && isDeckController, templateName);
                 if (updated == text) continue;
                 if (File.Exists(path)) File.Copy(path, path + ".reimagined-" + Guid.NewGuid().ToString("N") + ".bak");
                 SteamGameHandoff.WriteShortcutFile(path, encoding.GetBytes(updated));
@@ -49,14 +90,14 @@ internal static class SteamControllerLayout
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or DecoderFallbackException)
             {
-                Console.WriteLine("A saved controller layout could not be migrated; select Mouse Only in Steam if needed.");
+                Console.WriteLine("A saved controller layout could not be migrated; configure the launcher layout in Steam Controller Settings.");
             }
         }
         return migrated;
     }
 
     internal static string CarryForward(string text, string oldName, string newName, bool seedMouseOnly = false,
-        bool resetMouseOnly = false)
+        bool resetMouseOnly = false, string templateName = "controller_neptune_mouse.vdf")
     {
         var displayName = newName;
         newName = newName.Replace(":", "").ToLowerInvariant();
@@ -77,7 +118,9 @@ internal static class SteamControllerLayout
         var position = 1;
         var entries = ReadObject(tokens, ref position, 0, out var closing);
         if (position != tokens.Count) throw new InvalidDataException("Unexpected controller configuration data.");
-        const string mouseLayout = "{\n\t\t\"template\"\t\t\"controller_neptune_mouse.vdf\"\n\t}";
+        if (templateName is not ("controller_neptune_mouse.vdf" or "controller_neptune_gamepad+mouse.vdf" or "controller_neptune_reimagined.vdf"))
+            throw new ArgumentException("Unsupported launcher controller template.");
+        var mouseLayout = "{\n\t\t\"template\"\t\t\"" + templateName + "\"\n\t}";
         var existing = entries.SingleOrDefault(entry => entry.Name.Equals(newName, StringComparison.OrdinalIgnoreCase));
         if (existing != null)
         {
@@ -97,7 +140,7 @@ internal static class SteamControllerLayout
         return text.Insert(closing, insertion);
     }
 
-    private static List<Entry> ReadObject(List<Token> tokens, ref int position, int depth, out int closing)
+    private static List<Entry> ReadObject(List<Token> tokens, ref int position, int depth, out int closing, bool allowDuplicates = false)
     {
         if (depth > 32 || position >= tokens.Count || tokens[position++].Value != "{")
             throw new InvalidDataException("Invalid controller configuration object.");
@@ -106,11 +149,11 @@ internal static class SteamControllerLayout
         while (position < tokens.Count && (tokens[position].Quoted || tokens[position].Value != "}"))
         {
             var key = tokens[position++];
-            if (!key.Quoted || !names.Add(key.Value) || position >= tokens.Count)
+            if (!key.Quoted || (!names.Add(key.Value) && !allowDuplicates) || position >= tokens.Count)
                 throw new InvalidDataException("Invalid controller configuration entry.");
             var value = tokens[position];
             var isObject = !value.Quoted && value.Value == "{";
-            if (isObject) ReadObject(tokens, ref position, depth + 1, out _);
+            if (isObject) ReadObject(tokens, ref position, depth + 1, out _, allowDuplicates);
             else if (value.Quoted) position++;
             else throw new InvalidDataException("Invalid controller configuration value.");
             entries.Add(new Entry(key.Value, value.Start, tokens[position - 1].End, isObject));

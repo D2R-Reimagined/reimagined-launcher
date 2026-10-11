@@ -3,13 +3,15 @@
 ## Unreleased
 
 - Integrate official v0.16.7 and its approved Ladder runtime config-name matching fix.
-- Add native Steam Deck GUI/game-session handoff with shared base-game authentication, automatic game focus, actual Wine game monitoring, and persistent launcher return.
+- Add a dedicated native Steam Deck launcher session for Online, Offline and Ladder, preserving base-game authentication and vanilla D2R launching; keep the hidden game-session helper as an optional compatibility fallback.
 - Add Desktop Mode Steam shortcut setup with account discovery, stable AppImage installation, backups, permission preservation, and migration to Diablo II: Reimagined shortcut names without duplicate entries.
-- Configure the launcher Mouse Only layout by default during setup, with an opt-out for custom layouts; preserve separate gamepad controls and unrelated Steam preferences.
-- Detect Proton from the initialized base-game prefix while retaining manual overrides.
+- Generate a combined gamepad/trackpad-mouse layout with trackpad left-click, preserving normal triggers and buttons; allow custom layouts to be retained during setup.
+- Detect Proton from the initialized base-game prefix while retaining saved Proton selections.
 - Preserve generated/custom launch arguments, including Force Desktop and Ladder map reset; retain native Windows launch previews and validate the official Steam installation/prefix.
 - Keep launcher scrollbars expanded and add Exit Launcher to the main window.
 - Document player setup and automated/live validation; retain the existing Battle.net/Lutris launch flow.
 - Reserve Steam launches before preparing mod/session files and hold ownership through game-exit credential cleanup, preventing delayed-start overlapping launches from overwriting credentials.
 - Resolve filesystem aliases before matching Wine game processes, while distinguishing separate copies of the executable.
 - Select native/Flatpak Steam from the chosen installation and preserve Flatpak Offline routing when both clients coexist.
+- Add an off-by-default game-only LSFG option for both dedicated and fallback sessions; allow it to be disabled before Steam shortcut setup.
+- Hide the internal Launcher Game Session shortcut during setup, migrating existing visibility in place while retaining its launch ID and preserving unrelated shortcut data.

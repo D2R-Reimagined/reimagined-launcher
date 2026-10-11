@@ -12,7 +12,7 @@ namespace ReimaginedLauncher.Utilities;
 
 internal sealed record SteamHandoffRegistration(uint AppId, string SteamRoot, string LauncherPath);
 internal sealed record SteamHandoffRequest(string Id, DateTimeOffset Created, string SteamRoot, string GameDirectory,
-    string ProtonExecutable, string Executable, string[] Arguments);
+    string ProtonExecutable, string Executable, string[] Arguments, bool EnableLsfg = false);
 internal sealed record SteamHandoffStatus(string Id, string State, string? Error = null);
 internal sealed record SteamSetupAccount(string UserId, string Name, bool MostRecent)
 {
@@ -123,11 +123,12 @@ internal sealed class SteamGameHandoff : IDisposable
         Directory.CreateDirectory(directory);
         var quotedPath = "\"" + Path.GetFullPath(launcherPath) + "\"";
         var game = new LauncherSteamShortcut("Diablo II: Reimagined (Launcher Game Session)", quotedPath,
-            "--steam-game \"" + directory + "\"", "D2R Reimagined (Launcher Game Session)");
+            "--steam-game \"" + directory + "\"", "D2R Reimagined (Launcher Game Session)", Hidden: true);
         var gui = new LauncherSteamShortcut("Diablo II: Reimagined (Native Launcher)", quotedPath, "",
             "D2R Reimagined (Native Launcher)");
         var path = Path.Combine(steamRoot, "userdata", userId, "config", "shortcuts.vdf");
         var original = File.Exists(path) ? File.ReadAllBytes(path) : [];
+        var controllerTemplate = SteamControllerLayout.PrepareCombinedTemplate(steamRoot);
         var updated = SteamShortcutFile.AppendOwnedShortcuts(original, game, gui);
         if (!updated.SequenceEqual(original))
         {
@@ -135,9 +136,41 @@ internal sealed class SteamGameHandoff : IDisposable
             WriteShortcutFile(path, updated);
         }
         WriteJson(Path.Combine(directory, "registration.json"), new SteamHandoffRegistration(game.AppId, steamRoot, launcherPath));
-        SteamControllerLayout.SetUpLauncher(steamRoot, userId, gui.LegacyName!, gui.Name, resetMouseOnly);
+        SteamControllerLayout.SetUpLauncher(steamRoot, userId, gui.LegacyName!, gui.Name, resetMouseOnly, controllerTemplate);
         Console.WriteLine($"Registered launcher-owned game session {game.AppId}; GUI game ID {gui.GameId}. Restart Steam before launching.");
         return game.AppId;
+    }
+
+    internal static bool MatchesLauncherSession(SteamHandoffRegistration registration, string? executable,
+        string? appId, string? gameId)
+    {
+        if (string.IsNullOrWhiteSpace(executable)) return false;
+        var launcher = new LauncherSteamShortcut("Diablo II: Reimagined (Native Launcher)",
+            "\"" + Path.GetFullPath(registration.LauncherPath) + "\"", "", "D2R Reimagined (Native Launcher)");
+        return appId == launcher.AppId.ToString() && gameId == launcher.GameId.ToString()
+            && string.Equals(Path.GetFullPath(executable), Path.GetFullPath(registration.LauncherPath), StringComparison.Ordinal);
+    }
+
+    internal static bool TryInitializeLauncherSession()
+    {
+        if (!OperatingSystem.IsLinux()) return false;
+        try
+        {
+            var registration = ReadJson<SteamHandoffRegistration>(Path.Combine(StateDirectory, "registration.json"));
+            var launcher = new LauncherSteamShortcut("Diablo II: Reimagined (Native Launcher)",
+                "\"" + Path.GetFullPath(registration.LauncherPath) + "\"", "", "D2R Reimagined (Native Launcher)");
+            if (!MatchesLauncherSession(registration, Environment.GetEnvironmentVariable("APPIMAGE") ?? Environment.ProcessPath,
+                    Environment.GetEnvironmentVariable("SteamAppId"), Environment.GetEnvironmentVariable("SteamGameId"))) return false;
+            Environment.SetEnvironmentVariable("D2RR_SINGLE_STEAM_SESSION", "dedicated");
+            Environment.SetEnvironmentVariable("D2RR_SESSION_APP_ID", launcher.AppId.ToString());
+            Environment.SetEnvironmentVariable("SteamAppId", "2536520");
+            LaunchDiagnostics.Log("Dedicated Steam launcher session initialized: " + launcher.AppId);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
+        {
+            return false;
+        }
     }
 
     private static bool IsLiveSteamProcess(Process process)
@@ -202,7 +235,7 @@ internal sealed class SteamGameHandoff : IDisposable
                 throw new InvalidOperationException("The Steam game reservation is not available.");
             var id = reservation._id;
             var request = new SteamHandoffRequest(id, DateTimeOffset.UtcNow, registration.SteamRoot, gameDirectory,
-                profile.ProtonExecutable!, executable, SplitArguments(arguments));
+                profile.ProtonExecutable!, executable, SplitArguments(arguments), profile.EnableLsfg);
             WriteJson(Path.Combine(directory, "request.json"), request);
             WriteJson(Path.Combine(directory, "status.json"), new SteamHandoffStatus(id, "pending"));
             var command = new ProcessStartInfo(GameLauncherService.FindExecutableOnPath("steam")
@@ -251,6 +284,7 @@ internal sealed class SteamGameHandoff : IDisposable
         try
         {
             var info = CreateGameStartInfo(request);
+            if (request.EnableLsfg) LaunchDiagnostics.Log("Steam game helper: LSFG wrapper enabled (~/lsfg).");
             WriteJson(Path.Combine(directory, "status.json"), new SteamHandoffStatus(request.Id, "starting"));
             using var proton = Process.Start(info) ?? throw new InvalidOperationException("Proton could not start.");
             var deadline = DateTimeOffset.UtcNow.AddMinutes(2);
@@ -275,7 +309,7 @@ internal sealed class SteamGameHandoff : IDisposable
         }
     }
 
-    internal static ProcessStartInfo CreateGameStartInfo(SteamHandoffRequest request)
+    internal static ProcessStartInfo CreateGameStartInfo(SteamHandoffRequest request, string? userHome = null)
     {
         var profile = new InstallationProfile { Type = InstallationType.Steam, InstallDirectory = request.GameDirectory,
             ProtonExecutable = request.ProtonExecutable };
@@ -284,7 +318,18 @@ internal sealed class SteamGameHandoff : IDisposable
         if (request.Executable != Path.Combine(request.GameDirectory, "D2R.exe")
             && request.Executable != Path.Combine(request.GameDirectory, "D2RLoader.exe"))
             throw new InvalidOperationException("Unsupported Steam game executable.");
-        var info = new ProcessStartInfo(request.ProtonExecutable) { UseShellExecute = false, WorkingDirectory = request.GameDirectory };
+        var command = request.ProtonExecutable;
+        if (request.EnableLsfg)
+        {
+            command = Path.Combine(userHome ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "lsfg");
+            if (!File.Exists(command))
+                throw new InvalidOperationException("LSFG is enabled, but ~/lsfg is missing. Install the Decky LSFG-VK wrapper or turn off LSFG in the launcher.");
+            if (OperatingSystem.IsLinux() && (File.GetUnixFileMode(command)
+                & (UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute)) == 0)
+                throw new InvalidOperationException("The ~/lsfg wrapper is not executable. Repair the LSFG installation or turn off LSFG in the launcher.");
+        }
+        var info = new ProcessStartInfo(command) { UseShellExecute = false, WorkingDirectory = request.GameDirectory };
+        if (request.EnableLsfg) info.ArgumentList.Add(request.ProtonExecutable);
         info.ArgumentList.Add("run");
         info.ArgumentList.Add(request.Executable);
         foreach (var argument in request.Arguments) info.ArgumentList.Add(argument);
