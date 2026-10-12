@@ -52,7 +52,7 @@ public class SaveFileService
         if (OperatingSystem.IsLinux() && !string.IsNullOrWhiteSpace(userProfile))
         {
             var profileInstallDirectory = MainWindow.Settings.CurrentProfile.InstallDirectory;
-            var steamAppsDirectory = FindAncestorDirectory(profileInstallDirectory, "steamapps");
+            var steamAppsDirectory = FileService.FindAncestorDirectory(profileInstallDirectory, "steamapps");
             if (!string.IsNullOrWhiteSpace(steamAppsDirectory))
             {
                 candidates.Add(GetProtonSavedGamesPath(steamAppsDirectory));
@@ -134,30 +134,9 @@ public class SaveFileService
             "compatdata", "2536520", "pfx", "drive_c", "users", "steamuser", "Saved Games");
     }
 
-    private static string? FindAncestorDirectory(string? path, string directoryName)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return null;
-        }
-
-        var directory = new DirectoryInfo(path);
-        while (directory is not null)
-        {
-            if (string.Equals(directory.Name, directoryName, StringComparison.OrdinalIgnoreCase))
-            {
-                return directory.FullName;
-            }
-
-            directory = directory.Parent;
-        }
-
-        return null;
-    }
-
     private static string? FindWinePrefix(string? installDirectory)
     {
-        var driveDirectory = FindAncestorDirectory(installDirectory, "drive_c");
+        var driveDirectory = FileService.FindAncestorDirectory(installDirectory, "drive_c");
         return driveDirectory is null ? null : Directory.GetParent(driveDirectory)?.FullName;
     }
 

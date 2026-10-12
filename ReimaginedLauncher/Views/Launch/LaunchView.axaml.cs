@@ -27,6 +27,7 @@ public partial class LaunchView : UserControl
     private readonly D2RLoaderInstallerService _d2rLoaderInstallerService;
     private readonly LadderBundleService _ladderBundleService;
     private bool _isLaunching;
+    private bool _isSteamSetupRunning;
     private bool _isLoaderInstallPromptOpen;
     private bool _hasPromptedForMissingLoader;
     private string? _loaderUpdatePromptedVersion;
@@ -270,6 +271,39 @@ public partial class LaunchView : UserControl
         DetectionLoadingIndicator.IsVisible = LauncherService.IsDetecting;
 
         SteamExtraPanel.IsVisible = profile.Type == InstallationType.Steam;
+        SteamAdvancedPanel.IsVisible = profile.Type == InstallationType.Steam && OperatingSystem.IsLinux()
+                             && !GameLauncherService.IsSteamFlatpakInstall(profile.InstallDirectory);
+        SteamHelperFallbackCheckBox.IsChecked = profile.UseSteamHelperFallback;
+        SteamHelperFallbackCheckBox.IsEnabled = !_isLaunching && !SteamGameHandoff.IsLaunchPendingOrRunning;
+        EnableLsfgCheckBox.IsChecked = profile.EnableLsfg;
+        EnableLsfgCheckBox.IsEnabled = !_isLaunching && !SteamGameHandoff.IsLaunchPendingOrRunning;
+        SteamSetupShortcutsPanel.IsVisible = profile.Type == InstallationType.Steam && OperatingSystem.IsLinux()
+            && !GameLauncherService.IsSteamFlatpakInstall(profile.InstallDirectory);
+        SteamSetupShortcutsButton.IsEnabled = !_isSteamSetupRunning && !_isLaunching && !MainWindow.IsInstallInProgress
+            && !SteamGameHandoff.IsLaunchPendingOrRunning;
+        if (SteamSetupShortcutsPanel.IsVisible)
+        {
+            try
+            {
+                var selectedId = (SteamSetupAccountComboBox.SelectedItem as SteamSetupAccount)?.UserId;
+                var root = GameLauncherService.GetSteamInstallPath(installDirectory: profile.InstallDirectory);
+                SteamResetControllerLayoutCheckBox.IsVisible = root != null && SteamControllerLayout.HasCombinedTemplate(root);
+                var accounts = root is null ? [] : SteamGameHandoff.GetSetupAccounts(root);
+                SteamSetupAccountComboBox.ItemsSource = accounts;
+                var recent = accounts.Where(account => account.MostRecent).ToArray();
+                SteamSetupAccountComboBox.SelectedItem = accounts.FirstOrDefault(account => account.UserId == selectedId)
+                    ?? (accounts.Length == 1 ? accounts[0] : recent.Length == 1 ? recent[0] : null);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                SteamSetupStatusText.Text = "Could not read Steam accounts: " + exception.Message;
+            }
+        }
+        SteamProtonPanel.IsVisible = profile.Type == InstallationType.Steam
+                                     && OperatingSystem.IsLinux()
+                                     && !GameLauncherService.IsSteamFlatpakInstall(profile.InstallDirectory)
+                                     && (isOnlineExperience || isLadderExperience || SteamGameHandoff.IsGamingMode
+                                         || File.Exists(Path.Combine(SteamGameHandoff.StateDirectory, "registration.json")));
         LutrisExtraPanel.IsVisible = profile.Type == InstallationType.Lutris;
 
         // The Lutris game is the source of the install path.
@@ -283,6 +317,9 @@ public partial class LaunchView : UserControl
         SteamPathTextBox.Text = profile.SteamDirectory ?? string.Empty;
         SteamPathTextBox.PlaceholderText = OperatingSystem.IsLinux() ? "Steam or Flatpak executable" : "Steam.exe Path";
         LocateSteamButton.Content = OperatingSystem.IsLinux() ? "Locate Steam" : "Locate Steam.exe";
+        if (OperatingSystem.IsLinux())
+            GameLauncherService.TryDetectSteamProtonExecutable(profile);
+        ProtonPathTextBox.Text = profile.ProtonExecutable ?? string.Empty;
 
         // Auto-detect Steam path if not set or if it's currently Steam type
         if (profile.Type == InstallationType.Steam)
@@ -355,11 +392,15 @@ public partial class LaunchView : UserControl
         LadderAuthenticationWarningBanner.IsVisible = isLadderExperience && !isReimaginedSignedIn;
         RefreshLadderAuthenticationState();
 
+        var isOnlineSteamFlatpak = isOnlineExperience
+                                   && profile.Type == InstallationType.Steam
+                                   && GameLauncherService.IsSteamFlatpakInstall(profile.InstallDirectory);
+        
         if (profile.Type == InstallationType.D2RMM)
         {
             StartGameButton.Content = "Install Tweaks";
             StartGameDescription.Text = "Clicking 'Install Tweaks' will apply tweaks and adjustments to the files in your D2RMM/mods/Reimagined/data directory.";
-            StartGameButton.IsEnabled = !_isLaunching && isValidated && isModDetected;
+            StartGameButton.IsEnabled = !_isLaunching && !SteamGameHandoff.IsLaunchPendingOrRunning && isValidated && isModDetected;
         }
         else
         {
@@ -378,7 +419,7 @@ public partial class LaunchView : UserControl
             // A ladder setup step is allowed to run without the mod present -
             // installing it is part of what the step does. Play still requires
             // everything, because by then readiness has confirmed it.
-            StartGameButton.IsEnabled = !_isLaunching
+            StartGameButton.IsEnabled = !_isLaunching && !SteamGameHandoff.IsLaunchPendingOrRunning
                                         && !_isRunningLadderAction
                                         && isValidated
                                         && (isModDetected || isLadderExperience)
@@ -389,10 +430,12 @@ public partial class LaunchView : UserControl
                                             && loaderAvailable
                                             && _ladderAction is not (LadderAction.Blocked or LadderAction.Waiting));
 
-            if (!isOnlineExperience
-                && !isLadderExperience
-                && profile.Type == InstallationType.Steam
-                && string.IsNullOrWhiteSpace(profile.SteamDirectory))
+            var isOfflineSteamMissingDirectory = !isOnlineExperience
+                                                  && !isLadderExperience
+                                                  && profile.Type == InstallationType.Steam
+                                                  && string.IsNullOrWhiteSpace(profile.SteamDirectory);
+            
+            if (isOfflineSteamMissingDirectory || isOnlineSteamFlatpak)
             {
                 StartGameButton.IsEnabled = false;
             }
@@ -404,8 +447,8 @@ public partial class LaunchView : UserControl
         ValidationBanner.IsVisible = !isValidated
                                      || !isModDetected && !IsLadderSetupAction(isLadderExperience)
                                      || isOnlineExperience && !loaderAvailable
-                                     || isLadderExperience
-                                     && (!ladderAvailable
+                                     || isOnlineSteamFlatpak
+                                     || isLadderExperience && (!ladderAvailable
                                          || !loaderAvailable
                                          || _ladderAction == LadderAction.Blocked);
         
@@ -432,6 +475,7 @@ public partial class LaunchView : UserControl
                     : GetLadderUnavailableMessage(loaderAvailable ? null : loaderUnavailableReason)
                 : isOnlineExperience && isValidated && isModDetected && !loaderAvailable
                 ? loaderUnavailableReason ?? "D2RLoader is unavailable for this profile."
+                : isOnlineSteamFlatpak ? "Flatpak Steam is not supported for D2RLoader. Only native Steam installation is supported."
                 : !isValidated
                 ? profile.Type == InstallationType.Lutris
                     ? string.IsNullOrWhiteSpace(profile.InstallDirectory)
@@ -1931,6 +1975,81 @@ public partial class LaunchView : UserControl
         }
     }
 
+    /// <summary>Registers native Linux Steam shortcuts and reports optional controller-layout configuration results.</summary>
+    private async void OnSetupSteamShortcutsClick(object? sender, RoutedEventArgs e)
+    {
+        if (_isSteamSetupRunning || _isLaunching || MainWindow.IsInstallInProgress || SteamGameHandoff.IsLaunchPendingOrRunning) return;
+        var profile = MainWindow.Settings.CurrentProfile;
+        if (GameLauncherService.IsSteamFlatpakInstall(profile.InstallDirectory)) return;
+        if (SteamSetupAccountComboBox.SelectedItem is not SteamSetupAccount account)
+        {
+            SteamSetupStatusText.Text = "Select your Steam account. If none are listed, sign into native Steam first, then exit Steam and return here.";
+            return;
+        }
+        _isSteamSetupRunning = true;
+        SteamSetupShortcutsButton.IsEnabled = false;
+        StartGameButton.IsEnabled = false;
+        SteamSetupStatusText.Text = "Setting up Steam shortcuts...";
+        try
+        {
+            var root = GameLauncherService.GetSteamInstallPath(installDirectory: profile.InstallDirectory)
+                ?? throw new InvalidOperationException("Native Steam could not be found.");
+            await SettingsManager.SaveAsync(MainWindow.Settings);
+            var resetControllerLayout = SteamResetControllerLayoutCheckBox.IsVisible && SteamResetControllerLayoutCheckBox.IsChecked == true;
+            var result = await Task.Run(() => SteamGameHandoff.InstallFromLauncher(root, account.UserId, resetControllerLayout));
+            SteamSetupStatusText.Text = "Setup complete.\n\nClose this launcher and restart Steam, then open Diablo II: Reimagined (Native Launcher). "
+                + (result.ControllerLayoutWarning ?? (resetControllerLayout
+                    ? "The supported trackpad layout was requested in place of the saved layout."
+                    : "Saved layouts are preserved; the supported trackpad layout is selected for an unset layout."))
+                + " The helper remains available as a compatibility fallback.";
+            RefreshInstallDirectoryState();
+        }
+        catch (Exception exception)
+        {
+            SteamSetupStatusText.Text = "Setup failed: " + exception.Message;
+            LaunchDiagnostics.LogException("Steam shortcut setup failed", exception);
+        }
+        finally
+        {
+            _isSteamSetupRunning = false;
+            RefreshInstallDirectoryState();
+        }
+    }
+
+    /// <summary>Persists the selected Steam compatibility route and refreshes launch availability.</summary>
+    private async void OnSteamHelperFallbackChanged(object? sender, RoutedEventArgs e)
+    {
+        var profile = MainWindow.Settings.CurrentProfile;
+        var enabled = SteamHelperFallbackCheckBox.IsChecked == true;
+        if (profile.UseSteamHelperFallback == enabled) return;
+        profile.UseSteamHelperFallback = enabled;
+        try { await SettingsManager.SaveAsync(MainWindow.Settings); }
+        catch (Exception exception) { Notifications.SendNotification("Could not save the Steam fallback setting: " + exception.Message, "Warning"); }
+        RefreshInstallDirectoryState();
+    }
+
+    /// <summary>Persists the game-only LSFG option and refreshes launch availability.</summary>
+    private async void OnLsfgChanged(object? sender, RoutedEventArgs e)
+    {
+        var profile = MainWindow.Settings.CurrentProfile;
+        var enabled = EnableLsfgCheckBox.IsChecked == true;
+        if (profile.EnableLsfg == enabled) return;
+        profile.EnableLsfg = enabled;
+        try { await SettingsManager.SaveAsync(MainWindow.Settings); }
+        catch (Exception exception)
+        {
+            Notifications.SendNotification("Could not save the LSFG setting: " + exception.Message, "Warning");
+        }
+        RefreshInstallDirectoryState();
+    }
+    /// <summary>Retries automatic detection of the Proton tool used by the official Steam installation.</summary>
+    private async void OnLocateProtonClick(object? sender, RoutedEventArgs e)
+    {
+        GameLauncherService.TryDetectD2RProtonExecutable(MainWindow.Settings.CurrentProfile);
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+        RefreshInstallDirectoryState();
+    }
+
 
     private void SetLaunchStatus(string status, bool isVisible = true)
     {
@@ -1961,13 +2080,33 @@ public partial class LaunchView : UserControl
         LaunchDiagnostics.ResetSession();
         LaunchDiagnostics.Log("Launch/Install button clicked.");
 
-        if (_isLaunching || _isRunningLadderAction || MainWindow.IsInstallInProgress || MainWindow.IsGameRunning())
+        if (_isLaunching || _isSteamSetupRunning || _isRunningLadderAction || MainWindow.IsInstallInProgress
+            || SteamGameHandoff.IsLaunchPendingOrRunning || MainWindow.IsGameRunning())
         {
             LaunchDiagnostics.Log("Action ignored because an action is already in progress.");
             return;
         }
 
         var profile = MainWindow.Settings.CurrentProfile;
+        if (OperatingSystem.IsLinux() && profile.Type == InstallationType.Steam && profile.EnableLsfg
+            && !GameLauncherService.IsSteamFlatpakInstall(profile.InstallDirectory) && !GameLauncherService.UsesSteamHandoff(profile)
+            && !GameLauncherService.UsesSingleSteamSession(profile))
+        {
+            Notifications.SendNotification("Set up Steam shortcuts before using the launcher LSFG option.", "Warning");
+            return;
+        }
+        SteamGameHandoff? reservation = null;
+        try
+        {
+            if (GameLauncherService.UsesSteamHandoff(profile) || GameLauncherService.UsesSingleSteamSession(profile))
+                reservation = SteamGameHandoff.Reserve();
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            Notifications.SendNotification("A Steam game launch is already pending or running, or could not be reserved. " + exception.Message, "Warning");
+            return;
+        }
+        var reservationHandedToWatcher = false;
         _isLaunching = true;
         StartGameButton.IsEnabled = false;
         var actionName = profile.Type == InstallationType.D2RMM ? "Installation" : "Launch";
@@ -2192,7 +2331,7 @@ public partial class LaunchView : UserControl
                     SetLaunchStatus(profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder
                         ? "Starting D2RLoader..."
                         : "Starting Diablo II: Resurrected...");
-                    var gameProcess = LauncherService.LaunchGame();
+                    var gameProcess = LauncherService.LaunchGame(reservation);
                     if (gameProcess == null)
                     {
                         LaunchDiagnostics.Log("GameLauncherService.LaunchGame did not start a process.");
@@ -2216,10 +2355,13 @@ public partial class LaunchView : UserControl
                         ? LutrisService.TryResolveGameExePath(profile.LutrisGameSlug)
                         : null;
 
-                    var minimizeTarget = MainWindow.Settings.MinimizeToTray ? MainWindow.Instance : null;
+                    var steamHandoff = LauncherService.ActiveSteamHandoff;
+                    var minimizeTarget = MainWindow.Settings.MinimizeToTray || (steamHandoff is not null && SteamGameHandoff.IsGamingMode)
+                        ? MainWindow.Instance : null;
                     tokenHandedToGame = _launchGameToken;
                     _ = WatchGameExitAsync(gameProcess, expectedExePath, minimizeTarget, lutrisGameExePath, _preparedServerSaves,
-                        profile.InstallDirectory, _launchGameToken);
+                        profile.InstallDirectory, _launchGameToken, steamHandoff, steamHandoff is null ? reservation : null);
+                    reservationHandedToWatcher = reservation is not null;
                 }
             }
             catch (Exception ex)
@@ -2236,18 +2378,24 @@ public partial class LaunchView : UserControl
         {
             // A launch that minted a token but never started the game must not
             // leave it behind, on disk or live on the API.
-            if (_launchGameToken is { } abandoned && !ReferenceEquals(abandoned, tokenHandedToGame))
+            try
             {
-                if (sessionFileWritten)
+                if (_launchGameToken is { } abandoned && !ReferenceEquals(abandoned, tokenHandedToGame))
                 {
-                    GameSessionSecretsService.Delete(profile.InstallDirectory);
+                    if (sessionFileWritten)
+                    {
+                        GameSessionSecretsService.Delete(profile.InstallDirectory);
+                    }
+
+                    _ = _launcherAuthenticationService.RevokeGameTokenAsync(abandoned);
                 }
-
-                _ = _launcherAuthenticationService.RevokeGameTokenAsync(abandoned);
             }
-
+            finally
+            {
+                if (!reservationHandedToWatcher) reservation?.Dispose();
+                _isLaunching = false;
+            }
             LaunchDiagnostics.Log($"{actionName} flow completed.");
-            _isLaunching = false;
             await Dispatcher.UIThread.InvokeAsync(async () =>
             {
                 await Task.Delay(1500);
@@ -2668,7 +2816,8 @@ public partial class LaunchView : UserControl
         string? lutrisGameExePath = null,
         ServerSaveMonitor? serverSaves = null,
         string? installDirectory = null,
-        GameSessionToken? gameToken = null)
+        GameSessionToken? gameToken = null,
+        SteamGameHandoff? steamHandoff = null, SteamGameHandoff? sessionReservation = null)
     {
         using var monitoring = new CancellationTokenSource();
         var monitorTask = serverSaves is null ? Task.CompletedTask : MonitorServerSavesAsync(serverSaves, monitoring.Token);
@@ -2678,7 +2827,14 @@ public partial class LaunchView : UserControl
         var lutrisExitObserved = false;
         try
         {
-            if (lutrisGameExePath is not null)
+            if (steamHandoff is not null)
+            {
+                gameProcess.Dispose();
+                minimizeTarget?.MinimizeToTray();
+                try { gameExitConfirmed = await steamHandoff.WaitForExitAsync(); }
+                finally { minimizeTarget?.RestoreFromTray(); }
+            }
+            else if (lutrisGameExePath is not null)
             {
                 // The lutris process hands off and may exit immediately or outlive
                 // the session, so it is never waited on.
@@ -2705,6 +2861,7 @@ public partial class LaunchView : UserControl
         catch (Exception exception)
         {
             LaunchDiagnostics.LogException("Could not finish watching the game process", exception);
+            if (steamHandoff is not null) Notifications.SendNotification(exception.Message, "Warning");
         }
         finally
         {
@@ -2728,7 +2885,13 @@ public partial class LaunchView : UserControl
             }
             finally
             {
-                EndGameSession(installDirectory, gameToken, gameExitConfirmed || lutrisExitObserved);
+                try { EndGameSession(installDirectory, gameToken, gameExitConfirmed || lutrisExitObserved); }
+                finally
+                {
+                    steamHandoff?.Dispose();
+                    sessionReservation?.Dispose();
+                    await Dispatcher.UIThread.InvokeAsync(RefreshInstallDirectoryState);
+                }
             }
         }
     }
