@@ -65,7 +65,7 @@ In order for **Steam** to work, the desired **Proton** executable must be select
 
 Use the Proton tool selected for the base game in Steam's Compatibility settings. Launch the base game from Steam and sign in before the first modded launch, and repeat this when its authentication expires. The launcher reuses the existing `steamapps/compatdata/2536520/pfx` directory for saves and authentication; it does not copy authentication files into a new prefix. Configured launch options, including Force Desktop (`-forcedesktop`), are also passed to Proton.
 
-Steam Deck Gaming Mode normally uses one dedicated launcher session for Online, Offline and Ladder, with a hidden helper retained as a compatibility fallback. See the [setup guide](docs/steam-deck-setup.md) and [validation notes](docs/steam-deck-validation.md).
+Native Linux Steam supports one dedicated launcher session for Online, Offline and Ladder on desktops and handhelds, including Gaming Mode systems. A hidden helper remains available as a compatibility fallback. See the [Linux Steam setup guide](docs/steam-deck-setup.md) and [validation notes](docs/steam-deck-validation.md).
 
 This is because **Steam** does not allow the **D2RLoader** executable to run in **D2R**'s game context directly. To circumvent this, **Proton** is run with all the arguments that **Steam** would have passed to it, plus the executable set to **D2RLoader.exe** instead of **D2R.exe**. 
 
@@ -98,19 +98,19 @@ D2RLoader needs to communicate with the Steam client for authentication. Running
 - Save backup discovery includes native Steam, custom Steam libraries, Flatpak Steam, Wine prefixes, and Lutris prefixes. A custom save directory can still be selected in Settings.
 
 
-## Native Steam Gaming Mode
+## Native Linux Steam integration
 
-Follow the [Steam Deck setup guide](docs/steam-deck-setup.md). Setup is available under **Launch → Install directory → Steam shortcuts**, in Desktop Mode with Steam fully exited. It installs the AppImage at a stable location, preserves owned shortcut IDs and unrelated entries, and backs up changed shortcut/controller files. No terminal, SSH, Lutris, Decky or CEF debugging is required.
+Follow the [Linux Steam setup guide](docs/steam-deck-setup.md). Setup is available under **Launch → Install directory → Steam shortcuts**, with Steam fully exited. On systems with Gaming Mode, perform setup in Desktop Mode. It installs the AppImage at a stable location, preserves owned shortcut IDs and unrelated entries, and backs up changed shortcut/controller files. No terminal, SSH, Lutris, Decky or CEF debugging is required.
 
-Launch **Diablo II: Reimagined (Native Launcher)**. It initializes matching launcher/game authentication identity before GUI startup, retains its dedicated shortcut session identity and reuses the official D2R prefix. Online/Ladder start D2RLoader; Offline starts D2R.exe directly through the selected Proton tool. Game exit returns to the persistent GUI, and Exit Launcher returns to the dedicated Steam page. The official D2R entry and its launch options are untouched.
+Launch **Diablo II: Reimagined (Native Launcher)** through Steam. Before GUI startup it validates and caches the registered shortcut identity, then initializes matching launcher/game authentication identity and reuses the official D2R prefix. Online/Ladder start D2RLoader; Offline starts D2R.exe directly through the selected Proton tool. Game exit returns to the persistent GUI, and Exit Launcher returns to the dedicated Steam page. The official D2R entry and its launch options are untouched.
 
 Controller-layout configuration is optional. When Steam provides the supported Neptune template, setup generates its own copy with trackpad mouse movement and press-to-left-click; R2 remains the game trigger. The reset checkbox is shown only when the source template exists. Uncheck controller reset to retain a custom layout. If the template is missing, incompatible or unwritable, shortcut registration still completes and setup reports that layout configuration was skipped. Other Linux desktops and handhelds can keep their existing controller layouts or select one in Steam Controller Settings. On compatible devices, the manual fallback is Gamepad with Mouse Trackpad with Right Trackpad Click bound to Left Mouse Click.
 
 Battle.net and Lutris children inherit the original launcher environment even when the GUI was opened through the dedicated Steam shortcut. D2RMM retains its install-only path, and Windows does not initialize the Linux Steam session.
 
-The optional **Use separate game session (compatibility fallback)** setting uses the retained hidden Launcher Game Session helper. It monitors the actual Wine executable and keeps separate game-session lifecycle handling. After using it, Steam can retain the helper page in navigation history. Close the game before switching routes.
+Under **Launch → Install directory → Advanced**, the optional **Use separate game session (compatibility fallback)** setting uses the retained hidden Launcher Game Session helper. It monitors the actual Wine executable and keeps separate game-session lifecycle handling. After using it, Steam can retain the helper page in navigation history. Close the game before switching routes.
 
-Optional LSFG wraps only the Proton game process with an existing executable `~/lsfg`. It defaults off; the launcher does not install or configure LSFG. The Steam session mechanism itself does not require Decky. Launch preparation for both routes retains the cross-instance reservation through credential cleanup.
+Also under **Advanced**, optional LSFG wraps only the Proton game process with an existing configured executable `~/lsfg`. It defaults off; the launcher does not install or configure LSFG. The Steam session mechanism itself does not require Decky. Launch preparation for both routes retains the cross-instance reservation through credential cleanup.
 
 For developer tooling, registration remains available with Steam fully exited:
 

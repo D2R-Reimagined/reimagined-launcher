@@ -256,7 +256,7 @@
                             <TextBox x:Name="ProtonPathTextBox" IsReadOnly="True" PlaceholderText="Proton executable path" />
                             <Button x:Name="LocateProtonButton" Grid.Column="1" Content="Locate Proton" Click="OnLocateProtonClick" />
                         </Grid>
-                        <Expander x:Name="SteamSetupPanel" Grid.Row="6"
+                        <Expander x:Name="SteamSetupShortcutsPanel" Grid.Row="6"
                                   Header="Steam shortcuts"
                                   IsExpanded="True"
                                   HorizontalAlignment="Stretch"
@@ -267,19 +267,22 @@
                                            Text="Exit Steam completely before setup. On systems with Gaming Mode, stay in Desktop Mode. Controller layout configuration is optional." />
                                 <ComboBox x:Name="SteamSetupAccountComboBox" HorizontalAlignment="Stretch"
                                           PlaceholderText="Select your Steam account" />
-                                <CheckBox x:Name="SteamResetMouseLayoutCheckBox" Content="Reset layout to Gamepad with Mouse Trackpad" IsChecked="True" />
+                                <CheckBox x:Name="SteamResetControllerLayoutCheckBox" Content="Reset layout to Gamepad with Mouse Trackpad" IsChecked="True" />
                                 <TextBlock Classes="muted" TextWrapping="Wrap"
                                            Text="Supports both the launcher and game in one Steam entry. Uncheck to keep your custom layout." />
                                 <Button x:Name="SteamSetupShortcutsButton" Content="Set up Steam shortcuts" Click="OnSetupSteamShortcutsClick" />
                                 <TextBlock x:Name="SteamSetupStatusText" Classes="muted" TextWrapping="Wrap" />
                             </StackPanel>
                         </Expander>
-                        <StackPanel x:Name="LsfgPanel" Grid.Row="7" Spacing="6" IsVisible="False">
-                            <CheckBox x:Name="SteamHelperFallbackCheckBox" Content="Use separate game session (compatibility fallback)" IsCheckedChanged="OnSteamHelperFallbackChanged" />
-                            <CheckBox x:Name="EnableLsfgCheckBox" Content="Enable LSFG for the game" IsCheckedChanged="OnLsfgChanged" />
-                            <TextBlock Classes="muted" TextWrapping="Wrap"
-                                       Text="Optional: requires the Decky LSFG-VK ~/lsfg wrapper and Steam shortcut setup. Configure frame generation in Decky. Applies only to the game." />
-                        </StackPanel>
+                        <Expander x:Name="SteamAdvancedPanel" Grid.Row="7" Header="Advanced"
+                                  HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsVisible="False">
+                            <StackPanel x:Name="LsfgPanel" Spacing="6" Margin="0,4,0,0">
+                                <CheckBox x:Name="SteamHelperFallbackCheckBox" Content="Use separate game session (compatibility fallback)" IsCheckedChanged="OnSteamHelperFallbackChanged" />
+                                <CheckBox x:Name="EnableLsfgCheckBox" Content="Enable LSFG for the game" IsCheckedChanged="OnLsfgChanged" />
+                                <TextBlock Classes="muted" TextWrapping="Wrap"
+                                           Text="Optional: requires a configured executable ~/lsfg wrapper and Steam shortcut setup. Applies only to the game." />
+                            </StackPanel>
+                        </Expander>
                     </Grid>
                 </Border>
             </Grid>

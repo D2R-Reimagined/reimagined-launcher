@@ -15,8 +15,10 @@ internal sealed record SteamHandoffRequest(string Id, DateTimeOffset Created, st
     string ProtonExecutable, string Executable, string[] Arguments, bool EnableLsfg = false);
 internal sealed record SteamHandoffStatus(string Id, string State, string? Error = null);
 internal sealed record SteamShortcutSetupResult(uint AppId, string? ControllerLayoutWarning);
+internal sealed record SteamLauncherSession(uint AppId, ulong GameId);
 internal sealed record SteamSetupAccount(string UserId, string Name, bool MostRecent)
 {
+    /// <summary>Formats a Steam account for the setup selector.</summary>
     public override string ToString() => $"{Name} ({UserId})";
 }
 
@@ -28,6 +30,7 @@ internal sealed class SteamGameHandoff : IDisposable
     private bool _disposed;
     private bool _started;
     private static IReadOnlyDictionary<string, string?>? _originalLauncherEnvironment;
+    internal static SteamLauncherSession? LauncherSession { get; private set; }
     internal static string StateDirectory => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ReimaginedLauncher", "steam-handoff");
     internal static bool IsGamingMode => OperatingSystem.IsLinux()
@@ -35,9 +38,11 @@ internal sealed class SteamGameHandoff : IDisposable
             || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GAMESCOPE_WAYLAND_DISPLAY_0"))
             || Environment.GetEnvironmentVariable("XDG_CURRENT_DESKTOP") == "gamescope");
 
+    /// <summary>Retains ownership of a reserved launch until the game session and cleanup finish.</summary>
     private SteamGameHandoff(string directory, string id, FileStream launchLock)
         => (_directory, _id, _launchLock) = (directory, id, launchLock);
 
+    /// <summary>Lists existing Steam userdata accounts and their available login metadata.</summary>
     internal static SteamSetupAccount[] GetSetupAccounts(string steamRoot)
     {
         var userdata = Path.Combine(steamRoot, "userdata");
@@ -66,6 +71,7 @@ internal sealed class SteamGameHandoff : IDisposable
         return accounts.Values.OrderByDescending(account => account.MostRecent).ThenBy(account => account.UserId).ToArray();
     }
 
+    /// <summary>Resolves the original AppImage or executable and rejects temporary mount paths.</summary>
     internal static string ResolveSetupLauncherPath(string? appImage, string? processPath)
     {
         var path = !string.IsNullOrWhiteSpace(appImage) ? appImage : processPath;
@@ -77,6 +83,7 @@ internal sealed class SteamGameHandoff : IDisposable
         return path;
     }
 
+    /// <summary>Installs a stable AppImage copy with a backup and executable permissions.</summary>
     internal static string PrepareSetupAppImage(string source, string destinationDirectory)
     {
         var destination = Path.GetFullPath(Path.Combine(destinationDirectory, "D2RReimagined.ReimaginedLauncher.AppImage"));
@@ -97,27 +104,27 @@ internal sealed class SteamGameHandoff : IDisposable
     }
 
     /// <summary>Installs native Linux Steam shortcuts from the GUI while Steam is fully exited.</summary>
-    internal static SteamShortcutSetupResult InstallFromLauncher(string steamRoot, string userId, bool resetMouseOnly = false)
+    internal static SteamShortcutSetupResult InstallFromLauncher(string steamRoot, string userId, bool resetControllerLayout = false)
     {
         if (!OperatingSystem.IsLinux() || IsGamingMode)
             throw new InvalidOperationException("Set up Steam shortcuts in Desktop Mode, with Steam fully exited.");
         if (GameLauncherService.IsSteamFlatpakInstall())
             throw new InvalidOperationException("Steam shortcut setup currently requires native Steam, not Flatpak Steam.");
         if (Process.GetProcessesByName("steam").Any(IsLiveSteamProcess))
-            throw new InvalidOperationException("Exit Steam (Steam Deck users: stay in Desktop Mode), then click Set up Steam shortcuts again.");
+            throw new InvalidOperationException("Exit Steam completely, then click Set up Steam shortcuts again. On systems with Gaming Mode, stay in Desktop Mode.");
         if (!GetSetupAccounts(steamRoot).Any(account => account.UserId == userId))
             throw new InvalidOperationException("Select an existing Steam account before setting up shortcuts.");
         var appImage = Environment.GetEnvironmentVariable("APPIMAGE");
         var path = ResolveSetupLauncherPath(appImage, Environment.ProcessPath);
         if (!string.IsNullOrWhiteSpace(appImage))
             path = PrepareSetupAppImage(path, Path.Combine(StateDirectory, "..", "launcher"));
-        return Install(steamRoot, userId, path, resetMouseOnly);
+        return Install(steamRoot, userId, path, resetControllerLayout);
     }
 
     /// <summary>Registers owned shortcuts independently of optional controller-layout configuration.</summary>
     /// <param name="stateDirectory">An isolated registration directory for tests; defaults to the launcher state directory.</param>
     internal static SteamShortcutSetupResult Install(string steamRoot, string userId, string launcherPath,
-        bool resetMouseOnly = false, string? stateDirectory = null)
+        bool resetControllerLayout = false, string? stateDirectory = null)
     {
         if (!OperatingSystem.IsLinux()) throw new InvalidOperationException("Steam handoff setup is Linux-only.");
         if (Process.GetProcessesByName("steam").Any(IsLiveSteamProcess))
@@ -141,12 +148,13 @@ internal sealed class SteamGameHandoff : IDisposable
             WriteShortcutFile(path, updated);
         }
         WriteJson(Path.Combine(directory, "registration.json"), new SteamHandoffRegistration(game.AppId, steamRoot, launcherPath));
-        var controllerWarning = SteamControllerLayout.SetUpOptionalLauncher(steamRoot, userId, gui.LegacyName!, gui.Name, resetMouseOnly);
+        var controllerWarning = SteamControllerLayout.SetUpOptionalLauncher(steamRoot, userId, gui.LegacyName!, gui.Name, resetControllerLayout);
         if (controllerWarning != null) Console.WriteLine(controllerWarning);
         Console.WriteLine($"Registered launcher-owned game session {game.AppId}; GUI game ID {gui.GameId}. Restart Steam before launching.");
         return new SteamShortcutSetupResult(game.AppId, controllerWarning);
     }
 
+    /// <summary>Checks the owned shortcut executable and original Steam app/game IDs against registration.</summary>
     internal static bool MatchesLauncherSession(SteamHandoffRegistration registration, string? executable,
         string? appId, string? gameId)
     {
@@ -157,6 +165,18 @@ internal sealed class SteamGameHandoff : IDisposable
             && string.Equals(Path.GetFullPath(executable), Path.GetFullPath(registration.LauncherPath), StringComparison.Ordinal);
     }
 
+    /// <summary>Validates the owned executable and Steam game ID, allowing its initial or inherited D2R authentication app ID.</summary>
+    internal static SteamLauncherSession? GetLauncherSession(SteamHandoffRegistration registration, string? executable,
+        string? appId, string? gameId)
+    {
+        var launcher = new LauncherSteamShortcut("Diablo II: Reimagined (Native Launcher)",
+            "\"" + Path.GetFullPath(registration.LauncherPath) + "\"", "", "D2R Reimagined (Native Launcher)");
+        // A launcher restart can inherit the substituted authentication ID; its owned path and game ID must still match.
+        var originalAppId = appId == "2536520" ? launcher.AppId.ToString() : appId;
+        if (!MatchesLauncherSession(registration, executable, originalAppId, gameId)) return null;
+        return new SteamLauncherSession(launcher.AppId, launcher.GameId);
+    }
+
     /// <summary>Initializes the registered Linux shortcut and retains its original environment for other launch routes.</summary>
     internal static bool TryInitializeLauncherSession()
     {
@@ -164,20 +184,16 @@ internal sealed class SteamGameHandoff : IDisposable
         try
         {
             var registration = ReadJson<SteamHandoffRegistration>(Path.Combine(StateDirectory, "registration.json"));
-            var launcher = new LauncherSteamShortcut("Diablo II: Reimagined (Native Launcher)",
-                "\"" + Path.GetFullPath(registration.LauncherPath) + "\"", "", "D2R Reimagined (Native Launcher)");
-            if (!MatchesLauncherSession(registration, Environment.GetEnvironmentVariable("APPIMAGE") ?? Environment.ProcessPath,
-                    Environment.GetEnvironmentVariable("SteamAppId"), Environment.GetEnvironmentVariable("SteamGameId"))) return false;
+            var session = GetLauncherSession(registration, Environment.GetEnvironmentVariable("APPIMAGE") ?? Environment.ProcessPath,
+                Environment.GetEnvironmentVariable("SteamAppId"), Environment.GetEnvironmentVariable("SteamGameId"));
+            if (session == null) return false;
             _originalLauncherEnvironment = new Dictionary<string, string?>
             {
-                ["SteamAppId"] = Environment.GetEnvironmentVariable("SteamAppId"),
-                ["D2RR_SINGLE_STEAM_SESSION"] = Environment.GetEnvironmentVariable("D2RR_SINGLE_STEAM_SESSION"),
-                ["D2RR_SESSION_APP_ID"] = Environment.GetEnvironmentVariable("D2RR_SESSION_APP_ID")
+                ["SteamAppId"] = session.AppId.ToString()
             };
-            Environment.SetEnvironmentVariable("D2RR_SINGLE_STEAM_SESSION", "dedicated");
-            Environment.SetEnvironmentVariable("D2RR_SESSION_APP_ID", launcher.AppId.ToString());
             Environment.SetEnvironmentVariable("SteamAppId", "2536520");
-            LaunchDiagnostics.Log("Dedicated Steam launcher session initialized: " + launcher.AppId);
+            LauncherSession = session;
+            LaunchDiagnostics.Log("Dedicated Steam launcher session initialized: " + session.AppId);
             return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
@@ -202,6 +218,7 @@ internal sealed class SteamGameHandoff : IDisposable
         }
     }
 
+    /// <summary>Distinguishes a running Linux Steam process from a terminated or zombie process.</summary>
     private static bool IsLiveSteamProcess(Process process)
     {
         using (process)
@@ -217,11 +234,14 @@ internal sealed class SteamGameHandoff : IDisposable
         }
     }
 
+    /// <summary>Checks whether launch preparation or the helper currently owns a session lock.</summary>
     internal static bool IsLaunchPendingOrRunning => IsReserved(StateDirectory);
 
+    /// <summary>Checks whether launch preparation or the helper currently owns a session lock.</summary>
     internal static bool IsReserved(string directory)
         => FileIsLocked(Path.Combine(directory, "launch.lock")) || FileIsLocked(Path.Combine(directory, "game.lock"));
 
+    /// <summary>Runs startup maintenance only while it owns the shared game-preparation reservation.</summary>
     internal static async Task RunStartupMaintenanceAsync(Func<Task> maintenance, string? directory = null)
     {
         SteamGameHandoff reservation;
@@ -229,6 +249,7 @@ internal sealed class SteamGameHandoff : IDisposable
         catch (Exception exception) when (exception is IOException or InvalidOperationException or UnauthorizedAccessException) { return; }
         using (reservation) await maintenance();
     }
+    /// <summary>Reserves launch preparation across instances and rejects an active helper session.</summary>
     internal static SteamGameHandoff Reserve(string? directory = null)
     {
         directory ??= StateDirectory;
@@ -243,6 +264,7 @@ internal sealed class SteamGameHandoff : IDisposable
         catch { launchLock.Dispose(); throw; }
     }
 
+    /// <summary>Submits a validated request to the registered Steam helper using the supplied or newly acquired reservation.</summary>
     internal static (SteamGameHandoff Session, Process Command) Start(InstallationProfile profile, string arguments,
         SteamGameHandoff? reservation = null)
     {
@@ -279,6 +301,7 @@ internal sealed class SteamGameHandoff : IDisposable
         catch { if (ownsReservation) reservation.Dispose(); throw; }
     }
 
+    /// <summary>Waits for the matching helper to confirm game exit and reports startup or lifecycle failures.</summary>
     internal async Task<bool> WaitForExitAsync()
     {
         var deadline = DateTimeOffset.UtcNow.AddMinutes(2);
@@ -297,6 +320,7 @@ internal sealed class SteamGameHandoff : IDisposable
         throw new TimeoutException("Steam did not start the registered game session. Restart Steam after shortcut setup.");
     }
 
+    /// <summary>Validates and runs the registered helper request, publishing its game lifecycle status.</summary>
     internal static int RunGame(string directory)
     {
         if (Path.GetFullPath(directory) != Path.GetFullPath(StateDirectory))
@@ -338,6 +362,7 @@ internal sealed class SteamGameHandoff : IDisposable
         }
     }
 
+    /// <summary>Builds a native Proton game launch with the official prefix and optional LSFG wrapper.</summary>
     internal static ProcessStartInfo CreateGameStartInfo(SteamHandoffRequest request, string? userHome = null)
     {
         var profile = new InstallationProfile { Type = InstallationType.Steam, InstallDirectory = request.GameDirectory,
@@ -352,7 +377,7 @@ internal sealed class SteamGameHandoff : IDisposable
         {
             command = Path.Combine(userHome ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "lsfg");
             if (!File.Exists(command))
-                throw new InvalidOperationException("LSFG is enabled, but ~/lsfg is missing. Install the Decky LSFG-VK wrapper or turn off LSFG in the launcher.");
+                throw new InvalidOperationException("LSFG is enabled, but ~/lsfg is missing. Install and configure an executable LSFG wrapper at ~/lsfg or turn off LSFG in the launcher.");
             if (OperatingSystem.IsLinux() && (File.GetUnixFileMode(command)
                 & (UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute)) == 0)
                 throw new InvalidOperationException("The ~/lsfg wrapper is not executable. Repair the LSFG installation or turn off LSFG in the launcher.");
@@ -375,6 +400,7 @@ internal sealed class SteamGameHandoff : IDisposable
         return info;
     }
 
+    /// <summary>Splits quoted launch arguments without evaluating shell syntax.</summary>
     internal static string[] SplitArguments(string text)
     {
         var result = new List<string>();
@@ -398,6 +424,7 @@ internal sealed class SteamGameHandoff : IDisposable
         return result.ToArray();
     }
 
+    /// <summary>Finds Linux Wine processes matching the selected executable and its prefix drive mappings.</summary>
     internal static int[] FindGameProcesses(string executable)
     {
         var result = new List<int>();
@@ -430,6 +457,7 @@ internal sealed class SteamGameHandoff : IDisposable
         return result.ToArray();
     }
 
+    /// <summary>Compares the Wine executable path after resolving drive mappings and filesystem aliases.</summary>
     internal static bool MatchesGameCommandLine(string commandLine, string executable, IReadOnlyDictionary<char, string>? drives = null)
     {
         var argv0 = commandLine.Split('\0')[0].Replace('\\', '/');
@@ -443,8 +471,10 @@ internal sealed class SteamGameHandoff : IDisposable
             ResolveFileSystemPath(executable).Replace('\\', '/'), StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>Resolves directory aliases and relative segments with a bounded symlink traversal.</summary>
     internal static string ResolveFileSystemPath(string path) => ResolveFileSystemPath(path, 0);
 
+    /// <summary>Resolves directory aliases and relative segments with a bounded symlink traversal.</summary>
     private static string ResolveFileSystemPath(string path, int followedLinks)
     {
         if (!Path.IsPathFullyQualified(path)) return path;
@@ -477,6 +507,7 @@ internal sealed class SteamGameHandoff : IDisposable
         return resolved;
     }
 
+    /// <summary>Checks exclusive access to a session lock file without creating it.</summary>
     private static bool FileIsLocked(string path)
     {
         try { using var file = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None); return false; }
@@ -484,9 +515,12 @@ internal sealed class SteamGameHandoff : IDisposable
         catch (UnauthorizedAccessException) { return true; }
     }
 
+    /// <summary>Reads a typed handoff document and rejects an empty deserialization result.</summary>
     private static T ReadJson<T>(string path) => JsonSerializer.Deserialize<T>(File.ReadAllText(path))
         ?? throw new InvalidDataException("Invalid Steam handoff configuration.");
+    /// <summary>Replaces a file through a sibling temporary file and removes incomplete writes.</summary>
     private static void WriteJson<T>(string path, T value) => AtomicWrite(path, JsonSerializer.SerializeToUtf8Bytes(value));
+    /// <summary>Atomically replaces shortcut or controller data while preserving existing Linux file permissions.</summary>
     internal static void WriteShortcutFile(string path, byte[] data)
     {
         UnixFileMode? permissions = OperatingSystem.IsLinux() && File.Exists(path)
@@ -494,6 +528,7 @@ internal sealed class SteamGameHandoff : IDisposable
         AtomicWrite(path, data, permissions);
     }
 
+    /// <summary>Replaces a file through a sibling temporary file and removes incomplete writes.</summary>
     private static void AtomicWrite(string path, byte[] data, UnixFileMode? permissions = null)
     {
         var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
@@ -505,6 +540,7 @@ internal sealed class SteamGameHandoff : IDisposable
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
+    /// <summary>Releases the launch reservation once session cleanup has finished.</summary>
     public void Dispose()
     {
         if (_disposed) return;

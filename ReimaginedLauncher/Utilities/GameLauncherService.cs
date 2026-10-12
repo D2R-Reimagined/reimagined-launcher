@@ -289,6 +289,7 @@ public class GameLauncherService
                || IsFlatpakInstall(GetSteamInstallPath(userHome, installDirectory));
     }
 
+    /// <summary>Chooses the native or Flatpak Steam client belonging to the selected game installation.</summary>
     internal static string? FindLinuxSteamExecutable(string? installDirectory, string? userHome = null,
         Func<string, string?>? findExecutable = null)
     {
@@ -299,25 +300,28 @@ public class GameLauncherService
         return findExecutable("steam") ?? (steamRoot is null ? findExecutable("flatpak") : null);
     }
 
+    /// <summary>Determines whether the selected profile requires the separate Linux Steam helper route.</summary>
     internal static bool UsesSteamHandoff(InstallationProfile profile)
         => !UsesSingleSteamSession(profile)
            && UsesSteamHandoff(profile, OperatingSystem.IsLinux(), SteamGameHandoff.IsGamingMode,
             File.Exists(Path.Combine(SteamGameHandoff.StateDirectory, "registration.json")));
 
+    /// <summary>Determines whether a native Linux Steam profile belongs to the validated dedicated launcher session.</summary>
     internal static bool UsesSingleSteamSession(InstallationProfile profile)
-        => UsesSingleSteamSession(profile, Environment.GetEnvironmentVariable("D2RR_SINGLE_STEAM_SESSION"),
-            Environment.GetEnvironmentVariable("SteamAppId"), Environment.GetEnvironmentVariable("SteamGameId"),
-            Environment.GetEnvironmentVariable("D2RR_SESSION_APP_ID"));
+        => UsesSingleSteamSession(profile, SteamGameHandoff.LauncherSession,
+            Environment.GetEnvironmentVariable("SteamAppId"), Environment.GetEnvironmentVariable("SteamGameId"));
 
-    internal static bool UsesSingleSteamSession(InstallationProfile profile, string? enabled, string? appId,
-        string? gameId, string? sessionAppId = null, bool? isLinux = null)
+    /// <summary>Determines whether a native Linux Steam profile belongs to the validated dedicated launcher session.</summary>
+    internal static bool UsesSingleSteamSession(InstallationProfile profile, SteamLauncherSession? session, string? appId,
+        string? gameId, bool? isLinux = null)
         => (isLinux ?? OperatingSystem.IsLinux()) && appId == SteamAppId && profile.Type == InstallationType.Steam
            && !IsSteamFlatpakInstall(profile.InstallDirectory)
            && !profile.UseSteamHelperFallback
-           && profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Offline or LaunchExperience.Ladder
-           && enabled == "dedicated" && uint.TryParse(sessionAppId, out var shortcut) && shortcut >= 0x80000000
-           && ulong.TryParse(gameId, out var game) && game == (((ulong)shortcut << 32) | 0x02000000);
+           && session is { AppId: >= 0x80000000 }
+           && session.GameId == (((ulong)session.AppId << 32) | 0x02000000)
+           && ulong.TryParse(gameId, out var game) && game == session.GameId;
 
+    /// <summary>Determines whether the selected profile requires the separate Linux Steam helper route.</summary>
     internal static bool UsesSteamHandoff(InstallationProfile profile, bool isLinux, bool isGamingMode,
         bool hasRegistration, string? userHome = null)
         => isLinux && profile.Type == InstallationType.Steam
@@ -611,19 +615,23 @@ public class GameLauncherService
         return $"{envVarsExports}\n \"{profile.ProtonExecutable}\" {BuildSteamProtonArguments(loaderPath!, launchParameters)}";
     }
 
+    /// <summary>Formats the dedicated Proton command preview with the optional game-only LSFG wrapper.</summary>
     private static string BuildDedicatedSteamPreview(string executable, string arguments, InstallationProfile profile)
         => "Dedicated Steam launcher session (official D2R prefix)." + Environment.NewLine
            + (profile.EnableLsfg ? "\"~/lsfg\" " : "")
            + $"\"{profile.ProtonExecutable}\" {BuildSteamProtonArguments(executable, arguments)}";
 
+    /// <summary>Formats the separate Steam helper command preview and its configured game request.</summary>
     private static string BuildSteamHandoffPreview(string executable, string arguments, InstallationProfile profile)
         => $"Steam-owned game session; request prepared when Launch is pressed.{Environment.NewLine}"
            + (profile.EnableLsfg ? "LSFG wrapper: ~/lsfg (game only)." + Environment.NewLine : "")
            + $"\"{executable}\" {arguments}";
 
+    /// <summary>Starts the selected installation route while retaining any reserved Steam launch ownership.</summary>
     public Process? LaunchGame(string? launchParamOverride = null, string? gamePathOverride = null)
         => LaunchGame(null, launchParamOverride, gamePathOverride);
 
+    /// <summary>Starts the selected installation route while retaining any reserved Steam launch ownership.</summary>
     internal Process? LaunchGame(SteamGameHandoff? reservation, string? launchParamOverride = null, string? gamePathOverride = null)
     {
         var profile = MainWindow.Settings.CurrentProfile;
@@ -890,6 +898,7 @@ public class GameLauncherService
         return true;
     }
 
+    /// <summary>Detects the base game Proton tool only when the Steam profile has no saved selection.</summary>
     internal static bool TryDetectSteamProtonExecutable(InstallationProfile profile)
     {
         if (profile.Type != InstallationType.Steam || !string.IsNullOrWhiteSpace(profile.ProtonExecutable)
@@ -906,6 +915,7 @@ public class GameLauncherService
         }
     }
 
+    /// <summary>Detects a unique Proton executable from the initialized official game prefix metadata.</summary>
     internal static bool TryDetectD2RProtonExecutable(InstallationProfile profile)
     {
         var steamApps = FileService.FindAncestorDirectory(profile.InstallDirectory, SteamAppsDirName);
@@ -938,6 +948,7 @@ public class GameLauncherService
         return true;
     }
 
+    /// <summary>Builds Proton run arguments for the selected Windows executable.</summary>
     internal static string BuildSteamProtonArguments(string loaderPath, string launchParameters)
         => $"run \"{loaderPath}\" {launchParameters}";
 
@@ -952,10 +963,8 @@ public class GameLauncherService
         string steamInstallPath, string? steamApps)
     {
         environment["SteamAppId"] = $"{SteamAppId}";
-        environment["STEAM_COMPAT_APP_ID"] = UsesSingleSteamSession(profile,
-            Environment.GetEnvironmentVariable("D2RR_SINGLE_STEAM_SESSION"), Environment.GetEnvironmentVariable("SteamAppId"),
-            Environment.GetEnvironmentVariable("SteamGameId"), Environment.GetEnvironmentVariable("D2RR_SESSION_APP_ID"))
-            ? Environment.GetEnvironmentVariable("D2RR_SESSION_APP_ID") ?? SteamAppId : SteamAppId;
+        environment["STEAM_COMPAT_APP_ID"] = UsesSingleSteamSession(profile)
+            ? SteamGameHandoff.LauncherSession!.AppId.ToString() : SteamAppId;
         environment["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = $"{steamInstallPath}";
         environment["STEAM_COMPAT_DATA_PATH"] = Path.Combine(steamApps!, "compatdata", SteamAppId);
         environment["STEAM_COMPAT_INSTALL_PATH"] = $"{profile.InstallDirectory}";
@@ -988,6 +997,7 @@ public class GameLauncherService
         return InstallDirectoryValidator.GetExecutablePath(MainWindow.Settings.CurrentProfile.InstallDirectory);
     }
 
+    /// <summary>Determines whether the selected experience launches through D2RLoader.</summary>
     internal static bool UsesD2RLoader(InstallationProfile profile)
     {
         return profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder;
@@ -1112,6 +1122,7 @@ public class GameLauncherService
             : "steam";
     }
 
+    /// <summary>Returns the Flatpak Steam invocation prefix when the selected Linux client requires it.</summary>
     internal static string GetSteamArgumentPrefix(string steamExecutable, bool? isLinux = null)
     {
         if (!(isLinux ?? OperatingSystem.IsLinux()) ||
@@ -1168,6 +1179,7 @@ public class GameLauncherService
         return installedRoots.FirstOrDefault();
     }
 
+    /// <summary>Compares Steam directories after resolving filesystem aliases.</summary>
     private static bool SameSteamDirectory(string first, string second)
         => string.Equals(SteamGameHandoff.ResolveFileSystemPath(first).TrimEnd(Path.DirectorySeparatorChar),
             SteamGameHandoff.ResolveFileSystemPath(second).TrimEnd(Path.DirectorySeparatorChar),

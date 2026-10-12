@@ -5,6 +5,7 @@ namespace ReimaginedLauncher.Utilities;
 
 public static class FileService
 {
+    /// <summary>Finds the nearest named ancestor directory of a file or directory path.</summary>
     public static string? FindAncestorDirectory(string? path, string directoryName)
     {
         if (string.IsNullOrWhiteSpace(path))

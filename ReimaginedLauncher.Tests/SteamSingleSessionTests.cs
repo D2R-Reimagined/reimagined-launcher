@@ -5,6 +5,7 @@ namespace ReimaginedLauncher.Tests;
 
 public sealed class SteamSingleSessionTests
 {
+    /// <summary>Verifies that all experiences require the cached Linux shortcut identity and preserve fallback routing.</summary>
     [Theory]
     [InlineData(LaunchExperience.Online)]
     [InlineData(LaunchExperience.Offline)]
@@ -14,18 +15,20 @@ public sealed class SteamSingleSessionTests
         var profile = new InstallationProfile { Type = InstallationType.Steam, LaunchExperience = experience };
         const uint shortcut = 0xA1234567;
         var game = (((ulong)shortcut << 32) | 0x02000000).ToString();
-        Assert.True(GameLauncherService.UsesSingleSteamSession(profile, "dedicated", "2536520", game, shortcut.ToString(), true));
-        Assert.False(GameLauncherService.UsesSingleSteamSession(profile, "dedicated", "2536520", "2536520", shortcut.ToString(), true));
-        Assert.False(GameLauncherService.UsesSingleSteamSession(profile, "dedicated", "wrong", game, shortcut.ToString(), true));
-        Assert.False(GameLauncherService.UsesSingleSteamSession(profile, null, "2536520", game, shortcut.ToString(), true));
-        Assert.False(GameLauncherService.UsesSingleSteamSession(profile, "1", "2536520", "2536520", shortcut.ToString(), true));
-        Assert.False(GameLauncherService.UsesSingleSteamSession(profile, "dedicated", "2536520", game, shortcut.ToString(), false));
+        var session = new SteamLauncherSession(shortcut, ulong.Parse(game));
+        Assert.True(GameLauncherService.UsesSingleSteamSession(profile, session, "2536520", game, true));
+        Assert.False(GameLauncherService.UsesSingleSteamSession(profile, session, "2536520", "2536520", true));
+        Assert.False(GameLauncherService.UsesSingleSteamSession(profile, session, "wrong", game, true));
+        Assert.False(GameLauncherService.UsesSingleSteamSession(profile, null, "2536520", game, true));
+        Assert.False(GameLauncherService.UsesSingleSteamSession(profile, new SteamLauncherSession(shortcut, 2536520), "2536520", "2536520", true));
+        Assert.False(GameLauncherService.UsesSingleSteamSession(profile, session, "2536520", game, false));
         profile.UseSteamHelperFallback = true;
-        Assert.False(GameLauncherService.UsesSingleSteamSession(profile, "dedicated", "2536520", game, shortcut.ToString(), true));
+        Assert.False(GameLauncherService.UsesSingleSteamSession(profile, session, "2536520", game, true));
         profile.UseSteamHelperFallback = false;
         profile.Type = InstallationType.Lutris;
-        Assert.False(GameLauncherService.UsesSingleSteamSession(profile, "dedicated", "2536520", game, shortcut.ToString(), true));
+        Assert.False(GameLauncherService.UsesSingleSteamSession(profile, session, "2536520", game, true));
     }
+    /// <summary>Verifies that the combined layout preserves unrelated controller entries and repeated setup is idempotent.</summary>
     [Fact]
     public void SetupSeedsCombinedLayoutAndPreservesUnrelatedControllerEntries()
     {
@@ -38,6 +41,7 @@ public sealed class SteamSingleSessionTests
             "Diablo II: Reimagined (Native Launcher)", true, true, "controller_neptune_reimagined.vdf"));
     }
 
+    /// <summary>Verifies that the helper fallback defaults off and its selected value survives serialization.</summary>
     [Fact]
     public void HelperFallbackDefaultsOffAndPersistsWhenSelected()
     {
@@ -47,6 +51,7 @@ public sealed class SteamSingleSessionTests
             System.Text.Json.JsonSerializer.Serialize(profile))!.UseSteamHelperFallback);
     }
 
+    /// <summary>Verifies that session initialization requires the installed owned shortcut and matching Steam IDs.</summary>
     [Fact]
     public void AutomaticSessionInitializationOnlyMatchesTheInstalledOwnedLauncher()
     {
@@ -61,6 +66,28 @@ public sealed class SteamSingleSessionTests
         Assert.False(SteamGameHandoff.MatchesLauncherSession(registration, null, launcher.AppId.ToString(), launcher.GameId.ToString()));
     }
 
+    /// <summary>Verifies that startup validation survives the later D2R authentication ID substitution.</summary>
+    [Fact]
+    public void CachedSessionRetainsOwnershipAfterAuthenticationIdChanges()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "owned launcher", "Launcher.AppImage");
+        var launcher = new LauncherSteamShortcut("Diablo II: Reimagined (Native Launcher)",
+            "\"" + Path.GetFullPath(path) + "\"", "", "D2R Reimagined (Native Launcher)");
+        var registration = new SteamHandoffRegistration(123, "/steam", path);
+        var session = SteamGameHandoff.GetLauncherSession(registration, path, launcher.AppId.ToString(), launcher.GameId.ToString());
+        Assert.NotNull(session);
+        var profile = new InstallationProfile { Type = InstallationType.Steam };
+
+        Assert.True(GameLauncherService.UsesSingleSteamSession(profile, session, "2536520", launcher.GameId.ToString(), true));
+        Assert.Equal(session, SteamGameHandoff.GetLauncherSession(registration, path, "2536520", launcher.GameId.ToString()));
+        Assert.Null(SteamGameHandoff.GetLauncherSession(registration, path, "2536520", "2536520"));
+        Assert.Null(SteamGameHandoff.GetLauncherSession(registration, path, "wrong", launcher.GameId.ToString()));
+        Assert.Null(SteamGameHandoff.GetLauncherSession(registration, path + ".other", "2536520", launcher.GameId.ToString()));
+        Assert.Null(SteamGameHandoff.GetLauncherSession(registration, path + ".other", launcher.AppId.ToString(), launcher.GameId.ToString()));
+        Assert.False(GameLauncherService.UsesSingleSteamSession(profile, null, "2536520", launcher.GameId.ToString(), true));
+    }
+
+    /// <summary>Verifies that generated controller data changes only mouse-trackpad press and rejects unsupported layouts.</summary>
     [Fact]
     public void CombinedTemplateOnlyChangesMouseTrackpadPress()
     {

@@ -36,6 +36,7 @@ internal static class SteamControllerLayout
         }
     }
 
+    /// <summary>Generates a backed-up controller template from the supported installed Steam layout.</summary>
     internal static string PrepareCombinedTemplate(string steamRoot)
     {
         const string name = "controller_neptune_reimagined.vdf";
@@ -49,6 +50,7 @@ internal static class SteamControllerLayout
         return name;
     }
 
+    /// <summary>Changes only the unique mouse-trackpad press binding and rejects incompatible templates.</summary>
     internal static string BuildCombinedTemplate(string text)
     {
         var tokens = new List<Token>();
@@ -77,22 +79,24 @@ internal static class SteamControllerLayout
             .Insert(group.ValueStart + binding.Index, "\"binding\" \"mouse_button LEFT\"");
     }
 
-    internal static int SetUpLauncher(string steamRoot, string userId, string oldName, string newName, bool resetMouseOnly = false, string templateName = "controller_neptune_mouse.vdf")
+    /// <summary>Migrates owned controller preferences and seeds the supported template only when available.</summary>
+    internal static int SetUpLauncher(string steamRoot, string userId, string oldName, string newName, bool resetControllerLayout = false, string templateName = "controller_neptune_mouse.vdf")
         => MigrateLauncherName(Path.Combine(steamRoot, "steamapps", "common", "Steam Controller Configs", userId, "config"),
-            oldName, newName, File.Exists(Path.Combine(steamRoot, "controller_base", "templates", templateName)), resetMouseOnly, templateName);
+            oldName, newName, File.Exists(Path.Combine(steamRoot, "controller_base", "templates", templateName)), resetControllerLayout, templateName);
 
-    internal static int MigrateLauncherName(string configDirectory, string oldName, string newName, bool seedMouseOnly = false,
-        bool resetMouseOnly = false, string templateName = "controller_neptune_mouse.vdf")
+    /// <summary>Carries owned preferences across display-name changes while preserving unrelated controller mappings.</summary>
+    internal static int MigrateLauncherName(string configDirectory, string oldName, string newName, bool seedLayout = false,
+        bool resetControllerLayout = false, string templateName = "controller_neptune_mouse.vdf")
     {
         if (!Directory.Exists(configDirectory))
         {
-            if (!seedMouseOnly) return 0;
+            if (!seedLayout) return 0;
             Directory.CreateDirectory(configDirectory);
         }
         var migrated = 0;
         var paths = Directory.GetFiles(configDirectory, "configset_*.vdf").ToList();
-        var genericDeckConfig = Path.Combine(configDirectory, "configset_controller_neptune.vdf");
-        if (seedMouseOnly && !paths.Contains(genericDeckConfig)) paths.Add(genericDeckConfig);
+        var genericNeptuneConfig = Path.Combine(configDirectory, "configset_controller_neptune.vdf");
+        if (seedLayout && !paths.Contains(genericNeptuneConfig)) paths.Add(genericNeptuneConfig);
         foreach (var path in paths)
         {
             try
@@ -101,12 +105,12 @@ internal static class SteamControllerLayout
                 var encoding = new UTF8Encoding(false, true);
                 var text = encoding.GetString(original);
                 var preferences = Path.Combine(configDirectory, Path.GetFileName(path).Replace("configset_", "preferences_"));
-                var isDeckController = path == genericDeckConfig
+                var isNeptuneController = path == genericNeptuneConfig
                     || Regex.IsMatch(text, "\"template\"\\s*\"controller_neptune_[^\"]+\\.vdf\"", RegexOptions.IgnoreCase)
                     || File.Exists(preferences) && Regex.IsMatch(File.ReadAllText(preferences),
                         "\"name\"\\s*\"Steam Deck Controller\\s*\"", RegexOptions.IgnoreCase);
-                var updated = CarryForward(text, oldName, newName, seedMouseOnly && isDeckController,
-                    resetMouseOnly && seedMouseOnly && isDeckController, templateName);
+                var updated = CarryForward(text, oldName, newName, seedLayout && isNeptuneController,
+                    resetControllerLayout && seedLayout && isNeptuneController, templateName);
                 if (updated == text) continue;
                 if (File.Exists(path)) File.Copy(path, path + ".reimagined-" + Guid.NewGuid().ToString("N") + ".bak");
                 SteamGameHandoff.WriteShortcutFile(path, encoding.GetBytes(updated));
@@ -120,8 +124,9 @@ internal static class SteamControllerLayout
         return migrated;
     }
 
-    internal static string CarryForward(string text, string oldName, string newName, bool seedMouseOnly = false,
-        bool resetMouseOnly = false, string templateName = "controller_neptune_mouse.vdf")
+    /// <summary>Updates the owned controller entry while retaining custom layouts unless reset is requested.</summary>
+    internal static string CarryForward(string text, string oldName, string newName, bool seedLayout = false,
+        bool resetControllerLayout = false, string templateName = "controller_neptune_mouse.vdf")
     {
         var displayName = newName;
         newName = newName.Replace(":", "").ToLowerInvariant();
@@ -144,26 +149,27 @@ internal static class SteamControllerLayout
         if (position != tokens.Count) throw new InvalidDataException("Unexpected controller configuration data.");
         if (templateName is not ("controller_neptune_mouse.vdf" or "controller_neptune_gamepad+mouse.vdf" or "controller_neptune_reimagined.vdf"))
             throw new ArgumentException("Unsupported launcher controller template.");
-        var mouseLayout = "{\n\t\t\"template\"\t\t\"" + templateName + "\"\n\t}";
+        var templateLayout = "{\n\t\t\"template\"\t\t\"" + templateName + "\"\n\t}";
         var existing = entries.SingleOrDefault(entry => entry.Name.Equals(newName, StringComparison.OrdinalIgnoreCase));
         if (existing != null)
         {
-            if (resetMouseOnly && seedMouseOnly && existing.Object)
-                return text[..existing.ValueStart] + mouseLayout + text[existing.End..];
+            if (resetControllerLayout && seedLayout && existing.Object)
+                return text[..existing.ValueStart] + templateLayout + text[existing.End..];
             return text;
         }
         var legacy = entries.SingleOrDefault(entry => entry.Name.Equals(oldName, StringComparison.OrdinalIgnoreCase));
         if (legacy == null && displayName != newName)
             legacy = entries.SingleOrDefault(entry => entry.Name.Equals(displayName, StringComparison.OrdinalIgnoreCase));
-        if (resetMouseOnly && seedMouseOnly) legacy = null;
-        if (legacy != null && !legacy.Object || legacy == null && !seedMouseOnly) return text;
+        if (resetControllerLayout && seedLayout) legacy = null;
+        if (legacy != null && !legacy.Object || legacy == null && !seedLayout) return text;
         if (newName.Contains('"') || newName.Contains('\\')) throw new ArgumentException("Invalid controller entry name.");
-        var layout = legacy == null ? mouseLayout
+        var layout = legacy == null ? templateLayout
             : text[legacy.ValueStart..legacy.End];
         var insertion = "\n\t\"" + newName.ToLowerInvariant() + "\"\n\t" + layout + "\n";
         return text.Insert(closing, insertion);
     }
 
+    /// <summary>Parses bounded controller VDF objects and enforces the requested duplicate-key policy.</summary>
     private static List<Entry> ReadObject(List<Token> tokens, ref int position, int depth, out int closing, bool allowDuplicates = false)
     {
         if (depth > 32 || position >= tokens.Count || tokens[position++].Value != "{")

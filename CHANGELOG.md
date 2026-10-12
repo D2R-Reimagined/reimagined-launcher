@@ -3,7 +3,7 @@
 ## Unreleased
 
 - Integrate official v0.16.7 and its approved Ladder runtime config-name matching fix.
-- Add a dedicated native Steam Deck launcher session for Online, Offline and Ladder, preserving base-game authentication and vanilla D2R launching; keep the hidden game-session helper as an optional compatibility fallback.
+- Add a dedicated native Linux Steam launcher session for Online, Offline and Ladder, preserving base-game authentication and vanilla D2R launching; keep the hidden game-session helper as an optional compatibility fallback.
 - Add Desktop Mode Steam shortcut setup with account discovery, stable AppImage installation, backups, permission preservation, and migration to Diablo II: Reimagined shortcut names without duplicate entries.
 - Generate a combined gamepad/trackpad-mouse layout with trackpad left-click, preserving normal triggers and buttons; allow custom layouts to be retained during setup.
 - Make controller-template configuration optional for native Linux Steam shortcut setup; missing, incompatible or unwritable templates leave shortcut registration usable and saved layouts intact.
@@ -17,3 +17,4 @@
 - Select native/Flatpak Steam from the chosen installation and preserve Flatpak Offline routing when both clients coexist.
 - Add an off-by-default game-only LSFG option for both dedicated and fallback sessions; allow it to be disabled before Steam shortcut setup.
 - Hide the internal Launcher Game Session shortcut during setup, migrating existing visibility in place while retaining its launch ID and preserving unrelated shortcut data.
+- Cache the registered Steam session identity instead of passing launcher-only environment markers, document Steam integration helpers, and group Linux Steam fallback/LSFG settings under Advanced.

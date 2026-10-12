@@ -8,12 +8,14 @@ namespace ReimaginedLauncher.Utilities;
 
 internal sealed record LauncherSteamShortcut(string Name, string Executable, string Arguments, string? LegacyName = null, bool? Hidden = null)
 {
+    /// <summary>Calculates the unsigned non-Steam shortcut ID from its executable and stable name.</summary>
     public uint AppId => SteamShortcutFile.CalculateAppId(Executable, LegacyName ?? Name);
     public ulong GameId => ((ulong)AppId << 32) | 0x02000000;
 }
 
 internal static class SteamShortcutFile
 {
+    /// <summary>Calculates the unsigned non-Steam shortcut ID from its executable and stable name.</summary>
     internal static uint CalculateAppId(string executable, string name)
     {
         uint crc = uint.MaxValue;
@@ -26,6 +28,7 @@ internal static class SteamShortcutFile
         return ~crc | 0x80000000u;
     }
 
+    /// <summary>Adds or migrates owned entries while retaining unrelated binary fields and rejecting ID collisions.</summary>
     internal static byte[] AppendOwnedShortcuts(byte[] original, params LauncherSteamShortcut[] shortcuts)
     {
         if (original.Length == 0) original = [0, .. Encoding.UTF8.GetBytes("shortcuts\0"), 8, 8];
@@ -118,6 +121,7 @@ internal static class SteamShortcutFile
         return result.ToArray();
     }
 
+    /// <summary>Reads supported binary VDF fields with bounded nesting and duplicate-key rejection.</summary>
     private static Dictionary<string, object> ReadObject(BinaryReader reader, int depth,
         Action<string, long, long>? fieldRead = null)
     {
@@ -142,6 +146,7 @@ internal static class SteamShortcutFile
         }
     }
 
+    /// <summary>Reads the next binary field type without advancing the stream.</summary>
     private static byte Peek(BinaryReader reader)
     {
         var value = reader.ReadByte();
@@ -149,6 +154,7 @@ internal static class SteamShortcutFile
         return value;
     }
 
+    /// <summary>Reads a null-terminated binary VDF string with strict UTF-8 decoding.</summary>
     private static string ReadString(BinaryReader reader)
     {
         using var bytes = new MemoryStream();
@@ -157,6 +163,7 @@ internal static class SteamShortcutFile
         return new UTF8Encoding(false, true).GetString(bytes.ToArray());
     }
 
+    /// <summary>Writes a UTF-8 VDF string and rejects embedded null bytes.</summary>
     private static void WriteString(BinaryWriter writer, string value)
     {
         if (value.Contains('\0')) throw new InvalidDataException("Steam shortcut string contains a null byte.");
@@ -164,6 +171,7 @@ internal static class SteamShortcutFile
         writer.Write((byte)0);
     }
 
+    /// <summary>Writes a named binary VDF string field.</summary>
     private static void WriteField(BinaryWriter writer, string name, string value)
     {
         writer.Write((byte)1);
@@ -171,6 +179,7 @@ internal static class SteamShortcutFile
         WriteString(writer, value);
     }
 
+    /// <summary>Writes a named unsigned 32-bit binary VDF field.</summary>
     private static void WriteInt(BinaryWriter writer, string name, uint value)
     {
         writer.Write((byte)2);

@@ -1593,6 +1593,7 @@ public partial class MainWindow : Window
         _saveWindowStateTimer?.Start();
     }
 
+    /// <summary>Closes the launcher through the existing exit path, including when minimize-to-tray is enabled.</summary>
     private void OnExitLauncherClick(object? sender, RoutedEventArgs e) => ExitFromTray();
 
     private void ExitFromTray()

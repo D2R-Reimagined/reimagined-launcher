@@ -271,23 +271,23 @@ public partial class LaunchView : UserControl
         DetectionLoadingIndicator.IsVisible = LauncherService.IsDetecting;
 
         SteamExtraPanel.IsVisible = profile.Type == InstallationType.Steam;
-        LsfgPanel.IsVisible = profile.Type == InstallationType.Steam && OperatingSystem.IsLinux()
+        SteamAdvancedPanel.IsVisible = profile.Type == InstallationType.Steam && OperatingSystem.IsLinux()
                              && !GameLauncherService.IsSteamFlatpakInstall(profile.InstallDirectory);
         SteamHelperFallbackCheckBox.IsChecked = profile.UseSteamHelperFallback;
         SteamHelperFallbackCheckBox.IsEnabled = !_isLaunching && !SteamGameHandoff.IsLaunchPendingOrRunning;
         EnableLsfgCheckBox.IsChecked = profile.EnableLsfg;
         EnableLsfgCheckBox.IsEnabled = !_isLaunching && !SteamGameHandoff.IsLaunchPendingOrRunning;
-        SteamSetupPanel.IsVisible = profile.Type == InstallationType.Steam && OperatingSystem.IsLinux()
+        SteamSetupShortcutsPanel.IsVisible = profile.Type == InstallationType.Steam && OperatingSystem.IsLinux()
             && !GameLauncherService.IsSteamFlatpakInstall(profile.InstallDirectory);
         SteamSetupShortcutsButton.IsEnabled = !_isSteamSetupRunning && !_isLaunching && !MainWindow.IsInstallInProgress
             && !SteamGameHandoff.IsLaunchPendingOrRunning;
-        if (SteamSetupPanel.IsVisible)
+        if (SteamSetupShortcutsPanel.IsVisible)
         {
             try
             {
                 var selectedId = (SteamSetupAccountComboBox.SelectedItem as SteamSetupAccount)?.UserId;
                 var root = GameLauncherService.GetSteamInstallPath(installDirectory: profile.InstallDirectory);
-                SteamResetMouseLayoutCheckBox.IsVisible = root != null && SteamControllerLayout.HasCombinedTemplate(root);
+                SteamResetControllerLayoutCheckBox.IsVisible = root != null && SteamControllerLayout.HasCombinedTemplate(root);
                 var accounts = root is null ? [] : SteamGameHandoff.GetSetupAccounts(root);
                 SteamSetupAccountComboBox.ItemsSource = accounts;
                 var recent = accounts.Where(account => account.MostRecent).ToArray();
@@ -1975,6 +1975,7 @@ public partial class LaunchView : UserControl
         }
     }
 
+    /// <summary>Registers native Linux Steam shortcuts and reports optional controller-layout configuration results.</summary>
     private async void OnSetupSteamShortcutsClick(object? sender, RoutedEventArgs e)
     {
         if (_isSteamSetupRunning || _isLaunching || MainWindow.IsInstallInProgress || SteamGameHandoff.IsLaunchPendingOrRunning) return;
@@ -1994,10 +1995,10 @@ public partial class LaunchView : UserControl
             var root = GameLauncherService.GetSteamInstallPath(installDirectory: profile.InstallDirectory)
                 ?? throw new InvalidOperationException("Native Steam could not be found.");
             await SettingsManager.SaveAsync(MainWindow.Settings);
-            var resetMouseOnly = SteamResetMouseLayoutCheckBox.IsVisible && SteamResetMouseLayoutCheckBox.IsChecked == true;
-            var result = await Task.Run(() => SteamGameHandoff.InstallFromLauncher(root, account.UserId, resetMouseOnly));
+            var resetControllerLayout = SteamResetControllerLayoutCheckBox.IsVisible && SteamResetControllerLayoutCheckBox.IsChecked == true;
+            var result = await Task.Run(() => SteamGameHandoff.InstallFromLauncher(root, account.UserId, resetControllerLayout));
             SteamSetupStatusText.Text = "Setup complete.\n\nClose this launcher and restart Steam, then open Diablo II: Reimagined (Native Launcher). "
-                + (result.ControllerLayoutWarning ?? (resetMouseOnly
+                + (result.ControllerLayoutWarning ?? (resetControllerLayout
                     ? "The supported trackpad layout was requested in place of the saved layout."
                     : "Saved layouts are preserved; the supported trackpad layout is selected for an unset layout."))
                 + " The helper remains available as a compatibility fallback.";
@@ -2015,6 +2016,7 @@ public partial class LaunchView : UserControl
         }
     }
 
+    /// <summary>Persists the selected Steam compatibility route and refreshes launch availability.</summary>
     private async void OnSteamHelperFallbackChanged(object? sender, RoutedEventArgs e)
     {
         var profile = MainWindow.Settings.CurrentProfile;
@@ -2026,6 +2028,7 @@ public partial class LaunchView : UserControl
         RefreshInstallDirectoryState();
     }
 
+    /// <summary>Persists the game-only LSFG option and refreshes launch availability.</summary>
     private async void OnLsfgChanged(object? sender, RoutedEventArgs e)
     {
         var profile = MainWindow.Settings.CurrentProfile;
@@ -2039,6 +2042,7 @@ public partial class LaunchView : UserControl
         }
         RefreshInstallDirectoryState();
     }
+    /// <summary>Retries automatic detection of the Proton tool used by the official Steam installation.</summary>
     private async void OnLocateProtonClick(object? sender, RoutedEventArgs e)
     {
         GameLauncherService.TryDetectD2RProtonExecutable(MainWindow.Settings.CurrentProfile);
