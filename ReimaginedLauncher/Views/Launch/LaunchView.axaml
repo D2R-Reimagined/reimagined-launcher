@@ -264,7 +264,7 @@
                                   IsVisible="False">
                             <StackPanel Spacing="8" Margin="0,4,0,0">
                                 <TextBlock Classes="muted" TextWrapping="Wrap"
-                                           Text="Exit Steam before setup (Steam Deck users: stay in Desktop Mode). The launcher will create its own Steam entries for Gaming Mode." />
+                                           Text="Exit Steam completely before setup. On systems with Gaming Mode, stay in Desktop Mode. Controller layout configuration is optional." />
                                 <ComboBox x:Name="SteamSetupAccountComboBox" HorizontalAlignment="Stretch"
                                           PlaceholderText="Select your Steam account" />
                                 <CheckBox x:Name="SteamResetMouseLayoutCheckBox" Content="Reset layout to Gamepad with Mouse Trackpad" IsChecked="True" />

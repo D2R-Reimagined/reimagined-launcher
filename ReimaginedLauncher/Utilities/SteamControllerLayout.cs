@@ -12,6 +12,30 @@ internal static class SteamControllerLayout
     private sealed record Token(string Value, int Start, int End, bool Quoted);
     private sealed record Entry(string Name, int ValueStart, int End, bool Object);
 
+    /// <summary>Checks whether Steam provides the source template for the combined trackpad layout.</summary>
+    internal static bool HasCombinedTemplate(string steamRoot)
+        => File.Exists(Path.Combine(steamRoot, "controller_base", "templates", "controller_neptune_gamepad+mouse.vdf"));
+
+    /// <summary>Optionally configures the supported controller layout without blocking shortcut registration.</summary>
+    /// <returns>A layout warning when configuration is unavailable, otherwise <c>null</c>.</returns>
+    internal static string? SetUpOptionalLauncher(string steamRoot, string userId, string oldName, string newName,
+        bool resetLayout = false)
+    {
+        if (!HasCombinedTemplate(steamRoot))
+            return "Controller template unavailable; saved layouts were preserved. Choose a layout in Steam Controller Settings if needed.";
+        try
+        {
+            var template = PrepareCombinedTemplate(steamRoot);
+            SetUpLauncher(steamRoot, userId, oldName, newName, resetLayout, template);
+            return null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return "Controller layout setup was skipped: " + exception.Message
+                + " Choose a layout in Steam Controller Settings if needed.";
+        }
+    }
+
     internal static string PrepareCombinedTemplate(string steamRoot)
     {
         const string name = "controller_neptune_reimagined.vdf";

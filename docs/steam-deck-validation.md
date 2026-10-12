@@ -26,6 +26,8 @@ Final cleanup: 550 tests passed on Windows; the solution build completed with ze
 
 ## Runtime contracts and findings
 
+Optional-layout regressions exercise missing, malformed, incompatible and unwritable templates, preservation of custom/non-Neptune mappings, repeat setup, and real Linux shortcut registration in disposable Steam directories. Launch compatibility tests cover non-Steam routing and restoration of the original inherited environment. The Launcher Tests workflow runs the solution build and complete test suite on Ubuntu and Windows. These automated fixtures do not validate desktop Steam gameplay or focus behavior.
+
 - Official Steam app ID is `2536520`; shared prefix is `steamapps/compatdata/2536520/pfx`. Authentication was observed under `drive_c/users/steamuser/AppData/Local/Blizzard Entertainment/ClientSdk/cookie.bin`; saves are under `drive_c/users/steamuser/Saved Games/Diablo II Resurrected`. Cookie contents were not inspected or copied. Normal base-game sign-in remains necessary when authentication expires.
 - Native GUI initialization requires its registered shortcut app/game IDs and stable installed executable path. Before GUI startup it sets D2R's authentication identity while retaining its dedicated shortcut session and compatibility identity. Official D2R launch options are never edited. Machine-specific shortcut IDs are derived, not hardcoded.
 - Earlier direct-child tests changed only the game's identity and reproduced Steam-origin SIGINT about ten seconds after game exit. The validated dedicated route initializes matching GUI/child authentication identity from startup. It does not suppress exit signals. The separate helper remains a compatibility fallback.

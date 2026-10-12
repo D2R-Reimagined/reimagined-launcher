@@ -962,17 +962,20 @@ public class GameLauncherService
         environment["STEAM_COMPAT_LIBRARY_PATHS"] = $"{steamApps}";
     }
 
+    /// <summary>Creates a normal launch process with its configured directory and original inherited Steam environment.</summary>
     internal static ProcessStartInfo CreateProcessStartInfo(
         string executablePath,
         string arguments,
         string? workingDirectory)
     {
-        return new ProcessStartInfo(executablePath)
+        var startInfo = new ProcessStartInfo(executablePath)
         {
             UseShellExecute = !OperatingSystem.IsLinux() && string.IsNullOrWhiteSpace(workingDirectory),
             Arguments = arguments,
             WorkingDirectory = workingDirectory ?? string.Empty
         };
+        SteamGameHandoff.RestoreLauncherEnvironment(startInfo);
+        return startInfo;
     }
 
     private string? ResolveExecutablePath(string? gamePathOverride = null)

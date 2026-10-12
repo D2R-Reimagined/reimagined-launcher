@@ -287,6 +287,7 @@ public partial class LaunchView : UserControl
             {
                 var selectedId = (SteamSetupAccountComboBox.SelectedItem as SteamSetupAccount)?.UserId;
                 var root = GameLauncherService.GetSteamInstallPath(installDirectory: profile.InstallDirectory);
+                SteamResetMouseLayoutCheckBox.IsVisible = root != null && SteamControllerLayout.HasCombinedTemplate(root);
                 var accounts = root is null ? [] : SteamGameHandoff.GetSetupAccounts(root);
                 SteamSetupAccountComboBox.ItemsSource = accounts;
                 var recent = accounts.Where(account => account.MostRecent).ToArray();
@@ -1993,12 +1994,13 @@ public partial class LaunchView : UserControl
             var root = GameLauncherService.GetSteamInstallPath(installDirectory: profile.InstallDirectory)
                 ?? throw new InvalidOperationException("Native Steam could not be found.");
             await SettingsManager.SaveAsync(MainWindow.Settings);
-            var resetMouseOnly = SteamResetMouseLayoutCheckBox.IsChecked == true;
-            await Task.Run(() => SteamGameHandoff.InstallFromLauncher(root, account.UserId, resetMouseOnly));
-            SteamSetupStatusText.Text = "Setup complete.\n\nSteam Deck users: Close this launcher and restart Steam. In Gaming Mode, open Diablo II: Reimagined (Native Launcher). "
-                + (resetMouseOnly ? "Gamepad with Mouse Trackpad was requested in place of the saved layout. "
-                    : "Saved layouts are preserved; Gamepad with Mouse Trackpad is selected for an unset Steam Deck layout. ")
-                + "Use Gamepad With Mouse Trackpad in Steam Controller Settings if needed. The helper remains available as a compatibility fallback.";
+            var resetMouseOnly = SteamResetMouseLayoutCheckBox.IsVisible && SteamResetMouseLayoutCheckBox.IsChecked == true;
+            var result = await Task.Run(() => SteamGameHandoff.InstallFromLauncher(root, account.UserId, resetMouseOnly));
+            SteamSetupStatusText.Text = "Setup complete.\n\nClose this launcher and restart Steam, then open Diablo II: Reimagined (Native Launcher). "
+                + (result.ControllerLayoutWarning ?? (resetMouseOnly
+                    ? "The supported trackpad layout was requested in place of the saved layout."
+                    : "Saved layouts are preserved; the supported trackpad layout is selected for an unset layout."))
+                + " The helper remains available as a compatibility fallback.";
             RefreshInstallDirectoryState();
         }
         catch (Exception exception)

@@ -6,6 +6,8 @@
 - Add a dedicated native Steam Deck launcher session for Online, Offline and Ladder, preserving base-game authentication and vanilla D2R launching; keep the hidden game-session helper as an optional compatibility fallback.
 - Add Desktop Mode Steam shortcut setup with account discovery, stable AppImage installation, backups, permission preservation, and migration to Diablo II: Reimagined shortcut names without duplicate entries.
 - Generate a combined gamepad/trackpad-mouse layout with trackpad left-click, preserving normal triggers and buttons; allow custom layouts to be retained during setup.
+- Make controller-template configuration optional for native Linux Steam shortcut setup; missing, incompatible or unwritable templates leave shortcut registration usable and saved layouts intact.
+- Preserve the original inherited environment for normal launch processes when the launcher was opened through a dedicated Steam session; keep Battle.net, D2RMM, Lutris and Windows routing unchanged.
 - Detect Proton from the initialized base-game prefix while retaining saved Proton selections.
 - Preserve generated/custom launch arguments, including Force Desktop and Ladder map reset; retain native Windows launch previews and validate the official Steam installation/prefix.
 - Keep launcher scrollbars expanded and add Exit Launcher to the main window.

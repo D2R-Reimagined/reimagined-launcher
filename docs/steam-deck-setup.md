@@ -17,13 +17,15 @@ During testing, Firefox redirected Reimagined sign-in to the profile page withou
 
 1. Under **Launch → Install directory → Steam shortcuts**, select the Steam account.
 2. Fully exit desktop Steam using **Steam → Exit**. Closing its window with **X is insufficient**. Keep the launcher open, or reopen the AppImage afterward.
-3. Leave **Reset layout to Gamepad with Mouse Trackpad** checked for the default layout. It preserves gamepad sticks, triggers and buttons, adds trackpad mouse movement, and maps trackpad press to left-click. R2 remains the normal game trigger. Uncheck reset to retain a custom controller layout.
+3. When available, leave **Reset layout to Gamepad with Mouse Trackpad** checked for the supported layout. It preserves gamepad sticks, triggers and buttons, adds trackpad mouse movement, and maps trackpad press to left-click. R2 remains the normal game trigger. Uncheck reset to retain a custom controller layout. This option appears only when Steam provides the source template; other Linux devices can keep their existing layouts.
 4. Click **Set up Steam shortcuts**. Setup backs up changed files, preserves unrelated shortcuts and preferences, and installs the AppImage at a stable location.
 5. Close the desktop launcher and select **Return to Gaming Mode**.
 
 Open **Diablo II: Reimagined (Native Launcher)**. Setup also retains a hidden **Diablo II: Reimagined (Launcher Game Session)** for the compatibility fallback. Do not enable Proton compatibility on either native entry.
 
 The installed AppImage is `~/.local/share/ReimaginedLauncher/launcher/D2RReimagined.ReimaginedLauncher.AppImage`. Moving the Downloads copy does not break the registered entries. To install another AppImage manually, open it in Desktop Mode and rerun setup with Steam fully exited. Existing owned shortcut IDs are retained.
+
+Controller configuration is optional. A missing, incompatible or unwritable template does not prevent shortcut registration. Setup reports that the layout was skipped; choose a layout in Steam Controller Settings if needed. Linux desktop users can restart desktop Steam and launch the registered entry without switching to Gaming Mode.
 
 ## Play and exit
 
