@@ -127,6 +127,7 @@ public sealed class ReimaginedApiHttpClient
         using var timeout = CreateRequestTimeout(cancellationToken);
         using var request = new HttpRequestMessage(HttpMethod.Get, $"lobby/ladders/{ladderId}/regions");
         request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
+        await AuthorizeAsync(request, timeout.Token);
         using var response = await _httpClient.SendAsync(request, timeout.Token);
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<List<LobbyRegionResponse>>(JsonOptions, timeout.Token) ?? [];
