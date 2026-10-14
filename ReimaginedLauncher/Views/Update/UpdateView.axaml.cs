@@ -405,18 +405,47 @@ public partial class UpdateView : UserControl
             await Task.Run(() =>
             {
                 var modDir = Path.Combine(installDirectory, "mods", "Reimagined");
-                if (Directory.Exists(modDir))
+                var loaderDir = Path.Combine(modDir, "d2rloader");
+                // Holds the user's D2RLoader configs/plugins across the reinstall; a leftover
+                // copy from an interrupted install is restored on the next run.
+                var preservedLoaderDir = Path.Combine(installDirectory, "mods", "Reimagined.d2rloader");
+                if (Directory.Exists(loaderDir))
                 {
-                    var backupDir = Path.Combine(installDirectory, "mods", "Reimagined.backup");
-                    if (Directory.Exists(backupDir))
+                    if (Directory.Exists(preservedLoaderDir))
                     {
-                        Directory.Delete(backupDir, recursive: true);
+                        Directory.Delete(preservedLoaderDir, recursive: true);
                     }
-                    CopyDirectory(modDir, backupDir);
-                    Directory.Delete(modDir, recursive: true);
+                    Directory.Move(loaderDir, preservedLoaderDir);
                 }
 
-                ZipFile.ExtractToDirectory(zipPath, installDirectory, overwriteFiles: true);
+                try
+                {
+                    if (Directory.Exists(modDir))
+                    {
+                        var backupDir = Path.Combine(installDirectory, "mods", "Reimagined.backup");
+                        if (Directory.Exists(backupDir))
+                        {
+                            Directory.Delete(backupDir, recursive: true);
+                        }
+                        CopyDirectory(modDir, backupDir);
+                        Directory.Delete(modDir, recursive: true);
+                    }
+
+                    ZipFile.ExtractToDirectory(zipPath, installDirectory, overwriteFiles: true);
+                }
+                finally
+                {
+                    if (Directory.Exists(preservedLoaderDir))
+                    {
+                        if (Directory.Exists(loaderDir))
+                        {
+                            Directory.Delete(loaderDir, recursive: true);
+                        }
+                        Directory.CreateDirectory(modDir);
+                        Directory.Move(preservedLoaderDir, loaderDir);
+                    }
+                }
+
                 NormalModInstallationService.RecordNexusInstallation(installDirectory);
             });
 
