@@ -9,6 +9,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: write
 
 jobs:
@@ -112,6 +113,44 @@ jobs:
             }
           }
 
+      - name: Upload unsigned Windows executable
+        id: upload_unsigned_exe
+        if: vars.SIGNPATH_SIGNING_POLICY_SLUG != ''
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ github.workspace }}\artifacts\ReimaginedLauncher\win-x64\ReimaginedLauncher.exe
+          archive: false
+          retention-days: 1
+
+      - name: Sign Windows executable
+        if: vars.SIGNPATH_SIGNING_POLICY_SLUG != ''
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: f16414f6-32df-4874-a376-940734695369
+          project-slug: reimagined-launcher
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: initial
+          github-artifact-id: ${{ steps.upload_unsigned_exe.outputs.artifact-id }}
+          skip-decompress: true
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: ${{ github.workspace }}\artifacts\signed\exe-win-x64
+
+      - name: Replace Windows executable with signed copy
+        if: vars.SIGNPATH_SIGNING_POLICY_SLUG != ''
+        shell: pwsh
+        run: |
+          $signedFiles = @(Get-ChildItem -LiteralPath '${{ github.workspace }}\artifacts\signed\exe-win-x64' -File)
+          if ($signedFiles.Count -ne 1) {
+            throw "Expected exactly one signed executable, found $($signedFiles.Count)"
+          }
+
+          Copy-Item `
+            -LiteralPath $signedFiles[0].FullName `
+            -Destination '${{ github.workspace }}\artifacts\ReimaginedLauncher\win-x64\ReimaginedLauncher.exe' `
+            -Force
+
       - name: Restore Linux target
         run: dotnet restore ReimaginedLauncher.sln -p:Configuration=Production -r linux-x64
 
@@ -171,6 +210,42 @@ jobs:
             --runtime "win-x64" `
             --channel "win" `
             --outputDir "${{ github.workspace }}\artifacts\velopack\win-x64"
+
+      - name: Upload unsigned Windows installer
+        id: upload_unsigned_setup
+        if: vars.SIGNPATH_SIGNING_POLICY_SLUG != ''
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ github.workspace }}\artifacts\velopack\win-x64\*-Setup.exe
+          archive: false
+          retention-days: 1
+
+      - name: Sign Windows installer
+        if: vars.SIGNPATH_SIGNING_POLICY_SLUG != ''
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: f16414f6-32df-4874-a376-940734695369
+          project-slug: reimagined-launcher
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: initial
+          github-artifact-id: ${{ steps.upload_unsigned_setup.outputs.artifact-id }}
+          skip-decompress: true
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: ${{ github.workspace }}\artifacts\signed\setup-win-x64
+
+      - name: Replace Windows installer with signed copy
+        if: vars.SIGNPATH_SIGNING_POLICY_SLUG != ''
+        shell: pwsh
+        run: |
+          $setupFiles = @(Get-ChildItem -Path '${{ github.workspace }}\artifacts\velopack\win-x64\*-Setup.exe' -File)
+          $signedFiles = @(Get-ChildItem -LiteralPath '${{ github.workspace }}\artifacts\signed\setup-win-x64' -File)
+          if ($setupFiles.Count -ne 1 -or $signedFiles.Count -ne 1) {
+            throw "Expected exactly one installer and one signed installer, found $($setupFiles.Count) and $($signedFiles.Count)"
+          }
+
+          Copy-Item -LiteralPath $signedFiles[0].FullName -Destination $setupFiles[0].FullName -Force
 
       - name: Package Linux Velopack release
         shell: pwsh
