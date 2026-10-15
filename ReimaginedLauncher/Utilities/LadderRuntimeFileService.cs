@@ -18,13 +18,6 @@ internal static class LadderRuntimeFileService
         "/Reimagined.mpq/data/global/ui/layouts/controller/characterselectpanelhd.json"
     ];
 
-    private static readonly HashSet<string> GeneratedRuntimePaths = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "mods/Reimagined/d2rloader/config/server-saves.toml",
-        "mods/Reimagined/d2rloader/config/chat-relay.toml",
-        "mods/Reimagined/d2rloader/config/controller-qol-updates.toml"
-    };
-
     internal static string RestoreOrCaptureBaseline(string installDirectory, string targetPath)
     {
         var baselinePath = GetBaselinePath(installDirectory, targetPath);
@@ -84,32 +77,19 @@ internal static class LadderRuntimeFileService
             normalized.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
     }
 
-    internal static bool IsGeneratedRuntimePath(
-        string targetPath,
-        IReadOnlySet<string>? approvedPluginIds = null)
+    /// <summary>
+    /// Files D2RLoader and its plugins write while the game runs: logs, and
+    /// every config. A config decides nothing on its own - code comes only from
+    /// signed plugins - and plugins create and rewrite theirs on launch (Item
+    /// Roll Ranges, Controller QOL's per-character files). The configs that do
+    /// decide ladder rules ship in the bundle; callers check bundle files first,
+    /// so those stay hash-enforced and are replaced on repair.
+    /// </summary>
+    internal static bool IsGeneratedRuntimePath(string targetPath)
     {
         var normalized = ModInstallationPaths.ToSignedPath(targetPath);
-        if (GeneratedRuntimePaths.Contains(normalized)
-            || normalized.StartsWith(
-                "mods/Reimagined/d2rloader/logs/",
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        const string configPrefix = "mods/Reimagined/d2rloader/config/";
-        if (approvedPluginIds is null
-            || !normalized.StartsWith(configPrefix, StringComparison.OrdinalIgnoreCase)
-            || !normalized.EndsWith(".toml", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        // D2RLoader names the config after the plugin's own ID ("author.name"),
-        // while approved IDs are derived from the DLL filename ("author-name").
-        var pluginId = Path.GetFileNameWithoutExtension(normalized);
-        return approvedPluginIds.Contains(pluginId)
-               || approvedPluginIds.Contains(pluginId.Replace('.', '-'));
+        return normalized.StartsWith("mods/Reimagined/d2rloader/logs/", StringComparison.OrdinalIgnoreCase)
+               || normalized.StartsWith("mods/Reimagined/d2rloader/config/", StringComparison.OrdinalIgnoreCase);
     }
 
     internal static void DeleteBaselines(string installDirectory)

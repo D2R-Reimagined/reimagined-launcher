@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Keep players' D2RLoader plugin configs and logs across Ladder bundle installs; configs the bundle ships (mod.toml and force-shipped rule configs) still come from the signed bundle, and only configs of bundled plugins carry over.
+- Keep players' D2RLoader plugin configs and logs across Ladder bundle installs; configs the bundle ships (mod.toml and force-shipped rule configs) still come from the signed bundle. Every other file under d2rloader/config (including per-character folders like Controller QOL's) is the player's: it carries over and no longer blocks Ladder launches as "outside the signed package".
 - Keep only the three most recent Ladder bundle backups and optional-extension backups; older full mod copies are deleted after a successful install.
 - Integrate official v0.16.7 and its approved Ladder runtime config-name matching fix.
 - Add a dedicated native Linux Steam launcher session for Online, Offline and Ladder, preserving base-game authentication and vanilla D2R launching; keep the hidden game-session helper as an optional compatibility fallback.

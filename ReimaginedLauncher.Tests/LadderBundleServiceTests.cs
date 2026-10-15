@@ -441,12 +441,14 @@ public sealed class LadderBundleServiceTests : IDisposable
         readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
         Assert.True(readiness.IsReady, readiness.Status);
 
-        var unapprovedConfig = Path.Combine(Path.GetDirectoryName(config)!, "unapproved.toml");
-        await File.WriteAllTextAsync(unapprovedConfig, "enabled = true");
+        // Plugins write configs the bundle does not ship on launch, some under
+        // their own folders (Controller QOL's per-character files): the player's.
+        await File.WriteAllTextAsync(Path.Combine(Path.GetDirectoryName(config)!, "item-roll-ranges.toml"), "enabled = true");
+        var perCharacter = Path.Combine(Path.GetDirectoryName(config)!, "controller-qol-skills", "620816185bbf5972.overrides.toml");
+        Directory.CreateDirectory(Path.GetDirectoryName(perCharacter)!);
+        await File.WriteAllTextAsync(perCharacter, "slot = 1");
         readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
-        Assert.False(readiness.IsReady);
-        Assert.Contains(readiness.Problems, problem => problem.Contains("unapproved.toml"));
-        File.Delete(unapprovedConfig);
+        Assert.True(readiness.IsReady, readiness.Status);
 
         await File.WriteAllTextAsync(baseline, "tampered baseline");
         readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
@@ -487,14 +489,15 @@ public sealed class LadderBundleServiceTests : IDisposable
         var log = Path.Combine(ModInstallationPaths.LadderModRoot(_installDirectory), "d2rloader", "logs", "announcements.log");
         Directory.CreateDirectory(Path.GetDirectoryName(log)!);
         await File.WriteAllTextAsync(log, "runtime output");
-        var unapproved = LadderConfigPath("unapproved.toml");
-        await File.WriteAllTextAsync(unapproved, "not a bundled plugin");
+        var perCharacter = LadderConfigPath(Path.Combine("controller-qol-skills", "620816185bbf5972.catalog.toml"));
+        Directory.CreateDirectory(Path.GetDirectoryName(perCharacter)!);
+        await File.WriteAllTextAsync(perCharacter, "written on launch");
 
         await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
 
         Assert.Equal("player setting", await File.ReadAllTextAsync(config));
         Assert.Equal("runtime output", await File.ReadAllTextAsync(log));
-        Assert.False(File.Exists(unapproved));
+        Assert.Equal("written on launch", await File.ReadAllTextAsync(perCharacter));
         var readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
         Assert.True(readiness.IsReady, readiness.Status);
     }

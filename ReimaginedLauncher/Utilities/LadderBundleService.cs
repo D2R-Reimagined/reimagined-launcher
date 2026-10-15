@@ -170,18 +170,12 @@ public sealed class LadderBundleService(
                 var expectedPaths = bundle.Files
                     .Select(file => file.TargetPath)
                     .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                var approvedPluginIds = bundle.Plugins
-                    .Select(plugin => plugin.PluginId)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                if (allowedExtensions is not null)
-                    approvedPluginIds.UnionWith(allowedExtensions.Where(item => item.Kind == D2RLoaderExtensionKind.Plugin)
-                        .Select(LadderOptionalExtensionService.PluginId));
                 foreach (var path in EnumerateInstalledModFiles(normalized))
                 {
                     var relativePath = ModInstallationPaths.ToSignedPath(Path.GetRelativePath(normalized, path));
                     if (!expectedPaths.Contains(relativePath)
                         && !(allowedExtensions is not null && LadderOptionalExtensionService.IsExtensionPath(relativePath))
-                        && !LadderRuntimeFileService.IsGeneratedRuntimePath(relativePath, approvedPluginIds))
+                        && !LadderRuntimeFileService.IsGeneratedRuntimePath(relativePath))
                     {
                         problems.Add($"{relativePath} is not declared by the signed ladder package.");
                     }
@@ -604,9 +598,6 @@ public sealed class LadderBundleService(
         var bundleTargets = bundle.Files
             .Select(file => ModInstallationPaths.ToSignedPath(file.TargetPath))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var approvedPluginIds = bundle.Plugins
-            .Select(plugin => plugin.PluginId)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var options = new EnumerationOptions
         {
             RecurseSubdirectories = true,
@@ -626,7 +617,7 @@ public sealed class LadderBundleService(
                 var target = Path.Combine(stagedModRoot, relative.Replace('/', Path.DirectorySeparatorChar));
                 if (bundleTargets.Contains(signedPath)
                     || File.Exists(target)
-                    || !LadderRuntimeFileService.IsGeneratedRuntimePath(signedPath, approvedPluginIds))
+                    || !LadderRuntimeFileService.IsGeneratedRuntimePath(signedPath))
                     continue;
 
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
