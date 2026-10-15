@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep players' D2RLoader plugin configs and logs across Ladder bundle installs; configs the bundle ships (mod.toml and force-shipped rule configs) still come from the signed bundle, and only configs of bundled plugins carry over.
+- Keep only the three most recent Ladder bundle backups and optional-extension backups; older full mod copies are deleted after a successful install.
 - Integrate official v0.16.7 and its approved Ladder runtime config-name matching fix.
 - Add a dedicated native Linux Steam launcher session for Online, Offline and Ladder, preserving base-game authentication and vanilla D2R launching; keep the hidden game-session helper as an optional compatibility fallback.
 - Add Desktop Mode Steam shortcut setup with account discovery, stable AppImage installation, backups, permission preservation, and migration to Diablo II: Reimagined shortcut names without duplicate entries.

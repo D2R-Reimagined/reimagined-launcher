@@ -520,6 +520,7 @@ public sealed class LadderBundleService(
             Directory.CreateDirectory(Path.GetDirectoryName(modRoot)!);
             if (Directory.Exists(modRoot))
             {
+                CarryOverPlayerFiles(modRoot, stagedModRoot, bundle);
                 Directory.Move(modRoot, backupModRoot);
                 backedUp = true;
             }
@@ -545,6 +546,9 @@ public sealed class LadderBundleService(
                 DateTimeOffset.UtcNow);
             await WriteStateAsync(installDirectory, state, cancellationToken);
             LadderRuntimeFileService.DeleteBaselines(installDirectory);
+            // Each backup is a full mod copy; deleting dozens of them can take a
+            // while, so keep it off the caller's (often the UI) thread.
+            await Task.Run(() => PruneBackups(Path.Combine(managementRoot, "backups"), transactionId), CancellationToken.None);
         }
         catch
         {
@@ -581,6 +585,81 @@ public sealed class LadderBundleService(
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
                 LaunchDiagnostics.Log($"Could not remove ladder bundle staging directory: {exception.Message}");
+            }
+        }
+    }
+
+    internal const int RetainedBackupCount = 3;
+
+    /// <summary>
+    /// The swap replaces the whole mod folder, so without this every install
+    /// wipes the player's plugin settings and D2RLoader regenerates defaults.
+    /// Only files the readiness check already tolerates come across, and never
+    /// one the bundle ships: those (mod.toml and the force-shipped rule
+    /// configs) must stay exactly the signed copy. Copied rather than moved so
+    /// the backup stays a complete rollback image.
+    /// </summary>
+    private static void CarryOverPlayerFiles(string modRoot, string stagedModRoot, LadderBundleResponse bundle)
+    {
+        var bundleTargets = bundle.Files
+            .Select(file => ModInstallationPaths.ToSignedPath(file.TargetPath))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var approvedPluginIds = bundle.Plugins
+            .Select(plugin => plugin.PluginId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var options = new EnumerationOptions
+        {
+            RecurseSubdirectories = true,
+            AttributesToSkip = FileAttributes.ReparsePoint
+        };
+        foreach (var folder in new[] { "config", "logs" })
+        {
+            var source = Path.Combine(modRoot, "d2rloader", folder);
+            if (!Directory.Exists(source)
+                || (File.GetAttributes(source) & FileAttributes.ReparsePoint) != 0)
+                continue;
+
+            foreach (var path in Directory.EnumerateFiles(source, "*", options))
+            {
+                var relative = Path.GetRelativePath(modRoot, path).Replace('\\', '/');
+                var signedPath = "mods/Reimagined/" + relative;
+                var target = Path.Combine(stagedModRoot, relative.Replace('/', Path.DirectorySeparatorChar));
+                if (bundleTargets.Contains(signedPath)
+                    || File.Exists(target)
+                    || !LadderRuntimeFileService.IsGeneratedRuntimePath(signedPath, approvedPluginIds))
+                    continue;
+
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.Copy(path, target, overwrite: false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Keeps the newest <see cref="RetainedBackupCount"/> transaction folders
+    /// (always including <paramref name="currentName"/>). Ladder bundle backups
+    /// are whole mod copies, so unpruned they reach tens of gigabytes. A folder
+    /// that cannot be deleted now is left for the next install.
+    /// </summary>
+    internal static void PruneBackups(string backupsRoot, string? currentName = null)
+    {
+        if (!Directory.Exists(backupsRoot)) return;
+
+        var stale = new DirectoryInfo(backupsRoot).EnumerateDirectories()
+            .Where(directory => (directory.Attributes & FileAttributes.ReparsePoint) == 0)
+            .OrderByDescending(directory => string.Equals(directory.Name, currentName, StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(directory => directory.LastWriteTimeUtc)
+            .ThenByDescending(directory => directory.Name, StringComparer.Ordinal)
+            .Skip(RetainedBackupCount);
+        foreach (var directory in stale)
+        {
+            try
+            {
+                directory.Delete(recursive: true);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                LaunchDiagnostics.Log($"Could not remove old ladder backup {directory.Name}: {exception.Message}");
             }
         }
     }

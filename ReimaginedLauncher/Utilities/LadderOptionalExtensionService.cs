@@ -108,6 +108,8 @@ public static partial class LadderOptionalExtensionService
         }
         var problems = await GetProblemsAsync(root, bundle, extensions, selectedIds, token);
         if (problems.Count > 0) throw new InvalidDataException(string.Join(" ", problems));
+        LadderBundleService.PruneBackups(CheckedPath(root, ".reimagined-launcher/ladder-bundles/optional-backups"),
+            Path.GetFileName(backupRoot));
     }
 
     private static Dictionary<string, LadderAllowedExtensionResponse> GetDesired(LadderBundleResponse bundle,

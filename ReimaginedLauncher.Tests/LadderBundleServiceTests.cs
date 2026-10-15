@@ -477,6 +477,87 @@ public sealed class LadderBundleServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task InstallOrRepairKeepsPlayerConfigsTheBundleDoesNotShip()
+    {
+        var fixture = CreateConfigBundle();
+        var service = CreateService(fixture.Archive);
+        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+        var config = LadderConfigPath("announcements.toml");
+        await File.WriteAllTextAsync(config, "player setting");
+        var log = Path.Combine(ModInstallationPaths.LadderModRoot(_installDirectory), "d2rloader", "logs", "announcements.log");
+        Directory.CreateDirectory(Path.GetDirectoryName(log)!);
+        await File.WriteAllTextAsync(log, "runtime output");
+        var unapproved = LadderConfigPath("unapproved.toml");
+        await File.WriteAllTextAsync(unapproved, "not a bundled plugin");
+
+        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+
+        Assert.Equal("player setting", await File.ReadAllTextAsync(config));
+        Assert.Equal("runtime output", await File.ReadAllTextAsync(log));
+        Assert.False(File.Exists(unapproved));
+        var readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
+        Assert.True(readiness.IsReady, readiness.Status);
+    }
+
+    [Fact]
+    public async Task InstallOrRepairReplacesConfigsTheBundleShips()
+    {
+        var fixture = CreateConfigBundle();
+        var service = CreateService(fixture.Archive);
+        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+        var config = LadderConfigPath("maps.toml");
+        await File.WriteAllTextAsync(config, "player edit of a ladder rule");
+
+        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+
+        Assert.Equal("ladder rule = true", await File.ReadAllTextAsync(config));
+        var readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
+        Assert.True(readiness.IsReady, readiness.Status);
+    }
+
+    [Fact]
+    public async Task InstallOrRepairDeletesBackupsBeyondTheRetainedCount()
+    {
+        var fixture = CreateConfigBundle();
+        var service = CreateService(fixture.Archive);
+        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+        var backups = Path.Combine(_installDirectory, ".reimagined-launcher", "ladder-bundles", "backups");
+        var old = Enumerable.Range(0, 5).Select(index =>
+        {
+            var path = Path.Combine(backups, $"2026010{index + 1}000000-0000000{index}");
+            Directory.CreateDirectory(Path.Combine(path, "Reimagined"));
+            Directory.SetLastWriteTimeUtc(path, new DateTime(2026, 1, index + 1, 0, 0, 0, DateTimeKind.Utc));
+            return path;
+        }).ToArray();
+
+        // This install backs up the first one; that backup is the newest and must survive.
+        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+
+        var remaining = Directory.GetDirectories(backups);
+        Assert.Equal(LadderBundleService.RetainedBackupCount, remaining.Length);
+        Assert.Contains(remaining, path => File.Exists(Path.Combine(path, "Reimagined", "d2rloader", "config", "maps.toml")));
+        Assert.Contains(old[4], remaining);
+        Assert.All(old[..4], path => Assert.False(Directory.Exists(path)));
+    }
+
+    private BundleFixture CreateConfigBundle()
+    {
+        var files = new[]
+        {
+            ("announcements", "d2rl-announcements.dll", "announcement-code"u8.ToArray()),
+            ("maps", "d2rl-maps.dll", "map-code"u8.ToArray()),
+            ("maps-config", "maps.toml", "ladder rule = true"u8.ToArray())
+        };
+        return CreateBundle(
+            files,
+            files.Select(file => file.Item3).ToArray(),
+            targetPaths: new Dictionary<string, string> { ["maps-config"] = "mods/Reimagined/d2rloader/config/maps.toml" });
+    }
+
+    private string LadderConfigPath(string fileName)
+        => Path.Combine(ModInstallationPaths.LadderModRoot(_installDirectory), "d2rloader", "config", fileName);
+
+    [Fact]
     public async Task ReadinessRejectsFilesOutsideTheSignedManifest()
     {
         var fixture = CreateBundle(("announcements", "d2rl-announcements.dll", "announcement-code"u8.ToArray()));
