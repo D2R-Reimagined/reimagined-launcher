@@ -1,11 +1,13 @@
 using System;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using ReimaginedLauncher.Utilities;
 
 namespace ReimaginedLauncher.Views.Settings;
@@ -13,6 +15,7 @@ namespace ReimaginedLauncher.Views.Settings;
 public partial class SettingsView : UserControl
 {
     private bool _isRefreshingSettings;
+    private bool _releaseSeedFocusAfterPointerRelease;
 
     // Set by the tunnelling PointerPressed handler just before a folder button's
     // Click fires, so the handler knows whether Ctrl was held (force picker).
@@ -37,6 +40,9 @@ public partial class SettingsView : UserControl
             button.AddHandler(InputElement.PointerPressedEvent, OnFolderButtonPointerPressed, RoutingStrategies.Tunnel);
         }
 
+        RootScrollViewer.AddHandler(InputElement.PointerPressedEvent, OnSettingsPointerPressed, RoutingStrategies.Tunnel);
+        RootScrollViewer.AddHandler(InputElement.PointerReleasedEvent, OnSettingsPointerReleased, RoutingStrategies.Tunnel);
+
         RefreshSettingsState();
     }
 
@@ -52,16 +58,27 @@ public partial class SettingsView : UserControl
 
         var profile = MainWindow.Settings.CurrentProfile;
         var isD2Rmm = profile.Type == InstallationType.D2RMM;
+        var isLutris = profile.Type == InstallationType.Lutris;
+        var isOnline = profile.LaunchExperience == LaunchExperience.Online;
         LaunchParametersPanel.IsEnabled = !isD2Rmm;
         D2RmmLaunchParamsNotice.IsVisible = isD2Rmm;
+        LutrisLaunchParamsNotice.IsVisible = isLutris;
+        OnlineLaunchParamsNotice.IsVisible = !isD2Rmm && isOnline;
+        EnableRespecCheckBox.IsEnabled = !isOnline;
+        ResetOfflineMapsCheckBox.IsEnabled = !isOnline;
+        PlayersComboBox.IsEnabled = !isOnline;
+        CustomMapSeedCheckBox.IsEnabled = !isOnline;
+        CustomMapSeedTextBox.IsEnabled = !isOnline;
 
         if (isD2Rmm)
         {
             NoSoundCheckBox.IsChecked = false;
             NoRumbleCheckBox.IsChecked = false;
             ForceDesktopCheckBox.IsChecked = false;
+            WindowedModeCheckBox.IsChecked = false;
             ResetOfflineMapsCheckBox.IsChecked = false;
             EnableRespecCheckBox.IsChecked = false;
+            CustomMapSeedCheckBox.IsChecked = false;
             PlayersComboBox.SelectedIndex = 0;
         }
         else
@@ -69,12 +86,17 @@ public partial class SettingsView : UserControl
             NoSoundCheckBox.IsChecked = profile.NoSound;
             NoRumbleCheckBox.IsChecked = profile.NoRumble;
             ForceDesktopCheckBox.IsChecked = profile.ForceDesktop;
+            WindowedModeCheckBox.IsChecked = profile.WindowedMode;
             ResetOfflineMapsCheckBox.IsChecked = profile.ResetOfflineMaps;
             EnableRespecCheckBox.IsChecked = profile.EnableRespec;
+            CustomMapSeedCheckBox.IsChecked = profile.CustomMapSeedEnabled;
             PlayersComboBox.SelectedIndex = profile.PlayersCount is >= 2 and <= 8
                 ? profile.PlayersCount.Value - 1
                 : 0;
         }
+
+        CustomMapSeedTextBox.Text = profile.CustomMapSeed.ToString(CultureInfo.InvariantCulture);
+        CustomMapSeedValidationText.IsVisible = false;
 
         MinimizeToTrayCheckBox.IsChecked = MainWindow.Settings.MinimizeToTray;
         MinimizeToTrayOnCloseCheckBox.IsChecked = MainWindow.Settings.MinimizeToTrayOnClose;
@@ -118,8 +140,10 @@ public partial class SettingsView : UserControl
         profile.NoSound = NoSoundCheckBox.IsChecked ?? false;
         profile.NoRumble = NoRumbleCheckBox.IsChecked ?? false;
         profile.ForceDesktop = ForceDesktopCheckBox.IsChecked ?? false;
+        profile.WindowedMode = WindowedModeCheckBox.IsChecked ?? false;
         profile.ResetOfflineMaps = ResetOfflineMapsCheckBox.IsChecked ?? false;
         profile.EnableRespec = EnableRespecCheckBox.IsChecked ?? false;
+        profile.CustomMapSeedEnabled = CustomMapSeedCheckBox.IsChecked ?? false;
         await SettingsManager.SaveAsync(MainWindow.Settings);
     }
 
@@ -137,6 +161,96 @@ public partial class SettingsView : UserControl
         };
 
         await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private async void OnCustomMapSeedChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_isRefreshingSettings)
+        {
+            return;
+        }
+
+        await ApplyCustomMapSeedAsync();
+    }
+
+    private async void OnCustomMapSeedKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (_isRefreshingSettings || e.Key != Key.Enter)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        if (await ApplyCustomMapSeedAsync())
+        {
+            RootScrollViewer.Focus();
+        }
+    }
+
+    private void OnCustomMapSeedTextChanged(object? sender, TextChangedEventArgs e)
+    {
+        CustomMapSeedValidationText.IsVisible = !_isRefreshingSettings && !IsCustomMapSeedValid();
+    }
+
+    private async Task<bool> ApplyCustomMapSeedAsync()
+    {
+        if (!TryApplyCustomMapSeed(out var changed))
+        {
+            return false;
+        }
+
+        if (changed)
+        {
+            await SettingsManager.SaveAsync(MainWindow.Settings);
+        }
+
+        return true;
+    }
+
+    private bool TryApplyCustomMapSeed(out bool changed)
+    {
+        changed = false;
+
+        if (!uint.TryParse(CustomMapSeedTextBox.Text, CultureInfo.InvariantCulture, out var seed))
+        {
+            return false;
+        }
+
+        var profile = MainWindow.Settings.CurrentProfile;
+        changed = profile.CustomMapSeed != seed;
+        profile.CustomMapSeed = seed;
+        return true;
+    }
+
+    private bool IsCustomMapSeedValid()
+        => uint.TryParse(CustomMapSeedTextBox.Text, CultureInfo.InvariantCulture, out _);
+
+    private async void OnSettingsPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!CustomMapSeedTextBox.IsFocused || CustomMapSeedTextBox.IsPointerOver)
+        {
+            return;
+        }
+
+        _releaseSeedFocusAfterPointerRelease = true;
+        await ApplyCustomMapSeedAsync();
+    }
+
+    private void OnSettingsPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (!_releaseSeedFocusAfterPointerRelease)
+        {
+            return;
+        }
+
+        _releaseSeedFocusAfterPointerRelease = false;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (CustomMapSeedTextBox.IsFocused)
+            {
+                RootScrollViewer.Focus();
+            }
+        });
     }
 
     private async void OnMinimizeToTrayChanged(object? sender, RoutedEventArgs e)

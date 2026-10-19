@@ -112,6 +112,8 @@
                                             <StackPanel Orientation="Horizontal"
                                                         Spacing="10">
                                                 <TextBlock FontWeight="SemiBold"
+                                                           Classes.plugin-title-up-to-date="{Binding IsUpToDate}"
+                                                           Classes.plugin-title-out-of-date="{Binding IsOutOfDate}"
                                                            Text="{Binding Title}" />
                                                 <TextBlock FontWeight="SemiBold"
                                                            Text="{Binding ModVersion, StringFormat=Mod: {0}}"
@@ -119,6 +121,10 @@
                                                 <TextBlock FontWeight="SemiBold"
                                                            Text="{Binding PluginVersion, StringFormat=Plug: {0}}"
                                                            IsVisible="{Binding PluginVersion, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                                           Opacity="0.6" />
+                                                <TextBlock FontWeight="SemiBold"
+                                                           Text="{Binding InstalledVersion, StringFormat=Installed: {0}}"
+                                                           IsVisible="{Binding HasInstalledVersion}"
                                                            Opacity="0.6" />
                                             </StackPanel>
                                             <TextBlock Classes="muted"

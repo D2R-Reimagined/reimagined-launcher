@@ -65,6 +65,7 @@ public partial class PluginsView : UserControl
 
     public async Task RefreshPluginsStateAsync()
     {
+        LadderLockBanner.IsVisible = IsLadderMode;
         SetLoadingState(true);
 
         try
@@ -130,6 +131,7 @@ public partial class PluginsView : UserControl
         _isLoading = isLoading;
         LoadingBanner.IsVisible = isLoading;
         ContentPanel.IsVisible = !isLoading;
+        ApplyContentEnabledState();
         // Reapply Now's enable gate depends on _isLoading; refresh it here so the
         // button doesn't get stuck disabled when the view is attached mid-load.
         OnCascStateChanged(this, EventArgs.Empty);
@@ -225,9 +227,17 @@ public partial class PluginsView : UserControl
         {
             _isDryRunning = false;
             DryRunBanner.IsVisible = false;
-            ContentPanel.IsEnabled = true;
+            ApplyContentEnabledState();
             mainWindow?.SetNavigationEnabled(true);
         }
+    }
+
+    private static bool IsLadderMode =>
+        MainWindow.Settings.CurrentProfile.LaunchExperience == LaunchExperience.Ladder;
+
+    private void ApplyContentEnabledState()
+    {
+        ContentPanel.IsEnabled = !_isLoading && !_isDryRunning && !IsLadderMode;
     }
 
     private async void OnImportPluginClicked(object? sender, RoutedEventArgs e)

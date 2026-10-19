@@ -49,14 +49,20 @@ public partial class UpdateView : UserControl
         var isAuthenticated = MainWindow.UserViewModel.User != null;
         var usesDownloadsWatcher = isAuthenticated && MainWindow.Settings.NexusPremiumDownloadAccess == false;
         var isInstallMissing = MainWindow.UpdateCurrentVersion.Equals("Not detected", StringComparison.OrdinalIgnoreCase);
-        var canDownload = isInstallMissing || MainWindow.IsUpdateAvailable;
+        var actions = GetInstallActionAvailability(
+            isInstallMissing,
+            MainWindow.IsUpdateAvailable,
+            _isLoading,
+            MainWindow.IsInstallInProgress,
+            MainWindow.CanInstallOrUpdate,
+            isAuthenticated);
 
         LoadingBanner.IsVisible = _isLoading;
         InstallProgressBanner.IsVisible = MainWindow.IsInstallInProgress;
         StatusBorder.IsVisible = !_isLoading && !MainWindow.IsInstallInProgress;
         VersionsBorder.IsVisible = !_isLoading && !MainWindow.IsInstallInProgress;
         AuthWarningBanner.IsVisible = !_isLoading && !MainWindow.IsInstallInProgress && !isAuthenticated;
-        NonPremiumWarningBanner.IsVisible = !_isLoading && !MainWindow.IsInstallInProgress && usesDownloadsWatcher && canDownload;
+        NonPremiumWarningBanner.IsVisible = usesDownloadsWatcher && (actions.CanInstallOrUpdate || actions.CanReinstall);
 
         StatusTitleText.Text = MainWindow.UpdateStatusTitle;
         StatusMessageText.Text = MainWindow.UpdateStatusMessage;
@@ -65,12 +71,10 @@ public partial class UpdateView : UserControl
         // Block install/update activity while a CASC fastload op is running —
         // they touch overlapping paths under <install>/data and <install>/mods.
         var cascBusy = CascFastloadOperationState.Instance.IsRunning;
-        InstallOrUpdateButton.IsEnabled = !_isLoading &&
-                                          !cascBusy &&
-                                          MainWindow.CanInstallOrUpdate &&
-                                          !MainWindow.IsInstallInProgress &&
-                                          isAuthenticated &&
-                                          canDownload;
+        InstallOrUpdateButton.IsEnabled = actions.CanInstallOrUpdate && !cascBusy;
+        ReinstallButton.IsVisible = !isInstallMissing;
+        ReinstallButton.IsEnabled = actions.CanReinstall && !cascBusy;
+        ReinstallHelpText.IsVisible = !isInstallMissing && !_isLoading && !MainWindow.IsInstallInProgress;
         SelectZipManuallyButton.IsEnabled = !_isLoading &&
                                             !cascBusy &&
                                             !MainWindow.IsInstallInProgress &&
@@ -95,15 +99,33 @@ public partial class UpdateView : UserControl
         RefreshUpdateState();
     }
 
+    internal static (bool CanInstallOrUpdate, bool CanReinstall) GetInstallActionAvailability(
+        bool isInstallMissing,
+        bool isUpdateAvailable,
+        bool isLoading,
+        bool isInstallInProgress,
+        bool canInstallOrUpdate,
+        bool isAuthenticated)
+    {
+        var canDownload = !isLoading && !isInstallInProgress && canInstallOrUpdate && isAuthenticated;
+        return (canDownload && (isInstallMissing || isUpdateAvailable), canDownload && !isInstallMissing);
+    }
+
     private async void OnInstallOrUpdateClick(object? sender, RoutedEventArgs e)
     {
         if (MainWindow.IsInstallInProgress || string.IsNullOrWhiteSpace(MainWindow.UpdateDownloadUrl))
             return;
 
+        if (MainWindow.IsGameRunning())
+        {
+            Notifications.SendNotification("Close Diablo II: Resurrected before installing or reinstalling mod files.", "Warning");
+            return;
+        }
+
         if (MainWindow.UserViewModel.User == null)
         {
             Notifications.SendNotification(
-                "Authenticate with Nexus Mods first to use Download and Install.",
+                "Authenticate with Nexus Mods first to download, update, or reinstall the mod.",
                 "Warning");
             return;
         }
@@ -336,6 +358,9 @@ public partial class UpdateView : UserControl
 
     private async Task ExtractAndFinalizeInstallAsync(string zipPath, string installDirectory)
     {
+        if (MainWindow.IsGameRunning())
+            throw new InvalidOperationException("Close Diablo II: Resurrected before installing mod files.");
+
         if (!IsZipArchive(zipPath))
         {
             Notifications.SendNotification("Downloaded file is not a valid zip archive.", "Warning");
@@ -371,6 +396,7 @@ public partial class UpdateView : UserControl
                         Directory.Delete(legacyTargetDir, recursive: true);
 
                     CopyDirectory(sourceMpqDir, targetMpqDir);
+                    LadderCharacterSelectService.RefreshInstalledBaselines(installDirectory, targetMpqDir);
 
                     var backupDir = Path.Combine(installDirectory, "Reimagined.backup");
                     if (Directory.Exists(backupDir))
@@ -415,7 +441,38 @@ public partial class UpdateView : UserControl
                 oldModPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             }
 
-            await ExtractNonD2RmmModAsync(zipPath, installDirectory);
+            var modDir = Path.Combine(installDirectory, "mods", "Reimagined");
+            var loaderDir = Path.Combine(modDir, "d2rloader");
+            // Holds the user's D2RLoader configs/plugins across the reinstall; a leftover
+            // copy from an interrupted install is restored on the next run.
+            var preservedLoaderDir = Path.Combine(installDirectory, "mods", "Reimagined.d2rloader");
+            if (Directory.Exists(loaderDir))
+            {
+                if (Directory.Exists(preservedLoaderDir))
+                {
+                    Directory.Delete(preservedLoaderDir, recursive: true);
+                }
+                Directory.Move(loaderDir, preservedLoaderDir);
+            }
+
+            try
+            {
+                await ExtractNonD2RmmModAsync(zipPath, installDirectory);
+            }
+            finally
+            {
+                if (Directory.Exists(preservedLoaderDir))
+                {
+                    if (Directory.Exists(loaderDir))
+                    {
+                        Directory.Delete(loaderDir, recursive: true);
+                    }
+                    Directory.CreateDirectory(modDir);
+                    Directory.Move(preservedLoaderDir, loaderDir);
+                }
+            }
+
+            NormalModInstallationService.RecordNexusInstallation(installDirectory);
 
             // Invalidate per-launch "clean" snapshots so they are retaken from the new mod files.
             try

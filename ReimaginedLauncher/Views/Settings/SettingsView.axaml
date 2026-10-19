@@ -4,8 +4,10 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
              x:Class="ReimaginedLauncher.Views.Settings.SettingsView">
-    <ScrollViewer HorizontalScrollBarVisibility="Disabled"
-                  VerticalScrollBarVisibility="Auto">
+    <ScrollViewer x:Name="RootScrollViewer"
+                  HorizontalScrollBarVisibility="Disabled"
+                  VerticalScrollBarVisibility="Auto"
+                  Focusable="True">
         <StackPanel Spacing="18">
             <StackPanel Spacing="4">
                 <TextBlock Classes="view-title"
@@ -59,6 +61,19 @@
                                IsVisible="False"
                                TextWrapping="Wrap"
                                Text="Launch parameters are not available when using the D2RMM launcher. Configure launch options directly in D2RMM." />
+                    <TextBlock x:Name="LutrisLaunchParamsNotice"
+                               Classes="muted"
+                               IsVisible="False"
+                               TextWrapping="Wrap"
+                               Text="Lutris starts the game through its own URI handler, which accepts no arguments, so these options are written into the selected Lutris game's arguments just before it launches. Any other argument set in Lutris is left exactly as it is." />
+                    <Border x:Name="OnlineLaunchParamsNotice"
+                            Classes="warning-banner"
+                            Padding="12"
+                            IsVisible="False">
+                        <TextBlock Foreground="{StaticResource GoldTextBrush}"
+                                   TextWrapping="Wrap"
+                                   Text="Offline-only options (-enablerespec, -resetofflinemaps, -players, and -seed) are saved but not sent to D2RLoader while the Online experience is selected." />
+                    </Border>
                     <StackPanel x:Name="LaunchParametersPanel" Spacing="10">
                         <StackPanel Spacing="4">
                             <CheckBox x:Name="EnableRespecCheckBox"
@@ -119,6 +134,15 @@
                                        Text="Forces the desktop mouse-and-keyboard UI on devices the game otherwise treats as handheld." />
                         </StackPanel>
                         <StackPanel Spacing="4">
+                            <CheckBox x:Name="WindowedModeCheckBox"
+                                      Content="-w"
+                                      IsCheckedChanged="OnLaunchSettingChanged"/>
+                            <TextBlock Classes="muted"
+                                       Margin="28,0,0,0"
+                                       TextWrapping="Wrap"
+                                       Text="Starts the game in windowed mode." />
+                        </StackPanel>
+                        <StackPanel Spacing="4">
                             <CheckBox x:Name="NoSoundCheckBox"
                                       Content="-nosound"
                                       IsCheckedChanged="OnLaunchSettingChanged"/>
@@ -126,6 +150,28 @@
                                        Margin="28,0,0,0"
                                        TextWrapping="Wrap"
                                        Text="Starts the game without audio output." />
+                        </StackPanel>
+                        <StackPanel Spacing="4">
+                            <CheckBox x:Name="CustomMapSeedCheckBox"
+                                      Content="-seed"
+                                      IsCheckedChanged="OnLaunchSettingChanged"/>
+                            <TextBlock Classes="muted"
+                                       Margin="28,0,0,0"
+                                       TextWrapping="Wrap"
+                                       Text="Launch the game with a set map seed. This must be manually changed or disabled for it to change." />
+                            <TextBox x:Name="CustomMapSeedTextBox"
+                                     Width="180"
+                                     Margin="28,4,0,0"
+                                     HorizontalAlignment="Left"
+                                     PlaceholderText="0 - 4294967295"
+                                     LostFocus="OnCustomMapSeedChanged"
+                                     KeyDown="OnCustomMapSeedKeyDown"
+                                     TextChanged="OnCustomMapSeedTextChanged"/>
+                            <TextBlock x:Name="CustomMapSeedValidationText"
+                                       Margin="28,0,0,0"
+                                       Foreground="{StaticResource DangerTextBrush}"
+                                       IsVisible="False"
+                                       Text="Enter a whole number from 0 to 4294967295." />
                         </StackPanel>
                     </StackPanel>
                 </StackPanel>

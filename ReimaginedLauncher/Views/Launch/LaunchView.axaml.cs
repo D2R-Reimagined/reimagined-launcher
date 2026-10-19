@@ -1,11 +1,20 @@
 using System.Threading.Tasks;
+using System.Threading;
 using System;
+using System.Diagnostics;
 using System.IO;
+using System.Collections.Generic;
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
+using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Microsoft.Extensions.DependencyInjection;
+using ReimaginedLauncher.HttpClients;
+using ReimaginedLauncher.HttpClients.Models;
 using ReimaginedLauncher.Utilities;
 using ReimaginedLauncher.Utilities.Casc;
 
@@ -14,11 +23,75 @@ namespace ReimaginedLauncher.Views.Launch;
 public partial class LaunchView : UserControl
 {
     public GameLauncherService LauncherService = new();
+    private readonly ReimaginedApiHttpClient _apiHttpClient;
+    private readonly LauncherAuthenticationService _launcherAuthenticationService;
+    private readonly D2RLoaderInstallerService _d2rLoaderInstallerService;
+    private readonly LadderBundleService _ladderBundleService;
     private bool _isLaunching;
+    private bool _isSteamSetupRunning;
+    private bool _isLoaderInstallPromptOpen;
+    private bool _hasPromptedForMissingLoader;
+    private string? _loaderUpdatePromptedVersion;
+    private bool _isRefreshingLadders;
+    private bool _ladderAuthenticationRefreshPending;
+    private bool _isRefreshingLadderControls;
+    private bool _ladderStatusLoaded;
+    private bool _ladderPolicyVerified;
+    private string? _ladderLoadError;
+    private IReadOnlyList<string> _missingRequiredLadderExtensions = [];
+    private IReadOnlyList<LadderResponse> _activeLadders = [];
+    private IReadOnlyList<LadderExtensionChoice> _ladderExtensionChoices = [];
+    private LadderBundleReadiness? _ladderBundleReadiness;
+    private LadderAction _ladderAction = LadderAction.Blocked;
+    private bool _isRunningLadderAction;
+    private D2RLoaderInventory? _loaderInventory;
+    private bool? _isCompactLayout;
+    private readonly DispatcherTimer _ladderScheduleTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private ServerSaveMonitor? _preparedServerSaves;
+    // The secrets this launch hands to the game, gathered while preparing and
+    // written to the session file (outside mods/) just before the process starts.
+    private GameSessionToken? _launchGameToken;
+    private string? _launchLadderTicket;
+    private string? _launchStatusSessionId;
+    private LadderLaunchSchedule? _ladderSchedule;
+    private long _lastLadderRefresh;
+    private TimeSpan _ladderRefreshInterval;
+    private IReadOnlyList<LutrisGame> _lutrisGames = [];
+    private bool _isRefreshingLutrisControls;
+    private bool _lutrisGamesLoaded;
+
+    /// <summary>
+    /// What the ladder button does right now. Download and Update are setup
+    /// steps that never start the game - the player gets the game only once
+    /// the signed package on disk matches the one the ladder is running.
+    /// </summary>
+    private enum LadderAction
+    {
+        Blocked,
+        Download,
+        Update,
+        Restore,
+        Waiting,
+        Play
+    }
 
     public LaunchView()
     {
         InitializeComponent();
+        _apiHttpClient = Program.ServiceProvider.GetRequiredService<ReimaginedApiHttpClient>();
+        _launcherAuthenticationService = Program.ServiceProvider.GetRequiredService<LauncherAuthenticationService>();
+        _d2rLoaderInstallerService = Program.ServiceProvider.GetRequiredService<D2RLoaderInstallerService>();
+        _ladderBundleService = Program.ServiceProvider.GetRequiredService<LadderBundleService>();
+        SizeChanged += (_, _) => UpdateResponsiveLayout();
+        Loaded += async (_, _) => await PromptForMissingD2RLoaderAsync();
+        _ladderScheduleTimer.Tick += OnLadderScheduleTick;
+
+        if (!InstallationTypes.IsAvailable(InstallationType.Lutris))
+        {
+            LutrisInstallationTypeItem.IsEnabled = false;
+            LutrisInstallationTypeItem.Content = "Lutris (Linux only)";
+            ToolTip.SetTip(LutrisInstallationTypeItem, "Lutris is a Linux application and is not available on this platform.");
+        }
 
         RefreshInstallDirectoryState();
     }
@@ -30,15 +103,10 @@ public partial class LaunchView : UserControl
         RefreshInstallDirectoryState();
     }
 
-    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
-    {
-        CascFastloadOperationState.Instance.StateChanged -= OnCascStateChanged;
-        base.OnDetachedFromVisualTree(e);
-    }
-
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
+        UpdateResponsiveLayout();
 
         CascFastloadOperationState.Instance.StateChanged += OnCascStateChanged;
 
@@ -87,18 +155,135 @@ public partial class LaunchView : UserControl
                             mw.RefreshLocalModState();
                             await mw.RefreshUpdateStateAsync();
                         }
+                        await PromptForMissingD2RLoaderAsync();
                     });
                 });
             }
 
             RefreshInstallDirectoryState();
         }
+
+        _ladderScheduleTimer.Start();
+        _ = RefreshLadderStateAsync();
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        CascFastloadOperationState.Instance.StateChanged -= OnCascStateChanged;
+        _ladderScheduleTimer.Stop();
+        base.OnDetachedFromVisualTree(e);
+    }
+
+    private async void OnLadderScheduleTick(object? sender, EventArgs e)
+    {
+        if (_isRefreshingLadders || _isLaunching || _isRunningLadderAction || MainWindow.IsInstallInProgress
+            || MainWindow.IsGameRunning()) return;
+
+        if (MainWindow.Settings.CurrentProfile.LaunchExperience == LaunchExperience.Ladder
+            && _ladderAction is LadderAction.Waiting or LadderAction.Play)
+        {
+            if (_ladderSchedule?.IsLive(SelectedLadder) != true) _ladderAction = LadderAction.Waiting;
+            StartGameButton.Content = LadderActionLabel(_ladderAction);
+            if (_ladderAction == LadderAction.Waiting) StartGameButton.IsEnabled = false;
+        }
+
+        if (Stopwatch.GetElapsedTime(_lastLadderRefresh) >= _ladderRefreshInterval)
+            await RefreshLadderStateAsync();
+    }
+
+    private void UpdateResponsiveLayout()
+    {
+        if (Bounds.Width <= 0)
+        {
+            return;
+        }
+
+        var isCompact = Bounds.Width < 960;
+        if (_isCompactLayout == isCompact)
+        {
+            return;
+        }
+
+        _isCompactLayout = isCompact;
+
+        const int experienceCount = 3;
+        ConfigureGrid(ExperienceGrid, isCompact ? 1 : experienceCount, isCompact ? experienceCount : 1);
+        ExperienceGrid.ColumnSpacing = isCompact ? 0 : 12;
+        ExperienceGrid.RowSpacing = isCompact ? 12 : 0;
+        PositionGridChild(OfflineExperienceButton, 0, 0);
+        PositionGridChild(OnlineExperienceButton, isCompact ? 0 : 1, isCompact ? 1 : 0);
+        PositionGridChild(LadderExperienceButton, isCompact ? 0 : 2, isCompact ? 2 : 0);
+
+        ConfigureTwoPanelGrid(
+            LaunchSetupGrid,
+            LaunchPanel,
+            InstallDirectoryPanel,
+            isCompact);
+
+        ConfigureTwoPanelGrid(
+            LadderExtensionsGrid,
+            AllowedLadderPluginsPanel,
+            AllowedLadderPatchesPanel,
+            isCompact);
+        ConfigureTwoPanelGrid(
+            LoaderExtensionsGrid,
+            LoaderPluginsPanel,
+            LoaderPatchesPanel,
+            isCompact);
+
+        ConfigureGrid(LoaderHeaderGrid, isCompact ? 1 : 2, isCompact ? 2 : 1, secondColumnAuto: true);
+        LoaderHeaderGrid.ColumnSpacing = isCompact ? 0 : 16;
+        LoaderHeaderGrid.RowSpacing = isCompact ? 12 : 0;
+        PositionGridChild(LoaderActionsPanel, isCompact ? 0 : 1, isCompact ? 1 : 0);
+
+        LaunchActionsPanel.Orientation = isCompact ? Orientation.Vertical : Orientation.Horizontal;
+    }
+
+    private static void ConfigureTwoPanelGrid(Grid grid, Control first, Control second, bool isCompact)
+    {
+        ConfigureGrid(grid, isCompact ? 1 : 2, isCompact ? 2 : 1);
+        grid.ColumnSpacing = isCompact ? 0 : 14;
+        grid.RowSpacing = isCompact ? 14 : 0;
+        PositionGridChild(first, 0, 0);
+        PositionGridChild(second, isCompact ? 0 : 1, isCompact ? 1 : 0);
+    }
+
+    private static void ConfigureGrid(Grid grid, int columnCount, int rowCount, bool secondColumnAuto = false)
+    {
+        grid.ColumnDefinitions.Clear();
+        for (var index = 0; index < columnCount; index++)
+        {
+            var width = secondColumnAuto && index == 1 ? GridLength.Auto : GridLength.Star;
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = width });
+        }
+
+        grid.RowDefinitions.Clear();
+        for (var index = 0; index < rowCount; index++)
+        {
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        }
+    }
+
+    private static void PositionGridChild(Control control, int column, int row)
+    {
+        Grid.SetColumn(control, column);
+        Grid.SetRow(control, row);
     }
 
     public void RefreshInstallDirectoryState()
     {
         var settings = MainWindow.Settings;
         var profile = settings.CurrentProfile;
+        LadderExperienceButton.IsVisible = true;
+        if (!_ladderStatusLoaded && !_isRefreshingLadders)
+        {
+            _ = RefreshLadderStateAsync();
+        }
+
+        var isOnlineExperience = profile.LaunchExperience == LaunchExperience.Online;
+        var isLadderExperience = profile.LaunchExperience == LaunchExperience.Ladder;
+        var ladderAvailable = HasAvailableLadder;
+        var isReimaginedSignedIn = _launcherAuthenticationService.IsSignedIn;
 
         // Disable mutating controls while a CASC fastload op is running.
         var cascBusy = CascFastloadOperationState.Instance.IsRunning;
@@ -110,7 +295,55 @@ public partial class LaunchView : UserControl
         DetectionLoadingIndicator.IsVisible = LauncherService.IsDetecting;
 
         SteamExtraPanel.IsVisible = profile.Type == InstallationType.Steam;
+        SteamAdvancedPanel.IsVisible = profile.Type == InstallationType.Steam && OperatingSystem.IsLinux()
+                             && !GameLauncherService.IsSteamFlatpakInstall(profile.InstallDirectory);
+        SteamHelperFallbackCheckBox.IsChecked = profile.UseSteamHelperFallback;
+        SteamHelperFallbackCheckBox.IsEnabled = !_isLaunching && !SteamGameHandoff.IsLaunchPendingOrRunning;
+        EnableLsfgCheckBox.IsChecked = profile.EnableLsfg;
+        EnableLsfgCheckBox.IsEnabled = !_isLaunching && !SteamGameHandoff.IsLaunchPendingOrRunning;
+        SteamSetupShortcutsPanel.IsVisible = profile.Type == InstallationType.Steam && OperatingSystem.IsLinux()
+            && !GameLauncherService.IsSteamFlatpakInstall(profile.InstallDirectory);
+        SteamSetupShortcutsButton.IsEnabled = !_isSteamSetupRunning && !_isLaunching && !MainWindow.IsInstallInProgress
+            && !SteamGameHandoff.IsLaunchPendingOrRunning;
+        if (SteamSetupShortcutsPanel.IsVisible)
+        {
+            try
+            {
+                var selectedId = (SteamSetupAccountComboBox.SelectedItem as SteamSetupAccount)?.UserId;
+                var root = GameLauncherService.GetSteamInstallPath(installDirectory: profile.InstallDirectory);
+                SteamResetControllerLayoutCheckBox.IsVisible = root != null && SteamControllerLayout.HasCombinedTemplate(root);
+                var accounts = root is null ? [] : SteamGameHandoff.GetSetupAccounts(root);
+                SteamSetupAccountComboBox.ItemsSource = accounts;
+                var recent = accounts.Where(account => account.MostRecent).ToArray();
+                SteamSetupAccountComboBox.SelectedItem = accounts.FirstOrDefault(account => account.UserId == selectedId)
+                    ?? (accounts.Length == 1 ? accounts[0] : recent.Length == 1 ? recent[0] : null);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                SteamSetupStatusText.Text = "Could not read Steam accounts: " + exception.Message;
+            }
+        }
+        SteamProtonPanel.IsVisible = profile.Type == InstallationType.Steam
+                                     && OperatingSystem.IsLinux()
+                                     && !GameLauncherService.IsSteamFlatpakInstall(profile.InstallDirectory)
+                                     && (isOnlineExperience || isLadderExperience || SteamGameHandoff.IsGamingMode
+                                         || File.Exists(Path.Combine(SteamGameHandoff.StateDirectory, "registration.json")));
+        LutrisExtraPanel.IsVisible = profile.Type == InstallationType.Lutris;
+
+        // The Lutris game is the source of the install path.
+        BrowseInstallDirectoryButton.IsVisible = profile.Type != InstallationType.Lutris;
+
+        if (profile.Type == InstallationType.Lutris)
+        {
+            RefreshLutrisGameControls(profile);
+        }
+
         SteamPathTextBox.Text = profile.SteamDirectory ?? string.Empty;
+        SteamPathTextBox.PlaceholderText = OperatingSystem.IsLinux() ? "Steam or Flatpak executable" : "Steam.exe Path";
+        LocateSteamButton.Content = OperatingSystem.IsLinux() ? "Locate Steam" : "Locate Steam.exe";
+        if (OperatingSystem.IsLinux())
+            GameLauncherService.TryDetectSteamProtonExecutable(profile);
+        ProtonPathTextBox.Text = profile.ProtonExecutable ?? string.Empty;
 
         // Auto-detect Steam path if not set or if it's currently Steam type
         if (profile.Type == InstallationType.Steam)
@@ -149,6 +382,11 @@ public partial class LaunchView : UserControl
         {
             InstallDirectoryTitle.Text = "Install Directory";
             InstallDirectoryDescription.Text = "Select the Diablo II: Resurrected folder that contains your local mod installation (Folder with .exe in it)";
+            if (profile.Type == InstallationType.Lutris)
+            {
+                InstallDirectoryDescription.Text = "Pick your Diablo II: Resurrected entry in Lutris. The install directory is read from that game's Lutris configuration.";
+            }
+
             isValidated = profile.Type == InstallationType.Steam
                 ? InstallDirectoryValidator.IsValidSteamInstallDirectory(profile.InstallDirectory)
                 : InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory);
@@ -157,25 +395,86 @@ public partial class LaunchView : UserControl
 
         profile.IsInstallDirectoryValidated = isValidated;
 
+        NormalModRepairBanner.IsVisible = profile.Type != InstallationType.D2RMM
+                                          && isValidated
+                                          && NormalModInstallationService.RequiresRecovery(profile.InstallDirectory);
+        RepairNormalModButton.IsEnabled = !_isLaunching && !_isRunningLadderAction && !MainWindow.IsInstallInProgress;
+
+        _loaderInventory = D2RLoaderService.Discover(profile.InstallDirectory, profile.LaunchExperience);
+        RefreshD2RLoaderState(profile, _loaderInventory);
+        var loaderAvailable = D2RLoaderService.CanUseOnlineExperience(profile, out var loaderUnavailableReason);
+
+        OfflineExperienceButton.Classes.Set("selected", profile.LaunchExperience == LaunchExperience.Offline);
+        OnlineExperienceButton.Classes.Set("selected", isOnlineExperience);
+        LadderExperienceButton.Classes.Set("selected", isLadderExperience);
+        // D2RMM is the only type that does not support D2RLoader.
+        var supportsD2RLoader = profile.Type is not InstallationType.D2RMM;
+        OnlineExperienceButton.IsEnabled = supportsD2RLoader;
+        LadderExperienceButton.IsEnabled = supportsD2RLoader;
+        OnlineExperiencePanel.IsVisible = isOnlineExperience && supportsD2RLoader;
+        LadderPolicyPanel.IsVisible = isLadderExperience && supportsD2RLoader;
+        LadderAuthenticationWarningBanner.IsVisible = isLadderExperience && !isReimaginedSignedIn;
+        RefreshLadderAuthenticationState();
+
+        var isOnlineSteamFlatpak = isOnlineExperience
+                                   && profile.Type == InstallationType.Steam
+                                   && GameLauncherService.IsSteamFlatpakInstall(profile.InstallDirectory);
+        
         if (profile.Type == InstallationType.D2RMM)
         {
             StartGameButton.Content = "Install Tweaks";
             StartGameDescription.Text = "Clicking 'Install Tweaks' will apply tweaks and adjustments to the files in your D2RMM/mods/Reimagined/data directory.";
-            StartGameButton.IsEnabled = !_isLaunching && !cascBusy && isValidated && isModDetected;
+            StartGameButton.IsEnabled = !_isLaunching && !cascBusy && !SteamGameHandoff.IsLaunchPendingOrRunning && isValidated && isModDetected;
         }
         else
         {
-            StartGameButton.Content = "Start Game";
-            StartGameDescription.Text = "The button stays available here and will enable once the install directory is valid and the mod is detected.";
-            StartGameButton.IsEnabled = !_isLaunching && !cascBusy && isValidated && isModDetected;
+            StartGameButton.Content = isOnlineExperience
+                ? "Start Online"
+                : isLadderExperience
+                    ? LadderActionLabel(_ladderAction)
+                    : "Start Offline";
+            StartGameDescription.Text = isOnlineExperience
+                ? "Starts D2RLoader with Reimagined selected. Choose multiplayer in-game to host or join; this does not connect to Battle.net."
+                : isLadderExperience
+                    ? isReimaginedSignedIn
+                        ? LadderActionDescription(_ladderAction)
+                        : "Sign in with your D2R Reimagined website account before starting a ladder character."
+                    : "Starts the standard Reimagined offline experience with your saved launch options.";
+            // A ladder setup step is allowed to run without the mod present -
+            // installing it is part of what the step does. Play still requires
+            // everything, because by then readiness has confirmed it.
+            StartGameButton.IsEnabled = !_isLaunching && !cascBusy && !SteamGameHandoff.IsLaunchPendingOrRunning
+                                        && !_isRunningLadderAction
+                                        && isValidated
+                                        && (isModDetected || isLadderExperience)
+                                        && (!isOnlineExperience || loaderAvailable)
+                                        && (!isLadderExperience
+                                            || isReimaginedSignedIn
+                                            && ladderAvailable
+                                            && loaderAvailable
+                                            && _ladderAction is not (LadderAction.Blocked or LadderAction.Waiting));
 
-            if (profile.Type == InstallationType.Steam && string.IsNullOrWhiteSpace(profile.SteamDirectory))
+            var isOfflineSteamMissingDirectory = !isOnlineExperience
+                                                  && !isLadderExperience
+                                                  && profile.Type == InstallationType.Steam
+                                                  && string.IsNullOrWhiteSpace(profile.SteamDirectory);
+            
+            if (isOfflineSteamMissingDirectory || isOnlineSteamFlatpak)
             {
                 StartGameButton.IsEnabled = false;
             }
         }
 
-        ValidationBanner.IsVisible = !isValidated || !isModDetected;
+        // A ladder that only needs its Download or Update step run is not a
+        // validation problem - the button already says what to do about it, and
+        // a warning banner beside it just reads as something being wrong.
+        ValidationBanner.IsVisible = !isValidated
+                                     || !isModDetected && !IsLadderSetupAction(isLadderExperience)
+                                     || isOnlineExperience && !loaderAvailable
+                                     || isOnlineSteamFlatpak
+                                     || isLadderExperience && (!ladderAvailable
+                                         || !loaderAvailable
+                                         || _ladderAction == LadderAction.Blocked);
         
         if (profile.Type == InstallationType.D2RMM)
         {
@@ -189,8 +488,24 @@ public partial class LaunchView : UserControl
         }
         else
         {
-            ValidationBannerText.Text = !isValidated
-                ? string.IsNullOrWhiteSpace(profile.InstallDirectory)
+            ValidationBannerText.Text = isLadderExperience
+                                        && isValidated
+                                        && isModDetected
+                                        && (!ladderAvailable
+                                            || !loaderAvailable
+                                            || !_ladderPolicyVerified)
+                ? !_ladderPolicyVerified && ladderAvailable && loaderAvailable
+                    ? GetLadderPolicyUnavailableMessage()
+                    : GetLadderUnavailableMessage(loaderAvailable ? null : loaderUnavailableReason)
+                : isOnlineExperience && isValidated && isModDetected && !loaderAvailable
+                ? loaderUnavailableReason ?? "D2RLoader is unavailable for this profile."
+                : isOnlineSteamFlatpak ? "Flatpak Steam is not supported for D2RLoader. Only native Steam installation is supported."
+                : !isValidated
+                ? profile.Type == InstallationType.Lutris
+                    ? string.IsNullOrWhiteSpace(profile.InstallDirectory)
+                        ? "Select the Lutris game that runs Diablo II: Resurrected."
+                        : "That Lutris game does not run Diablo II: Resurrected - no D2R.exe in its install directory. Pick a different Lutris game."
+                    : string.IsNullOrWhiteSpace(profile.InstallDirectory)
                     ? "Enter your Diablo II: Resurrected install directory before using the launcher."
                     : profile.Type == InstallationType.Steam
                         && InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory)
@@ -207,6 +522,1285 @@ public partial class LaunchView : UserControl
             : "Auto-Backup Interval: N/A";
     }
 
+    public void RefreshAuthenticationState()
+    {
+        if (_isRefreshingLadders)
+            _ladderAuthenticationRefreshPending = true;
+        else
+            _ = RefreshLadderStateAsync();
+        RefreshInstallDirectoryState();
+    }
+
+    private void RefreshLadderAuthenticationState()
+    {
+        var user = _launcherAuthenticationService.CurrentUser;
+        LadderSignInButton.IsVisible = user is null;
+        LadderSignInButton.IsEnabled = user is null;
+    }
+
+    private async void OnLadderSignInClick(object? sender, RoutedEventArgs e)
+    {
+        LadderSignInButton.IsEnabled = false;
+        try
+        {
+            if (MainWindow.Instance is { } mainWindow)
+            {
+                await mainWindow.SignInToReimaginedAsync();
+            }
+        }
+        finally
+        {
+            RefreshInstallDirectoryState();
+        }
+    }
+
+    private void RefreshD2RLoaderState(InstallationProfile profile, D2RLoaderInventory inventory)
+    {
+        LoaderPluginsItemsControl.ItemsSource = inventory.Plugins;
+        LoaderPatchesItemsControl.ItemsSource = inventory.Patches;
+        LoaderPluginCountText.Text = inventory.Plugins.Count.ToString();
+        LoaderPatchCountText.Text = inventory.Patches.Count.ToString();
+        NoLoaderPluginsText.IsVisible = inventory.Plugins.Count == 0;
+        NoLoaderPatchesText.IsVisible = inventory.Patches.Count == 0;
+
+        LoaderStatusBadge.Background = new SolidColorBrush(Color.Parse(inventory.IsInstalled ? "#17351D" : "#3A1818"));
+        LoaderStatusBadgeText.Foreground = new SolidColorBrush(Color.Parse(inventory.IsInstalled ? "#86D88F" : "#E98B91"));
+        LoaderStatusBadgeText.Text = inventory.IsInstalled ? "READY" : "NOT FOUND";
+        LoaderStatusText.Text = inventory.IsInstalled
+            ? $"D2RLoader {inventory.Version ?? "unknown version"} detected beside D2R.exe. "
+              + $"Found {inventory.Plugins.Count} plugin{(inventory.Plugins.Count == 1 ? string.Empty : "s")} and "
+              + $"{inventory.Patches.Count} patch manifest{(inventory.Patches.Count == 1 ? string.Empty : "s")}."
+            : "Place D2RLoader.exe in the same folder as D2R.exe to enable this experience.";
+
+        var disabledScopes = new[]
+            {
+                inventory.AllowGlobalExtensions ? null : "global extensions",
+                inventory.AllowModExtensions ? null : "Reimagined extensions"
+            }
+            .Where(value => value is not null)
+            .ToArray();
+        LoaderExtensionPolicyText.Text = disabledScopes.Length == 0
+            ? "Global and Reimagined extension loading are enabled in d2rloader.toml."
+            : $"Disabled by d2rloader.toml: {string.Join(", ", disabledScopes!)}.";
+
+        var canUseOnline = D2RLoaderService.CanUseOnlineExperience(profile, out var reason);
+        LoaderWarningBanner.IsVisible = !canUseOnline;
+        LoaderWarningText.Text = reason ?? string.Empty;
+        OpenLoaderFolderButton.IsEnabled = Directory.Exists(inventory.GlobalRoot);
+        OpenModLoaderFolderButton.IsEnabled = Directory.Exists(inventory.ModRoot)
+                                                || Directory.Exists(Path.GetDirectoryName(inventory.ModRoot));
+    }
+
+    private async void OnRepairNormalModClick(object? sender, RoutedEventArgs e)
+    {
+        if (_isLaunching || _isRunningLadderAction || MainWindow.IsInstallInProgress) return;
+
+        if (MainWindow.IsGameRunning())
+        {
+            Notifications.SendNotification("Close Diablo II: Resurrected before repairing the mod.", "Warning");
+            return;
+        }
+
+        if (MainWindow.Instance is { } mainWindow)
+            await mainWindow.NavigateToUpdateViewAsync();
+    }
+
+    private async void OnOfflineExperienceClick(object? sender, RoutedEventArgs e)
+    {
+        await SetLaunchExperienceAsync(LaunchExperience.Offline);
+    }
+
+    private async void OnOnlineExperienceClick(object? sender, RoutedEventArgs e)
+    {
+        await SetLaunchExperienceAsync(LaunchExperience.Online);
+    }
+
+    private async void OnLadderExperienceClick(object? sender, RoutedEventArgs e)
+    {
+        await SetLaunchExperienceAsync(LaunchExperience.Ladder);
+    }
+
+    private async Task SetLaunchExperienceAsync(LaunchExperience experience)
+    {
+        var profile = MainWindow.Settings.CurrentProfile;
+        if (profile.Type == InstallationType.D2RMM || _isLaunching || _isRunningLadderAction || MainWindow.IsInstallInProgress)
+        {
+            return;
+        }
+
+        var isLadderTransition = profile.LaunchExperience != experience
+                                 && (profile.LaunchExperience == LaunchExperience.Ladder || experience == LaunchExperience.Ladder);
+        if (profile.LaunchExperience != experience)
+        {
+            if (MainWindow.IsGameRunning())
+            {
+                Notifications.SendNotification("Close Diablo II: Resurrected before changing play modes.", "Mode switch blocked");
+                return;
+            }
+
+            if (isLadderTransition && experience != LaunchExperience.Ladder && profile.InstallDirectory is { } installDirectory)
+            {
+                try
+                {
+                    _isLaunching = true;
+                    MainWindow.IsInstallInProgress = true;
+                    await Task.Run(() => NormalModInstallationService.Restore(installDirectory));
+                    if (!await LadderSaveDirectoryService.RestoreAsync(installDirectory))
+                    {
+                        Notifications.SendNotification(NormalModInstallationService.RecoveryMessage, "Normal save restore failed");
+                        return;
+                    }
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+                {
+                    LaunchDiagnostics.LogException("Could not restore the normal mod installation", exception);
+                    Notifications.SendNotification(exception.Message, "Normal mod restore failed");
+                    return;
+                }
+                finally
+                {
+                    MainWindow.IsInstallInProgress = false;
+                    _isLaunching = false;
+                }
+            }
+
+            try
+            {
+                if (isLadderTransition && D2RLoaderService.IsInstalled(profile.InstallDirectory))
+                    D2RLoaderService.SetDefaultMod(profile.InstallDirectory!, experience);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                Notifications.SendNotification(exception.Message, "Could not select D2RLoader default mod");
+                return;
+            }
+
+            profile.LaunchExperience = experience;
+            await SettingsManager.SaveAsync(MainWindow.Settings);
+            MainWindow.Instance?.RefreshLocalModState();
+            if (experience == LaunchExperience.Ladder)
+                await RefreshLadderStateAsync();
+            RefreshInstallDirectoryState();
+        }
+
+        if (experience is LaunchExperience.Online or LaunchExperience.Ladder)
+        {
+            await PromptInstallD2RLoaderAsync(profile);
+        }
+    }
+
+    private async Task PromptForMissingD2RLoaderAsync()
+    {
+        var profile = MainWindow.Settings.CurrentProfile;
+        if (_hasPromptedForMissingLoader || _isLoaderInstallPromptOpen || !IsLoaded
+            || _isLaunching || _isRunningLadderAction || MainWindow.IsInstallInProgress
+            || MainWindow.IsGameRunning()
+            || profile.Type == InstallationType.D2RMM
+            || profile.LaunchExperience is not (LaunchExperience.Online or LaunchExperience.Ladder)
+            || !InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory)
+            || D2RLoaderService.IsInstalled(profile.InstallDirectory)
+            || TopLevel.GetTopLevel(this) is not Window { IsVisible: true })
+        {
+            return;
+        }
+
+        _hasPromptedForMissingLoader = true;
+        await PromptInstallD2RLoaderAsync(profile);
+    }
+
+    private async Task PromptInstallD2RLoaderAsync(InstallationProfile profile)
+    {
+        if (_isLoaderInstallPromptOpen
+            || !InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory)
+            || TopLevel.GetTopLevel(this) is not Window owner)
+        {
+            return;
+        }
+
+        _isLoaderInstallPromptOpen = true;
+        try
+        {
+            var inventory = D2RLoaderService.Discover(profile.InstallDirectory, profile.LaunchExperience);
+            D2RLoaderUpdateCheckResult? update = null;
+            if (inventory.IsInstalled)
+            {
+                try
+                {
+                    update = await _d2rLoaderInstallerService.CheckForUpdateAsync(profile.InstallDirectory);
+                }
+                catch (Exception exception)
+                {
+                    LaunchDiagnostics.LogException("D2RLoader update check failed", exception);
+                    return;
+                }
+
+                if (!update.IsUpdateAvailable
+                    || string.Equals(
+                        _loaderUpdatePromptedVersion,
+                        update.LatestVersion,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                _loaderUpdatePromptedVersion = update.LatestVersion;
+            }
+
+            var installed = await ShowD2RLoaderInstallDialogAsync(
+                owner,
+                profile.InstallDirectory!,
+                update);
+            if (!installed)
+            {
+                return;
+            }
+
+            var action = update is null ? "installed" : $"updated to {update.LatestVersion}";
+            LaunchDiagnostics.Log($"D2RLoader {action} at {profile.InstallDirectory}.");
+            Notifications.SendNotification(
+                update is null
+                    ? "D2RLoader installed. Online and Ladder modes are now ready to use."
+                    : $"D2RLoader updated to {update.LatestVersion}.",
+                "Success");
+            RefreshInstallDirectoryState();
+            await RefreshLadderStateAsync();
+        }
+        finally
+        {
+            _isLoaderInstallPromptOpen = false;
+        }
+    }
+
+    private async Task<bool> ShowD2RLoaderInstallDialogAsync(
+        Window owner,
+        string installDirectory,
+        D2RLoaderUpdateCheckResult? update = null)
+    {
+        var isUpdate = update is not null;
+        var dialog = new Window
+        {
+            Width = 520,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Title = isUpdate ? "Update D2RLoader?" : "Install D2RLoader?"
+        };
+
+        var statusText = new TextBlock
+        {
+            IsVisible = false,
+            TextWrapping = TextWrapping.Wrap
+        };
+        var progressBar = new ProgressBar
+        {
+            IsVisible = false,
+            IsIndeterminate = true,
+            Minimum = 0,
+            Maximum = 100
+        };
+        var installButton = new Button
+        {
+            Content = isUpdate ? "Download and Update" : "Download and Install",
+            Classes = { "accent" },
+            MinWidth = 156
+        };
+        var cancelButton = new Button
+        {
+            Content = "Not Now",
+            MinWidth = 96
+        };
+        var isInstalling = false;
+        var isInstalled = false;
+
+        installButton.Click += async (_, _) =>
+        {
+            if (isInstalled)
+            {
+                dialog.Close(true);
+                return;
+            }
+
+            isInstalling = true;
+            installButton.IsEnabled = false;
+            cancelButton.IsEnabled = false;
+            statusText.IsVisible = true;
+            statusText.Foreground = new SolidColorBrush(Color.Parse("#F7F1E3"));
+            progressBar.IsVisible = true;
+
+            var progress = new Progress<D2RLoaderInstallProgress>(update =>
+            {
+                statusText.Text = update.Message;
+                progressBar.IsIndeterminate = !update.Percentage.HasValue;
+                if (update.Percentage.HasValue)
+                {
+                    progressBar.Value = update.Percentage.Value;
+                }
+            });
+
+            try
+            {
+                await _d2rLoaderInstallerService.InstallAsync(
+                    installDirectory,
+                    progress,
+                    minimumVersion: update?.LatestVersion,
+                    forceDownload: isUpdate);
+                isInstalled = true;
+                statusText.Text = isUpdate
+                    ? $"D2RLoader {update!.LatestVersion} installed successfully."
+                    : "D2RLoader installed successfully.";
+                statusText.Foreground = new SolidColorBrush(Color.Parse("#86D88F"));
+                progressBar.IsIndeterminate = false;
+                progressBar.Value = 100;
+                installButton.Content = "Close";
+                installButton.IsEnabled = true;
+                cancelButton.IsVisible = false;
+            }
+            catch (Exception exception)
+            {
+                LaunchDiagnostics.LogException("D2RLoader installation failed", exception);
+                statusText.Text = $"Installation failed: {exception.Message}";
+                statusText.Foreground = new SolidColorBrush(Color.Parse("#E98B91"));
+                progressBar.IsVisible = false;
+                installButton.IsEnabled = true;
+                cancelButton.IsEnabled = true;
+                cancelButton.Content = "Close";
+            }
+            finally
+            {
+                isInstalling = false;
+            }
+        };
+
+        cancelButton.Click += (_, _) => dialog.Close(false);
+        dialog.Closing += (_, args) =>
+        {
+            if (isInstalling)
+            {
+                args.Cancel = true;
+            }
+        };
+
+        dialog.Content = new Border
+        {
+            Padding = new Thickness(22),
+            Child = new StackPanel
+            {
+                Spacing = 14,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = isUpdate
+                            ? $"D2RLoader {update!.LatestVersion} is available. You currently have {update.InstalledVersion}."
+                            : "D2RLoader is required for Online and Ladder modes, but it was not found beside D2R.exe.",
+                        FontWeight = FontWeight.SemiBold,
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    new TextBlock
+                    {
+                        Text = isUpdate
+                            ? "Would you like the launcher to download and install the update now? Your loader configuration, plugins, and patches will be preserved."
+                            : "Would you like the launcher to download D2RLoader and extract it into your Diablo II: Resurrected installation?",
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    new TextBlock
+                    {
+                        Text = installDirectory,
+                        Classes = { "muted" },
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    statusText,
+                    progressBar,
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Spacing = 10,
+                        Children =
+                        {
+                            cancelButton,
+                            installButton
+                        }
+                    }
+                }
+            }
+        };
+
+        return await dialog.ShowDialog<bool>(owner);
+    }
+
+    private void OnRefreshLoaderClick(object? sender, RoutedEventArgs e)
+    {
+        RefreshInstallDirectoryState();
+    }
+
+    private bool HasAvailableLadder => _activeLadders.Any(ladder =>
+        LadderLaunchSchedule.IsAvailable(ladder, _ladderSchedule?.Now ?? DateTimeOffset.UtcNow));
+
+    private LadderResponse? SelectedLadder
+    {
+        get
+        {
+            var selectedId = MainWindow.Settings.CurrentProfile.SelectedLadderId;
+            return _activeLadders.FirstOrDefault(ladder => ladder.Id == selectedId)
+                   ?? _activeLadders.FirstOrDefault();
+        }
+    }
+
+    private async Task RefreshLadderStateAsync()
+    {
+        if (_isRefreshingLadders)
+        {
+            return;
+        }
+
+        _isRefreshingLadders = true;
+        _ladderStatusLoaded = false;
+        _ladderLoadError = null;
+        LadderStatusText.Text = "Checking for active ladders...";
+        LadderExtensionPolicyStatusText.Text = "Checking installed D2RLoader extensions...";
+        _ladderPolicyVerified = false;
+        _ladderAction = LadderAction.Blocked;
+        _ladderPolicyGeneration++;
+        ActiveLaddersItemsControl.ItemsSource = null;
+        RefreshInstallDirectoryState();
+
+        try
+        {
+            _ladderSchedule = await _apiHttpClient.GetLadderLaunchScheduleAsync();
+            _activeLadders = _ladderSchedule.Available;
+            ActiveLaddersItemsControl.ItemsSource = _activeLadders;
+            EnsureSelectedLadder();
+            _isRefreshingLadderControls = true;
+            ActiveLadderComboBox.ItemsSource = _activeLadders;
+            ActiveLadderComboBox.SelectedItem = SelectedLadder;
+            _isRefreshingLadderControls = false;
+            LadderStatusText.Text = _activeLadders.Count == 0
+                ? "No live ladders or ladders starting within 2 hours."
+                : _activeLadders.Count == 1
+                    ? "Live or upcoming ladder:"
+                    : "Live and upcoming ladders:";
+        }
+        catch (Exception ex)
+        {
+            _ladderSchedule = null;
+            _activeLadders = [];
+            _ladderExtensionChoices = [];
+            _ladderLoadError = "Ladder status is temporarily unavailable.";
+            LadderStatusText.Text = _ladderLoadError;
+            LadderExtensionPolicyStatusText.Text = _ladderLoadError;
+            ActiveLadderComboBox.ItemsSource = null;
+            AllowedLadderPluginsItemsControl.ItemsSource = null;
+            AllowedLadderPatchesItemsControl.ItemsSource = null;
+            UnapprovedLadderExtensionsBanner.IsVisible = false;
+            UnapprovedLadderExtensionsSummaryBanner.IsVisible = false;
+            LaunchDiagnostics.LogException("Failed to fetch active ladders", ex);
+        }
+        finally
+        {
+            _ladderStatusLoaded = true;
+            RefreshInstallDirectoryState();
+        }
+
+        try
+        {
+            _ = RefreshLadderRegionsAsync();
+            if (_ladderLoadError is null)
+                await RefreshLadderExtensionPolicyAsync();
+        }
+        finally
+        {
+            _isRefreshingLadders = false;
+            _lastLadderRefresh = Stopwatch.GetTimestamp();
+            _ladderRefreshInterval = LadderLaunchSchedule.RefreshInterval(
+                MainWindow.Settings.CurrentProfile.LaunchExperience == LaunchExperience.Ladder,
+                _ladderLoadError is not null, SelectedLadder?.StartDateUtc,
+                _ladderSchedule?.Now ?? DateTimeOffset.UtcNow);
+            RefreshInstallDirectoryState();
+        }
+        if (_ladderAuthenticationRefreshPending)
+        {
+            _ladderAuthenticationRefreshPending = false;
+            await RefreshLadderStateAsync();
+        }
+    }
+
+    private string GetLadderUnavailableMessage(string? loaderUnavailableReason = null)
+    {
+        if (!_ladderStatusLoaded)
+        {
+            return "Checking the Reimagined API for an active ladder.";
+        }
+
+        if (!string.IsNullOrWhiteSpace(loaderUnavailableReason))
+        {
+            return loaderUnavailableReason;
+        }
+
+        return _ladderLoadError ?? "No active Reimagined ladder is available right now.";
+    }
+
+    private string GetLadderPolicyUnavailableMessage()
+    {
+        if (_ladderBundleReadiness is { IsReady: false } bundleReadiness)
+        {
+            return bundleReadiness.Status;
+        }
+
+        return _missingRequiredLadderExtensions.Count > 0
+            ? $"Required ladder extension(s) are missing or do not match the approved hash: {string.Join(", ", _missingRequiredLadderExtensions)}."
+            : "Installed D2RLoader extensions have not been verified against the ladder policy.";
+    }
+
+    private void EnsureSelectedLadder()
+    {
+        var selectedLadder = SelectedLadder;
+        MainWindow.Settings.CurrentProfile.SelectedLadderId = selectedLadder?.Id;
+    }
+
+    private int _ladderPolicyGeneration;
+    private static readonly TimeSpan LobbyPreferenceBudget = TimeSpan.FromSeconds(2);
+    private int _ladderRegionsGeneration;
+    private Guid? _ladderRegionsLadderId;
+    private IReadOnlyList<LobbyRegionResponse> _ladderRegions = [];
+    private IReadOnlyDictionary<string, double?> _ladderRegionPings = new Dictionary<string, double?>();
+    private IReadOnlyList<LobbyAdminServerResponse>? _ladderAdminServers;
+    private bool _isRefreshingRegionControls;
+
+    /// <summary>Never throws: the region picker is optional and must not disturb the ladder refresh.</summary>
+    private async Task RefreshLadderRegionsAsync(bool retest = false)
+    {
+        var generation = ++_ladderRegionsGeneration;
+        var ladder = SelectedLadder;
+        if (ladder is null)
+        {
+            _ladderRegionsLadderId = null;
+            _ladderRegions = [];
+            _ladderAdminServers = null;
+            ShowLadderRegions();
+            return;
+        }
+
+        try
+        {
+            var regions = await _apiHttpClient.GetLobbyRegionsAsync(ladder.Id);
+            if (generation != _ladderRegionsGeneration) return;
+            if (_ladderRegionsLadderId != ladder.Id) _ladderAdminServers = null;
+            _ladderRegionsLadderId = ladder.Id;
+            _ladderRegions = regions;
+            _ladderRegionPings = RegionPingService.Shared.GetLastKnown(regions);
+            ShowLadderRegions();
+            if (regions.Count == 0) return;
+
+            var adminServers = LoadLobbyAdminServersAsync(ladder.Id);
+            RetestRegionsButton.IsEnabled = false;
+            RetestRegionsButton.Content = "Testing...";
+            try
+            {
+                var pings = await RegionPingService.Shared.MeasureAsync(regions, retest);
+                if (generation != _ladderRegionsGeneration) return;
+                _ladderRegionPings = pings;
+                ShowLadderRegions();
+            }
+            finally
+            {
+                RetestRegionsButton.IsEnabled = true;
+                RetestRegionsButton.Content = "Re-test";
+            }
+
+            var servers = await adminServers;
+            if (generation != _ladderRegionsGeneration) return;
+            _ladderAdminServers = servers;
+            ShowLadderServerPin();
+        }
+        catch (Exception exception)
+        {
+            if (generation != _ladderRegionsGeneration) return;
+            _ladderRegionsLadderId = null;
+            _ladderRegions = [];
+            _ladderAdminServers = null;
+            ShowLadderRegions();
+            LaunchDiagnostics.LogException("Failed to load lobby regions", exception);
+        }
+    }
+
+    private async Task<IReadOnlyList<LobbyAdminServerResponse>?> LoadLobbyAdminServersAsync(
+        Guid ladderId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await _apiHttpClient.GetLobbyAdminServersAsync(ladderId, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            LaunchDiagnostics.Log($"Lobby admin servers unavailable: {exception.Message}");
+            return null;
+        }
+    }
+
+    private void ShowLadderRegions()
+    {
+        if (SelectedLadder is not { } ladder || _ladderRegionsLadderId != ladder.Id || _ladderRegions.Count == 0)
+        {
+            LadderRegionsItemsControl.ItemsSource = null;
+            LadderRegionsPanel.IsVisible = false;
+            LadderServerPinPanel.IsVisible = false;
+            return;
+        }
+
+        var stored = GetStoredLadderRegions(ladder.Id);
+        var selected = LobbyRegionSelection.Effective(_ladderRegions, _ladderRegionPings, stored);
+        LadderRegionsItemsControl.ItemsSource = _ladderRegions
+            .Select(region => new LobbyRegionChoice
+            {
+                Id = region.Id,
+                Name = region.Name,
+                IsAvailable = region.Available,
+                IsMeasured = _ladderRegionPings.ContainsKey(region.Id),
+                PingMs = _ladderRegionPings.GetValueOrDefault(region.Id),
+                IsSelected = selected.Contains(region.Id),
+                CanToggle = !(selected.Count == 1 && selected.Contains(region.Id))
+            })
+            .ToArray();
+        var isCustom = LobbyRegionSelection.IsCustom(_ladderRegions, stored);
+        LadderRegionsModeText.Text = isCustom
+            ? "Custom selection"
+            : $"Automatic: the {LobbyRegionSelection.AutomaticRegionCount} fastest regions";
+        UseFastestRegionsButton.IsVisible = isCustom;
+        LadderRegionsPanel.IsVisible = true;
+        ShowLadderServerPin();
+    }
+
+    private void ShowLadderServerPin()
+    {
+        if (_ladderAdminServers is null || !LadderRegionsPanel.IsVisible || SelectedLadder is not { } ladder)
+        {
+            LadderServerPinPanel.IsVisible = false;
+            return;
+        }
+
+        var regionNames = _ladderRegions
+            .GroupBy(region => region.Id, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First().Name, StringComparer.Ordinal);
+        var choices = new List<LobbyServerChoice> { LobbyServerChoice.Automatic };
+        choices.AddRange(_ladderAdminServers.Select(server => LobbyServerChoice.From(server, regionNames)));
+        var pinned = GetPinnedLadderServer(ladder.Id);
+        var current = LadderServerPinComboBox.ItemsSource as IReadOnlyList<LobbyServerChoice>;
+        _isRefreshingRegionControls = true;
+        try
+        {
+            if (current is null || !current.Select(choice => (choice.Id, choice.Label))
+                    .SequenceEqual(choices.Select(choice => (choice.Id, choice.Label))))
+            {
+                LadderServerPinComboBox.ItemsSource = choices;
+                current = choices;
+            }
+
+            LadderServerPinComboBox.SelectedItem = current.FirstOrDefault(choice => choice.Id == pinned) ?? current[0];
+        }
+        finally
+        {
+            _isRefreshingRegionControls = false;
+        }
+
+        LadderServerPinPanel.IsVisible = true;
+    }
+
+    private async void OnLadderRegionSelectionChanged(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not CheckBox { DataContext: LobbyRegionChoice choice } checkBox
+            || SelectedLadder is not { } ladder
+            || _ladderRegionsLadderId != ladder.Id)
+        {
+            return;
+        }
+
+        var selected = LobbyRegionSelection.Effective(
+            _ladderRegions, _ladderRegionPings, GetStoredLadderRegions(ladder.Id));
+        var next = LobbyRegionSelection.Toggle(selected, choice.Id, checkBox.IsChecked == true);
+        if (next is null)
+        {
+            checkBox.IsChecked = true;
+            return;
+        }
+
+        var profile = MainWindow.Settings.CurrentProfile;
+        profile.SelectedLadderRegions ??= [];
+        profile.SelectedLadderRegions[ladder.Id.ToString("N")] = next;
+        ShowLadderRegions();
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private async void OnUseFastestRegionsClick(object? sender, RoutedEventArgs e)
+    {
+        if (SelectedLadder is not { } ladder) return;
+        MainWindow.Settings.CurrentProfile.SelectedLadderRegions?.Remove(ladder.Id.ToString("N"));
+        ShowLadderRegions();
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private async void OnRetestRegionsClick(object? sender, RoutedEventArgs e)
+    {
+        await RefreshLadderRegionsAsync(retest: true);
+    }
+
+    private async void OnLadderServerPinSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_isRefreshingRegionControls
+            || LadderServerPinComboBox.SelectedItem is not LobbyServerChoice choice
+            || SelectedLadder is not { } ladder)
+        {
+            return;
+        }
+
+        var profile = MainWindow.Settings.CurrentProfile;
+        profile.PinnedLadderServers ??= [];
+        var key = ladder.Id.ToString("N");
+        if (choice.Id is null)
+        {
+            if (!profile.PinnedLadderServers.Remove(key)) return;
+        }
+        else
+        {
+            if (profile.PinnedLadderServers.GetValueOrDefault(key) == choice.Id) return;
+            profile.PinnedLadderServers[key] = choice.Id;
+        }
+
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
+    private static List<string>? GetStoredLadderRegions(Guid ladderId)
+    {
+        var selections = MainWindow.Settings.CurrentProfile.SelectedLadderRegions ??= [];
+        return selections.GetValueOrDefault(ladderId.ToString("N"));
+    }
+
+    private static string? GetPinnedLadderServer(Guid ladderId)
+    {
+        var pins = MainWindow.Settings.CurrentProfile.PinnedLadderServers ??= [];
+        return pins.GetValueOrDefault(ladderId.ToString("N"));
+    }
+
+    /// <summary>
+    /// The lobby preference handed to the plugin. Bounded so it never holds the
+    /// launch up for long, and any failure just leaves both values empty.
+    /// </summary>
+    private async Task<(IReadOnlyList<string> RegionIds, string ServerId)> ResolveLobbyPreferenceAsync(LadderResponse ladder)
+    {
+        try
+        {
+            using var budget = new CancellationTokenSource(LobbyPreferenceBudget);
+            var pinned = GetPinnedLadderServer(ladder.Id);
+            var adminServers = string.IsNullOrWhiteSpace(pinned)
+                ? Task.FromResult<IReadOnlyList<LobbyAdminServerResponse>?>(null)
+                : LoadLobbyAdminServersAsync(ladder.Id, budget.Token);
+
+            IReadOnlyList<string> regionIds = [];
+            try
+            {
+                var regions = _ladderRegionsLadderId == ladder.Id
+                    ? _ladderRegions
+                    : await _apiHttpClient.GetLobbyRegionsAsync(ladder.Id, budget.Token);
+                if (regions.Count > 0)
+                {
+                    IReadOnlyDictionary<string, double?> pings;
+                    try
+                    {
+                        pings = await RegionPingService.Shared.MeasureAsync(regions).WaitAsync(budget.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        pings = RegionPingService.Shared.GetLastKnown(regions);
+                    }
+
+                    var selected = LobbyRegionSelection.Effective(regions, pings, GetStoredLadderRegions(ladder.Id));
+                    regionIds = LobbyRegionSelection.OrderForLaunch(selected, regions, pings);
+                }
+            }
+            catch (Exception exception)
+            {
+                LaunchDiagnostics.Log($"Lobby regions unavailable at launch: {exception.Message}");
+            }
+
+            var serverId = string.Empty;
+            try
+            {
+                if (await adminServers is { } servers && servers.Any(server => server.Id == pinned))
+                    serverId = pinned!;
+            }
+            catch (OperationCanceledException)
+            {
+                LaunchDiagnostics.Log("Lobby admin servers did not answer in time; the server pin is skipped.");
+            }
+
+            LaunchDiagnostics.Log($"Lobby preference: regions [{string.Join(",", regionIds)}], server \"{serverId}\".");
+            return (regionIds, serverId);
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.LogException("Failed to resolve the lobby region preference", exception);
+            return ([], string.Empty);
+        }
+    }
+
+    private void ShowLadderBundleReadiness(LadderBundleReadiness readiness)
+    {
+        LadderBundleProblemsPanel.Children.Clear();
+        LadderBundleProblemsPanel.IsVisible = readiness.Problems.Count > 0;
+        LadderBundleStatusText.Text = readiness.Problems.Count == 0
+            ? readiness.Status
+            : !readiness.IsInstalled && readiness.CanRepair
+                ? "Ladder package needs to be downloaded."
+                : readiness.CanRepair
+                    ? "Ladder package needs attention. Update it before launching."
+                    : "Ladder launch is blocked. Resolve the issues below.";
+
+        var categories = new[]
+        {
+            (Suffix: " was modified after installation.", Title: "Modified files"),
+            (Suffix: " is missing.", Title: "Missing files"),
+            (Suffix: " is not declared by the signed ladder package.", Title: "Files outside the signed package"),
+            (Suffix: " needs to be removed from the active mod folder.", Title: "Files to remove from the active mod folder"),
+            (Suffix: " needs to be downloaded or updated.", Title: "Extensions to download or update")
+        };
+        var groups = readiness.Problems.Select(problem =>
+        {
+            var category = categories.FirstOrDefault(candidate => problem.EndsWith(candidate.Suffix, StringComparison.Ordinal));
+            var label = category.Suffix is null
+                ? problem
+                : Path.GetFileName(problem[..^category.Suffix.Length].Replace('\\', '/'));
+            return new { Title = category.Title ?? "Other requirements", Label = label, Detail = problem };
+        }).GroupBy(problem => problem.Title);
+
+        foreach (var group in groups)
+        {
+            var section = new StackPanel { Spacing = 4 };
+            section.Children.Add(new TextBlock
+            {
+                Text = $"{group.Key} ({group.Count()})",
+                FontWeight = FontWeight.SemiBold,
+                TextWrapping = TextWrapping.Wrap
+            });
+            foreach (var problem in group)
+            {
+                var row = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), ColumnSpacing = 8 };
+                row.Children.Add(new TextBlock { Text = "•", Classes = { "muted" } });
+                var label = new TextBlock { Text = problem.Label, TextWrapping = TextWrapping.Wrap, Classes = { "muted" } };
+                ToolTip.SetTip(label, problem.Detail);
+                Grid.SetColumn(label, 1);
+                row.Children.Add(label);
+                section.Children.Add(row);
+            }
+            LadderBundleProblemsPanel.Children.Add(section);
+        }
+    }
+
+    private async Task RefreshLadderExtensionPolicyAsync()
+    {
+        var generation = ++_ladderPolicyGeneration;
+        _ladderPolicyVerified = false;
+        _ladderAction = LadderAction.Blocked;
+        _missingRequiredLadderExtensions = [];
+        _ladderBundleReadiness = null;
+        var ladder = SelectedLadder;
+        LadderBundleProblemsPanel.Children.Clear();
+        LadderBundleProblemsPanel.IsVisible = false;
+        UnapprovedLadderExtensionsSummaryBanner.IsVisible = false;
+        UnapprovedLadderExtensionsBanner.IsVisible = false;
+        if (ladder is null)
+        {
+            _ladderExtensionChoices = [];
+            _missingRequiredLadderExtensions = [];
+            AllowedLadderPluginsItemsControl.ItemsSource = null;
+            AllowedLadderPatchesItemsControl.ItemsSource = null;
+            LadderExtensionPolicyStatusText.Text = "Not Yet Available";
+            LadderBundleStatusText.Text = "No signed ladder package is active.";
+            _ladderAction = LadderAction.Blocked;
+            UnapprovedLadderExtensionsBanner.IsVisible = false;
+            UnapprovedLadderExtensionsSummaryBanner.IsVisible = false;
+            return;
+        }
+
+        LadderExtensionPolicyStatusText.Text = "Checking installed D2RLoader extensions...";
+        LadderBundleStatusText.Text = "Checking the signed ladder package...";
+        try
+        {
+            var readiness = await _ladderBundleService.GetReadinessAsync(
+                MainWindow.Settings.CurrentProfile.InstallDirectory,
+                ladder.ActiveBundle,
+                allowedExtensions: ladder.AllowedExtensions,
+                selectedExtensionIds: GetEffectiveSelectedLadderExtensionIds(ladder));
+            if (generation != _ladderPolicyGeneration) return;
+            _ladderBundleReadiness = readiness;
+            ShowLadderBundleReadiness(readiness);
+
+            var approvals = MapApprovals(ladder);
+            var preview = await D2RLoaderService.PreviewLadderPolicyAsync(
+                MainWindow.Settings.CurrentProfile.InstallDirectory,
+                approvals);
+            if (generation != _ladderPolicyGeneration) return;
+            var selectedIds = GetEffectiveSelectedLadderExtensionIds(ladder);
+            _ladderExtensionChoices = preview.ApprovedExtensions
+                .Select(state =>
+                {
+                    var isProvidedByLauncher = !state.IsInstalled
+                                               && (ladder.AllowedExtensions.Any(extension => extension.Id == state.Approval.Id
+                                                       && LadderOptionalExtensionService.CanDownload(extension))
+                                                   || LadderBundleService.CanSupplyApproval(
+                                                       ladder.ActiveBundle,
+                                                       state.Approval.FileName,
+                                                       state.Approval.Sha256,
+                                                       state.Approval.Kind)
+                                                   || (state.Approval.Kind == D2RLoaderExtensionKind.Plugin
+                                                       && ChatRelayConfigService.CanSupplyApprovedPlugin(
+                                                       state.Approval.FileName,
+                                                       state.Approval.Sha256)));
+                    return new LadderExtensionChoice
+                    {
+                        ApprovalId = state.Approval.Id,
+                        Name = state.Approval.Name,
+                        FileName = state.Approval.FileName,
+                        Kind = state.Approval.Kind,
+                        Version = state.Version ?? ladder.ActiveBundle?.Files.FirstOrDefault(file =>
+                            string.Equals(file.FileName, state.Approval.FileName, StringComparison.OrdinalIgnoreCase)
+                            && string.Equals(file.Sha256, state.Approval.Sha256, StringComparison.OrdinalIgnoreCase))?.Version,
+                        IsRequired = state.Approval.IsRequired,
+                        IsInstalled = state.IsInstalled,
+                        IsProvidedByLauncher = isProvidedByLauncher,
+                        IsLadderDisabled = state.IsLadderDisabled,
+                        IsSelected = (state.IsInstalled || isProvidedByLauncher)
+                                     && selectedIds.Contains(state.Approval.Id)
+                    };
+                })
+                .ToArray();
+            AllowedLadderPluginsItemsControl.ItemsSource = _ladderExtensionChoices
+                .Where(choice => choice.Kind == D2RLoaderExtensionKind.Plugin)
+                .ToArray();
+            AllowedLadderPatchesItemsControl.ItemsSource = _ladderExtensionChoices
+                .Where(choice => choice.Kind == D2RLoaderExtensionKind.Patch)
+                .ToArray();
+
+            _missingRequiredLadderExtensions = _ladderExtensionChoices
+                .Where(choice => choice.IsRequired && !choice.IsAvailable)
+                .Select(choice => choice.Name)
+                .ToArray();
+            var requiredCount = approvals.Count(approval => approval.IsRequired);
+            var optionalCount = approvals.Count - requiredCount;
+            LadderExtensionPolicyStatusText.Text = approvals.Count == 0
+                ? "No D2RLoader plugins or patches are approved for this ladder. All installed extensions will be disabled."
+                : _missingRequiredLadderExtensions.Count > 0
+                    ? "Ladder launch is blocked. Required extensions need attention below."
+                    : $"{requiredCount} required and {optionalCount} optional extension(s). Required extensions are enabled automatically; select any optional extensions you want to use.";
+            var hasUnapprovedExtensions = preview.UnapprovedExtensions.Count > 0;
+            UnapprovedLadderExtensionsBanner.IsVisible = hasUnapprovedExtensions;
+            var policyWarnings = new List<string>();
+            if (_missingRequiredLadderExtensions.Count > 0)
+            {
+                policyWarnings.Add(
+                    "Required extensions to install or update:" + Environment.NewLine
+                    + string.Join(Environment.NewLine, _missingRequiredLadderExtensions.Select(name => $"• {name}")));
+            }
+
+            if (hasUnapprovedExtensions)
+            {
+                var extensionLabel = preview.UnapprovedExtensions.Count == 1 ? "extension is" : "extensions are";
+                policyWarnings.Add(
+                    $"{preview.UnapprovedExtensions.Count} installed {extensionLabel} not approved for this ladder and will be disabled for launch. Expand the policy details to review them.");
+            }
+            UnapprovedLadderExtensionsSummaryBanner.IsVisible = policyWarnings.Count > 0;
+            UnapprovedLadderExtensionsSummaryText.Text = string.Join(Environment.NewLine + Environment.NewLine, policyWarnings);
+            var pendingUnapproved = preview.UnapprovedExtensions
+                .Where(extension => !extension.IsLadderDisabled)
+                .Select(extension => extension.FileName)
+                .ToArray();
+            var alreadyDisabled = preview.UnapprovedExtensions
+                .Where(extension => extension.IsLadderDisabled)
+                .Select(extension => extension.FileName)
+                .ToArray();
+            UnapprovedLadderExtensionsText.Text = string.Join(
+                Environment.NewLine + Environment.NewLine,
+                new[]
+                {
+                    pendingUnapproved.Length == 0
+                        ? null
+                        : "Will be disabled before launch:" + Environment.NewLine
+                          + string.Join(Environment.NewLine, pendingUnapproved.Select(name => $"• {name}")),
+                    alreadyDisabled.Length == 0
+                        ? null
+                        : "Already disabled for ladder:" + Environment.NewLine
+                          + string.Join(Environment.NewLine, alreadyDisabled.Select(name => $"• {name}"))
+                }.OfType<string>());
+            _ladderPolicyVerified = _missingRequiredLadderExtensions.Count == 0
+                                    && (_ladderBundleReadiness is { IsReady: true }
+                                        || _ladderBundleReadiness is { CanRepair: true });
+            _ladderAction = ResolveLadderAction();
+        }
+        catch (Exception ex)
+        {
+            if (generation != _ladderPolicyGeneration) return;
+            _ladderExtensionChoices = [];
+            _missingRequiredLadderExtensions = [];
+            AllowedLadderPluginsItemsControl.ItemsSource = null;
+            AllowedLadderPatchesItemsControl.ItemsSource = null;
+            LadderExtensionPolicyStatusText.Text = "Could not verify installed D2RLoader extensions.";
+            LadderBundleStatusText.Text = "Could not verify the signed ladder package.";
+            _ladderAction = LadderAction.Blocked;
+            UnapprovedLadderExtensionsBanner.IsVisible = true;
+            UnapprovedLadderExtensionsSummaryBanner.IsVisible = true;
+            UnapprovedLadderExtensionsSummaryText.Text =
+                "Extension verification failed. Ladder launch remains blocked until the installed extensions can be checked.";
+            UnapprovedLadderExtensionsText.Text =
+                "Ladder launch will remain blocked until installed extensions can be verified.";
+            LaunchDiagnostics.LogException("Failed to preview ladder extension policy", ex);
+        }
+
+        RefreshInstallDirectoryState();
+    }
+
+    /// <summary>
+    /// Download when nothing is installed, Update when what is installed is not
+    /// the revision the ladder is running, Play only when readiness has verified
+    /// every file. Blocked covers the cases nothing on this machine can fix.
+    /// </summary>
+    private LadderAction ResolveLadderAction()
+    {
+        if (SelectedLadder?.ActiveBundle is null || _ladderBundleReadiness is null)
+        {
+            return LadderAction.Blocked;
+        }
+        if (_ladderBundleReadiness.IsReady && _missingRequiredLadderExtensions.Count == 0)
+        {
+            return _ladderSchedule?.IsLive(SelectedLadder) == true ? LadderAction.Play : LadderAction.Waiting;
+        }
+        if (!_ladderBundleReadiness.CanRepair)
+        {
+            return LadderAction.Blocked;
+        }
+
+        if (_ladderBundleReadiness.IsInstalled) return LadderAction.Update;
+        return LadderBundleService.HasCachedPackage(MainWindow.Settings.CurrentProfile.InstallDirectory, SelectedLadder.ActiveBundle)
+            ? LadderAction.Restore
+            : LadderAction.Download;
+    }
+
+    private bool IsLadderSetupAction(bool isLadderExperience)
+        => isLadderExperience && _ladderAction is LadderAction.Download or LadderAction.Update or LadderAction.Restore;
+
+    private string LadderActionLabel(LadderAction action) => action switch
+    {
+        LadderAction.Download => "Download",
+        LadderAction.Update => "Update",
+        LadderAction.Restore => "Restore Ladder",
+        LadderAction.Play => "Play",
+        LadderAction.Waiting => LadderLaunchSchedule.Countdown(
+            SelectedLadder?.StartDateUtc ?? DateTimeOffset.MinValue, _ladderSchedule?.Now ?? DateTimeOffset.UtcNow),
+        LadderAction.Blocked when _isRefreshingLadders => "Checking ladder...",
+        _ => "Start Ladder"
+    };
+
+    private string LadderActionDescription(LadderAction action) => action switch
+    {
+        LadderAction.Download => "Downloads and verifies everything this ladder requires. This does not start the game.",
+        LadderAction.Update => "Update the required package or apply your optional plugin and patch selections. This does not start the game.",
+        LadderAction.Restore => "Restores and verifies the cached ladder package while preserving your normal installation. This does not start the game.",
+        LadderAction.Play => "Verifies the isolated ladder installation, enforces its extension allowlist, and starts ReimaginedLadder through D2RLoader.",
+        LadderAction.Waiting => "Your package is ready. Play unlocks after the API confirms the ladder is live and the installation is verified again.",
+        _ => _ladderBundleReadiness?.Status ?? "This ladder cannot be played from this installation yet."
+    };
+
+    /// <summary>
+    /// Runs the Download or Update step. It deliberately stops when the install
+    /// is verified: the player sees the button turn into Play and starts the
+    /// game themselves, rather than having a download silently launch D2R.
+    /// </summary>
+    private async Task RunLadderSetupActionAsync()
+    {
+        if (SelectedLadder is not { ActiveBundle: { } bundle } ladder || _isLaunching || _isRunningLadderAction
+            || MainWindow.IsInstallInProgress || MainWindow.IsGameRunning())
+        {
+            return;
+        }
+
+        var isUpdate = _ladderAction == LadderAction.Update;
+        _isRunningLadderAction = true;
+        MainWindow.IsInstallInProgress = true;
+        LadderExtensionsGrid.IsEnabled = false;
+        ActiveLadderComboBox.IsEnabled = false;
+        RefreshInstallDirectoryState();
+        SetLadderSetupProgress(
+            _ladderAction == LadderAction.Restore ? "Restoring the ladder package..."
+                : isUpdate ? "Updating the ladder package..." : "Downloading the ladder package...",
+            null);
+        try
+        {
+            var progress = new Progress<LadderBundleProgress>(update =>
+                SetLadderSetupProgress(update.Message, update.Percentage, update.Details));
+            var installDirectory = MainWindow.Settings.CurrentProfile.InstallDirectory;
+            var selectedIds = GetEffectiveSelectedLadderExtensionIds(ladder);
+            var readiness = await _ladderBundleService.GetReadinessAsync(installDirectory, bundle,
+                allowedExtensions: ladder.AllowedExtensions, selectedExtensionIds: selectedIds);
+            if (readiness.RequiresBundleRepair)
+                await Task.Run(() => _ladderBundleService.InstallOrRepairAsync(installDirectory, bundle, progress));
+            await LadderOptionalExtensionService.SynchronizeAsync(installDirectory!, bundle,
+                ladder.AllowedExtensions, selectedIds,
+                (extension, token) => _apiHttpClient.DownloadOptionalExtensionAsync(ladder.Id, extension, progress, token), progress);
+            readiness = await _ladderBundleService.GetReadinessAsync(installDirectory, bundle,
+                allowedExtensions: ladder.AllowedExtensions, selectedExtensionIds: selectedIds);
+            if (!readiness.IsReady) throw new InvalidOperationException(readiness.Status);
+            Notifications.SendNotification(
+                $"Signed ladder package r{bundle.Revision} is installed and verified. Play becomes available when the ladder is confirmed live.",
+                "Ladder ready");
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.LogException("Failed to install signed ladder package", exception);
+            Notifications.SendNotification(exception.Message, isUpdate ? "Update failed" : "Download failed");
+        }
+        finally
+        {
+            MainWindow.IsInstallInProgress = false;
+            _isRunningLadderAction = false;
+            LadderExtensionsGrid.IsEnabled = true;
+            ActiveLadderComboBox.IsEnabled = true;
+            LadderBundleProgressPanel.IsVisible = false;
+            MainWindow.Instance?.RefreshLocalModState();
+            await RefreshLadderExtensionPolicyAsync();
+        }
+    }
+
+    private void SetLadderSetupProgress(string message, double? percentage, string? details = null)
+    {
+        LadderBundleProgressPanel.IsVisible = true;
+        LadderBundleProgressText.Text = details ?? message;
+        LadderBundleStatusText.Text = message;
+        if (percentage is { } value)
+        {
+            LadderBundleProgressBar.IsIndeterminate = false;
+            LadderBundleProgressBar.Value = Math.Clamp(value, 0, 100);
+        }
+        else
+        {
+            LadderBundleProgressBar.IsIndeterminate = true;
+        }
+    }
+
+    private async void OnActiveLadderSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_isRefreshingLadderControls || ActiveLadderComboBox.SelectedItem is not LadderResponse ladder)
+        {
+            return;
+        }
+
+        MainWindow.Settings.CurrentProfile.SelectedLadderId = ladder.Id;
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+        _ = RefreshLadderRegionsAsync();
+        await RefreshLadderExtensionPolicyAsync();
+        RefreshInstallDirectoryState();
+    }
+
+    private async void OnLadderExtensionSelectionChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_isRunningLadderAction || _isLaunching
+            || sender is not CheckBox { DataContext: LadderExtensionChoice choice } checkBox
+            || !choice.IsAvailable
+            || SelectedLadder is not { } ladder)
+        {
+            return;
+        }
+
+        if (choice.IsRequired)
+        {
+            checkBox.IsChecked = true;
+            return;
+        }
+
+        choice.IsSelected = checkBox.IsChecked ?? false;
+        var selectedIds = GetSelectedLadderExtensionIds(ladder.Id);
+        if (choice.IsSelected)
+        {
+            selectedIds.Add(choice.ApprovalId);
+        }
+        else
+        {
+            selectedIds.Remove(choice.ApprovalId);
+        }
+
+        MainWindow.Settings.CurrentProfile.SelectedLadderExtensions ??= [];
+        MainWindow.Settings.CurrentProfile.SelectedLadderExtensions[ladder.Id.ToString("N")] = selectedIds.ToList();
+        _ladderPolicyGeneration++;
+        _ladderPolicyVerified = false;
+        _ladderAction = LadderAction.Blocked;
+        RefreshInstallDirectoryState();
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+        await RefreshLadderExtensionPolicyAsync();
+    }
+
+    private static IReadOnlyList<LadderExtensionApproval> MapApprovals(LadderResponse ladder)
+    {
+        return (ladder.AllowedExtensions ?? [])
+            .Select(extension => new LadderExtensionApproval(
+                extension.Id,
+                extension.Name,
+                extension.FileName,
+                extension.Sha256,
+                extension.Kind,
+                extension.IsRequired))
+            .ToArray();
+    }
+
+    private static HashSet<Guid> GetEffectiveSelectedLadderExtensionIds(LadderResponse ladder)
+    {
+        var selectedIds = GetSelectedLadderExtensionIds(ladder.Id);
+        selectedIds.UnionWith((ladder.AllowedExtensions ?? [])
+            .Where(extension => extension.IsRequired)
+            .Select(extension => extension.Id));
+        return selectedIds;
+    }
+
+    private static HashSet<Guid> GetSelectedLadderExtensionIds(Guid ladderId)
+    {
+        var selections = MainWindow.Settings.CurrentProfile.SelectedLadderExtensions ??= [];
+        return selections.TryGetValue(ladderId.ToString("N"), out var selected)
+            ? selected.ToHashSet()
+            : [];
+    }
+
+    private void OnOpenLoaderFolderClick(object? sender, RoutedEventArgs e)
+    {
+        OpenFolder(_loaderInventory?.GlobalRoot);
+    }
+
+    private void OnOpenModLoaderFolderClick(object? sender, RoutedEventArgs e)
+    {
+        var path = _loaderInventory?.ModRoot;
+        OpenFolder(Directory.Exists(path) ? path : Path.GetDirectoryName(path));
+    }
+
+    private static void OpenFolder(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            var startInfo = OperatingSystem.IsWindows()
+                ? new ProcessStartInfo("explorer.exe") { UseShellExecute = false }
+                : OperatingSystem.IsMacOS()
+                    ? new ProcessStartInfo("open") { UseShellExecute = false }
+                    : new ProcessStartInfo("xdg-open") { UseShellExecute = false };
+
+            startInfo.ArgumentList.Add(path);
+            Process.Start(startInfo);
+        }
+        catch (Exception ex)
+        {
+            Notifications.SendNotification($"Could not open folder: {ex.Message}", "Warning");
+        }
+    }
+
     private async void OnInstallationTypeChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (InstallationTypeComboBox == null) return;
@@ -217,8 +1811,26 @@ public partial class LaunchView : UserControl
         var newType = (InstallationType)selectedIndex;
         if (MainWindow.Settings.CurrentProfile.Type == newType) return;
 
+        if (!InstallationTypes.IsAvailable(newType))
+        {
+            // The item is disabled, but keyboard navigation can still reach it.
+            InstallationTypeComboBox.SelectedIndex = (int)MainWindow.Settings.CurrentProfile.Type;
+            return;
+        }
+
+        if (newType == InstallationType.Lutris)
+        {
+            // Appends the profile the first time Lutris is picked, so a settings
+            // file written before the type existed keeps its other profiles put.
+            MainWindow.Settings.EnsureLutrisProfile();
+        }
+
         // Switch profile
         MainWindow.Settings.SelectedProfileIndex = selectedIndex;
+        if (MainWindow.Settings.CurrentProfile.Type is InstallationType.D2RMM or InstallationType.Lutris)
+        {
+            MainWindow.Settings.CurrentProfile.LaunchExperience = LaunchExperience.Offline;
+        }
         BackupService.ApplyDefaultSettings();
         await SettingsManager.SaveAsync(MainWindow.Settings);
 
@@ -231,15 +1843,149 @@ public partial class LaunchView : UserControl
         RefreshInstallDirectoryState();
     }
 
+    private void RefreshLutrisGameControls(InstallationProfile profile)
+    {
+        if (!_lutrisGamesLoaded)
+        {
+            _lutrisGamesLoaded = true;
+            _ = LoadLutrisGamesAsync();
+            return;
+        }
+
+        _isRefreshingLutrisControls = true;
+        try
+        {
+            LutrisGameComboBox.ItemsSource = _lutrisGames;
+            LutrisGameComboBox.SelectedItem = _lutrisGames
+                .FirstOrDefault(game => game.Id == profile.LutrisGameId);
+        }
+        finally
+        {
+            _isRefreshingLutrisControls = false;
+        }
+
+        if (!LutrisService.IsAvailable())
+        {
+            LutrisGameStatusText.Text = "Lutris was not found on PATH.";
+        }
+        else if (_lutrisGames.Count == 0)
+        {
+            LutrisGameStatusText.Text = "No installed Lutris games were found.";
+        }
+        else if (profile.LutrisGameId is { } gameId)
+        {
+            // The command itself is shown under Advanced launch details.
+            LutrisGameStatusText.Text = LutrisGameComboBox.SelectedItem is null
+                ? $"The saved Lutris game (id {gameId}) is no longer installed. Pick it again."
+                : InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory)
+                    ? "Diablo II: Resurrected detected. Saves and backups follow this game's Lutris prefix."
+                    : "This Lutris game has no D2R.exe beside it. Pick the entry that runs Diablo II: Resurrected.";
+        }
+        else
+        {
+            LutrisGameStatusText.Text = "Select the Lutris game that runs Diablo II: Resurrected.";
+        }
+    }
+
+    private async Task LoadLutrisGamesAsync(bool forceRefresh = false)
+    {
+        _lutrisGames = await LutrisService.GetInstalledGamesAsync(forceRefresh);
+
+        if (MainWindow.Settings.CurrentProfile.Type == InstallationType.Lutris)
+        {
+            RefreshLutrisGameControls(MainWindow.Settings.CurrentProfile);
+        }
+    }
+
+    /// <summary>
+    /// Lutris reloads the game config on every launch, so the options have to
+    /// be written immediately before the game starts.
+    /// </summary>
+    private void ApplyLutrisLaunchOptions(InstallationProfile profile)
+    {
+        SetLaunchStatus("Applying launch options to Lutris...");
+
+        if (!LutrisArgumentsService.ApplyToGameConfig(profile.LutrisGameSlug, profile))
+        {
+            Notifications.SendNotification(
+                "Could not write the launch options into the Lutris game configuration. "
+                + "The game starts with whatever arguments are already set in Lutris.",
+                "Warning");
+        }
+    }
+
+    private async void OnRefreshLutrisGamesClick(object? sender, RoutedEventArgs e)
+    {
+        RefreshLutrisGamesButton.IsEnabled = false;
+        LutrisGameStatusText.Text = "Reading the Lutris game list...";
+        try
+        {
+            await LoadLutrisGamesAsync(forceRefresh: true);
+        }
+        finally
+        {
+            RefreshLutrisGamesButton.IsEnabled = true;
+        }
+    }
+
+    private async void OnLutrisGameChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_isRefreshingLutrisControls) return;
+        if (LutrisGameComboBox.SelectedItem is not LutrisGame game) return;
+
+        var profile = MainWindow.Settings.CurrentProfile;
+        if (profile.Type != InstallationType.Lutris) return;
+
+        var isDifferentGame = profile.LutrisGameId != game.Id;
+
+        profile.LutrisGameId = game.Id;
+        profile.LutrisGameSlug = game.Slug;
+        profile.LutrisGameName = game.Name;
+
+        // The selected game is the only source of the path, so it always
+        // replaces the previous one - picking a non-D2R game must fail
+        // validation rather than keep a stale valid path.
+        var detectedDirectory = LutrisService.TryResolveInstallDirectory(game.Slug);
+        profile.InstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(detectedDirectory);
+        profile.IsInstallDirectoryValidated =
+            InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory);
+        LaunchDiagnostics.Log(
+            $"Lutris game '{game.Slug}' resolved to '{profile.InstallDirectory ?? "<none>"}' "
+            + $"(valid={profile.IsInstallDirectoryValidated}).");
+
+        // Only on a real switch: re-importing the selected game would wipe
+        // options set in Settings since.
+        if (isDifferentGame)
+        {
+            LutrisArgumentsService.ImportInto(profile, LutrisService.TryResolveGameArgs(game.Slug));
+        }
+
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+
+        if (TopLevel.GetTopLevel(this) is MainWindow mainWindow)
+        {
+            mainWindow.RefreshLocalModState();
+            await mainWindow.RefreshUpdateStateAsync();
+        }
+
+        RefreshInstallDirectoryState();
+    }
+
     private async void OnLocateSteamClick(object? sender, RoutedEventArgs e)
     {
         if (TopLevel.GetTopLevel(this) is Window window)
         {
             var files = await window.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
             {
-                Title = "Locate Steam.exe",
+                Title = OperatingSystem.IsLinux() ? "Locate Steam or Flatpak executable" : "Locate Steam.exe",
                 AllowMultiple = false,
-                FileTypeFilter = [new FilePickerFileType("Steam Executable") { Patterns = ["Steam.exe"] }]
+                FileTypeFilter =
+                [
+                    new FilePickerFileType("Steam Executable")
+                    {
+                        Patterns = OperatingSystem.IsLinux() ? ["steam", "flatpak"] : ["Steam.exe"]
+                    }
+                ]
             });
 
             if (files.Count > 0)
@@ -253,6 +1999,81 @@ public partial class LaunchView : UserControl
         }
     }
 
+    /// <summary>Registers native Linux Steam shortcuts and reports optional controller-layout configuration results.</summary>
+    private async void OnSetupSteamShortcutsClick(object? sender, RoutedEventArgs e)
+    {
+        if (_isSteamSetupRunning || _isLaunching || MainWindow.IsInstallInProgress || SteamGameHandoff.IsLaunchPendingOrRunning) return;
+        var profile = MainWindow.Settings.CurrentProfile;
+        if (GameLauncherService.IsSteamFlatpakInstall(profile.InstallDirectory)) return;
+        if (SteamSetupAccountComboBox.SelectedItem is not SteamSetupAccount account)
+        {
+            SteamSetupStatusText.Text = "Select your Steam account. If none are listed, sign into native Steam first, then exit Steam and return here.";
+            return;
+        }
+        _isSteamSetupRunning = true;
+        SteamSetupShortcutsButton.IsEnabled = false;
+        StartGameButton.IsEnabled = false;
+        SteamSetupStatusText.Text = "Setting up Steam shortcuts...";
+        try
+        {
+            var root = GameLauncherService.GetSteamInstallPath(installDirectory: profile.InstallDirectory)
+                ?? throw new InvalidOperationException("Native Steam could not be found.");
+            await SettingsManager.SaveAsync(MainWindow.Settings);
+            var resetControllerLayout = SteamResetControllerLayoutCheckBox.IsVisible && SteamResetControllerLayoutCheckBox.IsChecked == true;
+            var result = await Task.Run(() => SteamGameHandoff.InstallFromLauncher(root, account.UserId, resetControllerLayout));
+            SteamSetupStatusText.Text = "Setup complete.\n\nClose this launcher and restart Steam, then open Diablo II: Reimagined (Native Launcher). "
+                + (result.ControllerLayoutWarning ?? (resetControllerLayout
+                    ? "The supported trackpad layout was requested in place of the saved layout."
+                    : "Saved layouts are preserved; the supported trackpad layout is selected for an unset layout."))
+                + " The helper remains available as a compatibility fallback.";
+            RefreshInstallDirectoryState();
+        }
+        catch (Exception exception)
+        {
+            SteamSetupStatusText.Text = "Setup failed: " + exception.Message;
+            LaunchDiagnostics.LogException("Steam shortcut setup failed", exception);
+        }
+        finally
+        {
+            _isSteamSetupRunning = false;
+            RefreshInstallDirectoryState();
+        }
+    }
+
+    /// <summary>Persists the selected Steam compatibility route and refreshes launch availability.</summary>
+    private async void OnSteamHelperFallbackChanged(object? sender, RoutedEventArgs e)
+    {
+        var profile = MainWindow.Settings.CurrentProfile;
+        var enabled = SteamHelperFallbackCheckBox.IsChecked == true;
+        if (profile.UseSteamHelperFallback == enabled) return;
+        profile.UseSteamHelperFallback = enabled;
+        try { await SettingsManager.SaveAsync(MainWindow.Settings); }
+        catch (Exception exception) { Notifications.SendNotification("Could not save the Steam fallback setting: " + exception.Message, "Warning"); }
+        RefreshInstallDirectoryState();
+    }
+
+    /// <summary>Persists the game-only LSFG option and refreshes launch availability.</summary>
+    private async void OnLsfgChanged(object? sender, RoutedEventArgs e)
+    {
+        var profile = MainWindow.Settings.CurrentProfile;
+        var enabled = EnableLsfgCheckBox.IsChecked == true;
+        if (profile.EnableLsfg == enabled) return;
+        profile.EnableLsfg = enabled;
+        try { await SettingsManager.SaveAsync(MainWindow.Settings); }
+        catch (Exception exception)
+        {
+            Notifications.SendNotification("Could not save the LSFG setting: " + exception.Message, "Warning");
+        }
+        RefreshInstallDirectoryState();
+    }
+    /// <summary>Retries automatic detection of the Proton tool used by the official Steam installation.</summary>
+    private async void OnLocateProtonClick(object? sender, RoutedEventArgs e)
+    {
+        GameLauncherService.TryDetectD2RProtonExecutable(MainWindow.Settings.CurrentProfile);
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+        RefreshInstallDirectoryState();
+    }
+
 
     private void SetLaunchStatus(string status, bool isVisible = true)
     {
@@ -262,6 +2083,16 @@ public partial class LaunchView : UserControl
 
     private async void OnRunClick(object? sender, RoutedEventArgs e)
     {
+        // Download and Update are setup, not launch. They share the button so
+        // there is one obvious thing to click, but they must never start D2R -
+        // the player decides to play once the button says Play.
+        if (MainWindow.Settings.CurrentProfile.LaunchExperience == LaunchExperience.Ladder
+            && _ladderAction is LadderAction.Download or LadderAction.Update or LadderAction.Restore)
+        {
+            await RunLadderSetupActionAsync();
+            return;
+        }
+
         await StartGameAsync();
     }
 
@@ -273,49 +2104,170 @@ public partial class LaunchView : UserControl
         LaunchDiagnostics.ResetSession();
         LaunchDiagnostics.Log("Launch/Install button clicked.");
 
-        if (_isLaunching)
+        if (_isLaunching || _isSteamSetupRunning || _isRunningLadderAction || MainWindow.IsInstallInProgress
+            || SteamGameHandoff.IsLaunchPendingOrRunning || MainWindow.IsGameRunning())
         {
             LaunchDiagnostics.Log("Action ignored because an action is already in progress.");
             return;
         }
 
         var profile = MainWindow.Settings.CurrentProfile;
-
-        if (!profile.IsInstallDirectoryValidated)
+        if (OperatingSystem.IsLinux() && profile.Type == InstallationType.Steam && profile.EnableLsfg
+            && !GameLauncherService.IsSteamFlatpakInstall(profile.InstallDirectory) && !GameLauncherService.UsesSteamHandoff(profile)
+            && !GameLauncherService.UsesSingleSteamSession(profile))
         {
-            LaunchDiagnostics.Log("Action blocked because install directory is not validated.");
-            Notifications.SendNotification(
-                "Install directory not validated",
-                "Choose the Diablo II: Resurrected folder that contains D2R.exe.");
+            Notifications.SendNotification("Set up Steam shortcuts before using the launcher LSFG option.", "Warning");
             return;
         }
-
-        if (!MainWindow.IsLocalModDetected)
+        SteamGameHandoff? reservation = null;
+        try
         {
-            LaunchDiagnostics.Log("Action blocked because the local mod was not detected.");
-            Notifications.SendNotification(
-                "D2R Reimagined mod not detected",
-                "Install the mod in the selected directory before launching/installing.");
-
-            if (MainWindow.Instance is { } mainWindow)
-            {
-                await mainWindow.PromptInstallForMissingModAsync();
-            }
-
+            if (GameLauncherService.UsesSteamHandoff(profile) || GameLauncherService.UsesSingleSteamSession(profile))
+                reservation = SteamGameHandoff.Reserve();
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            Notifications.SendNotification("A Steam game launch is already pending or running, or could not be reserved. " + exception.Message, "Warning");
             return;
         }
-
-
+        var reservationHandedToWatcher = false;
         _isLaunching = true;
         StartGameButton.IsEnabled = false;
         var actionName = profile.Type == InstallationType.D2RMM ? "Installation" : "Launch";
-        SetLaunchStatus($"Preparing {actionName.ToLower()}...");
-        var progress = new Progress<string>(status => SetLaunchStatus(status));
+        _launchGameToken = null;
+        _launchLadderTicket = null;
+        _launchStatusSessionId = null;
+        // Set once the game process owns the token, so the finally block knows
+        // whether a minted token was abandoned by a failed launch.
+        GameSessionToken? tokenHandedToGame = null;
+        var sessionFileWritten = false;
 
         try
         {
+            if (profile.LaunchExperience == LaunchExperience.Ladder
+                && !await EnsureLadderAuthenticationAsync())
+            {
+                return;
+            }
+
+            if (profile.LaunchExperience == LaunchExperience.Ladder)
+            {
+                if (_isRefreshingLadders) return;
+                var requestedLadderId = SelectedLadder?.Id;
+                await RefreshLadderStateAsync();
+                if (requestedLadderId != SelectedLadder?.Id || _ladderSchedule?.IsLive(SelectedLadder) != true)
+                {
+                    Notifications.SendNotification("The selected ladder has not been confirmed live. Wait for the countdown and live-status check.", "Ladder unavailable");
+                    return;
+                }
+            }
+
+            if (!profile.IsInstallDirectoryValidated)
+            {
+                LaunchDiagnostics.Log("Action blocked because install directory is not validated.");
+                Notifications.SendNotification(
+                    "Install directory not validated",
+                    "Choose the Diablo II: Resurrected folder that contains D2R.exe.");
+                return;
+            }
+
+            if (profile.LaunchExperience != LaunchExperience.Ladder && !MainWindow.IsLocalModDetected)
+            {
+                LaunchDiagnostics.Log("Action blocked because the local mod was not detected.");
+                Notifications.SendNotification(
+                    "D2R Reimagined mod not detected",
+                    "Install the mod in the selected directory before launching/installing.");
+
+                if (MainWindow.Instance is { } mainWindow)
+                {
+                    await mainWindow.PromptInstallForMissingModAsync();
+                }
+
+                return;
+            }
+
+            if (profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder)
+            {
+                await PromptInstallD2RLoaderAsync(profile);
+            }
+
+            if (profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder
+                && !D2RLoaderService.CanUseOnlineExperience(profile, out var loaderUnavailableReason))
+            {
+                LaunchDiagnostics.Log($"D2RLoader launch blocked: {loaderUnavailableReason}");
+                Notifications.SendNotification(loaderUnavailableReason ?? "D2RLoader is unavailable.", "Warning");
+                return;
+            }
+
+            if (profile.LaunchExperience == LaunchExperience.Ladder)
+            {
+                await RefreshLadderExtensionPolicyAsync();
+
+                // The refresh may have found a newer revision than the one this
+                // click was made against. Hand the player the setup step the button
+                // now offers instead of pushing on into a launch that will fail.
+                if (_ladderAction is LadderAction.Download or LadderAction.Update or LadderAction.Restore)
+                {
+                    Notifications.SendNotification(
+                        _ladderAction == LadderAction.Restore
+                            ? "Use Restore Ladder to activate the cached ladder package before playing."
+                            : _ladderAction == LadderAction.Download
+                            ? "This ladder needs its package downloaded first. Use the Download button."
+                            : "This ladder has a newer package. Use the Update button before playing.",
+                        "Ladder setup needed");
+                    return;
+                }
+            }
+
+            if (profile.LaunchExperience == LaunchExperience.Ladder && _ladderSchedule?.IsLive(SelectedLadder) != true)
+            {
+                var unavailableMessage = GetLadderUnavailableMessage();
+                LaunchDiagnostics.Log($"Ladder launch blocked: {unavailableMessage}");
+                Notifications.SendNotification(unavailableMessage, "Warning");
+                return;
+            }
+
+            if (profile.LaunchExperience == LaunchExperience.Ladder && !_ladderPolicyVerified)
+            {
+                var message = GetLadderPolicyUnavailableMessage();
+                LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
+                Notifications.SendNotification(message, "Warning");
+                return;
+            }
+
+            SetLaunchStatus($"Preparing {actionName.ToLower()}...");
+            var progress = new Progress<string>(status => SetLaunchStatus(status));
+
+            // Older launchers wrote account tokens straight into the plugin
+            // configs under mods/, which D2RLoader can hand to joining players.
+            // Blank any that are still there - disabled plugins included -
+            // before anything else reads the install.
+            await GameSessionSecretsService.ScrubPluginConfigsAsync(profile.InstallDirectory);
+
+            // Put the mod back on its normal save folder before anything else
+            // runs. Mod tweaks and the launch backup both resolve the save
+            // directory out of modinfo.json, and every step below here can bail
+            // out early - so leaving the restore until PrepareServerSavesAsync
+            // meant a failed preparation could strand the player's install
+            // pointed at the last ladder's folder, with their own characters
+            // nowhere to be seen. Doing it twice is harmless; it is idempotent.
+            if (!await RestoreNonLadderSaveDirectoryAsync(profile))
+            {
+                SetLaunchStatus($"{actionName} preparation failed.");
+                return;
+            }
+
+            if (!await PrepareD2RLoaderExtensionsAsync(profile, progress))
+            {
+                SetLaunchStatus($"{actionName} preparation failed.");
+                return;
+            }
+
             LaunchDiagnostics.Log("Starting mod tweak preparation.");
-            var prepared = await Task.Run(() => ModTweaksService.PrepareForLaunchAsync(progress));
+            var ladderDisplay = profile.LaunchExperience == LaunchExperience.Ladder && SelectedLadder is { } activeLadder
+                ? new LadderDisplayInfo(activeLadder.Name, activeLadder.StartDateUtc, activeLadder.EndDateUtc)
+                : null;
+            var prepared = await Task.Run(() => ModTweaksService.PrepareForLaunchAsync(progress, ladderDisplay));
             if (!prepared)
             {
                 LaunchDiagnostics.Log("Mod tweak preparation returned false.");
@@ -323,6 +2275,44 @@ public partial class LaunchView : UserControl
                 Notifications.SendNotification($"{actionName} preparation failed. See previous warning for details.", "Warning");
                 return;
             }
+
+            // One game token per launch, shared by every plugin. It is never
+            // the launcher's own account token unless the API predates game
+            // tokens; null means plugins run as if nobody were signed in.
+            if (profile.Type != InstallationType.D2RMM
+                && profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder)
+            {
+                _launchGameToken = await _launcherAuthenticationService.CreateGameTokenAsync();
+                LaunchDiagnostics.Log(_launchGameToken switch
+                {
+                    null => "game token: none for this launch.",
+                    { IsUserTokenFallback: true } => "game token: using the account token (API has no game tokens yet).",
+                    _ => $"game token: minted, expires {_launchGameToken.ExpiresAtUtc:u}."
+                });
+            }
+
+            var gameToken = _launchGameToken?.AccessToken;
+
+            if (!await PrepareServerSavesAsync(profile))
+            {
+                SetLaunchStatus($"{actionName} preparation failed.");
+                return;
+            }
+
+            // After server-saves, and outside it, because global chat is not a
+            // ladder feature: PrepareServerSavesAsync turns everything off for a
+            // non-ladder launch, which is right for the save plugin and the
+            // Discord relay and wrong for a chat room the whole community uses.
+            await ConfigureGlobalChatAsync(profile, gameToken);
+
+            // Outside PrepareServerSavesAsync for the same reason as global chat:
+            // that turns everything off for a non-ladder launch.
+            await ConfigureHardcoreDeathsAsync(profile, gameToken);
+            await ConfigureTradeNotificationsAsync(profile, gameToken);
+            await ConfigureTradePriceCheckAsync(profile, gameToken);
+            await ConfigureReimaginedFeedbackAsync(profile, gameToken);
+            await ConfigureAnnouncementsAsync(profile, gameToken);
+            await ConfigureSupporterPortalsAsync(profile, gameToken);
 
             if (profile.AutomaticBackupsEnabled)
             {
@@ -336,6 +2326,17 @@ public partial class LaunchView : UserControl
                 }
             }
 
+            // Last step before the process starts, so the file holds exactly
+            // what this launch gathered - or is gone when there is nothing to hand
+            // over (offline, D2RMM, signed out).
+            var sessionSecrets = await WriteSessionSecretsAsync(profile);
+            sessionFileWritten = sessionSecrets.Written;
+            if (!sessionSecrets.Proceed)
+            {
+                SetLaunchStatus($"{actionName} preparation failed.");
+                return;
+            }
+
             try
             {
                 if (profile.Type == InstallationType.D2RMM)
@@ -345,24 +2346,46 @@ public partial class LaunchView : UserControl
                 }
                 else
                 {
+                    if (profile.Type == InstallationType.Lutris)
+                    {
+                        ApplyLutrisLaunchOptions(profile);
+                    }
+
                     LaunchDiagnostics.Log("Calling GameLauncherService.LaunchGame.");
-                    SetLaunchStatus("Starting Diablo II: Resurrected...");
-                    var gameProcess = LauncherService.LaunchGame();
+                    SetLaunchStatus(profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder
+                        ? "Starting D2RLoader..."
+                        : "Starting Diablo II: Resurrected...");
+                    var gameProcess = LauncherService.LaunchGame(reservation);
+                    if (gameProcess == null)
+                    {
+                        LaunchDiagnostics.Log("GameLauncherService.LaunchGame did not start a process.");
+                        SetLaunchStatus("Launch failed.");
+                        return;
+                    }
                     LaunchDiagnostics.Log("GameLauncherService.LaunchGame returned without throwing.");
                     SetLaunchStatus($"{actionName} command sent.");
 
-                    if (gameProcess != null && MainWindow.Settings.MinimizeToTray && MainWindow.Instance is { } mainWindow)
+                    string? expectedExePath = null;
+                    if (profile.Type == InstallationType.Steam
+                        || profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder)
                     {
-                        // For Steam launches, pass the actual D2R.exe path so the launcher
-                        // waits for the game process rather than the Steam bootstrapper.
-                        string? expectedExePath = null;
-                        if (profile.Type == InstallationType.Steam)
-                        {
-                            expectedExePath = InstallDirectoryValidator.GetExecutablePath(profile.InstallDirectory);
-                        }
-
-                        _ = mainWindow.MinimizeToTrayAndWaitForExitAsync(gameProcess, expectedExePath);
+                        expectedExePath = LauncherService.GetExpectedGameExecutablePath();
                     }
+
+                    // Lutris hands off to its own wrapper and the exe is commonly
+                    // D2RLoader.exe, so the session is found by path instead of
+                    // waiting on the process the launcher started.
+                    var lutrisGameExePath = profile.Type == InstallationType.Lutris
+                        ? LutrisService.TryResolveGameExePath(profile.LutrisGameSlug)
+                        : null;
+
+                    var steamHandoff = LauncherService.ActiveSteamHandoff;
+                    var minimizeTarget = MainWindow.Settings.MinimizeToTray || (steamHandoff is not null && SteamGameHandoff.IsGamingMode)
+                        ? MainWindow.Instance : null;
+                    tokenHandedToGame = _launchGameToken;
+                    _ = WatchGameExitAsync(gameProcess, expectedExePath, minimizeTarget, lutrisGameExePath, _preparedServerSaves,
+                        profile.InstallDirectory, _launchGameToken, steamHandoff, steamHandoff is null ? reservation : null);
+                    reservationHandedToWatcher = reservation is not null;
                 }
             }
             catch (Exception ex)
@@ -377,8 +2400,26 @@ public partial class LaunchView : UserControl
         }
         finally
         {
+            // A launch that minted a token but never started the game must not
+            // leave it behind, on disk or live on the API.
+            try
+            {
+                if (_launchGameToken is { } abandoned && !ReferenceEquals(abandoned, tokenHandedToGame))
+                {
+                    if (sessionFileWritten)
+                    {
+                        GameSessionSecretsService.Delete(profile.InstallDirectory);
+                    }
+
+                    _ = _launcherAuthenticationService.RevokeGameTokenAsync(abandoned);
+                }
+            }
+            finally
+            {
+                if (!reservationHandedToWatcher) reservation?.Dispose();
+                _isLaunching = false;
+            }
             LaunchDiagnostics.Log($"{actionName} flow completed.");
-            _isLaunching = false;
             await Dispatcher.UIThread.InvokeAsync(async () =>
             {
                 await Task.Delay(1500);
@@ -388,6 +2429,820 @@ public partial class LaunchView : UserControl
                 }
             });
             RefreshInstallDirectoryState();
+        }
+    }
+
+    private async Task<bool> EnsureLadderAuthenticationAsync()
+    {
+        try
+        {
+            if (await _launcherAuthenticationService.GetAccessTokenAsync() is not null)
+            {
+                return true;
+            }
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.LogException("Could not validate the Reimagined API session", exception);
+            Notifications.SendNotification(
+                "The launcher could not validate your D2R Reimagined login. Check your connection and try again.",
+                "Ladder login required");
+            return false;
+        }
+
+        LaunchDiagnostics.Log("Ladder launch blocked because no D2R Reimagined account is signed in.");
+        Notifications.SendNotification(
+            "Sign in with your D2R Reimagined website account before playing on the ladder.",
+            "Ladder login required");
+
+        if (MainWindow.Instance is not { } mainWindow
+            || !await mainWindow.SignInToReimaginedAsync())
+        {
+            return false;
+        }
+
+        return await _launcherAuthenticationService.GetAccessTokenAsync() is not null;
+    }
+
+    /// <summary>
+    /// Writes &lt;install&gt;/reimagined-secrets/session.toml for a signed-in
+    /// Online/Ladder launch, or deletes it for every other launch.
+    /// </summary>
+    /// <returns>
+    /// Proceed is false only for a ladder launch whose file could not be
+    /// written: server-saves would start without its token and ticket, and the
+    /// session would silently fall back to local characters. Written says
+    /// whether a file now exists that a failed launch must clean up.
+    /// </returns>
+    private async Task<(bool Proceed, bool Written)> WriteSessionSecretsAsync(InstallationProfile profile)
+    {
+        var isOnlineLaunch = profile.Type != InstallationType.D2RMM
+                             && profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder;
+        if (!isOnlineLaunch || _launchGameToken is not { } token)
+        {
+            if (!GameSessionSecretsService.Delete(profile.InstallDirectory))
+            {
+                LaunchDiagnostics.Log("session secrets: a previous session file could not be deleted; it stops working once it expires.");
+            }
+
+            return (true, false);
+        }
+
+        var isLadderLaunch = profile.LaunchExperience == LaunchExperience.Ladder;
+        var secrets = new GameSessionSecrets(
+            token.AccessToken,
+            token.ExpiresAtUtc,
+            isLadderLaunch ? _launchLadderTicket : null,
+            isLadderLaunch ? _launchStatusSessionId : null);
+        if (await GameSessionSecretsService.WriteAsync(profile.InstallDirectory, secrets))
+        {
+            return (true, true);
+        }
+
+        GameSessionSecretsService.Delete(profile.InstallDirectory);
+        if (isLadderLaunch)
+        {
+            const string message = "The game session file could not be written next to D2R.exe, so Server Saves would have no account. Check the install folder's permissions and try again.";
+            LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
+            Notifications.SendNotification(message, "Warning");
+            return (false, false);
+        }
+
+        LaunchDiagnostics.Log("session secrets: the session file could not be written; online plugins have no account for this launch.");
+        return (true, false);
+    }
+
+    /// <summary>
+    /// Points the chat-relay plugin at the API for a ladder launch.
+    /// </summary>
+    /// <remarks>
+    /// Never blocks the launch. Chat not reaching Discord costs a convenience;
+    /// refusing to start the game over it would cost the session. Every failure
+    /// here leaves the plugin disabled and says so in the log.
+    ///
+    /// The token decides whose name Discord shows against the messages, because
+    /// the API reads the sender from the token rather than the payload. The
+    /// token is only checked here (signed-in ladder launches only); it is not
+    /// written to chat-relay.toml, and the bundled chat-relay DLL predates the
+    /// session secrets file, so it runs without one.
+    /// </remarks>
+    private async Task ConfigureChatRelayAsync(InstallationProfile profile, string accessToken)
+    {
+        try
+        {
+            // Not approved for this ladder, or the player left it unchecked.
+            // A legitimate outcome: the launch proceeds without the bridge.
+            if (!ChatRelayConfigService.IsPluginInstalled(profile.InstallDirectory))
+            {
+                await ChatRelayConfigService.DisableAsync(profile.InstallDirectory);
+                LaunchDiagnostics.Log("chat-relay is not approved for this ladder; this launch has no Discord chat bridge.");
+                return;
+            }
+
+            var settings = new ChatRelayLaunchSettings(
+                _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority),
+                accessToken);
+            if (!await ChatRelayConfigService.EnableAsync(profile.InstallDirectory, settings))
+            {
+                LaunchDiagnostics.Log("chat-relay: the plugin configuration could not be written; the Discord chat bridge is off for this launch.");
+                return;
+            }
+
+            LaunchDiagnostics.Log("chat-relay configured for the Discord chat bridge.");
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.Log($"chat-relay: configuration failed ({exception.Message}); the Discord chat bridge is off for this launch.");
+        }
+    }
+
+    private async Task ConfigureAnnouncementsAsync(InstallationProfile profile, string? gameToken)
+    {
+        try
+        {
+            await AnnouncementsConfigService.DisableAsync(profile.InstallDirectory);
+            if (!AnnouncementsConfigService.IsEligible(profile.Type, profile.LaunchExperience)) return;
+            if (!AnnouncementsConfigService.IsPluginInstalled(profile.InstallDirectory, profile.LaunchExperience))
+            {
+                var modName = profile.LaunchExperience == LaunchExperience.Ladder
+                    ? ModInstallationPaths.LadderModName : "Reimagined";
+                LaunchDiagnostics.Log($"announcements: {AnnouncementsConfigService.PluginFileName} is missing from mods/{modName}/d2rloader/plugins; in-game announcements are off.");
+                return;
+            }
+            var token = gameToken;
+            var settings = new AnnouncementsLaunchSettings(
+                _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority), token, profile.SelectedLadderId?.ToString());
+            if (!await AnnouncementsConfigService.EnableAsync(profile.InstallDirectory, settings, profile.LaunchExperience))
+                LaunchDiagnostics.Log("announcements: configuration could not be written.");
+            else
+                LaunchDiagnostics.Log($"announcements configured for {profile.LaunchExperience} at {settings.ApiBaseUrl}.");
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.Log($"announcements: configuration failed ({exception.Message}).");
+        }
+    }
+
+    private async Task ConfigureTradeNotificationsAsync(InstallationProfile profile, string? gameToken)
+    {
+        try
+        {
+            await TradeNotificationsConfigService.DisableAsync(profile.InstallDirectory);
+            if (!TradeNotificationsConfigService.IsEligible(profile.Type, profile.LaunchExperience)) return;
+            if (!TradeNotificationsConfigService.IsPluginInstalled(profile.InstallDirectory, profile.LaunchExperience))
+            {
+                var modName = profile.LaunchExperience == LaunchExperience.Ladder
+                    ? ModInstallationPaths.LadderModName : "Reimagined";
+                LaunchDiagnostics.Log($"trade-notifications: {TradeNotificationsConfigService.PluginFileName} is missing from mods/{modName}/d2rloader/plugins; in-game trade notifications are off. Install the plugin through the ladder's approved extensions or include it in the bundle.");
+                return;
+            }
+            var token = gameToken;
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                LaunchDiagnostics.Log("trade-notifications: no signed-in account; in-game trade notifications are off for this launch.");
+                return;
+            }
+            var settings = new TradeNotificationsLaunchSettings(
+                _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority), token);
+            if (!await TradeNotificationsConfigService.EnableAsync(profile.InstallDirectory, settings, profile.LaunchExperience))
+                LaunchDiagnostics.Log("trade-notifications: configuration could not be written.");
+            else
+                LaunchDiagnostics.Log($"trade-notifications configured for {profile.LaunchExperience} at {settings.ApiBaseUrl}.");
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.Log($"trade-notifications: configuration failed ({exception.Message}).");
+        }
+    }
+
+    // Market search is anonymous on the API, so a launch with nobody signed in
+    // still configures the plugin - with an empty token rather than none at all.
+    private async Task ConfigureTradePriceCheckAsync(InstallationProfile profile, string? gameToken)
+    {
+        try
+        {
+            await TradePriceCheckConfigService.DisableAsync(profile.InstallDirectory);
+            if (!TradePriceCheckConfigService.IsEligible(profile.Type, profile.LaunchExperience)) return;
+            if (!TradePriceCheckConfigService.IsPluginInstalled(profile.InstallDirectory, profile.LaunchExperience))
+            {
+                var modName = profile.LaunchExperience == LaunchExperience.Ladder
+                    ? ModInstallationPaths.LadderModName : "Reimagined";
+                LaunchDiagnostics.Log($"trade-price-check: {TradePriceCheckConfigService.PluginFileName} is missing from mods/{modName}/d2rloader/plugins; in-game price checks are off.");
+                return;
+            }
+            var token = gameToken;
+            if (string.IsNullOrWhiteSpace(token))
+                LaunchDiagnostics.Log("trade-price-check: no signed-in account; market searches will be anonymous.");
+            var settings = new TradePriceCheckLaunchSettings(
+                _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority), token, profile.SelectedLadderId?.ToString());
+            if (!await TradePriceCheckConfigService.EnableAsync(profile.InstallDirectory, settings, profile.LaunchExperience))
+                LaunchDiagnostics.Log("trade-price-check: configuration could not be written.");
+            else
+                LaunchDiagnostics.Log($"trade-price-check configured for {profile.LaunchExperience} at {settings.ApiBaseUrl}.");
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.Log($"trade-price-check: configuration failed ({exception.Message}).");
+        }
+    }
+
+    // The API only takes feedback from signed-in accounts, so the plugin gets
+    // the same launcher token as the other online plugins, or stays disabled.
+    private async Task ConfigureReimaginedFeedbackAsync(InstallationProfile profile, string? gameToken)
+    {
+        try
+        {
+            await ReimaginedFeedbackConfigService.DisableAsync(profile.InstallDirectory);
+            if (!ReimaginedFeedbackConfigService.IsEligible(profile.Type, profile.LaunchExperience)) return;
+            if (!ReimaginedFeedbackConfigService.IsPluginInstalled(profile.InstallDirectory, profile.LaunchExperience))
+            {
+                var modName = profile.LaunchExperience == LaunchExperience.Ladder
+                    ? ModInstallationPaths.LadderModName : "Reimagined";
+                LaunchDiagnostics.Log($"reimagined-feedback: {ReimaginedFeedbackConfigService.PluginFileName} is missing from mods/{modName}/d2rloader/plugins; in-game /bug and /suggest are off.");
+                return;
+            }
+            var token = gameToken;
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                LaunchDiagnostics.Log("reimagined-feedback: no signed-in account; in-game /bug and /suggest are off for this launch.");
+                return;
+            }
+            var settings = new ReimaginedFeedbackLaunchSettings(
+                _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority), token);
+            if (!await ReimaginedFeedbackConfigService.EnableAsync(profile.InstallDirectory, settings, profile.LaunchExperience))
+                LaunchDiagnostics.Log("reimagined-feedback: configuration could not be written.");
+            else
+                LaunchDiagnostics.Log($"reimagined-feedback configured for {profile.LaunchExperience} at {settings.ApiBaseUrl}.");
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.Log($"reimagined-feedback: configuration failed ({exception.Message}).");
+        }
+    }
+
+    private async Task ConfigureSupporterPortalsAsync(InstallationProfile profile, string? gameToken)
+    {
+        try
+        {
+            await SupporterPortalsConfigService.DisableAsync(profile.InstallDirectory);
+            if (!SupporterPortalsConfigService.IsEligible(profile.Type, profile.LaunchExperience)) return;
+            if (!SupporterPortalsConfigService.IsPluginInstalled(profile.InstallDirectory, profile.LaunchExperience))
+            {
+                var modName = profile.LaunchExperience == LaunchExperience.Ladder
+                    ? ModInstallationPaths.LadderModName : "Reimagined";
+                LaunchDiagnostics.Log($"supporter-portals: {SupporterPortalsConfigService.PluginFileName} is missing from mods/{modName}/d2rloader/plugins; supporter portals are unavailable for this launch.");
+                return;
+            }
+            var token = gameToken;
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                LaunchDiagnostics.Log("supporter-portals: no signed-in account; supporter portals have no account credentials for this launch.");
+                return;
+            }
+            var settings = new SupporterPortalsLaunchSettings(
+                _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority), token);
+            if (!await SupporterPortalsConfigService.EnableAsync(profile.InstallDirectory, settings, profile.LaunchExperience))
+                LaunchDiagnostics.Log("supporter-portals: configuration could not be written.");
+            else
+                LaunchDiagnostics.Log($"supporter-portals configured for {profile.LaunchExperience} at {settings.ApiBaseUrl}.");
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.Log($"supporter-portals: configuration failed ({exception.Message}).");
+        }
+    }
+
+    /// <summary>
+    /// Points an already-installed global-chat plugin at the API, for any
+    /// signed-in D2RLoader launch, ladder or not.
+    /// </summary>
+    /// <remarks>
+    /// Never blocks the launch, for the same reason ConfigureChatRelayAsync does
+    /// not: losing global chat costs a convenience, and refusing to start the
+    /// game over it would cost the session. Every failure path leaves the plugin
+    /// disabled and says so in the log.
+    ///
+    /// Unlike chat-relay this runs for LaunchExperience.Online too. It gets the
+    /// launch's game token (null when nobody is signed in or minting failed),
+    /// and treats "no token" as an ordinary off switch rather than a failure:
+    /// playing offline without an account is a supported thing to do.
+    /// </remarks>
+    private async Task ConfigureGlobalChatAsync(InstallationProfile profile, string? gameToken)
+    {
+        try
+        {
+            if (!GlobalChatConfigService.IsEligible(profile.Type, profile.LaunchExperience))
+            {
+                await GlobalChatConfigService.DisableAsync(profile.InstallDirectory);
+                return;
+            }
+
+            var accessToken = gameToken;
+            if (string.IsNullOrWhiteSpace(accessToken))
+            {
+                // Clearing rather than leaving the last launch's token behind:
+                // a signed-out session must not keep talking under that name.
+                await GlobalChatConfigService.DisableAsync(profile.InstallDirectory);
+                LaunchDiagnostics.Log("global-chat: no signed-in account; global chat is off for this launch.");
+                return;
+            }
+
+            // The launcher never installs this plugin - it only ever configures
+            // one the player already has. It arrives either in the ladder bundle
+            // or as an approved extension, or the player downloads it from the
+            // website and drops it into their own mod install. So a missing
+            // plugin is an ordinary outcome, not a failure: nothing to say to
+            // the player, and nothing to install on their behalf.
+            if (!GlobalChatConfigService.IsPluginInstalled(profile.InstallDirectory, profile.LaunchExperience))
+            {
+                // Clear any config a previous install left behind, so a token
+                // does not sit in a file for a plugin that is no longer there.
+                await GlobalChatConfigService.DisableAsync(profile.InstallDirectory);
+                LaunchDiagnostics.Log("global-chat is not installed; this launch has no global chat.");
+                return;
+            }
+
+            var settings = new GlobalChatLaunchSettings(
+                _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority),
+                accessToken);
+            if (!await GlobalChatConfigService.EnableAsync(profile.InstallDirectory, settings, profile.LaunchExperience))
+            {
+                LaunchDiagnostics.Log("global-chat: the plugin configuration could not be written; global chat is off for this launch.");
+                return;
+            }
+
+            LaunchDiagnostics.Log($"global-chat configured for a {profile.LaunchExperience} launch.");
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.Log($"global-chat: configuration failed ({exception.Message}); global chat is off for this launch.");
+        }
+    }
+
+    /// <summary>
+    /// Points the hardcore death announcer at the API for a signed-in Online or
+    /// Ladder launch.
+    /// </summary>
+    /// <remarks>
+    /// The same shape as ConfigureGlobalChatAsync: takes the launch's game
+    /// token, treats "no token" as an ordinary off switch, and never blocks the
+    /// launch.
+    /// </remarks>
+    private async Task ConfigureHardcoreDeathsAsync(InstallationProfile profile, string? gameToken)
+    {
+        try
+        {
+            if (!HardcoreDeathsConfigService.IsEligible(profile.Type, profile.LaunchExperience))
+            {
+                await HardcoreDeathsConfigService.DisableAsync(profile.InstallDirectory);
+                return;
+            }
+
+            var accessToken = gameToken;
+            if (string.IsNullOrWhiteSpace(accessToken))
+            {
+                // A signed-out session must not keep the previous account's token.
+                await HardcoreDeathsConfigService.DisableAsync(profile.InstallDirectory);
+                LaunchDiagnostics.Log("hardcore-deaths: no signed-in account; death announcements are off for this launch.");
+                return;
+            }
+
+            // The launcher never installs this plugin, so a missing one is an
+            // ordinary outcome rather than a failure.
+            if (!HardcoreDeathsConfigService.IsPluginInstalled(profile.InstallDirectory, profile.LaunchExperience))
+            {
+                await HardcoreDeathsConfigService.DisableAsync(profile.InstallDirectory);
+                LaunchDiagnostics.Log("hardcore-deaths is not installed; this launch has no death announcements.");
+                return;
+            }
+
+            var settings = new HardcoreDeathsLaunchSettings(
+                _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority),
+                accessToken);
+            if (!await HardcoreDeathsConfigService.EnableAsync(profile.InstallDirectory, settings, profile.LaunchExperience))
+            {
+                LaunchDiagnostics.Log("hardcore-deaths: the plugin configuration could not be written; death announcements are off for this launch.");
+                return;
+            }
+
+            LaunchDiagnostics.Log($"hardcore-deaths configured for a {profile.LaunchExperience} launch.");
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.Log($"hardcore-deaths: configuration failed ({exception.Message}); death announcements are off for this launch.");
+        }
+    }
+
+    private async Task WatchGameExitAsync(
+        Process gameProcess,
+        string? expectedExePath,
+        MainWindow? minimizeTarget,
+        string? lutrisGameExePath = null,
+        ServerSaveMonitor? serverSaves = null,
+        string? installDirectory = null,
+        GameSessionToken? gameToken = null,
+        SteamGameHandoff? steamHandoff = null, SteamGameHandoff? sessionReservation = null)
+    {
+        using var monitoring = new CancellationTokenSource();
+        var monitorTask = serverSaves is null ? Task.CompletedTask : MonitorServerSavesAsync(serverSaves, monitoring.Token);
+        var gameExitConfirmed = false;
+        // Kept apart from gameExitConfirmed, which also drives the Server Saves
+        // wording and has never counted a Lutris session's end as confirmed.
+        var lutrisExitObserved = false;
+        try
+        {
+            if (steamHandoff is not null)
+            {
+                gameProcess.Dispose();
+                minimizeTarget?.MinimizeToTray();
+                try { gameExitConfirmed = await steamHandoff.WaitForExitAsync(); }
+                finally { minimizeTarget?.RestoreFromTray(); }
+            }
+            else if (lutrisGameExePath is not null)
+            {
+                // The lutris process hands off and may exit immediately or outlive
+                // the session, so it is never waited on.
+                gameProcess.Dispose();
+                if (minimizeTarget is not null)
+                {
+                    lutrisExitObserved = await minimizeTarget.MinimizeToTrayAndWaitForLutrisExitAsync(lutrisGameExePath);
+                }
+                else
+                {
+                    lutrisExitObserved = await LutrisService.WaitForGameSessionAsync(lutrisGameExePath, TimeSpan.FromMinutes(2));
+                }
+            }
+            else if (minimizeTarget is not null)
+            {
+                gameExitConfirmed = await minimizeTarget.MinimizeToTrayAndWaitForExitAsync(gameProcess, expectedExePath);
+            }
+            else
+            {
+                gameExitConfirmed = await MainWindow.WaitForGameExitAsync(gameProcess, expectedExePath);
+            }
+
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.LogException("Could not finish watching the game process", exception);
+            if (steamHandoff is not null) Notifications.SendNotification(exception.Message, "Warning");
+        }
+        finally
+        {
+            try
+            {
+                if (serverSaves is not null)
+                {
+                    await ServerSaveSessionMonitor.WaitForInactiveAsync(
+                        () => ServerSaveStatus.ReadAsync(serverSaves, CancellationToken.None),
+                        () => DateTimeOffset.UtcNow,
+                        () => Task.Delay(TimeSpan.FromSeconds(2)));
+                }
+                monitoring.Cancel();
+                await monitorTask;
+                if (serverSaves is not null)
+                {
+                    var status = await ServerSaveStatus.ReadAsync(serverSaves, CancellationToken.None);
+                    await ShowServerSaveStatusAsync(ServerSaveSessionMonitor.DescribeAfterWatch(
+                        status, DateTimeOffset.UtcNow, gameExitConfirmed));
+                }
+            }
+            finally
+            {
+                try { EndGameSession(installDirectory, gameToken, gameExitConfirmed || lutrisExitObserved); }
+                finally
+                {
+                    steamHandoff?.Dispose();
+                    sessionReservation?.Dispose();
+                    await Dispatcher.UIThread.InvokeAsync(RefreshInstallDirectoryState);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Removes the session secrets file and revokes the game token once the
+    /// game is known to be gone. An unconfirmed exit leaves both alone: deleting
+    /// the file under a live game would cut its plugins off mid-session. The
+    /// next launch rewrites or deletes it, launcher startup deletes it when no
+    /// game is running, and the plugins ignore it once it expires.
+    /// </summary>
+    private void EndGameSession(string? installDirectory, GameSessionToken? gameToken, bool exitConfirmed)
+    {
+        if (!exitConfirmed)
+        {
+            LaunchDiagnostics.Log("session secrets: the game's exit was not confirmed; the session file is left until the next launch or launcher start.");
+            return;
+        }
+
+        if (GameSessionSecretsService.Delete(installDirectory))
+        {
+            LaunchDiagnostics.Log("session secrets: removed after the game exited.");
+        }
+
+        if (gameToken is not null)
+        {
+            _ = _launcherAuthenticationService.RevokeGameTokenAsync(gameToken);
+        }
+    }
+
+    private async Task MonitorServerSavesAsync(ServerSaveMonitor monitor, CancellationToken token)
+    {
+        var started = DateTimeOffset.UtcNow;
+        string? notified = null;
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                var status = await ServerSaveStatus.ReadAsync(monitor, token);
+                var display = status?.Describe(DateTimeOffset.UtcNow, sessionEnded: false);
+                if (display is null && DateTimeOffset.UtcNow - started > TimeSpan.FromSeconds(45))
+                    display = new ServerSaveStatusDisplay("The game has not reported its save status. Recent progress is not confirmed saved.",
+                        "Check that Server Saves is running before continuing.", true, "status_missing");
+                if (display is not null)
+                {
+                    await ShowServerSaveStatusAsync(display);
+                    if (display.Warning && display.NotificationKey != notified)
+                    {
+                        Notifications.SendNotification(display.Message + "\n" + display.Confirmed, "Warning");
+                        notified = display.NotificationKey;
+                    }
+                    if (!display.Warning) notified = null;
+                }
+                await Task.Delay(TimeSpan.FromSeconds(2), token);
+            }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.LogException("Could not monitor server save status", exception);
+            await ShowServerSaveStatusAsync(new ServerSaveStatusDisplay("Save status is unavailable. Recent progress is not confirmed saved.",
+                "Check Server Saves before continuing.", true, "status_unavailable"));
+        }
+    }
+
+    private async Task ShowServerSaveStatusAsync(ServerSaveStatusDisplay display)
+    {
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            ServerSaveStatusPanel.IsVisible = true;
+            ServerSaveStatusPanel.Classes.Set("warning-banner", display.Warning);
+            ServerSaveStatusText.Text = display.Message;
+            ServerSaveConfirmedText.Text = display.Confirmed;
+        });
+    }
+
+    /// <summary>
+    /// Puts the mod back on its normal save folder for any launch that is not a
+    /// ladder launch. Returns false when the restore failed, which the caller
+    /// must treat as a reason not to launch: the game would start on the last
+    /// ladder's folder and the player would find none of their own characters
+    /// there, which is indistinguishable from having lost them.
+    /// </summary>
+    private static async Task<bool> RestoreNonLadderSaveDirectoryAsync(InstallationProfile profile)
+    {
+        var isLadderLaunch = profile.Type != InstallationType.D2RMM
+                             && profile.LaunchExperience == LaunchExperience.Ladder;
+        if (isLadderLaunch || profile.Type == InstallationType.D2RMM)
+        {
+            return true;
+        }
+
+        try
+        {
+            await Task.Run(() => NormalModInstallationService.Restore(profile.InstallDirectory!));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            LaunchDiagnostics.LogException("Could not restore the normal mod installation", exception);
+            Notifications.SendNotification(exception.Message, "Normal mod restore failed");
+            return false;
+        }
+
+        if (await LadderSaveDirectoryService.RestoreAsync(profile.InstallDirectory))
+        {
+            return true;
+        }
+
+        const string message =
+            NormalModInstallationService.RecoveryMessage;
+        LaunchDiagnostics.Log($"Launch blocked: {message}");
+        Notifications.SendNotification(message, "Warning");
+        return false;
+    }
+
+    /// <summary>
+    /// Points the server-saves plugin at the API for a ladder launch, and turns
+    /// it off for every other launch. A stale token left enabled would keep
+    /// hiding the player's own characters outside the ladder.
+    /// </summary>
+    private async Task<bool> PrepareServerSavesAsync(InstallationProfile profile)
+    {
+        _preparedServerSaves = null;
+        ServerSaveStatusPanel.IsVisible = false;
+        var isLadderLaunch = profile.Type != InstallationType.D2RMM
+                             && profile.LaunchExperience == LaunchExperience.Ladder;
+
+        try
+        {
+            if (!isLadderLaunch)
+            {
+                await ServerSavesConfigService.DisableAsync(profile.InstallDirectory);
+                await ChatRelayConfigService.DisableAsync(profile.InstallDirectory);
+
+                return await RestoreNonLadderSaveDirectoryAsync(profile);
+            }
+
+            var ladder = SelectedLadder;
+            if (ladder is null)
+            {
+                const string message = "The selected active ladder could not be resolved.";
+                LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
+                Notifications.SendNotification(message, "Warning");
+                return false;
+            }
+
+            if (!ServerSavesConfigService.IsPluginInstalled(profile.InstallDirectory))
+            {
+                const string message = "Server Saves is missing from the ladder installation. Repair the ladder package before playing.";
+                LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
+                Notifications.SendNotification(message, "Warning");
+                return false;
+            }
+
+            // The account token only authenticates the launcher's own call for
+            // the launch ticket below; the game gets the launch's game token.
+            var accessToken = await _launcherAuthenticationService.GetAccessTokenAsync();
+            if (string.IsNullOrWhiteSpace(accessToken))
+            {
+                const string message = "Sign in to your Reimagined account to play on the ladder - your characters are stored on the server.";
+                LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
+                Notifications.SendNotification(message, "Warning");
+                return false;
+            }
+
+            if (_launchGameToken is not { } gameToken)
+            {
+                const string message = "The Reimagined API did not issue a game session token. Check your connection and try again.";
+                LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
+                Notifications.SendNotification(message, "Warning");
+                return false;
+            }
+
+            if (ladder.ActiveBundle is not { } activeBundle)
+            {
+                const string message = "The selected ladder does not have an active signed package.";
+                LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
+                Notifications.SendNotification(message, "Warning");
+                return false;
+            }
+
+            var launchTicket = await _apiHttpClient.CreateLadderLaunchTicketAsync(
+                ladder.Id,
+                activeBundle,
+                LadderBundleService.LauncherVersion,
+                accessToken);
+
+            var statusSessionId = Guid.NewGuid().ToString("N");
+            var lobbyPreference = await ResolveLobbyPreferenceAsync(ladder);
+            var settings = new ServerSavesLaunchSettings(
+                _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority),
+                gameToken.AccessToken,
+                ladder.Id,
+                launchTicket.LaunchTicket,
+                statusSessionId,
+                lobbyPreference.RegionIds,
+                lobbyPreference.ServerId);
+            if (!await ServerSavesConfigService.EnableAsync(profile.InstallDirectory, settings))
+            {
+                const string message = "The server-saves plugin configuration could not be written.";
+                LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
+                Notifications.SendNotification(message, "Warning");
+                return false;
+            }
+
+            // Not in server-saves.toml any more - they go in the session file
+            // written just before the game starts.
+            _launchLadderTicket = launchTicket.LaunchTicket;
+            _launchStatusSessionId = statusSessionId;
+
+            // Only now, with the plugin present and configured, is it safe to send
+            // D2R at this ladder's own save folder.
+            var preparation = await LadderSaveDirectoryService.PrepareAsync(
+                profile.InstallDirectory,
+                ladder.Id,
+                ladder.Name);
+            if (preparation.DirectoryPath is null)
+            {
+                var message = preparation.ErrorMessage ?? "The ladder save folder could not be prepared.";
+                LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
+                Notifications.SendNotification(message, "Warning");
+                return false;
+            }
+
+            LaunchDiagnostics.Log($"server-saves configured for ladder {ladder.Id} at \"{preparation.DirectoryPath}\".");
+            _preparedServerSaves = new ServerSaveMonitor(
+                Path.Combine(preparation.DirectoryPath, ".server-saves", "status.json"), statusSessionId, ladder.Id);
+
+            await ConfigureChatRelayAsync(profile, gameToken.AccessToken);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.LogException("server-saves preparation failed", exception);
+            Notifications.SendNotification($"Server save preparation failed: {exception.Message}", "Warning");
+
+            return !isLadderLaunch;
+        }
+    }
+
+    private async Task<bool> PrepareD2RLoaderExtensionsAsync(
+        InstallationProfile profile,
+        IProgress<string> progress)
+    {
+        try
+        {
+            if (profile.Type == InstallationType.D2RMM)
+            {
+                return true;
+            }
+
+            if (profile.LaunchExperience != LaunchExperience.Ladder)
+            {
+                var restoredCount = await Task.Run(() =>
+                    D2RLoaderService.RestoreLadderDisabledExtensions(profile.InstallDirectory));
+                if (restoredCount > 0)
+                {
+                    LaunchDiagnostics.Log($"Restored {restoredCount} extension(s) disabled by the previous ladder launch.");
+                }
+
+                return true;
+            }
+
+            var ladder = SelectedLadder;
+            if (ladder is null)
+            {
+                Notifications.SendNotification("The selected active ladder could not be resolved.", "Warning");
+                return false;
+            }
+
+            if (ladder.ActiveBundle is { } activeBundle)
+            {
+                // Play is only offered once readiness has passed, so reaching
+                // here means the ladder moved to a new revision between the
+                // check and the click. Downloading now would turn a launch into
+                // a silent install, so the launch stops and the button goes
+                // back to Update for the player to run deliberately.
+                var readiness = await _ladderBundleService.GetReadinessAsync(
+                    profile.InstallDirectory,
+                    activeBundle,
+                    allowedExtensions: ladder.AllowedExtensions,
+                    selectedExtensionIds: GetEffectiveSelectedLadderExtensionIds(ladder));
+                if (!readiness.IsReady)
+                {
+                    LaunchDiagnostics.Log($"Ladder launch blocked: {readiness.Status}");
+                    Notifications.SendNotification(
+                        readiness.CanRepair
+                            ? "This ladder needs an update before you can play. Use the Update button."
+                            : readiness.Status,
+                        "Warning");
+                    return false;
+                }
+            }
+            else
+            {
+                const string message = "This ladder does not have an active signed package.";
+                LaunchDiagnostics.Log($"Ladder launch blocked: {message}");
+                Notifications.SendNotification(message, "Warning");
+                return false;
+            }
+
+            progress.Report("Enforcing ladder D2RLoader extension policy...");
+            var approvals = MapApprovals(ladder);
+            var selectedIds = GetEffectiveSelectedLadderExtensionIds(ladder);
+            var result = await Task.Run(() => D2RLoaderService.ApplyLadderPolicyAsync(
+                profile.InstallDirectory,
+                approvals,
+                selectedIds));
+
+            LaunchDiagnostics.Log(
+                $"Ladder extension policy: {result.UnapprovedMoved.Count} unapproved and "
+                + $"{result.UnselectedMoved.Count} unselected extension(s) moved; "
+                + $"{result.RestoredCount} previously disabled extension(s) restored for re-evaluation.");
+            if (result.UnapprovedMoved.Count > 0)
+            {
+                Notifications.SendNotification(
+                    $"Moved {result.UnapprovedMoved.Count} unapproved D2RLoader extension(s) to their ladder-disabled folders.",
+                    "Warning");
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LaunchDiagnostics.LogException("Failed to enforce D2RLoader ladder policy", ex);
+            Notifications.SendNotification($"Could not enforce the ladder extension policy: {ex.Message}", "Warning");
+            return false;
         }
     }
 

@@ -29,6 +29,9 @@ public partial class ModTweaksView : UserControl
         _isRefreshing = true;
 
         var profile = MainWindow.Settings.CurrentProfile;
+        var isLadder = profile.LaunchExperience == LaunchExperience.Ladder;
+        LadderLockBanner.IsVisible = isLadder;
+        TweaksContentPanel.IsEnabled = !isLadder;
         var skillPointsPerLevel = Clamp(profile.SkillPointsPerLevel, 1, 5);
         var attributesPerLevel = Clamp(profile.AttributesPerLevel, 1, 20);
         var maxSkillLevel = Clamp(profile.MaxSkillLevel, 5, 25);
@@ -38,6 +41,7 @@ public partial class ModTweaksView : UserControl
         var zoneDurationMinutes = NormalizeZoneDurationMinutes(profile.ZoneDurationMinutes);
         var removePaladinAuraSound = profile.RemovePaladinAuraSound;
         var removeSplashVfx = profile.RemoveSplashVfx;
+        var disableExtraBlood = profile.DisableExtraBlood;
         var makeTooltipBackgroundOpaque = profile.MakeTooltipBackgroundOpaque;
         var removeHelmetVisual = profile.RemoveHelmetVisual;
         var terrorizeAllZones = profile.TerrorizeAllZones;
@@ -57,6 +61,7 @@ public partial class ModTweaksView : UserControl
         profile.ZoneDurationMinutes = zoneDurationMinutes;
         profile.RemovePaladinAuraSound = removePaladinAuraSound;
         profile.RemoveSplashVfx = removeSplashVfx;
+        profile.DisableExtraBlood = disableExtraBlood;
         profile.MakeTooltipBackgroundOpaque = makeTooltipBackgroundOpaque;
         profile.RemoveHelmetVisual = removeHelmetVisual;
         profile.TerrorizeAllZones = terrorizeAllZones;
@@ -76,6 +81,7 @@ public partial class ModTweaksView : UserControl
         ZoneDurationMinutesComboBox.SelectedIndex = IndexOfZoneDuration(zoneDurationMinutes);
         RemovePaladinAuraSoundCheckBox.IsChecked = removePaladinAuraSound;
         RemoveSplashVfxCheckBox.IsChecked = removeSplashVfx;
+        DisableExtraBloodCheckBox.IsChecked = disableExtraBlood;
         MakeTooltipBackgroundOpaqueCheckBox.IsChecked = makeTooltipBackgroundOpaque;
         RemoveHelmetVisualCheckBox.IsChecked = removeHelmetVisual;
         TerrorizeAllZonesCheckBox.IsChecked = terrorizeAllZones;
@@ -171,6 +177,7 @@ public partial class ModTweaksView : UserControl
 
         var profile = MainWindow.Settings.CurrentProfile;
         profile.RemoveSplashVfx = RemoveSplashVfxCheckBox.IsChecked ?? false;
+        profile.DisableExtraBlood = DisableExtraBloodCheckBox.IsChecked ?? false;
         profile.MakeTooltipBackgroundOpaque = MakeTooltipBackgroundOpaqueCheckBox.IsChecked ?? false;
         profile.RemoveHelmetVisual = RemoveHelmetVisualCheckBox.IsChecked ?? false;
         profile.TerrorZonePurpleOverlay = TerrorZonePurpleOverlayCheckBox.IsChecked ?? false;
@@ -228,6 +235,7 @@ public partial class ModTweaksView : UserControl
         profile.ZoneDurationMinutes = DefaultZoneDurationMinutes;
         profile.RemovePaladinAuraSound = false;
         profile.RemoveSplashVfx = false;
+        profile.DisableExtraBlood = false;
         profile.MakeTooltipBackgroundOpaque = false;
         profile.RemoveHelmetVisual = false;
         profile.TerrorizeAllZones = false;

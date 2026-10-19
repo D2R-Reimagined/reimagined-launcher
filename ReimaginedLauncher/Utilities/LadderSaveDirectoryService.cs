@@ -1,0 +1,405 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace ReimaginedLauncher.Utilities;
+
+public sealed record LadderSavePreparationResult(string? DirectoryPath, string? ErrorMessage = null);
+
+/// <summary>
+/// Points D2R at a per-ladder save folder by rewriting the mod's
+/// <c>savepath</c>, so ladder characters and the player's own characters live in
+/// physically separate directories and neither is ever moved.
+///
+/// This replaces an earlier design where the plugin quarantined local saves into
+/// a subfolder and moved them back on exit. That could not survive the plugin
+/// being removed - the code that undid the move was the code being uninstalled.
+/// </summary>
+public static class LadderSaveDirectoryService
+{
+    /// <summary>Longest slug taken from a ladder's name, before the id suffix.</summary>
+    private const int MaxSlugLength = 40;
+
+    /// <summary>
+    /// Files that describe how the player likes to play rather than who their
+    /// characters are. Seeded into a new ladder folder so a ladder session does
+    /// not start with default graphics settings and no loot filters.
+    /// </summary>
+    private static readonly string[] CarriedFileNames = ["Settings.json", "lootfilter.json"];
+
+    private static readonly string[] CarriedPatterns = ["*.fltr"];
+
+    /// <summary>
+    /// New folders use the full ladder ID; existing folder names are kept by the registry.
+    /// </summary>
+    public static string BuildLadderSavePath(Guid ladderId, string? ladderName)
+    {
+        var slug = Slugify(ladderName);
+        var suffix = ladderId.ToString("N");
+        return slug.Length == 0 ? $"ReimaginedThree-{suffix}" : $"ReimaginedThree-{slug}-{suffix}";
+    }
+
+    /// <summary>
+    /// Turns a ladder name into a safe folder fragment. Apostrophes are dropped
+    /// rather than replaced so "Ben's" reads as "Bens", not "Ben-s"; every other
+    /// run of non-alphanumerics collapses to a single dash.
+    /// </summary>
+    internal static string Slugify(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder(name.Length);
+        var pendingDash = false;
+        foreach (var character in name.Normalize(NormalizationForm.FormD))
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(character) == UnicodeCategory.NonSpacingMark)
+            {
+                continue;
+            }
+
+            if (character is '\'' or '’' or '`' or '"')
+            {
+                continue;
+            }
+
+            if (char.IsAsciiLetterOrDigit(character))
+            {
+                if (pendingDash && builder.Length > 0)
+                {
+                    builder.Append('-');
+                }
+
+                pendingDash = false;
+                builder.Append(character);
+                if (builder.Length >= MaxSlugLength)
+                {
+                    break;
+                }
+
+                continue;
+            }
+
+            pendingDash = true;
+        }
+
+        return builder.ToString().Trim('-');
+    }
+
+    /// <summary>
+    /// Redirects the mod at <paramref name="installDirectory"/> to this ladder's
+    /// own save folder and seeds it with the player's settings and loot filters.
+    /// Returns the resolved ladder save directory or an actionable failure message.
+    /// </summary>
+    public static Task<LadderSavePreparationResult> PrepareAsync(
+        string? installDirectory,
+        Guid ladderId,
+        string? ladderName,
+        CancellationToken cancellationToken = default)
+    {
+        return PrepareAsync(installDirectory, ladderId, ladderName, null, cancellationToken);
+    }
+
+    internal static async Task<LadderSavePreparationResult> PrepareAsync(
+        string? installDirectory,
+        Guid ladderId,
+        string? ladderName,
+        string? savedGamesPath,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedInstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(installDirectory);
+        try
+        {
+            var modInfoPath = string.IsNullOrWhiteSpace(normalizedInstallDirectory)
+                ? null : ModInstallationPaths.FindLadderModInfo(normalizedInstallDirectory);
+            if (modInfoPath is null)
+            {
+                return PreparationFailed("The ladder mod's modinfo.json is missing. Update or reinstall the ladder package and try again.");
+            }
+
+            LadderRuntimeFileService.RestoreOrCaptureBaseline(normalizedInstallDirectory!, modInfoPath);
+            savedGamesPath ??= SaveFileService.GetSavedGamesPath();
+            var defaultSaveDirectory = ResolveSaveDirectory("ReimaginedThree", savedGamesPath, createMissingDirectories: true);
+            if (defaultSaveDirectory is null)
+            {
+                return PreparationFailed("The Saved Games folder could not be located. Check that your Windows user profile or Wine/Proton save folder is available.");
+            }
+
+            var modsDirectory = Path.GetDirectoryName(defaultSaveDirectory)!;
+            var ladderSavePath = LadderSavePathRegistry.GetOrCreate(modsDirectory, ladderId, ladderName);
+            var ladderDirectory = Path.Combine(modsDirectory, ladderSavePath);
+            Directory.CreateDirectory(ladderDirectory);
+            SeedPlayerPreferences(defaultSaveDirectory, ladderDirectory);
+            if (!await WriteSavePathAsync(modInfoPath, ladderSavePath, cancellationToken))
+            {
+                return PreparationFailed("The ladder mod's modinfo.json is invalid. Update or reinstall the ladder package and try again.");
+            }
+
+            LaunchDiagnostics.Log($"ladder saves: D2R will use \"{ladderSavePath}\" for this session.");
+            return new LadderSavePreparationResult(ladderDirectory);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            LaunchDiagnostics.LogException("ladder saves: could not prepare the ladder save folder", exception);
+            return new LadderSavePreparationResult(null, $"The ladder save folder could not be prepared: {exception.Message}");
+        }
+    }
+
+    private static LadderSavePreparationResult PreparationFailed(string message)
+    {
+        LaunchDiagnostics.Log($"ladder saves: {message}");
+        return new LadderSavePreparationResult(null, message);
+    }
+
+    /// <summary>
+    /// Puts the mod back on its normal save folder. Every non-ladder launch must
+    /// do this, or the player would find their own characters missing.
+    /// </summary>
+    public static async Task<bool> RestoreAsync(
+        string? installDirectory,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedInstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(installDirectory);
+        var modInfoPath = ResolveModInfoPath(normalizedInstallDirectory);
+        if (modInfoPath is null)
+        {
+            return true;
+        }
+
+        try
+        {
+            var baseSavePath = await ReadBaseSavePathAsync(normalizedInstallDirectory!, modInfoPath, cancellationToken);
+            if (string.IsNullOrWhiteSpace(baseSavePath))
+            {
+                LaunchDiagnostics.Log(NormalModInstallationService.RecoveryMessage);
+                return false;
+            }
+
+            var currentSavePath = await ReadSavePathAsync(modInfoPath, cancellationToken);
+            return string.Equals(baseSavePath, currentSavePath, StringComparison.Ordinal)
+                   || await WriteSavePathAsync(modInfoPath, baseSavePath, cancellationToken);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            LaunchDiagnostics.Log($"ladder saves: could not restore the normal save folder: {exception.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Restores only the savepath, without capturing runtime files as normal files.
+    /// </summary>
+    public static async Task<bool> RestoreIfRedirectedAsync(
+        string? installDirectory,
+        CancellationToken cancellationToken = default)
+    {
+        return await RestoreAsync(installDirectory, cancellationToken);
+    }
+
+    /// <summary>
+    /// Normal installation metadata is independent of the signed runtime baseline.
+    /// </summary>
+    private static async Task<string?> ReadBaseSavePathAsync(
+        string installDirectory,
+        string modInfoPath,
+        CancellationToken cancellationToken)
+    {
+        if (!NormalModInstallationService.HasLadderInstallation(installDirectory)
+            && NormalModInstallationService.HasNormalSavePath(modInfoPath))
+            return await ReadSavePathAsync(modInfoPath, cancellationToken);
+
+        var normalModInfo = NormalModInstallationService.FindModInfo(
+            NormalModInstallationService.NormalModRoot(installDirectory));
+        if (normalModInfo is not null && NormalModInstallationService.HasNormalSavePath(normalModInfo))
+            return await ReadSavePathAsync(normalModInfo, cancellationToken);
+
+        if (NormalModInstallationService.HasLadderInstallation(installDirectory)) return null;
+
+        if (NormalModInstallationService.HasNormalSavePath(modInfoPath))
+            return await ReadSavePathAsync(modInfoPath, cancellationToken);
+
+        return null;
+    }
+
+    private static async Task<string?> ReadSavePathAsync(string path, CancellationToken cancellationToken)
+    {
+        var json = await File.ReadAllTextAsync(path, cancellationToken);
+        var node = JsonNode.Parse(json);
+        return node is JsonObject modInfo && modInfo["savepath"] is JsonValue value
+               && value.TryGetValue<string>(out var savePath)
+            ? savePath.Trim().Trim('/', '\\')
+            : null;
+    }
+
+    private static async Task<bool> WriteSavePathAsync(string modInfoPath, string savePath, CancellationToken cancellationToken)
+    {
+        var json = await File.ReadAllTextAsync(modInfoPath, cancellationToken);
+        if (JsonNode.Parse(json) is not JsonObject node)
+        {
+            return false;
+        }
+
+        // D2R's own modinfo uses a trailing slash; match it rather than betting
+        // on the parser being lenient.
+        node["savepath"] = $"{savePath}/";
+        await File.WriteAllTextAsync(
+            modInfoPath,
+            node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }),
+            new UTF8Encoding(false),
+            cancellationToken);
+        return true;
+    }
+
+    /// <summary>
+    /// Copies graphics/audio settings and loot filters into a ladder folder that
+    /// does not have them yet. Existing files are never overwritten, so a player
+    /// who tunes settings inside a ladder keeps them.
+    /// </summary>
+    internal static int SeedPlayerPreferences(string? baseDirectory, string ladderDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(baseDirectory) || !Directory.Exists(baseDirectory))
+        {
+            return 0;
+        }
+
+        var sources = new List<string>();
+        foreach (var name in CarriedFileNames)
+        {
+            var path = Path.Combine(baseDirectory, name);
+            if (File.Exists(path))
+            {
+                sources.Add(path);
+            }
+        }
+
+        foreach (var pattern in CarriedPatterns)
+        {
+            sources.AddRange(Directory.EnumerateFiles(baseDirectory, pattern, SearchOption.TopDirectoryOnly));
+        }
+
+        var copied = 0;
+        foreach (var source in sources)
+        {
+            var destination = Path.Combine(ladderDirectory, Path.GetFileName(source));
+            if (File.Exists(destination))
+            {
+                continue;
+            }
+
+            try
+            {
+                File.Copy(source, destination);
+                copied++;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                LaunchDiagnostics.Log($"ladder saves: could not carry over {Path.GetFileName(source)}: {exception.Message}");
+            }
+        }
+
+        if (copied > 0)
+        {
+            LaunchDiagnostics.Log($"ladder saves: carried {copied} settings/loot-filter file(s) into the ladder folder.");
+        }
+
+        return copied;
+    }
+
+    /// <summary>Saved Games\Diablo II Resurrected\mods\&lt;savePath&gt;.</summary>
+    public static string? ResolveSaveDirectory(string savePath)
+    {
+        return ResolveSaveDirectory(savePath, createMissingDirectories: false);
+    }
+
+    private static string? ResolveSaveDirectory(string savePath, bool createMissingDirectories)
+    {
+        return ResolveSaveDirectory(
+            savePath,
+            SaveFileService.GetSavedGamesPath(),
+            createMissingDirectories);
+    }
+
+    internal static string? ResolveSaveDirectory(
+        string savePath,
+        string? savedGamesPath,
+        bool createMissingDirectories)
+    {
+        var trimmed = savePath.Trim().Trim('/', '\\');
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(savedGamesPath))
+        {
+            return null;
+        }
+
+        if (!Directory.Exists(savedGamesPath))
+        {
+            if (!createMissingDirectories)
+            {
+                return null;
+            }
+
+            Directory.CreateDirectory(savedGamesPath);
+        }
+
+        var d2rPath = SaveFileService.ResolveDirectoryCaseInsensitive(savedGamesPath, "Diablo II Resurrected");
+        if (d2rPath == null)
+        {
+            if (!createMissingDirectories)
+            {
+                return null;
+            }
+
+            d2rPath = Path.Combine(savedGamesPath, "Diablo II Resurrected");
+            Directory.CreateDirectory(d2rPath);
+        }
+
+        var modsPath = SaveFileService.ResolveDirectoryCaseInsensitive(d2rPath, "mods");
+        if (modsPath == null)
+        {
+            if (!createMissingDirectories)
+            {
+                return null;
+            }
+
+            modsPath = Path.Combine(d2rPath, "mods");
+            Directory.CreateDirectory(modsPath);
+        }
+
+        return Path.Combine(modsPath, trimmed);
+    }
+
+    private static string? ResolveModInfoPath(string? installDirectory)
+    {
+        var normalized = InstallDirectoryValidator.NormalizeInstallDirectory(installDirectory);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        var modsPath = SaveFileService.ResolveDirectoryCaseInsensitive(normalized, "mods");
+        if (modsPath == null)
+        {
+            return null;
+        }
+
+        var reimaginedPath = SaveFileService.ResolveDirectoryCaseInsensitive(modsPath, "Reimagined");
+        if (reimaginedPath == null)
+        {
+            return null;
+        }
+
+        return NormalModInstallationService.FindModInfo(reimaginedPath);
+    }
+}

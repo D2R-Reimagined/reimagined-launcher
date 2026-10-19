@@ -35,22 +35,57 @@ public class SaveFileService
 
         var candidates = new List<string>();
 
-        // 1. Linux: Steam Proton prefix path (prioritize on Linux)
-        if (!string.IsNullOrWhiteSpace(userProfile))
+        // 0. Linux: the Lutris prefix. It sits beside the game rather than above
+        // it, so neither the steamapps walk nor FindWinePrefix below can reach it.
+        if (OperatingSystem.IsLinux() && MainWindow.Settings.CurrentProfile.Type == InstallationType.Lutris)
         {
+            var lutrisPrefix = LutrisService.TryResolveWinePrefix(
+                MainWindow.Settings.CurrentProfile.LutrisGameSlug);
+            if (!string.IsNullOrWhiteSpace(lutrisPrefix))
+            {
+                candidates.Add(Path.Combine(lutrisPrefix, "drive_c", "users", "steamuser", "Saved Games"));
+                candidates.Add(Path.Combine(lutrisPrefix, "drive_c", "users", Environment.UserName, "Saved Games"));
+            }
+        }
+
+        // 1. Linux: Steam Proton prefix paths (prioritize on Linux)
+        if (OperatingSystem.IsLinux() && !string.IsNullOrWhiteSpace(userProfile))
+        {
+            var profileInstallDirectory = MainWindow.Settings.CurrentProfile.InstallDirectory;
+            var steamAppsDirectory = FileService.FindAncestorDirectory(profileInstallDirectory, "steamapps");
+            if (!string.IsNullOrWhiteSpace(steamAppsDirectory))
+            {
+                candidates.Add(GetProtonSavedGamesPath(steamAppsDirectory));
+            }
+
             var steamCompatPath = Path.Combine(
                 userProfile,
                 ".local", "share", "Steam", "steamapps", "compatdata", "2536520", "pfx",
                 "drive_c", "users", "steamuser", "Saved Games");
             candidates.Add(steamCompatPath);
+
+            var flatpakCompatPath = Path.Combine(
+                userProfile,
+                ".var", "app", "com.valvesoftware.Steam", "data", "Steam", "steamapps",
+                "compatdata", "2536520", "pfx", "drive_c", "users", "steamuser", "Saved Games");
+            candidates.Add(flatpakCompatPath);
         }
 
         // 2. Linux: Wine default path
-        if (!string.IsNullOrWhiteSpace(userProfile))
+        if (OperatingSystem.IsLinux() && !string.IsNullOrWhiteSpace(userProfile))
         {
+            var winePrefix = FindWinePrefix(MainWindow.Settings.CurrentProfile.InstallDirectory);
+            if (!string.IsNullOrWhiteSpace(winePrefix))
+            {
+                candidates.Add(Path.Combine(
+                    winePrefix, "drive_c", "users", Environment.UserName, "Saved Games"));
+                candidates.Add(Path.Combine(
+                    winePrefix, "drive_c", "users", "steamuser", "Saved Games"));
+            }
+
             var winePath = Path.Combine(
                 userProfile,
-                ".wine", "drive_c", "users", "steamuser", "Saved Games");
+                ".wine", "drive_c", "users", Environment.UserName, "Saved Games");
             candidates.Add(winePath);
         }
 
@@ -90,6 +125,19 @@ public class SaveFileService
         return candidates.FirstOrDefault(Directory.Exists)
                ?? candidates.FirstOrDefault(c => !string.IsNullOrWhiteSpace(c))
                ?? Path.Combine(userProfile, "Saved Games");
+    }
+
+    private static string GetProtonSavedGamesPath(string steamAppsDirectory)
+    {
+        return Path.Combine(
+            steamAppsDirectory,
+            "compatdata", "2536520", "pfx", "drive_c", "users", "steamuser", "Saved Games");
+    }
+
+    private static string? FindWinePrefix(string? installDirectory)
+    {
+        var driveDirectory = FileService.FindAncestorDirectory(installDirectory, "drive_c");
+        return driveDirectory is null ? null : Directory.GetParent(driveDirectory)?.FullName;
     }
 
     public static bool SaveFilesSafe()

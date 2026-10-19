@@ -51,6 +51,9 @@ public partial class MainWindow : Window
     private static readonly string LauncherVersion = ResolveLauncherVersion();
     private readonly GitHubAnnouncementsHttpClient _gitHubAnnouncementsHttpClient;
     private readonly INexusModsHttpClient _nexusModsHttpClient;
+    private readonly LauncherAuthenticationService _launcherAuthenticationService;
+    private readonly object _reimaginedSignInLock = new();
+    private CancellationTokenSource? _reimaginedSignInCancellationTokenSource;
     public NexusModsValidateResponse? User { get; set; }
     public static NexusUserViewModel UserViewModel { get; } = new();
     
@@ -89,6 +92,7 @@ public partial class MainWindow : Window
         Instance = this;
         _gitHubAnnouncementsHttpClient = Program.ServiceProvider.GetRequiredService<GitHubAnnouncementsHttpClient>();
         _nexusModsHttpClient = Program.ServiceProvider.GetRequiredService<NexusModsHttpClient>();;
+        _launcherAuthenticationService = Program.ServiceProvider.GetRequiredService<LauncherAuthenticationService>();
         Opacity = 0;
         InitializeComponent();
         NotificationManager = new WindowNotificationManager(this)
@@ -96,7 +100,8 @@ public partial class MainWindow : Window
             Position = NotificationPosition.BottomRight,
             MaxItems = 3
         };
-        LogoImage.Source = new Bitmap("Assets/ReimaginedLauncher.ico");
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "ReimaginedLauncher.ico");
+        LogoImage.Source = new Bitmap(iconPath);
         LauncherVersionTextBlock.Text = $"Launcher v{LauncherVersion}";
         LauncherUpdateService.UpdateDownloaded += (s, e) => RefreshLauncherUpdateUI();
         LauncherUpdateService.UpdateStateChanged += (s, e) => RefreshLauncherUpdateUI();
@@ -110,7 +115,7 @@ public partial class MainWindow : Window
         _ = NavigateToLaunchViewAsync();
         
         // Set the window icon
-        Icon = new WindowIcon("Assets/ReimaginedLauncher.ico");
+        Icon = new WindowIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "ReimaginedLauncherDesktop.ico"));
         InitializeTrayIcon();
         _saveWindowStateTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _saveWindowStateTimer.Tick += async (_, _) =>
@@ -140,25 +145,75 @@ public partial class MainWindow : Window
     
     private async Task LoadSettingsAsync()
     {
+        try
+        {
+            await LoadSettingsCoreAsync();
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.LogException("Startup settings load failed", exception);
+        }
+        finally
+        {
+            Opacity = 1;
+        }
+    }
+
+    private async Task LoadSettingsCoreAsync()
+    {
         Settings = await SettingsManager.LoadAsync();
         RestoreWindowState();
         Opacity = 1;
+        if (SettingsManager.RecoveredFromCorruptSettings)
+        {
+            Notifications.SendNotification(
+                "Your launcher settings file was damaged and has been reset. A copy was kept in the launcher's AppData folder.",
+                "Warning");
+        }
         Settings.UiScale = ClampUiScale(Settings.UiScale);
         var profile = Settings.CurrentProfile;
         profile.InstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(profile.InstallDirectory);
         profile.IsInstallDirectoryValidated = InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory);
         BackupService.ApplyDefaultSettings();
-        var openedUnreadAnnouncements = await RefreshAnnouncementsStateAsync(openUnreadAnnouncements: true);
-        ApplyUiScale();
-        
-        if (!string.IsNullOrWhiteSpace(Settings.NexusModsSSOApiKey))
+
+        // Undo a ladder redirect that outlived its session - a crash, a machine
+        // that lost power, or a launcher closed before the game did. The player's
+        // own characters are only visible while the mod points at its normal save
+        // folder, so this runs before anything else looks at the install.
+        //
+        // Skipped while D2R is running: that session read modinfo.json at startup
+        // and may be a ladder session still writing into the ladder folder.
+        async Task RestoreStartupFilesAsync()
         {
-            User = await _nexusModsHttpClient.ValidateApiKeyAsync();
-            UserViewModel.User = User;
+            if (!IsGameRunning())
+            {
+                if (profile.LaunchExperience != LaunchExperience.Ladder && profile.InstallDirectory is not null)
+                {
+                    try
+                    {
+                        NormalModInstallationService.Restore(profile.InstallDirectory);
+                    }
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+                    {
+                        LaunchDiagnostics.LogException("Could not restore the normal mod installation during startup", exception);
+                    }
+                }
+                await LadderSaveDirectoryService.RestoreIfRedirectedAsync(profile.InstallDirectory);
+            }
+
+            await CleanUpSessionSecretsAsync(deleteSessionFiles: !IsGameRunning());
         }
-        
+
+        if (OperatingSystem.IsLinux())
+            await SteamGameHandoff.RunStartupMaintenanceAsync(RestoreStartupFilesAsync);
+        else
+            await RestoreStartupFilesAsync();
+
+        // Resolve local mod state and refresh the current view immediately,
+        // before any potentially-slow network calls.
         var installDir = Settings.CurrentProfile.InstallDirectory;
         RefreshLocalModState(installDir);
+        ApplyUiScale();
         PluginsView? pluginsViewToRefresh = null;
 
         await Dispatcher.UIThread.InvokeAsync(() =>
@@ -197,6 +252,25 @@ public partial class MainWindow : Window
         BackupService.UpdateSchedule();
         await SettingsManager.SaveAsync(Settings);
 
+        try
+        {
+            await _launcherAuthenticationService.InitializeAsync(Settings);
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.Log($"Could not restore the Reimagined API session: {exception.Message}");
+        }
+        RefreshReimaginedAccountUI();
+
+        // Network calls (can be slow; don't block UI setup)
+        var openedUnreadAnnouncements = await RefreshAnnouncementsStateAsync(openUnreadAnnouncements: true);
+
+        if (!string.IsNullOrWhiteSpace(Settings.NexusModsSSOApiKey))
+        {
+            User = await _nexusModsHttpClient.ValidateApiKeyAsync();
+            UserViewModel.User = User;
+        }
+
         await RefreshUpdateStateAsync();
         LauncherUpdateService.AreUpdatesDisabled = Settings.DisableLauncherUpdates;
         _ = LauncherUpdateService.CheckForUpdatesAsync();
@@ -206,7 +280,7 @@ public partial class MainWindow : Window
         UserViewModel.PropertyChanged -= UserViewModelOnPropertyChanged;
         UserViewModel.PropertyChanged += UserViewModelOnPropertyChanged;
 
-        if (!IsLocalModDetected)
+        if (!IsLocalModDetected && Settings.CurrentProfile.LaunchExperience != LaunchExperience.Ladder)
         {
             if (!openedUnreadAnnouncements)
             {
@@ -381,9 +455,15 @@ public partial class MainWindow : Window
         var bounds = RootScaleControl.Bounds;
         if (bounds.Width > 0 && bounds.Height > 0 && _currentScale > 0)
         {
+            var logicalWidth = bounds.Width / _currentScale;
+            var useCompactShell = logicalWidth < 1200;
+            RootGrid.Margin = useCompactShell ? new Thickness(12) : new Thickness(20);
+            RootGrid.ColumnSpacing = useCompactShell ? 12 : 18;
+            RootGrid.ColumnDefinitions[0].Width = new GridLength(useCompactShell ? 250 : 300);
+
             var horizontalMargin = RootGrid.Margin.Left + RootGrid.Margin.Right;
             var verticalMargin = RootGrid.Margin.Top + RootGrid.Margin.Bottom;
-            RootGrid.Width = (bounds.Width / _currentScale) - horizontalMargin;
+            RootGrid.Width = logicalWidth - horizontalMargin;
             RootGrid.Height = (bounds.Height / _currentScale) - verticalMargin;
         }
     }
@@ -478,7 +558,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!IsLocalModDetected)
+        if (!IsLocalModDetected && Settings.CurrentProfile.LaunchExperience != LaunchExperience.Ladder)
         {
             var latestVersionForInstall = "Latest available";
             var downloadUrlForInstall = NexusUrl;
@@ -664,9 +744,7 @@ public partial class MainWindow : Window
 
                 // modinfo.json is the canonical version source (see CharacterSelectPanelService).
                 var modInfoVersion = CharacterSelectPanelService.GetModVersion(modPath);
-                _localModVersion = !string.IsNullOrWhiteSpace(modInfoVersion)
-                    ? modInfoVersion
-                    : "Unknown";
+                _localModVersion = SelectInstalledModVersion(modInfoVersion, panelVersion: null);
             }
         }
         else
@@ -683,13 +761,21 @@ public partial class MainWindow : Window
                 var modInfoVersion =
                     CharacterSelectPanelService.GetModVersionFromFile(modInfoPath)
                     ?? CharacterSelectPanelService.GetModVersionFromFile(modInfoPathInMpq);
-                _localModVersion = !string.IsNullOrWhiteSpace(modInfoVersion)
-                    ? modInfoVersion
-                    : "Unknown";
+                _localModVersion = SelectInstalledModVersion(modInfoVersion, panelVersion: null);
 
                 // Detection requires modinfo.json; directory existence alone is the bootstrapped
                 // "mod uninstalled" state and must not enable the launch button.
                 IsLocalModDetected = File.Exists(modInfoPath) || File.Exists(modInfoPathInMpq);
+
+                // Ladder installs the mod under ReimaginedLadder, so the normal
+                // check above would miss it. Detect the ladder mod too.
+                if (!IsLocalModDetected)
+                {
+                    var ladderModRoot = Path.Combine(installDir, "mods", "ReimaginedLadder");
+                    var ladderModInfo = Path.Combine(ladderModRoot, "modinfo.json");
+                    var ladderModInfoInMpq = Path.Combine(ladderModRoot, "ReimaginedLadder.mpq", "modinfo.json");
+                    IsLocalModDetected = Directory.Exists(ladderModRoot) || File.Exists(ladderModInfo) || File.Exists(ladderModInfoInMpq);
+                }
             }
         }
 
@@ -713,6 +799,16 @@ public partial class MainWindow : Window
         });
     }
 
+    internal static string SelectInstalledModVersion(string? modInfoVersion, string? panelVersion)
+    {
+        foreach (var version in new[] { modInfoVersion, panelVersion })
+        {
+            if (!string.IsNullOrWhiteSpace(version) && !version.Trim().Equals("Unknown", StringComparison.OrdinalIgnoreCase))
+                return version.Trim();
+        }
+
+        return "Unknown";
+    }
 
     private async Task<NexusModsFileResponse?> GetLatestModFileAsync()
     {
@@ -1260,6 +1356,141 @@ public partial class MainWindow : Window
         await _nexusSSO.ConnectAsync();
     }
 
+    private async void OnReimaginedSignInClicked(object? sender, RoutedEventArgs e)
+    {
+        await SignInToReimaginedAsync();
+    }
+
+    public async Task<bool> SignInToReimaginedAsync()
+    {
+        if (_launcherAuthenticationService.IsSignedIn)
+        {
+            RefreshReimaginedAccountUI();
+            return true;
+        }
+
+        var cancellationTokenSource = new CancellationTokenSource();
+        CancellationTokenSource? previousCancellationTokenSource;
+        lock (_reimaginedSignInLock)
+        {
+            previousCancellationTokenSource = _reimaginedSignInCancellationTokenSource;
+            _reimaginedSignInCancellationTokenSource = cancellationTokenSource;
+        }
+
+        // A closed browser tab cannot notify the launcher. Treat another click as
+        // a retry by cancelling the abandoned callback listener immediately.
+        previousCancellationTokenSource?.Cancel();
+
+        try
+        {
+            var user = await _launcherAuthenticationService.SignInAsync(cancellationTokenSource.Token);
+            Notifications.SendNotification($"Signed in as {user.DisplayName}.", "Success");
+            return true;
+        }
+        catch (OperationCanceledException) when (cancellationTokenSource.IsCancellationRequested)
+        {
+            return false;
+        }
+        catch (Exception exception)
+        {
+            Notifications.SendNotification(exception.Message, "Sign-in failed");
+            return false;
+        }
+        finally
+        {
+            lock (_reimaginedSignInLock)
+            {
+                if (ReferenceEquals(_reimaginedSignInCancellationTokenSource, cancellationTokenSource))
+                {
+                    _reimaginedSignInCancellationTokenSource = null;
+                }
+            }
+
+            cancellationTokenSource.Dispose();
+            RefreshReimaginedAccountUI();
+        }
+    }
+
+    private async void OnReimaginedLogoutClicked(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await _launcherAuthenticationService.SignOutAsync();
+            Notifications.SendNotification("Signed out of D2R Reimagined.", "Success");
+        }
+        catch (Exception exception)
+        {
+            Notifications.SendNotification(
+                $"Signed out locally, but the server session could not be revoked: {exception.Message}",
+                "Warning");
+        }
+        finally
+        {
+            // Signing out ends the account's game session too, running or not.
+            foreach (var installDirectory in KnownInstallDirectories())
+            {
+                GameSessionSecretsService.Delete(installDirectory);
+            }
+
+            RefreshReimaginedAccountUI();
+        }
+    }
+
+    /// <summary>
+    /// Every install directory a profile points at, so cleanup reaches installs
+    /// the player is not currently using.
+    /// </summary>
+    private static List<string> KnownInstallDirectories()
+    {
+        return Settings.Profiles
+            .Select(profile => InstallDirectoryValidator.NormalizeInstallDirectory(profile.InstallDirectory))
+            .Where(directory => !string.IsNullOrWhiteSpace(directory))
+            .Select(directory => directory!)
+            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Blanks account secrets an older launcher left in plugin configs under
+    /// mods/ - D2RLoader can hand that folder to joining players - and, when no
+    /// game is running, deletes a session secrets file a crash or a closed
+    /// launcher left behind. The file is kept while a game runs, because that
+    /// session's plugins are still reading it.
+    /// </summary>
+    private static async Task CleanUpSessionSecretsAsync(bool deleteSessionFiles)
+    {
+        foreach (var installDirectory in KnownInstallDirectories())
+        {
+            try
+            {
+                await GameSessionSecretsService.ScrubPluginConfigsAsync(installDirectory);
+                if (deleteSessionFiles)
+                {
+                    GameSessionSecretsService.Delete(installDirectory);
+                }
+            }
+            catch (Exception exception)
+            {
+                LaunchDiagnostics.LogException("Could not clean up session secrets during startup", exception);
+            }
+        }
+    }
+
+    private void RefreshReimaginedAccountUI()
+    {
+        var user = _launcherAuthenticationService.CurrentUser;
+        ReimaginedSignInButton.IsVisible = user is null;
+        ReimaginedUserMenuButton.IsVisible = user is not null;
+        ReimaginedUserMenuButton.Content = user?.DisplayName ?? string.Empty;
+        ToolTip.SetTip(
+            ReimaginedUserMenuButton,
+            user is null ? null : $"D2R Reimagined account: {user.DisplayName}");
+        if (ContentArea.Content is LaunchView launchView)
+        {
+            launchView.RefreshAuthenticationState();
+        }
+    }
+
     private void OnUserMenuClick(object? sender, RoutedEventArgs e)
     {
         if (sender is Button { ContextMenu: not null } button)
@@ -1344,10 +1575,27 @@ public partial class MainWindow : Window
         try
         {
             Notifications.SendNotification("Checking for launcher updates...", "Launcher");
-            await LauncherUpdateService.CheckForUpdatesAsync();
-            if (!LauncherUpdateService.IsUpdateAvailable && !LauncherUpdateService.IsUpdateDownloaded)
+            var result = await LauncherUpdateService.CheckForUpdatesAsync();
+            switch (result.Status)
             {
-                Notifications.SendNotification($"Launcher v{LauncherVersion} is up to date.", "Launcher");
+                case LauncherUpdateCheckStatus.UpToDate:
+                    Notifications.SendNotification($"Launcher v{LauncherVersion} is up to date.", "Launcher");
+                    break;
+                case LauncherUpdateCheckStatus.UpdateReady:
+                    Notifications.SendNotification($"Launcher update {LauncherUpdateService.LatestVersion} is ready to install.", "Launcher");
+                    break;
+                case LauncherUpdateCheckStatus.InProgress:
+                    Notifications.SendNotification("A launcher update check or download is already in progress.", "Launcher");
+                    break;
+                case LauncherUpdateCheckStatus.NotInstalled:
+                    Notifications.SendNotification("This launcher is not installed with automatic update support.", "Launcher");
+                    break;
+                case LauncherUpdateCheckStatus.Disabled:
+                    Notifications.SendNotification("Launcher updates are disabled in Settings.", "Launcher");
+                    break;
+                case LauncherUpdateCheckStatus.Failed:
+                    Notifications.SendNotification($"Update check failed: {result.ErrorMessage}", "Error");
+                    break;
             }
         }
         catch (Exception ex)
@@ -1355,7 +1603,6 @@ public partial class MainWindow : Window
             Notifications.SendNotification($"Update check failed: {ex.Message}", "Error");
         }
     }
-
 
     private async void OnCopySessionLogClicked(object? sender, RoutedEventArgs e)
     {
@@ -1524,6 +1771,9 @@ public partial class MainWindow : Window
         _saveWindowStateTimer?.Start();
     }
 
+    /// <summary>Closes the launcher through the existing exit path, including when minimize-to-tray is enabled.</summary>
+    private void OnExitLauncherClick(object? sender, RoutedEventArgs e) => ExitFromTray();
+
     private void ExitFromTray()
     {
         Dispatcher.UIThread.Post(() =>
@@ -1549,17 +1799,31 @@ public partial class MainWindow : Window
         base.OnClosing(e);
     }
 
-    public async Task MinimizeToTrayAndWaitForExitAsync(Process gameProcess, string? expectedExePath = null)
+    public async Task<bool> MinimizeToTrayAndWaitForExitAsync(Process gameProcess, string? expectedExePath = null)
     {
         MinimizeToTray();
+        var exited = await WaitForGameExitAsync(gameProcess, expectedExePath);
+        RestoreFromTray();
+        return exited;
+    }
 
-        await Task.Run(() =>
+    /// <summary>
+    /// Waits for the game to close, taking ownership of <paramref name="gameProcess"/>.
+    /// Returns true only when the game process was identified and its exit observed.
+    /// </summary>
+    public static Task<bool> WaitForGameExitAsync(Process gameProcess, string? expectedExePath = null)
+    {
+        return Task.Run(() =>
         {
             Process? processToWatch = null;
+            var watchingGame = string.IsNullOrEmpty(expectedExePath);
             try
             {
                 // When launched via Steam, the returned process is Steam.exe, not the game.
                 // Poll briefly to find the actual D2R.exe process by its executable path.
+                //
+                // When launched via Proton, the returned process is python*, not the game, but it's a specific instance
+                // so it's ok to wait for its exit.
                 processToWatch = gameProcess;
                 if (!string.IsNullOrEmpty(expectedExePath))
                 {
@@ -1568,22 +1832,86 @@ public partial class MainWindow : Window
                     {
                         gameProcess.Dispose();
                         processToWatch = found;
+                        watchingGame = true;
                     }
                 }
 
                 processToWatch.WaitForExit();
+                return watchingGame;
             }
             catch (InvalidOperationException)
             {
-                // Process already exited or handle is invalid
+                // An invalid handle does not confirm that the game exited.
+                return false;
             }
             finally
             {
                 processToWatch?.Dispose();
             }
         });
+    }
+
+    /// <summary>
+    /// True while a D2R process this launcher can see is running. Used to hold
+    /// off touching mod files that a live session has already read.
+    /// </summary>
+    public static bool IsGameRunning()
+    {
+        try
+        {
+            if (OperatingSystem.IsLinux())
+            {
+                foreach (var profile in Settings.Profiles)
+                {
+                    if (string.IsNullOrWhiteSpace(profile.InstallDirectory)) continue;
+                    if (SteamGameHandoff.FindGameProcesses(Path.Combine(profile.InstallDirectory, "D2R.exe")).Length != 0
+                        || SteamGameHandoff.FindGameProcesses(Path.Combine(profile.InstallDirectory, "D2RLoader.exe")).Length != 0)
+                        return true;
+                }
+            }
+            // Under Wine the game usually shows up as "D2R.exe", which a
+            // "D2R" lookup misses - and the startup cleanup would then delete a
+            // live session's secrets file.
+            var count = 0;
+            foreach (var name in OperatingSystem.IsWindows() ? new[] { "D2R" } : new[] { "D2R", "D2R.exe" })
+            {
+                var running = Process.GetProcessesByName(name);
+                count += running.Length;
+                foreach (var process in running)
+                {
+                    process.Dispose();
+                }
+            }
+
+            return count > 0;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The Lutris client the launcher starts may exit immediately after handing
+    /// off or outlive the session, so the game process is watched instead.
+    /// </summary>
+    /// <returns>True only when the game session was found and its end observed.</returns>
+    public async Task<bool> MinimizeToTrayAndWaitForLutrisExitAsync(string? gameExePath)
+    {
+        MinimizeToTray();
+
+        var exited = false;
+        try
+        {
+            exited = await LutrisService.WaitForGameSessionAsync(gameExePath, TimeSpan.FromMinutes(2));
+        }
+        catch (Exception ex)
+        {
+            LaunchDiagnostics.LogException("Lutris session watch failed", ex);
+        }
 
         RestoreFromTray();
+        return exited;
     }
 
     private static Process? WaitForProcessByPath(string exePath, TimeSpan timeout)
@@ -1596,7 +1924,11 @@ public partial class MainWindow : Window
         {
             try
             {
-                foreach (var proc in Process.GetProcessesByName(processName))
+                var candidateProcesses = OperatingSystem.IsLinux()
+                    ? Process.GetProcesses()
+                    : Process.GetProcessesByName(processName);
+
+                foreach (var proc in candidateProcesses)
                 {
                     try
                     {
@@ -1605,6 +1937,19 @@ public partial class MainWindow : Window
                             string.Equals(Path.GetFullPath(mainModule.FileName), normalizedTarget, StringComparison.OrdinalIgnoreCase))
                         {
                             return proc;
+                        }
+
+                        if (OperatingSystem.IsLinux())
+                        {
+                            var commandLinePath = $"/proc/{proc.Id}/cmdline";
+                            var commandLine = File.Exists(commandLinePath)
+                                ? File.ReadAllText(commandLinePath).Replace('\0', ' ')
+                                : string.Empty;
+                            if (commandLine.Contains(normalizedTarget, StringComparison.Ordinal) ||
+                                commandLine.Contains(Path.GetFileName(exePath), StringComparison.OrdinalIgnoreCase))
+                            {
+                                return proc;
+                            }
                         }
                     }
                     catch

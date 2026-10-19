@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System;
 using System.Text.Json.Serialization;
 
 namespace ReimaginedLauncher.Utilities;
@@ -7,7 +8,26 @@ public enum InstallationType
 {
     BattleNet,
     Steam,
-    D2RMM
+    D2RMM,
+    Lutris
+}
+
+public static class InstallationTypes
+{
+    /// <summary>
+    /// Lutris is a Linux application, so on Windows the type is shown in the
+    /// dropdown as unavailable rather than being selectable. Unavailable types
+    /// get no profile, which keeps a Windows settings file exactly as it was.
+    /// </summary>
+    public static bool IsAvailable(InstallationType type)
+        => type != InstallationType.Lutris || OperatingSystem.IsLinux();
+}
+
+public enum LaunchExperience
+{
+    Offline,
+    Online,
+    Ladder
 }
 
 public enum StackDropOption
@@ -21,8 +41,23 @@ public enum StackDropOption
 public class InstallationProfile
 {
     public InstallationType Type { get; set; }
+    public LaunchExperience LaunchExperience { get; set; }
+    public Guid? SelectedLadderId { get; set; }
+    public Dictionary<string, List<Guid>> SelectedLadderExtensions { get; set; } = [];
+
+    // Keyed by ladder id ("N"). A missing region entry means automatic; pins are admin-only.
+    public Dictionary<string, List<string>> SelectedLadderRegions { get; set; } = [];
+    public Dictionary<string, string> PinnedLadderServers { get; set; } = [];
     public string? InstallDirectory { get; set; }
     public string? SteamDirectory { get; set; }
+    public string? ProtonExecutable { get; set; }
+    public bool EnableLsfg { get; set; }
+    public bool UseSteamHelperFallback { get; set; }
+
+    // The id drives the launch URI; the slug locates the game's YAML config.
+    public int? LutrisGameId { get; set; }
+    public string? LutrisGameSlug { get; set; }
+    public string? LutrisGameName { get; set; }
     public bool IsInstallDirectoryValidated { get; set; }
     public string? SaveDirectory { get; set; }
 
@@ -36,9 +71,12 @@ public class InstallationProfile
     public bool NoSound { get; set; }
     public bool NoRumble { get; set; }
     public bool ForceDesktop { get; set; }
+    public bool WindowedMode { get; set; }
     public bool ResetOfflineMaps { get; set; }
     public bool EnableRespec { get; set; }
     public int? PlayersCount { get; set; }
+    public bool CustomMapSeedEnabled { get; set; }
+    public uint CustomMapSeed { get; set; }
     public int SkillPointsPerLevel { get; set; } = 1;
     public int AttributesPerLevel { get; set; } = 5;
     public int MaxSkillLevel { get; set; } = 25;
@@ -47,6 +85,7 @@ public class InstallationProfile
     public int HellResistPenalty { get; set; } = -120;
     public bool RemovePaladinAuraSound { get; set; }
     public bool RemoveSplashVfx { get; set; }
+    public bool DisableExtraBlood { get; set; }
     public List<PluginRegistration> Plugins { get; set; } = [];
     public bool MakeTooltipBackgroundOpaque { get; set; }
     public bool RemoveHelmetVisual { get; set; }
@@ -94,6 +133,16 @@ public class AppSettings
         set => NexusModsSSOApiKey = SecretProtector.Unprotect(value);
     }
 
+    [JsonIgnore]
+    public string? D2RReimaginedRefreshToken { get; set; }
+
+    [JsonPropertyName("D2RReimaginedRefreshToken")]
+    public string? D2RReimaginedRefreshTokenEncrypted
+    {
+        get => SecretProtector.Protect(D2RReimaginedRefreshToken);
+        set => D2RReimaginedRefreshToken = SecretProtector.Unprotect(value);
+    }
+
     public bool? NexusPremiumDownloadAccess { get; set; }
     
     public List<InstallationProfile> Profiles { get; set; } = [];
@@ -116,6 +165,28 @@ public class AppSettings
                 SelectedProfileIndex = 0;
             }
             return Profiles[SelectedProfileIndex];
+        }
+    }
+
+    /// <summary>
+    /// Adds the Lutris profile to a settings file written before the type
+    /// existed. It is appended, so existing profiles keep their position and
+    /// <see cref="SelectedProfileIndex"/> still refers to the same installation.
+    /// Windows never gets one: the type cannot be selected there.
+    /// </summary>
+    public void EnsureLutrisProfile()
+    {
+        // Seeds the default profiles when the settings file is brand new.
+        _ = CurrentProfile;
+
+        if (!InstallationTypes.IsAvailable(InstallationType.Lutris))
+        {
+            return;
+        }
+
+        if (!Profiles.Exists(profile => profile.Type == InstallationType.Lutris))
+        {
+            Profiles.Add(new InstallationProfile { Type = InstallationType.Lutris });
         }
     }
 }
