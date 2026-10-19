@@ -107,6 +107,11 @@ public sealed class CascOrphanRecoveryService
         var sw = Stopwatch.StartNew();
 
         var manifest = await _manifestService.LoadAsync(cancellationToken).ConfigureAwait(false);
+        var manifestByPath = new Dictionary<string, CascFastloadEntry>(manifest.Files.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var file in manifest.Files)
+        {
+            manifestByPath[file.Path] = file;
+        }
 
         // Index live CASC entries lazily — only opened the first time we need
         // a CKey lookup so the no-storage path stays cheap.
@@ -129,7 +134,7 @@ public sealed class CascOrphanRecoveryService
             }
 
             var diskPath = Path.Combine(destinationRoot, CascExtractionService.NormalizeRelativePath(rawPath));
-            var entry = CascFastloadManifestService.FindEntry(manifest, rawPath);
+            manifestByPath.TryGetValue(rawPath, out var entry);
 
             if (entry is null)
             {
@@ -171,6 +176,7 @@ public sealed class CascOrphanRecoveryService
                             ? CascFastloadEntry.SourceTokens.Casc
                             : withoutMod;
                         entry.ModVersion = null;
+                        entry.ModMd5 = null;
                         entry.CKey = HexEncode(cascEntry.CKey);
                         entry.CascCKey = entry.CKey;
                         entry.Size = (long)cascEntry.FileSize;
@@ -197,6 +203,7 @@ public sealed class CascOrphanRecoveryService
                 // let plugin reconciliation (Phase 1i) re-apply on next launch.
                 entry.Source = withoutMod;
                 entry.ModVersion = null;
+                entry.ModMd5 = null;
                 manifestUpdates.Add(entry);
                 items.Add(new CascOrphanRecoveryItem(rawPath, CascOrphanRecoveryAction.SourceUpdated));
                 continue;
@@ -221,6 +228,7 @@ public sealed class CascOrphanRecoveryService
             {
                 entry.Source = withoutMod;
                 entry.ModVersion = null;
+                entry.ModMd5 = null;
                 manifestUpdates.Add(entry);
                 items.Add(deleted
                     ? new CascOrphanRecoveryItem(rawPath, CascOrphanRecoveryAction.SourceUpdated)
@@ -231,17 +239,26 @@ public sealed class CascOrphanRecoveryService
         // Persist manifest changes atomically.
         if (manifestRemovals.Count > 0 || manifestUpdates.Count > 0)
         {
+            var removals = new HashSet<string>(manifestRemovals, StringComparer.OrdinalIgnoreCase);
+            var updates = new Dictionary<string, CascFastloadEntry>(StringComparer.OrdinalIgnoreCase);
+            foreach (var updated in manifestUpdates)
+            {
+                updates[updated.Path] = updated;
+            }
+
             await _manifestService.UpdateAsync(m =>
             {
-                foreach (var path in manifestRemovals)
+                m.Files.RemoveAll(f => removals.Contains(f.Path));
+
+                for (var i = 0; i < m.Files.Count; i++)
                 {
-                    CascFastloadManifestService.Remove(m, path);
+                    if (updates.Remove(m.Files[i].Path, out var updated))
+                    {
+                        m.Files[i] = updated;
+                    }
                 }
 
-                foreach (var updated in manifestUpdates)
-                {
-                    CascFastloadManifestService.AddOrUpdate(m, updated);
-                }
+                m.Files.AddRange(updates.Values);
             }, cancellationToken).ConfigureAwait(false);
         }
 

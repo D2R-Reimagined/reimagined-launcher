@@ -26,8 +26,8 @@ public sealed record CascResetProgress(
 /// <summary>Outcome of a reset pass.</summary>
 /// <param name="FilesScanned">On-disk files inspected under the fastload roots.</param>
 /// <param name="OrphansDeleted">Files removed because they were not tracked by the manifest at all.</param>
-/// <param name="MismatchedDeleted">Tracked CASC-only files removed because their on-disk size did not match the manifest.</param>
-/// <param name="OverlayMismatchesIgnored">Tracked overlay (mod/plugin) entries with a size mismatch that were left in place.</param>
+/// <param name="MismatchedDeleted">Tracked CASC-only files removed because their on-disk content did not match the manifest.</param>
+/// <param name="OverlayMismatchesIgnored">Tracked mod files whose MD5 no longer matches what the installer wrote; left in place.</param>
 /// <param name="ManifestEntriesDropped">Manifest entries cleared so the next delta pass re-extracts them.</param>
 /// <param name="DirectoriesPruned">Empty directories removed beneath the fastload roots.</param>
 public sealed record CascResetResult(
@@ -46,7 +46,7 @@ public sealed record CascResetResult(
 ///
 /// Removes files that are not tracked at all (e.g. third-party content the user
 /// dropped into <c>Reimagined.mpq\data\</c> manually) and CASC-owned files
-/// whose on-disk size disagrees with the manifest. Manifest overlay entries
+/// whose on-disk size or MD5 disagrees with the manifest CKey. Manifest overlay entries
 /// (<c>mod</c>/<c>plugin</c>) are intentionally preserved — they are the
 /// launcher-owned mod payload, not "vanilla".
 ///
@@ -161,13 +161,9 @@ public sealed class CascResetService
                             continue;
                         }
 
-                        if (size == entry.Size)
+                        if (IsCascOnly(entry.Source))
                         {
-                            // Healthy tracked file; nothing to do.
-                        }
-                        else if (IsCascOnly(entry.Source))
-                        {
-                            if (TryDeleteFile(file, out var deletedBytes))
+                            if (!IsHealthyCascFile(file, size, entry) && TryDeleteFile(file, out var deletedBytes))
                             {
                                 mismatches++;
                                 bytes += deletedBytes;
@@ -175,7 +171,7 @@ public sealed class CascResetService
                                 pathsToDrop.Add(entry.Path);
                             }
                         }
-                        else
+                        else if (!IsHealthyOverlayFile(file, entry))
                         {
                             // Overlay (mod/plugin) — not "vanilla"; leave for the
                             // user / mod reinstall flow rather than nuking it here.
@@ -228,6 +224,37 @@ public sealed class CascResetService
     private static bool IsCascOnly(string? source)
     {
         return string.Equals(source, CascFastloadEntry.SourceTokens.Casc, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Size first, then MD5 against the CKey; a same-length edit (0 -> 1) only shows up in the hash.
+    private static bool IsHealthyCascFile(string file, long size, CascFastloadEntry entry)
+    {
+        if (size != entry.Size)
+        {
+            return false;
+        }
+
+        try
+        {
+            return string.Equals(CascFileHash.ComputeMd5Hex(file), entry.CKey, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Unreadable file: skip rather than risk a false-positive deletion.
+            return true;
+        }
+    }
+
+    // Mod-owned bytes are checked against the MD5 recorded at install; plugin edits are expected drift.
+    private static bool IsHealthyOverlayFile(string file, CascFastloadEntry entry)
+    {
+        if (CascFastloadEntry.SourceTokens.Contains(entry.Source, CascFastloadEntry.SourceTokens.Mod) &&
+            !CascFastloadEntry.SourceTokens.Contains(entry.Source, CascFastloadEntry.SourceTokens.Plugin))
+        {
+            return CascFileHash.Matches(file, entry.ModMd5);
+        }
+
+        return true;
     }
 
     private static void QueueParent(HashSet<string> directories, string filePath)

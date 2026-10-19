@@ -38,7 +38,7 @@ public sealed class ModReleaseInstallerServiceTests : IDisposable
         var handler = new GitHubReleaseHandler(ReleasesJson("v3.0.10", "D2R.Reimagined.-.3.0.10.zip", archive), archive);
         var service = new ModReleaseInstallerService(new HttpClient(handler));
 
-        await service.InstallAsync(_installDirectory, "3.0.10");
+        await service.InstallAsync(_installDirectory, InstallationType.BattleNet, "3.0.10");
 
         Assert.Equal("3.0.10", ModReleaseInstallerService.ReadInstalledVersion(_installDirectory));
         Assert.Contains("/releases/download/v3.0.10/", handler.LastDownloadUrl);
@@ -52,7 +52,7 @@ public sealed class ModReleaseInstallerServiceTests : IDisposable
         var service = new ModReleaseInstallerService(new HttpClient(handler));
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => service.InstallAsync(_installDirectory, "3.0.11"));
+            () => service.InstallAsync(_installDirectory, InstallationType.BattleNet, "3.0.11"));
 
         Assert.Contains("3.0.11", exception.Message);
     }
@@ -66,7 +66,7 @@ public sealed class ModReleaseInstallerServiceTests : IDisposable
         var service = new ModReleaseInstallerService(new HttpClient(new GitHubReleaseHandler(json, archive)));
 
         await Assert.ThrowsAsync<InvalidDataException>(
-            () => service.InstallAsync(_installDirectory, "3.0.10"));
+            () => service.InstallAsync(_installDirectory, InstallationType.BattleNet, "3.0.10"));
 
         Assert.Null(ModReleaseInstallerService.ReadInstalledVersion(_installDirectory));
     }

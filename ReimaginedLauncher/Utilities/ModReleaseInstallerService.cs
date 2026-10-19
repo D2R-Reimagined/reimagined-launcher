@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -47,6 +46,7 @@ public sealed class ModReleaseInstallerService
 
     public async Task InstallAsync(
         string? installDirectory,
+        InstallationType installationType,
         string requiredVersion,
         IProgress<ModReleaseInstallProgress>? progress = null,
         CancellationToken cancellationToken = default)
@@ -78,7 +78,9 @@ public sealed class ModReleaseInstallerService
             await DownloadAsync(asset, archivePath, progress, cancellationToken);
 
             progress?.Report(new ModReleaseInstallProgress($"Installing Reimagined {requiredVersion}..."));
-            await Task.Run(() => InstallArchive(archivePath, normalized!, cancellationToken), cancellationToken);
+            await Task.Run(
+                () => ModArchiveInstallService.InstallAsync(archivePath, installationType, normalized!, cancellationToken),
+                cancellationToken);
 
             var installed = ReadInstalledVersion(normalized!);
             if (!string.Equals(installed, requiredVersion.Trim(), StringComparison.OrdinalIgnoreCase))
@@ -198,79 +200,6 @@ public sealed class ModReleaseInstallerService
             {
                 throw new InvalidDataException("The downloaded Reimagined archive failed its SHA-256 check.");
             }
-        }
-    }
-
-    /// <summary>
-    /// The release archive is rooted at the game folder and carries
-    /// mods/Reimagined. The existing folder is replaced rather than merged so a
-    /// downgrade cannot leave newer files behind, and the previous copy is kept
-    /// next to it until the new one is in place.
-    /// </summary>
-    private static void InstallArchive(
-        string archivePath,
-        string installDirectory,
-        CancellationToken cancellationToken)
-    {
-        var stagingDirectory = Path.Combine(Path.GetDirectoryName(archivePath)!, "staging");
-        D2RLoaderInstallerService.ExtractArchive(archivePath, stagingDirectory, cancellationToken);
-
-        var sourceModDirectory = Directory
-            .GetDirectories(stagingDirectory, "Reimagined", SearchOption.AllDirectories)
-            .FirstOrDefault(path => string.Equals(
-                Path.GetFileName(Path.GetDirectoryName(path)),
-                "mods",
-                StringComparison.OrdinalIgnoreCase));
-        if (sourceModDirectory is null)
-        {
-            throw new InvalidDataException("The Reimagined archive does not contain a mods/Reimagined folder.");
-        }
-
-        var targetModDirectory = Path.Combine(installDirectory, "mods", "Reimagined");
-        var backupDirectory = Path.Combine(installDirectory, "mods", "Reimagined.backup");
-        if (Directory.Exists(targetModDirectory))
-        {
-            if (Directory.Exists(backupDirectory))
-            {
-                Directory.Delete(backupDirectory, recursive: true);
-            }
-
-            Directory.Move(targetModDirectory, backupDirectory);
-        }
-
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(targetModDirectory)!);
-            CopyDirectory(sourceModDirectory, targetModDirectory, cancellationToken);
-        }
-        catch
-        {
-            if (Directory.Exists(targetModDirectory))
-            {
-                Directory.Delete(targetModDirectory, recursive: true);
-            }
-            if (Directory.Exists(backupDirectory))
-            {
-                Directory.Move(backupDirectory, targetModDirectory);
-            }
-
-            throw;
-        }
-    }
-
-    private static void CopyDirectory(string source, string destination, CancellationToken cancellationToken)
-    {
-        Directory.CreateDirectory(destination);
-        foreach (var directory in Directory.GetDirectories(source, "*", SearchOption.AllDirectories))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Directory.CreateDirectory(Path.Combine(destination, Path.GetRelativePath(source, directory)));
-        }
-
-        foreach (var file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            File.Copy(file, Path.Combine(destination, Path.GetRelativePath(source, file)), overwrite: true);
         }
     }
 

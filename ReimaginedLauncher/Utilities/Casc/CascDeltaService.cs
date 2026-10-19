@@ -161,6 +161,13 @@ public sealed class CascDeltaService
                 continue;
             }
 
+            // Overlay-only entries that never had a CASC counterpart have nothing to reconcile.
+            if (!CascFastloadEntry.SourceTokens.Contains(m.Source, CascFastloadEntry.SourceTokens.Casc) &&
+                string.IsNullOrEmpty(m.CascCKey))
+            {
+                continue;
+            }
+
             removed.Add(new CascDeltaItem(m.Path, CascDeltaReason.Removed, null, m));
         }
 
@@ -196,7 +203,10 @@ public sealed class CascDeltaService
         return Plan(entries, manifest, destinationRoot, cancellationToken);
     }
 
-    /// <summary>Extracts Added/Updated/Restored entries, removes CASC-only orphans, and persists the manifest.</summary>
+    /// <summary>
+    /// Extracts Added/Updated/Restored entries, removes CASC-only orphans, and persists the manifest.
+    /// Updated paths owned by the mod or a plugin keep their bytes; only the CASC fingerprint is refreshed.
+    /// </summary>
     public async Task<CascDeltaApplyResult> ApplyAsync(
         SafeCascStorageHandle storage,
         CascDeltaPlan plan,
@@ -213,10 +223,18 @@ public sealed class CascDeltaService
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
+        var overlayUpdates = plan.Updated
+            .Where(i => CascFastloadEntry.SourceTokens.IsOverlay(i.ManifestEntry?.Source))
+            .ToList();
         var extractItems = plan.Added
-            .Concat(plan.Updated)
+            .Concat(plan.Updated.Where(i => !CascFastloadEntry.SourceTokens.IsOverlay(i.ManifestEntry?.Source)))
             .Concat(plan.Restored)
             .ToList();
+
+        if (overlayUpdates.Count > 0)
+        {
+            LaunchDiagnostics.Log($"CASC ApplyAsync: {overlayUpdates.Count:N0} updated path(s) are mod/plugin overlays; keeping their bytes.");
+        }
 
         long bytesWritten = 0;
 
@@ -294,6 +312,17 @@ public sealed class CascDeltaService
                     existing.Size = (long)entry.FileSize;
                     // Refresh the underlying CASC fingerprint for future orphan recovery.
                     existing.CascCKey = ckeyHex;
+
+                    // A Restored overlay was missing on disk, so the bytes now are vanilla.
+                    if (item.Reason == CascDeltaReason.Restored &&
+                        CascFastloadEntry.SourceTokens.Contains(existing.Source, CascFastloadEntry.SourceTokens.Mod))
+                    {
+                        existing.Source = CascFastloadEntry.SourceTokens.With(
+                            CascFastloadEntry.SourceTokens.Without(existing.Source, CascFastloadEntry.SourceTokens.Mod),
+                            CascFastloadEntry.SourceTokens.Casc);
+                        existing.ModVersion = null;
+                        existing.ModMd5 = null;
+                    }
                 }
                 else
                 {
@@ -305,6 +334,19 @@ public sealed class CascDeltaService
                         Source = CascFastloadEntry.SourceTokens.Casc,
                         CascCKey = ckeyHex
                     };
+                }
+            }
+
+            foreach (var item in overlayUpdates)
+            {
+                var entry = item.Entry!;
+                if (byPath.TryGetValue(entry.Path, out var existing))
+                {
+                    var ckeyHex = HexEncode(entry.CKey);
+                    existing.CKey = ckeyHex;
+                    existing.Size = (long)entry.FileSize;
+                    existing.CascCKey = ckeyHex;
+                    existing.Source = CascFastloadEntry.SourceTokens.With(existing.Source, CascFastloadEntry.SourceTokens.Casc);
                 }
             }
 
@@ -325,6 +367,7 @@ public sealed class CascDeltaService
                     // Drop the CASC fingerprint but keep the entry so the
                     // mod/plugin overlay it tracks is still recorded.
                     m.CascCKey = null;
+                    m.Source = CascFastloadEntry.SourceTokens.Without(m.Source, CascFastloadEntry.SourceTokens.Casc);
                     byPath[m.Path] = m;
                 }
             }

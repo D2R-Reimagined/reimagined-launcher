@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Threading;
@@ -30,8 +31,16 @@ internal static class FileCopyHelper
         }
     }
 
-    /// <summary>Extracts <paramref name="zipPath"/> into <paramref name="destinationDirectory"/> using per-entry atomic replace (fresh file id per overwrite).</summary>
-    public static async Task ExtractZipAsync(string zipPath, string destinationDirectory)
+    /// <summary>
+    /// Extracts <paramref name="zipPath"/> into <paramref name="destinationDirectory"/> using per-entry atomic replace (fresh file id per overwrite).
+    /// Only entries under <paramref name="entryPrefix"/> are extracted, with the prefix stripped. Returns the
+    /// written file paths relative to <paramref name="destinationDirectory"/>, using '/' separators.
+    /// </summary>
+    public static async Task<IReadOnlyList<string>> ExtractZipAsync(
+        string zipPath,
+        string destinationDirectory,
+        string entryPrefix = "",
+        CancellationToken cancellationToken = default)
     {
         Directory.CreateDirectory(destinationDirectory);
 
@@ -42,15 +51,25 @@ internal static class FileCopyHelper
             fullDestination += Path.DirectorySeparatorChar;
         }
 
+        var written = new List<string>();
         using var archive = ZipFile.OpenRead(zipPath);
         foreach (var entry in archive.Entries)
         {
-            if (string.IsNullOrEmpty(entry.FullName))
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var entryName = entry.FullName.Replace('\\', '/');
+            if (!entryName.StartsWith(entryPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            var destinationPath = Path.GetFullPath(Path.Combine(destinationDirectory, entry.FullName));
+            entryName = entryName[entryPrefix.Length..];
+            if (string.IsNullOrEmpty(entryName))
+            {
+                continue;
+            }
+
+            var destinationPath = Path.GetFullPath(Path.Combine(destinationDirectory, entryName));
             if (!destinationPath.StartsWith(fullDestination, StringComparison.OrdinalIgnoreCase))
             {
                 // Defend against zip slip.
@@ -59,7 +78,7 @@ internal static class FileCopyHelper
             }
 
             // Directory entry.
-            if (entry.FullName.EndsWith('/') || entry.FullName.EndsWith('\\'))
+            if (entryName.EndsWith('/'))
             {
                 Directory.CreateDirectory(destinationPath);
                 continue;
@@ -72,8 +91,11 @@ internal static class FileCopyHelper
             }
 
             await using var sourceStream = entry.Open();
-            await WriteStreamAtomicallyAsync(sourceStream, destinationPath).ConfigureAwait(false);
+            await WriteStreamAtomicallyAsync(sourceStream, destinationPath, cancellationToken).ConfigureAwait(false);
+            written.Add(entryName);
         }
+
+        return written;
     }
 
     /// <summary>

@@ -544,13 +544,18 @@ public partial class CascFastloadView : UserControl
                 $"overlayIgnored={resetResult.OverlayMismatchesIgnored} bytes={resetResult.BytesDeleted} dropped={resetResult.ManifestEntriesDropped} " +
                 $"pruned={resetResult.DirectoriesPruned} elapsed={resetResult.Elapsed}.");
 
+            var overlayNote = resetResult.OverlayMismatchesIgnored > 0
+                ? $" {resetResult.OverlayMismatchesIgnored:N0} mod file(s) differ from what was installed (tweaks, plugins or manual edits) and were left in place."
+                : string.Empty;
+
             // If nothing needed restoring there is no point opening the live
             // CASC storage; report and exit.
             if (resetResult.OrphansDeleted == 0 && resetResult.MismatchedDeleted == 0)
             {
                 CascFastloadOperationState.Instance.SetResult(
                     $"Reset complete. Nothing to do — installation already matches the manifest " +
-                    $"({resetResult.FilesScanned:N0} files scanned in {CascFastloadOperationState.FormatElapsed(resetResult.Elapsed)}).");
+                    $"({resetResult.FilesScanned:N0} files scanned in {CascFastloadOperationState.FormatElapsed(resetResult.Elapsed)})." +
+                    overlayNote);
                 return;
             }
 
@@ -572,7 +577,8 @@ public partial class CascFastloadView : UserControl
             CascFastloadOperationState.Instance.SetResult(
                 $"Reset complete. Removed {resetResult.OrphansDeleted:N0} orphan(s), {resetResult.MismatchedDeleted:N0} mismatched file(s) " +
                 $"({CascFastloadOperationState.FormatBytes(resetResult.BytesDeleted)}); pruned {resetResult.DirectoriesPruned:N0} dir(s); " +
-                $"vanilla files re-extracted via delta.");
+                $"vanilla files re-extracted via delta." +
+                overlayNote);
         }).ConfigureAwait(false);
     }
 
@@ -618,7 +624,7 @@ public partial class CascFastloadView : UserControl
                     {
                         Text = "The launcher will compare the files in Reimagined.mpq\\data\\ against the fastload manifest and:" + Environment.NewLine +
                                "  • delete files that are not tracked at all (e.g. content dropped in manually)" + Environment.NewLine +
-                               "  • delete CASC-tracked files whose size no longer matches the manifest" + Environment.NewLine +
+                               "  • delete CASC-tracked files whose contents no longer match the manifest (size and MD5)" + Environment.NewLine +
                                "  • re-extract the dropped vanilla files via a delta pass" + Environment.NewLine + Environment.NewLine +
                                "Mod and plugin overlays tracked in the manifest are preserved. If you've modified mod files manually, run Install/Update afterwards to reapply the mod on top.",
                         TextWrapping = Avalonia.Media.TextWrapping.Wrap

@@ -55,6 +55,9 @@ public sealed class CascFastloadEntry
     /// <summary>Mod version that last wrote this path (<c>"mod"</c> source).</summary>
     public string? ModVersion { get; set; }
 
+    /// <summary>Hex MD5 of the bytes the mod installer last wrote to this path; null when the mod does not own it.</summary>
+    public string? ModMd5 { get; set; }
+
     /// <summary>Enabled plugin ids currently claiming this path; drives conflict detection and reconciliation on disable/uninstall.</summary>
     public List<string>? PluginIds { get; set; }
 
@@ -67,5 +70,47 @@ public sealed class CascFastloadEntry
         public const string CascAndPlugin = "casc+plugin";
         public const string ModAndPlugin = "mod+plugin";
         public const string CascAndModAndPlugin = "casc+mod+plugin";
+
+        public static bool Contains(string? source, string token)
+        {
+            if (string.IsNullOrEmpty(source))
+            {
+                return false;
+            }
+
+            foreach (var part in source.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (string.Equals(part, token, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>True when the mod or a plugin owns the bytes on disk.</summary>
+        public static bool IsOverlay(string? source) => Contains(source, Mod) || Contains(source, Plugin);
+
+        /// <summary>Returns <paramref name="source"/> with <paramref name="token"/> added, in canonical casc/mod/plugin order.</summary>
+        public static string With(string? source, string token) =>
+            Build(Contains(source, Casc) || token == Casc,
+                Contains(source, Mod) || token == Mod,
+                Contains(source, Plugin) || token == Plugin);
+
+        /// <summary>Returns <paramref name="source"/> without <paramref name="token"/>; empty when no owner remains.</summary>
+        public static string Without(string? source, string token) =>
+            Build(Contains(source, Casc) && token != Casc,
+                Contains(source, Mod) && token != Mod,
+                Contains(source, Plugin) && token != Plugin);
+
+        private static string Build(bool casc, bool mod, bool plugin)
+        {
+            var parts = new List<string>(3);
+            if (casc) parts.Add(Casc);
+            if (mod) parts.Add(Mod);
+            if (plugin) parts.Add(Plugin);
+            return string.Join('+', parts);
+        }
     }
 }
