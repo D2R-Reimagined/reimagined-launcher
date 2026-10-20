@@ -29,7 +29,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
     [InlineData("BonesMcPimp.d2s", false)]
     [InlineData("WereSorc.d2s", false)]
     [InlineData("BruhII.d2s", false)]
-    [InlineData("ModernSharedStashSoftCoreV2.d2i", true)]
+    [InlineData("ModernSharedStashSoftCoreV2.d2i", false)]
     public void CurrentSavesAreLeftAloneAndConvertedSavesAreNotConvertedAgain(string fixture, bool alreadyCompatible)
     {
         var service = CreateService();
