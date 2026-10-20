@@ -38,7 +38,7 @@ public sealed record CascExtractionFilter(
     internal bool Accept(CascFileEntry entry)
     {
         var path = StripCascNamespace(entry.Path);
-        if (string.IsNullOrEmpty(path))
+        if (string.IsNullOrEmpty(path) || !CascPaths.IsSafeRelative(path))
         {
             return false;
         }
@@ -559,8 +559,9 @@ public sealed class CascExtractionService
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var relative = NormalizeRelativePath(entry.Path);
-                var destination = Path.Combine(destinationRoot, relative);
+                var destination = CascPaths.ResolveUnderRoot(destinationRoot, entry.Path)
+                                  ?? throw new InvalidDataException(
+                                      $"CASC entry '{entry.Path}' resolves outside '{destinationRoot}'.");
 
                 var written = await ExtractEntryAsync(storage, entry, destination, cancellationToken).ConfigureAwait(false);
 
@@ -594,27 +595,5 @@ public sealed class CascExtractionService
         LaunchDiagnostics.Log($"CASC ExtractAll: completed. {filesDone:N0} files, {bytesDone:N0} bytes, elapsed {sw.Elapsed}.");
 
         progress?.Report(new CascProgress(filesDone, totalFiles, bytesDone, totalBytes, null, sw.Elapsed));
-    }
-
-    /// <summary>
-    /// Maps a CASC entry path (always backslash-delimited) to a relative path
-    /// suitable for <see cref="Path.Combine(string, string)"/> on the current
-    /// platform.
-    /// </summary>
-    internal static string NormalizeRelativePath(string cascPath)
-    {
-        if (string.IsNullOrEmpty(cascPath))
-        {
-            return cascPath;
-        }
-
-        var stripped = CascExtractionFilter.StripCascNamespace(cascPath);
-
-        if (Path.DirectorySeparatorChar == '\\')
-        {
-            return stripped;
-        }
-
-        return stripped.Replace('\\', Path.DirectorySeparatorChar);
     }
 }

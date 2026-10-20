@@ -102,6 +102,9 @@ public sealed class NativeCascLib : ICascNative
     // "us" pairs with the enUS locale and is the default for D2R installs we care about.
     private const string DefaultRegion = "us";
 
+    // CASC_FIND_DATA embeds char[MAX_PATH]: 260 on Windows, 1024 in CascLib's non-Windows builds.
+    private static readonly bool s_posixFindData = !OperatingSystem.IsWindows();
+
     private static readonly object ResolverLock = new();
     private static bool s_resolverRegistered;
     private static string? s_loadFailure;
@@ -263,19 +266,12 @@ public sealed class NativeCascLib : ICascNative
     {
         if (!_available || storage is null || storage.IsInvalid) yield break;
 
-        var seed = new CASC_FIND_DATA
-        {
-            szFileName = new byte[CASC_FIND_DATA.MaxPath],
-            CKey = new byte[CASC_FIND_DATA.Md5HashSize],
-            EKey = new byte[CASC_FIND_DATA.Md5HashSize]
-        };
-
-        int structSize = Marshal.SizeOf<CASC_FIND_DATA>();
+        int structSize = FindDataSize;
         IntPtr buf = Marshal.AllocHGlobal(structSize);
         SafeCascFindHandle? finder = null;
         try
         {
-            Marshal.StructureToPtr(seed, buf, fDeleteOld: false);
+            Marshal.Copy(new byte[structSize], 0, buf, structSize);
             IntPtr findHandle;
             try
             {
@@ -327,8 +323,23 @@ public sealed class NativeCascLib : ICascNative
     {
         try
         {
-            var data = Marshal.PtrToStructure<CASC_FIND_DATA>(buf);
-            string fullName = NullTerminatedAnsi(data.szFileName);
+            byte[] fileName, ckey, ekey;
+            ulong fileSize;
+            uint localeFlags, contentFlags, fileDataId;
+            if (s_posixFindData)
+            {
+                var data = Marshal.PtrToStructure<CASC_FIND_DATA_POSIX>(buf);
+                (fileName, ckey, ekey) = (data.szFileName, data.CKey, data.EKey);
+                (fileSize, localeFlags, contentFlags, fileDataId) = (data.FileSize, data.dwLocaleFlags, data.dwContentFlags, data.dwFileDataId);
+            }
+            else
+            {
+                var data = Marshal.PtrToStructure<CASC_FIND_DATA>(buf);
+                (fileName, ckey, ekey) = (data.szFileName, data.CKey, data.EKey);
+                (fileSize, localeFlags, contentFlags, fileDataId) = (data.FileSize, data.dwLocaleFlags, data.dwContentFlags, data.dwFileDataId);
+            }
+
+            string fullName = NullTerminatedAnsi(fileName);
             if (string.IsNullOrEmpty(fullName)) return null;
 
             // Canonicalise by stripping the TVFS namespace prefix; FullName retains the
@@ -338,12 +349,12 @@ public sealed class NativeCascLib : ICascNative
 
             return new CascFileEntry(
                 Path: path,
-                CKey: (byte[])data.CKey.Clone(),
-                EKey: (byte[])data.EKey.Clone(),
-                FileSize: data.FileSize,
-                LocaleFlags: data.dwLocaleFlags,
-                ContentFlags: data.dwContentFlags,
-                FileDataId: data.dwFileDataId,
+                CKey: (byte[])ckey.Clone(),
+                EKey: (byte[])ekey.Clone(),
+                FileSize: fileSize,
+                LocaleFlags: localeFlags,
+                ContentFlags: contentFlags,
+                FileDataId: fileDataId,
                 FullName: fullName);
         }
         catch
@@ -410,6 +421,11 @@ public sealed class NativeCascLib : ICascNative
             if (namePtr != IntPtr.Zero) Marshal.FreeCoTaskMem(namePtr);
         }
     }
+
+    /// <summary>Byte size of the native <c>CASC_FIND_DATA</c> for this platform's CascLib build.</summary>
+    internal static int FindDataSize => s_posixFindData
+        ? Marshal.SizeOf<CASC_FIND_DATA_POSIX>()
+        : Marshal.SizeOf<CASC_FIND_DATA>();
 
     private static string NullTerminatedAnsi(byte[] buffer)
     {
@@ -536,12 +552,13 @@ public sealed class NativeCascLib : ICascNative
         }
     }
 
-    // P/Invoke surface. CharSet.Ansi matches the LPCSTR signatures.
+    // P/Invoke surface. CharSet.Ansi matches the LPCSTR signatures. CascLib's exports return C++
+    // `bool` (one byte), so returns are marshalled as U1; only AL is defined by the x64 ABIs.
 
     // CascOpenStorageEx: structured open API. szParams is ignored when args.szLocalPath is set.
     // bOnlineStorage=false because this launcher only opens local D2R installs.
     [DllImport(LibraryName, CharSet = CharSet.Ansi, SetLastError = false)]
-    [return: MarshalAs(UnmanagedType.Bool)]
+    [return: MarshalAs(UnmanagedType.U1)]
     internal static extern bool CascOpenStorageEx(
         IntPtr szParams,
         ref CASC_OPEN_STORAGE_ARGS pArgs,
@@ -549,11 +566,11 @@ public sealed class NativeCascLib : ICascNative
         out IntPtr phStorage);
 
     [DllImport(LibraryName, SetLastError = false)]
-    [return: MarshalAs(UnmanagedType.Bool)]
+    [return: MarshalAs(UnmanagedType.U1)]
     internal static extern bool CascCloseStorage(IntPtr hStorage);
 
     [DllImport(LibraryName, CharSet = CharSet.Ansi, SetLastError = false)]
-    [return: MarshalAs(UnmanagedType.Bool)]
+    [return: MarshalAs(UnmanagedType.U1)]
     internal static extern bool CascGetStorageInfo(
         IntPtr hStorage,
         CASC_STORAGE_INFO_CLASS InfoClass,
@@ -562,7 +579,7 @@ public sealed class NativeCascLib : ICascNative
         out UIntPtr pcbLengthNeeded);
 
     [DllImport(LibraryName, SetLastError = false)]
-    [return: MarshalAs(UnmanagedType.Bool)]
+    [return: MarshalAs(UnmanagedType.U1)]
     internal static extern bool CascOpenFile(
         IntPtr hStorage,
         IntPtr pvFileName,
@@ -571,11 +588,11 @@ public sealed class NativeCascLib : ICascNative
         out IntPtr PtrFileHandle);
 
     [DllImport(LibraryName, SetLastError = false)]
-    [return: MarshalAs(UnmanagedType.Bool)]
+    [return: MarshalAs(UnmanagedType.U1)]
     internal static extern bool CascGetFileSize64(IntPtr hFile, out ulong PtrFileSize);
 
     [DllImport(LibraryName, SetLastError = false)]
-    [return: MarshalAs(UnmanagedType.Bool)]
+    [return: MarshalAs(UnmanagedType.U1)]
     internal static extern bool CascReadFile(
         IntPtr hFile,
         [Out] byte[] lpBuffer,
@@ -583,7 +600,7 @@ public sealed class NativeCascLib : ICascNative
         out uint pdwRead);
 
     [DllImport(LibraryName, SetLastError = false)]
-    [return: MarshalAs(UnmanagedType.Bool)]
+    [return: MarshalAs(UnmanagedType.U1)]
     internal static extern bool CascCloseFile(IntPtr hFile);
 
     [DllImport(LibraryName, CharSet = CharSet.Ansi, SetLastError = false)]
@@ -594,11 +611,11 @@ public sealed class NativeCascLib : ICascNative
         [MarshalAs(UnmanagedType.LPStr)] string? szListFile);
 
     [DllImport(LibraryName, SetLastError = false)]
-    [return: MarshalAs(UnmanagedType.Bool)]
+    [return: MarshalAs(UnmanagedType.U1)]
     internal static extern bool CascFindNextFile(IntPtr hFind, IntPtr pFindData);
 
     [DllImport(LibraryName, SetLastError = false)]
-    [return: MarshalAs(UnmanagedType.Bool)]
+    [return: MarshalAs(UnmanagedType.U1)]
     internal static extern bool CascFindClose(IntPtr hFind);
 
     [DllImport(LibraryName, SetLastError = false)]

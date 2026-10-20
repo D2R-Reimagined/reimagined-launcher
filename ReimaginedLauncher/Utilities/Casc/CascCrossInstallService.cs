@@ -97,9 +97,9 @@ public sealed class CascCrossInstallService
         if (string.IsNullOrWhiteSpace(sourceInstallDirectory) ||
             string.IsNullOrWhiteSpace(targetInstallDirectory) ||
             string.Equals(
-                System.IO.Path.GetFullPath(sourceInstallDirectory),
-                System.IO.Path.GetFullPath(targetInstallDirectory),
-                StringComparison.OrdinalIgnoreCase))
+                System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(sourceInstallDirectory)),
+                System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(targetInstallDirectory)),
+                CascPaths.FileSystemComparison))
         {
             return new CascCrossInstallEligibility(
                 CascCrossInstallEligibilityReason.InvalidInstallPaths,

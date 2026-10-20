@@ -121,6 +121,55 @@ public sealed class ModArchiveInstallServiceTests : IDisposable
         Assert.Equal("keep", ReadModFile(@"data\global\excel\armor.txt"));
     }
 
+    [Fact]
+    public async Task ACaseOnlyRenameInTheArchiveLeavesExactlyTheShippedFile()
+    {
+        WriteModFile(@"data\global\excel\Armor.txt", "old");
+
+        var zip = CreateArchive(new()
+        {
+            ["mods/Reimagined/Reimagined.mpq/modinfo.json"] = ModInfo,
+            ["mods/Reimagined/Reimagined.mpq/data/global/excel/armor.txt"] = "new"
+        });
+
+        await ModArchiveInstallService.InstallAsync(zip, InstallationType.BattleNet, _installDirectory);
+
+        // Windows: one case-insensitive file overwritten in place. Linux: the stale "Armor.txt" is removed.
+        var file = Assert.Single(Directory.GetFiles(ModPath(@"data\global\excel")));
+        Assert.Equal("new", File.ReadAllText(file));
+    }
+
+    [Fact]
+    public async Task AnOrphanPathThatEscapesTheModRootIsNeverDeleted()
+    {
+        WriteModFile(@"..\d2rloader\config.json", "user config");
+        var orphans = new CascOrphanRecoveryService(new CascExtractionService(new NativeCascLib()), _manifestService);
+
+        var result = await orphans.ReconcileRemovedPathsAsync(
+            [@"..\d2rloader\config.json", @"data\..\..\d2rloader\config.json"],
+            storage: null,
+            destinationRoot: _modRoot);
+
+        Assert.Equal(2, result.Failed);
+        Assert.Equal("user config", ReadModFile(@"..\d2rloader\config.json"));
+    }
+
+    [LinuxFact]
+    public async Task ALinuxFileNameContainingBackslashesIsNotTreatedAsANestedPath()
+    {
+        WriteModFile(@"..\d2rloader\config.json", "user config");
+        // On Linux this is a single file directly inside Reimagined.mpq, not a path into d2rloader.
+        var literal = Path.Combine(_modRoot, @"..\d2rloader\config.json");
+        File.WriteAllText(literal, "stray");
+
+        var zip = CreateArchive(new() { ["mods/Reimagined/Reimagined.mpq/modinfo.json"] = ModInfo });
+
+        await ModArchiveInstallService.InstallAsync(zip, InstallationType.BattleNet, _installDirectory);
+
+        Assert.Equal("user config", ReadModFile(@"..\d2rloader\config.json"));
+        Assert.Equal("stray", File.ReadAllText(literal));
+    }
+
     [Theory]
     [InlineData("mods/Reimagined/modinfo.json", "")]
     [InlineData("wrap/mods/Reimagined/modinfo.json", "wrap/")]
@@ -155,7 +204,9 @@ public sealed class ModArchiveInstallServiceTests : IDisposable
 
     private static string Md5(string content) => Convert.ToHexString(MD5.HashData(Encoding.UTF8.GetBytes(content)));
 
-    private string ModPath(string relative) => Path.GetFullPath(Path.Combine(_modRoot, relative));
+    // Test paths are written CASC-style (backslashes); map them to real nested directories on every OS.
+    private string ModPath(string relative) =>
+        Path.GetFullPath(Path.Combine(_modRoot, relative.Replace('\\', Path.DirectorySeparatorChar)));
 
     private void WriteModFile(string relative, string content)
     {

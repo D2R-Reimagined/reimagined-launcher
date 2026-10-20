@@ -45,6 +45,35 @@ internal struct CASC_FIND_DATA
     public uint Flags;
 }
 
+/// <summary>
+/// <see cref="CASC_FIND_DATA"/> as built for Linux x64, where CascLib's <c>CascPort.h</c> defines
+/// <c>MAX_PATH</c> as 1024. Every field after <see cref="szFileName"/> shifts accordingly.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 8, CharSet = CharSet.Ansi)]
+internal struct CASC_FIND_DATA_POSIX
+{
+    /// <summary><c>MAX_PATH</c> as defined by <c>CascPort.h</c> for non-Windows builds.</summary>
+    public const int MaxPath = 1024;
+
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = MaxPath)]
+    public byte[] szFileName;
+
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = CASC_FIND_DATA.Md5HashSize)]
+    public byte[] CKey;
+
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = CASC_FIND_DATA.Md5HashSize)]
+    public byte[] EKey;
+
+    public ulong TagBitMask;
+    public ulong FileSize;
+    public IntPtr szPlainName;
+    public uint dwFileDataId;
+    public uint dwLocaleFlags;
+    public uint dwContentFlags;
+    public uint dwSpanCount;
+    public uint Flags;
+}
+
 /// <summary>Mirrors <c>CASC_STORAGE_INFO_CLASS</c>.</summary>
 internal enum CASC_STORAGE_INFO_CLASS
 {

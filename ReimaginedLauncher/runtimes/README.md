@@ -10,7 +10,9 @@ binary per RID without any custom MSBuild logic.
 - `win-x64/native/CascLib.dll` — Windows x64 build of CascLib.
 - `linux-x64/native/libcasc.so` — Linux x64 build of CascLib (best-effort tier-2,
   used when the launcher runs natively on SteamOS / desktop Linux; under Proton
-  the Windows DLL is used transparently).
+  the Windows DLL is used transparently). The current build needs glibc 2.38 or
+  newer and the system `libz.so.1`; without them the launcher reports fastload
+  as unavailable.
 - `CascLib.LICENSE` — upstream MIT license / copyright notice (attribution).
 
 ## Upstream
@@ -37,6 +39,10 @@ CascLib repository:
 2. Rebuild for each RID using the steps above.
 3. Replace the corresponding file in `runtimes/<rid>/native/`.
 4. If the upstream `LICENSE` text changed, refresh `runtimes/CascLib.LICENSE`.
+   Re-check `CASC_FIND_DATA` against `CascNativeStructs.cs`: its `szFileName` is
+   `char[MAX_PATH]`, which is 260 bytes on Windows and 1024 bytes in the Linux build
+   (`CascPort.h`), so the two platforms use different managed structs.
+   `CascNativeInteropTests` pins both layouts.
 5. Rebuild this project — `CascLib.dll` is copied to the output root, so the
    exe will pick it up automatically on next launch.
 

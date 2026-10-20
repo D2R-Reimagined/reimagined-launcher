@@ -125,6 +125,12 @@ public sealed class CascDeltaService
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            var diskPath = CascPaths.ResolveUnderRoot(destinationRoot, entry.Path);
+            if (diskPath is null)
+            {
+                continue;
+            }
+
             seenInCasc.Add(entry.Path);
 
             var ckeyHex = HexEncode(entry.CKey);
@@ -142,7 +148,6 @@ public sealed class CascDeltaService
             }
 
             // Same CKey; verify the file actually exists on disk.
-            var diskPath = Path.Combine(destinationRoot, CascExtractionService.NormalizeRelativePath(entry.Path));
             if (!File.Exists(diskPath))
             {
                 restored.Add(new CascDeltaItem(entry.Path, CascDeltaReason.Restored, entry, m));
@@ -268,7 +273,12 @@ public sealed class CascDeltaService
                 continue;
             }
 
-            var diskPath = Path.Combine(destinationRoot, CascExtractionService.NormalizeRelativePath(m.Path));
+            var diskPath = CascPaths.ResolveUnderRoot(destinationRoot, m.Path);
+            if (diskPath is null)
+            {
+                continue;
+            }
+
             try
             {
                 if (File.Exists(diskPath))
@@ -410,8 +420,7 @@ public sealed class CascDeltaService
             var rootFull = Path.GetFullPath(destinationRoot);
             var dir = Path.GetDirectoryName(Path.GetFullPath(filePath));
             while (!string.IsNullOrEmpty(dir) &&
-                   dir.Length > rootFull.Length &&
-                   dir.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase) &&
+                   CascPaths.IsUnder(rootFull, dir) &&
                    Directory.Exists(dir) &&
                    Directory.EnumerateFileSystemEntries(dir).FirstOrDefault() is null)
             {

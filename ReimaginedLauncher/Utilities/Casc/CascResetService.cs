@@ -93,7 +93,7 @@ public sealed class CascResetService
             manifest.Files.Count, StringComparer.OrdinalIgnoreCase);
         foreach (var entry in manifest.Files)
         {
-            var rel = CascExtractionService.NormalizeRelativePath(entry.Path);
+            var rel = CascPaths.ToNativeRelative(entry.Path);
             if (!string.IsNullOrEmpty(rel))
             {
                 index[rel] = entry;
@@ -370,12 +370,7 @@ public sealed class CascResetService
         foreach (var rel in FastloadRoots)
         {
             var fastloadRoot = Path.GetFullPath(Path.Combine(installRoot, NormalizeForCurrentPlatform(rel)));
-            if (full.Length < fastloadRoot.Length)
-            {
-                continue;
-            }
-
-            if (full.StartsWith(fastloadRoot, StringComparison.OrdinalIgnoreCase))
+            if (CascPaths.IsSameOrUnder(fastloadRoot, full))
             {
                 return true;
             }

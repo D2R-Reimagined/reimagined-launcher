@@ -108,10 +108,9 @@ public sealed class CascUndoService
                     var withoutCasc = StripCascToken(entry.Source);
                     if (string.IsNullOrEmpty(withoutCasc))
                     {
-                        var diskPath = Path.Combine(destinationRoot,
-                            CascExtractionService.NormalizeRelativePath(entry.Path));
+                        var diskPath = CascPaths.ResolveUnderRoot(destinationRoot, entry.Path);
 
-                        if (TryDeleteFile(diskPath, out var deletedBytes))
+                        if (diskPath is not null && TryDeleteFile(diskPath, out var deletedBytes))
                         {
                             fd++;
                             bd += deletedBytes;
@@ -336,13 +335,8 @@ public sealed class CascUndoService
         var full = Path.GetFullPath(candidate);
         foreach (var rel in FastloadRoots)
         {
-            var fastloadRoot = Path.GetFullPath(Path.Combine(installRoot, rel));
-            if (full.Length < fastloadRoot.Length)
-            {
-                continue;
-            }
-
-            if (full.StartsWith(fastloadRoot, StringComparison.OrdinalIgnoreCase))
+            var fastloadRoot = Path.GetFullPath(Path.Combine(installRoot, CascPaths.ToNativeRelative(rel)));
+            if (CascPaths.IsSameOrUnder(fastloadRoot, full))
             {
                 return true;
             }

@@ -70,7 +70,9 @@ internal static class FileCopyHelper
             }
 
             var destinationPath = Path.GetFullPath(Path.Combine(destinationDirectory, entryName));
-            if (!destinationPath.StartsWith(fullDestination, StringComparison.OrdinalIgnoreCase))
+            // Case-insensitive only on Windows: on Linux "../Game/x" must not pass for "game/".
+            if (!destinationPath.StartsWith(fullDestination,
+                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
             {
                 // Defend against zip slip.
                 throw new InvalidDataException(

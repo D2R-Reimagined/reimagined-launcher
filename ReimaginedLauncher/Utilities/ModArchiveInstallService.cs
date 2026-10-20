@@ -52,7 +52,7 @@ internal static class ModArchiveInstallService
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             LaunchDiagnostics.Log($"Failed to snapshot existing mod payload for orphan recovery: {ex.Message}");
-            previousPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            previousPaths = new HashSet<string>(CascPaths.FileSystemComparer);
         }
 
         var loaderDir = Path.Combine(modDir, "d2rloader");
@@ -180,8 +180,10 @@ internal static class ModArchiveInstallService
             manifestByPath[entry.Path] = entry;
         }
 
+        // On Linux "Armor.txt" and "armor.txt" are different files, so a case-only rename leaves a stale copy.
+        var shipped = new HashSet<string>(archivePaths, CascPaths.FileSystemComparer);
         return previousPaths
-            .Where(path => !archivePaths.Contains(path))
+            .Where(path => !shipped.Contains(path))
             .Where(path => !manifestByPath.TryGetValue(path, out var entry) ||
                            CascFastloadEntry.SourceTokens.Contains(entry.Source, CascFastloadEntry.SourceTokens.Mod))
             .ToList();
@@ -243,7 +245,12 @@ internal static class ModArchiveInstallService
         foreach (var path in archivePaths)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var diskPath = Path.Combine(modRoot, CascExtractionService.NormalizeRelativePath(path));
+            var diskPath = CascPaths.ResolveUnderRoot(modRoot, path);
+            if (diskPath is null)
+            {
+                continue;
+            }
+
             hashes[path] = (CascFileHash.ComputeMd5Hex(diskPath), new FileInfo(diskPath).Length);
         }
 
@@ -307,7 +314,11 @@ internal static class ModArchiveInstallService
             if (path.StartsWith(ModMpqEntryPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 // Manifest paths use backslashes regardless of platform.
-                set.Add(path[ModMpqEntryPrefix.Length..].Replace('/', '\\'));
+                var relative = CascPaths.FromArchiveRelative(path[ModMpqEntryPrefix.Length..]);
+                if (CascPaths.IsSafeRelative(relative))
+                {
+                    set.Add(relative);
+                }
             }
         }
 
@@ -317,7 +328,7 @@ internal static class ModArchiveInstallService
     /// <summary>Returns relative paths under <paramref name="modRoot"/> in CASC-style backslash form.</summary>
     private static HashSet<string> EnumerateModRelativePaths(string modRoot)
     {
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var set = new HashSet<string>(CascPaths.FileSystemComparer);
         if (string.IsNullOrWhiteSpace(modRoot) || !Directory.Exists(modRoot))
         {
             return set;
@@ -325,11 +336,14 @@ internal static class ModArchiveInstallService
 
         foreach (var fullPath in Directory.EnumerateFiles(modRoot, "*", SearchOption.AllDirectories))
         {
-            var relative = Path.GetRelativePath(modRoot, fullPath);
-            if (Path.DirectorySeparatorChar != '\\')
+            var relative = CascPaths.FromNativeRelative(Path.GetRelativePath(modRoot, fullPath));
+            if (relative is null)
             {
-                relative = relative.Replace(Path.DirectorySeparatorChar, '\\');
+                // A Linux file name containing '\' would be misread as nested directories; never touch it.
+                LaunchDiagnostics.Log($"Mod orphan recovery: skipping '{fullPath}' (file name contains '\\').");
+                continue;
             }
+
             set.Add(relative);
         }
 

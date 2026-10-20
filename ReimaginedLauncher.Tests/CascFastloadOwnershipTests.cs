@@ -100,6 +100,131 @@ public sealed class CascFastloadOwnershipTests : IDisposable
         Assert.Equal("mod armor edited", ReadFile(@"data\global\excel\armor.txt"));
     }
 
+    [Fact]
+    public async Task AFirstRunExtractsCascPathsIntoNestedNativeDirectories()
+    {
+        var native = new FakeCascNative(new Dictionary<string, string>
+        {
+            [@"data\global\excel\armor.txt"] = "vanilla armor",
+            [@"data\hd\global\ui\panel.json"] = "vanilla panel"
+        });
+        var delta = new CascDeltaService(new CascExtractionService(native), _manifestService);
+        var plan = delta.Plan(native.Entries, await _manifestService.LoadAsync(), _modRoot);
+        Assert.Equal(2, plan.Added.Count);
+
+        using var storage = new SafeCascStorageHandle();
+        await delta.ApplyAsync(storage, plan, null, _modRoot, new CascStorageProduct("d2r", 1));
+
+        Assert.Equal("vanilla armor", File.ReadAllText(Path.Combine(_modRoot, "data", "global", "excel", "armor.txt")));
+        Assert.Equal("vanilla panel", File.ReadAllText(Path.Combine(_modRoot, "data", "hd", "global", "ui", "panel.json")));
+        // A flat file here would mean a CASC path was used verbatim as a Linux file name.
+        Assert.Empty(Directory.GetFiles(_modRoot));
+
+        var manifest = await _manifestService.LoadAsync();
+        Assert.Equal(2, manifest.Files.Count);
+        Assert.All(manifest.Files, entry => Assert.DoesNotContain('/', entry.Path));
+        Assert.NotNull(CascFastloadManifestService.FindEntry(manifest, @"data\hd\global\ui\panel.json"));
+        Assert.True(delta.Plan(native.Entries, manifest, _modRoot).IsNoOp);
+    }
+
+    [Fact]
+    public async Task PathsDroppedFromCascAreDeletedOnlyWhenCascOwnsThem()
+    {
+        WriteFile(@"data\global\excel\gone.txt", "old vanilla");
+        WriteFile(@"data\global\excel\patched.txt", "mod patched");
+        WriteFile(@"data\global\excel\armor.txt", "vanilla armor");
+        await _manifestService.UpdateAsync(m =>
+        {
+            m.Files.Add(Entry(@"data\global\excel\gone.txt", "old vanilla", CascFastloadEntry.SourceTokens.Casc));
+            var patched = Entry(@"data\global\excel\patched.txt", "vanilla patched", CascFastloadEntry.SourceTokens.CascAndMod);
+            patched.ModMd5 = Md5("mod patched");
+            m.Files.Add(patched);
+            m.Files.Add(Entry(@"data\global\excel\armor.txt", "vanilla armor", CascFastloadEntry.SourceTokens.Casc));
+        });
+
+        var native = new FakeCascNative(new Dictionary<string, string>
+        {
+            [@"data\global\excel\armor.txt"] = "vanilla armor"
+        });
+        var delta = new CascDeltaService(new CascExtractionService(native), _manifestService);
+        var plan = delta.Plan(native.Entries, await _manifestService.LoadAsync(), _modRoot);
+        Assert.Equal(2, plan.Removed.Count);
+        Assert.Equal(1, plan.UnchangedCount);
+
+        using var storage = new SafeCascStorageHandle();
+        await delta.ApplyAsync(storage, plan, null, _modRoot, new CascStorageProduct("d2r", 3));
+
+        Assert.False(File.Exists(FilePath(@"data\global\excel\gone.txt")));
+        Assert.Equal("mod patched", ReadFile(@"data\global\excel\patched.txt"));
+        Assert.Equal("vanilla armor", ReadFile(@"data\global\excel\armor.txt"));
+        Assert.Empty(native.Extracted);
+
+        var manifest = await _manifestService.LoadAsync();
+        Assert.Null(CascFastloadManifestService.FindEntry(manifest, @"data\global\excel\gone.txt"));
+        var patchedEntry = CascFastloadManifestService.FindEntry(manifest, @"data\global\excel\patched.txt")!;
+        Assert.Equal(CascFastloadEntry.SourceTokens.Mod, patchedEntry.Source);
+        Assert.Null(patchedEntry.CascCKey);
+    }
+
+    [Fact]
+    public void CascEntriesThatEscapeTheModRootAreNeitherIndexedNorPlanned()
+    {
+        var escaping = new CascFileEntry(@"data\global\..\..\..\..\escape.txt", MD5.HashData("x"u8), [], 1, 0, 0, 0);
+
+        Assert.False(CascExtractionFilter.Default.Accept(escaping));
+
+        var delta = new CascDeltaService(new CascExtractionService(new FakeCascNative(new())), _manifestService);
+        Assert.True(delta.Plan([escaping], new CascFastloadManifest(), _modRoot).IsNoOp);
+    }
+
+    [Fact]
+    public async Task UndoDeletesVanillaFilesKeepsModFilesAndPrunesEmptyDirectories()
+    {
+        WriteFile(@"data\global\excel\monstats.txt", "vanilla");
+        WriteFile(@"data\global\excel\armor.txt", "mod armor");
+        WriteFile(@"data\hd\global\ui\panel.json", "vanilla panel");
+        await _manifestService.UpdateAsync(m =>
+        {
+            m.Files.Add(Entry(@"data\global\excel\monstats.txt", "vanilla", CascFastloadEntry.SourceTokens.Casc));
+            m.Files.Add(Entry(@"data\hd\global\ui\panel.json", "vanilla panel", CascFastloadEntry.SourceTokens.Casc));
+            m.Files.Add(Entry(@"data\global\excel\armor.txt", "vanilla armor", CascFastloadEntry.SourceTokens.CascAndMod));
+        });
+
+        var result = await new CascUndoService(_manifestService).UndoAsync(_modRoot);
+
+        Assert.Equal(2, result.FilesDeleted);
+        Assert.Equal(1, result.OverlaysPreserved);
+        Assert.False(File.Exists(FilePath(@"data\global\excel\monstats.txt")));
+        Assert.Equal("mod armor", ReadFile(@"data\global\excel\armor.txt"));
+        Assert.False(Directory.Exists(FilePath(@"data\hd")));
+        Assert.True(Directory.Exists(FilePath(@"data\global\excel")));
+
+        var armor = CascFastloadManifestService.FindEntry(await _manifestService.LoadAsync(), @"data\global\excel\armor.txt")!;
+        Assert.Equal(CascFastloadEntry.SourceTokens.Mod, armor.Source);
+        Assert.Null(armor.CascCKey);
+    }
+
+    [Fact]
+    public async Task ResetOnlyTouchesUntrackedFilesInsideTheFastloadRoots()
+    {
+        WriteFile(@"data\global\excel\untracked.txt", "stray");
+        WriteFile(@"data\global\excel\monstats.txt", "vanilla");
+        WriteFile(@"data\other\keep.txt", "keep");
+        WriteFile("modinfo.json", "{}");
+        await _manifestService.UpdateAsync(m =>
+            m.Files.Add(Entry(@"data\global\excel\monstats.txt", "vanilla", CascFastloadEntry.SourceTokens.Casc)));
+
+        var result = await new CascResetService(_manifestService).ResetAsync(_modRoot);
+
+        Assert.Equal(2, result.FilesScanned);
+        Assert.Equal(1, result.OrphansDeleted);
+        Assert.Equal(0, result.MismatchedDeleted);
+        Assert.False(File.Exists(FilePath(@"data\global\excel\untracked.txt")));
+        Assert.Equal("vanilla", ReadFile(@"data\global\excel\monstats.txt"));
+        Assert.Equal("keep", ReadFile(@"data\other\keep.txt"));
+        Assert.Equal("{}", ReadFile("modinfo.json"));
+    }
+
     private static CascFastloadEntry Entry(string path, string vanillaContent, string source)
     {
         var ckey = Md5(vanillaContent);
@@ -115,7 +240,9 @@ public sealed class CascFastloadOwnershipTests : IDisposable
 
     private static string Md5(string content) => Convert.ToHexString(MD5.HashData(Encoding.UTF8.GetBytes(content)));
 
-    private string FilePath(string relative) => Path.Combine(_modRoot, relative);
+    // Test paths are written CASC-style (backslashes); map them to real nested directories on every OS.
+    private string FilePath(string relative) =>
+        Path.GetFullPath(Path.Combine(_modRoot, relative.Replace('\\', Path.DirectorySeparatorChar)));
 
     private void WriteFile(string relative, string content)
     {

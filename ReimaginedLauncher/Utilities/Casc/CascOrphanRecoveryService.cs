@@ -133,7 +133,14 @@ public sealed class CascOrphanRecoveryService
                 continue;
             }
 
-            var diskPath = Path.Combine(destinationRoot, CascExtractionService.NormalizeRelativePath(rawPath));
+            var diskPath = CascPaths.ResolveUnderRoot(destinationRoot, rawPath);
+            if (diskPath is null)
+            {
+                items.Add(new CascOrphanRecoveryItem(rawPath, CascOrphanRecoveryAction.Failed,
+                    Error: "Path resolves outside the destination root."));
+                continue;
+            }
+
             manifestByPath.TryGetValue(rawPath, out var entry);
 
             if (entry is null)
@@ -377,8 +384,7 @@ public sealed class CascOrphanRecoveryService
             try
             {
                 while (!string.IsNullOrEmpty(dir) &&
-                       dir.Length > rootFull.Length &&
-                       dir.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase) &&
+                       CascPaths.IsUnder(rootFull, dir) &&
                        Directory.Exists(dir) &&
                        Directory.EnumerateFileSystemEntries(dir).FirstOrDefault() is null)
                 {
