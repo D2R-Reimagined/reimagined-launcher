@@ -16,6 +16,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ReimaginedLauncher.HttpClients;
 using ReimaginedLauncher.HttpClients.Models;
 using ReimaginedLauncher.Utilities;
+using ReimaginedLauncher.Utilities.Casc;
 
 namespace ReimaginedLauncher.Views.Launch;
 
@@ -95,10 +96,27 @@ public partial class LaunchView : UserControl
         RefreshInstallDirectoryState();
     }
 
+    private void OnCascStateChanged(object? sender, EventArgs e)
+    {
+        // CASC fastload activity can race with mod-tweak prep + game launch.
+        // Re-evaluate the gated controls so they disable for the duration.
+        RefreshInstallDirectoryState();
+    }
+
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
         UpdateResponsiveLayout();
+
+        CascFastloadOperationState.Instance.StateChanged += OnCascStateChanged;
+
+        // Re-evaluate disk-side mod detection on every visit; other flows can mutate mods\Reimagined\.
+        if (TopLevel.GetTopLevel(this) is MainWindow mwAttach)
+        {
+            mwAttach.RefreshLocalModState();
+        }
+
+        RefreshInstallDirectoryState();
 
         if (MainWindow.Settings is not null && !LauncherService.IsDetecting)
         {
@@ -151,6 +169,7 @@ public partial class LaunchView : UserControl
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
+        CascFastloadOperationState.Instance.StateChanged -= OnCascStateChanged;
         _ladderScheduleTimer.Stop();
         base.OnDetachedFromVisualTree(e);
     }
@@ -266,6 +285,11 @@ public partial class LaunchView : UserControl
         var ladderAvailable = HasAvailableLadder;
         var isReimaginedSignedIn = _launcherAuthenticationService.IsSignedIn;
 
+        // Disable mutating controls while a CASC fastload op is running.
+        var cascBusy = CascFastloadOperationState.Instance.IsRunning;
+        InstallationTypeComboBox.IsEnabled = !cascBusy;
+        BrowseInstallDirectoryButton.IsEnabled = !cascBusy;
+
         InstallationTypeComboBox.SelectedIndex = (int)profile.Type;
         DirectoryTextBox.Text = profile.InstallDirectory ?? string.Empty;
         DetectionLoadingIndicator.IsVisible = LauncherService.IsDetecting;
@@ -336,7 +360,7 @@ public partial class LaunchView : UserControl
             }
             else
             {
-                LocateSteamButton.IsEnabled = true;
+                LocateSteamButton.IsEnabled = !cascBusy;
             }
         }
 
@@ -400,7 +424,7 @@ public partial class LaunchView : UserControl
         {
             StartGameButton.Content = "Install Tweaks";
             StartGameDescription.Text = "Clicking 'Install Tweaks' will apply tweaks and adjustments to the files in your D2RMM/mods/Reimagined/data directory.";
-            StartGameButton.IsEnabled = !_isLaunching && !SteamGameHandoff.IsLaunchPendingOrRunning && isValidated && isModDetected;
+            StartGameButton.IsEnabled = !_isLaunching && !cascBusy && !SteamGameHandoff.IsLaunchPendingOrRunning && isValidated && isModDetected;
         }
         else
         {
@@ -419,7 +443,7 @@ public partial class LaunchView : UserControl
             // A ladder setup step is allowed to run without the mod present -
             // installing it is part of what the step does. Play still requires
             // everything, because by then readiness has confirmed it.
-            StartGameButton.IsEnabled = !_isLaunching && !SteamGameHandoff.IsLaunchPendingOrRunning
+            StartGameButton.IsEnabled = !_isLaunching && !cascBusy && !SteamGameHandoff.IsLaunchPendingOrRunning
                                         && !_isRunningLadderAction
                                         && isValidated
                                         && (isModDetected || isLadderExperience)

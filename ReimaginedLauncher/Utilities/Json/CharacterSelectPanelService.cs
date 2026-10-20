@@ -1,92 +1,48 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
-using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
-using ReimaginedLauncher.Generators;
 
 namespace ReimaginedLauncher.Utilities.Json;
 
-public class WidgetNode
+/// <summary>
+/// Resolves the installed D2R Reimagined mod version from the mod's <c>modinfo.json</c>.
+/// </summary>
+public static class CharacterSelectPanelService
 {
-    [JsonPropertyName("type")] public string Type { get; set; } = string.Empty;
-
-    [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
-
-    [JsonPropertyName("fields")] public Dictionary<string, JsonElement> Fields { get; set; } = new();
-
-    [JsonPropertyName("children")] public List<WidgetNode> Children { get; set; } = new();
-}
-
-public class CharacterSelectPanelService
-{
-    [JsonPropertyName("type")] public string Type { get; set; } = string.Empty;
-
-    [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
-
-    [JsonPropertyName("fields")] public Dictionary<string, JsonElement> Fields { get; set; } = new();
-
-    [JsonPropertyName("children")] public List<WidgetNode> Children { get; set; } = new();
-
-    public static CharacterSelectPanelService? FromJson(string layoutsDirectory)
+    /// <summary>Reads the <c>version</c> string from <paramref name="modRoot"/>/<c>modinfo.json</c>; <c>null</c> when missing/unreadable.</summary>
+    public static string? GetModVersion(string? modRoot)
     {
-        var path = Path.Combine(layoutsDirectory, "characterselectpanelhd.json");
-        if (!File.Exists(path))
-        {
+        if (string.IsNullOrWhiteSpace(modRoot))
             return null;
-        }
+
+        var modInfoPath = Path.Combine(modRoot, "modinfo.json");
+        return GetModVersionFromFile(modInfoPath);
+    }
+
+    /// <summary>Reads the <c>version</c> string from a full <c>modinfo.json</c> path; returns <c>null</c> on any failure.</summary>
+    public static string? GetModVersionFromFile(string? modInfoPath)
+    {
+        if (string.IsNullOrWhiteSpace(modInfoPath) || !File.Exists(modInfoPath))
+            return null;
 
         try
         {
-            var json = File.ReadAllText(path);
-            return JsonSerializer.Deserialize<CharacterSelectPanelService>(json,
-                SerializerOptions.PropertyNameCaseInsensitive);
-        }
-        catch
-        {
-            return null;
-        }
-    }
+            using var document = JsonDocument.Parse(File.ReadAllText(modInfoPath));
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+                return null;
 
-    public string GetModVersion()
-    {
-        var version = SearchVersionInChildren(Children);
-        return version ?? "Unknown";
-    }
-
-    private string? SearchVersionInChildren(List<WidgetNode>? children)
-    {
-        if (children == null) return null;
-
-        foreach (var child in children)
-        {
-            if (child.Fields != null)
+            if (document.RootElement.TryGetProperty("version", out var versionElement) &&
+                versionElement.ValueKind == JsonValueKind.String)
             {
-                JsonElement elem;
-                // try all the likely names
-                if ( child.Fields.TryGetValue("text", out elem)
-                     || child.Fields.TryGetValue("textString", out elem)
-                     || child.Fields.TryGetValue("Text", out elem)      // just in case
-                     || child.Fields.TryGetValue("TextString", out elem))
-                {
-                    if (elem.ValueKind == JsonValueKind.String)
-                    {
-                        var txt = elem.GetString()!;
-                        var m = Regex.Match(txt, @"D2R\s+Reimagined\s+v\s*([\d.]+)");
-                        if (m.Success)
-                            return m.Groups[1].Value;
-                    }
-                }
+                var version = versionElement.GetString();
+                return string.IsNullOrWhiteSpace(version) ? null : version;
             }
-
-            // recurse
-            var found = SearchVersionInChildren(child.Children);
-            if (found != null)
-                return found;
+        }
+        catch (Exception)
+        {
+            // Treat malformed modinfo.json as "unknown"; callers handle the null return.
         }
 
         return null;
     }
-
 }

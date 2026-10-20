@@ -41,8 +41,16 @@
         </Style>
     </UserControl.Styles>
 
-    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
+    <DockPanel LastChildFill="True">
+        <Border x:Name="LaunchStatusPanel" DockPanel.Dock="Bottom" Classes="panel" Padding="18" Margin="0,14,0,0" IsVisible="False">
+            <StackPanel Spacing="10">
+                <TextBlock Classes="section-title" Text="Launch Status" />
+                <TextBlock x:Name="LaunchStatusText" Classes="muted" Text="Preparing launch..." />
+                <ProgressBar x:Name="LaunchProgressBar" IsIndeterminate="True" Height="8" />
+            </StackPanel>
+        </Border>
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto"
               RowSpacing="14"
               HorizontalAlignment="Stretch">
             <StackPanel Spacing="4">
@@ -287,15 +295,7 @@
                 </Border>
             </Grid>
 
-            <Border x:Name="LaunchStatusPanel" Grid.Row="3" Classes="panel" Padding="18" IsVisible="False">
-                <StackPanel Spacing="10">
-                    <TextBlock Classes="section-title" Text="Launch Status" />
-                    <TextBlock x:Name="LaunchStatusText" Classes="muted" Text="Preparing launch..." />
-                    <ProgressBar x:Name="LaunchProgressBar" IsIndeterminate="True" Height="8" />
-                </StackPanel>
-            </Border>
-
-            <Border x:Name="LadderPolicyPanel" Grid.Row="4" Classes="panel" Padding="18" IsVisible="False">
+            <Border x:Name="LadderPolicyPanel" Grid.Row="3" Classes="panel" Padding="18" IsVisible="False">
                 <StackPanel Spacing="12">
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="14">
                         <StackPanel Spacing="4">
@@ -450,7 +450,7 @@
                 </StackPanel>
             </Border>
 
-            <Border x:Name="OnlineExperiencePanel" Grid.Row="5" Classes="panel" Padding="18" IsVisible="False">
+            <Border x:Name="OnlineExperiencePanel" Grid.Row="4" Classes="panel" Padding="18" IsVisible="False">
                 <StackPanel Spacing="16">
                     <Grid x:Name="LoaderHeaderGrid" ColumnDefinitions="*,Auto" ColumnSpacing="16">
                         <StackPanel Spacing="5">
@@ -532,5 +532,6 @@
                 </StackPanel>
             </Border>
         </Grid>
-    </ScrollViewer>
+        </ScrollViewer>
+    </DockPanel>
 </UserControl>

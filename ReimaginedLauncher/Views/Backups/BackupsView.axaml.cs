@@ -11,7 +11,6 @@ namespace ReimaginedLauncher.Views.Backups;
 public partial class BackupsView : UserControl
 {
     private bool _isRefreshing;
-    private bool _isLoading;
 
     public BackupsView()
     {
@@ -51,7 +50,6 @@ public partial class BackupsView : UserControl
 
     public void SetLoadingState(bool isLoading)
     {
-        _isLoading = isLoading;
         LoadingBanner.IsVisible = isLoading;
         ContentGrid.IsVisible = !isLoading;
     }

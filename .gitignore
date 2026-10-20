@@ -371,3 +371,4 @@ gamedata/
 .output_full.txt
 
 /.junie
+/ReimaginedLauncher.Tests/TestOutput/SaveMigration

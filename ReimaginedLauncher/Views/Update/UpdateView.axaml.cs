@@ -3,13 +3,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
-using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using ReimaginedLauncher.Utilities;
+using ReimaginedLauncher.Utilities.Casc;
 
 namespace ReimaginedLauncher.Views.Update;
 
@@ -21,6 +21,25 @@ public partial class UpdateView : UserControl
     {
         InitializeComponent();
         RefreshUpdateState();
+    }
+
+    private void OnCascStateChanged(object? sender, EventArgs e)
+    {
+        // Re-evaluate gated install/update buttons when a CASC fastload op starts/stops.
+        RefreshUpdateState();
+    }
+
+    protected override void OnAttachedToVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        CascFastloadOperationState.Instance.StateChanged += OnCascStateChanged;
+        RefreshUpdateState();
+    }
+
+    protected override void OnDetachedFromVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)
+    {
+        CascFastloadOperationState.Instance.StateChanged -= OnCascStateChanged;
+        base.OnDetachedFromVisualTree(e);
     }
 
     public void RefreshUpdateState()
@@ -47,16 +66,20 @@ public partial class UpdateView : UserControl
         StatusMessageText.Text = MainWindow.UpdateStatusMessage;
         CurrentVersionText.Text = MainWindow.UpdateCurrentVersion;
         LatestVersionText.Text = MainWindow.UpdateLatestVersion;
-        InstallOrUpdateButton.IsEnabled = actions.CanInstallOrUpdate;
+        // Block install/update activity while a CASC fastload op is running —
+        // they touch overlapping paths under <install>/data and <install>/mods.
+        var cascBusy = CascFastloadOperationState.Instance.IsRunning;
+        InstallOrUpdateButton.IsEnabled = actions.CanInstallOrUpdate && !cascBusy;
         ReinstallButton.IsVisible = !isInstallMissing;
-        ReinstallButton.IsEnabled = actions.CanReinstall;
+        ReinstallButton.IsEnabled = actions.CanReinstall && !cascBusy;
         ReinstallHelpText.IsVisible = !isInstallMissing && !_isLoading && !MainWindow.IsInstallInProgress;
         SelectZipManuallyButton.IsEnabled = !_isLoading &&
+                                            !cascBusy &&
                                             !MainWindow.IsInstallInProgress &&
                                             MainWindow.Settings.CurrentProfile.IsInstallDirectoryValidated &&
                                             !string.IsNullOrWhiteSpace(MainWindow.Settings.CurrentProfile.InstallDirectory);
         OpenDownloadPageButton.IsEnabled = !_isLoading && !string.IsNullOrWhiteSpace(MainWindow.UpdateDownloadUrl);
-        RecheckButton.IsEnabled = !_isLoading;
+        RecheckButton.IsEnabled = !_isLoading && !cascBusy;
         InstallOrUpdateButton.Content = MainWindow.UpdateCurrentVersion.Equals("Not detected", StringComparison.OrdinalIgnoreCase)
             ? "Download and Install"
             : "Download and Update";
@@ -402,52 +425,11 @@ public partial class UpdateView : UserControl
         }
         else
         {
-            await Task.Run(() =>
-            {
-                var modDir = Path.Combine(installDirectory, "mods", "Reimagined");
-                var loaderDir = Path.Combine(modDir, "d2rloader");
-                // Holds the user's D2RLoader configs/plugins across the reinstall; a leftover
-                // copy from an interrupted install is restored on the next run.
-                var preservedLoaderDir = Path.Combine(installDirectory, "mods", "Reimagined.d2rloader");
-                if (Directory.Exists(loaderDir))
-                {
-                    if (Directory.Exists(preservedLoaderDir))
-                    {
-                        Directory.Delete(preservedLoaderDir, recursive: true);
-                    }
-                    Directory.Move(loaderDir, preservedLoaderDir);
-                }
+            // In-place install keeps CASC-extracted vanilla files; the service reconciles dropped
+            // mod files and the fastload manifest.
+            await Task.Run(() => ModArchiveInstallService.InstallAsync(zipPath, profile.Type, installDirectory));
 
-                try
-                {
-                    if (Directory.Exists(modDir))
-                    {
-                        var backupDir = Path.Combine(installDirectory, "mods", "Reimagined.backup");
-                        if (Directory.Exists(backupDir))
-                        {
-                            Directory.Delete(backupDir, recursive: true);
-                        }
-                        CopyDirectory(modDir, backupDir);
-                        Directory.Delete(modDir, recursive: true);
-                    }
-
-                    ZipFile.ExtractToDirectory(zipPath, installDirectory, overwriteFiles: true);
-                }
-                finally
-                {
-                    if (Directory.Exists(preservedLoaderDir))
-                    {
-                        if (Directory.Exists(loaderDir))
-                        {
-                            Directory.Delete(loaderDir, recursive: true);
-                        }
-                        Directory.CreateDirectory(modDir);
-                        Directory.Move(preservedLoaderDir, loaderDir);
-                    }
-                }
-
-                NormalModInstallationService.RecordNexusInstallation(installDirectory);
-            });
+            NormalModInstallationService.RecordNexusInstallation(installDirectory);
 
             Notifications.SendNotification("Mod installed successfully.", "Success");
         }
@@ -507,11 +489,7 @@ public partial class UpdateView : UserControl
             CopyDirectory(directory, Path.Combine(targetDir, Path.GetFileName(directory)));
     }
 
-    /// <summary>
-    /// Refreshes the currently visible UpdateView if one is active in the content area.
-    /// This allows the install operation to update the UI even when the original view
-    /// instance that started the install has been replaced by tab navigation.
-    /// </summary>
+    /// <summary>Refreshes the active UpdateView so installs surface UI updates after tab navigation replaces the original instance.</summary>
     private static void RefreshVisibleUpdateView()
     {
         Dispatcher.UIThread.Post(() =>
