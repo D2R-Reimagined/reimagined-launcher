@@ -370,4 +370,7 @@ gamedata/
 # Stray tool output
 .output_full.txt
 
+# Save migration test output (converted saves and reports)
+ReimaginedLauncher.Tests/TestOutput/
+
 /.junie

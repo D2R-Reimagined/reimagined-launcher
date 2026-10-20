@@ -1,0 +1,85 @@
+{
+  "formatVersion": 1,
+  "checkpoints": [
+    {
+      "id": "reimagined-2.1.2",
+      "label": "2.1.2",
+      "build": "Reimagined 2.1.2",
+      "type": "release",
+      "order": 10,
+      "directory": "D2RR 2.1.2",
+      "installedVersions": [ "2.1.2" ]
+    },
+    {
+      "id": "reimagined-3.0.12",
+      "label": "3.0.12",
+      "build": "Reimagined 3.0.12",
+      "type": "release",
+      "order": 20,
+      "directory": "D2RR 3.0.12",
+      "installedVersions": [ "3.0.12" ]
+    },
+    {
+      "id": "reimagined-3.0.13-pre-swap",
+      "label": "3.0.13 candidate (3.0.12 + appended PR #1181 stats)",
+      "build": "Intermediate 3.0.13 (pre-swap)",
+      "type": "intermediate",
+      "order": 30,
+      "directory": "D2RR 3.0.12",
+      "appendedStatsDirectory": "D2RR 3.0.13",
+      "description": "3.0.12 tables plus only the lab stats appended past the end of 3.0.12's itemstatcost.txt. Source only."
+    },
+    {
+      "id": "pr-1181",
+      "label": "PR #1181",
+      "build": "PR #1181 (upcoming Reimagined 3.0.13)",
+      "type": "intermediate",
+      "order": 40,
+      "directory": "D2RR 3.0.13",
+      "supportedTarget": true,
+      "description": "PR #1181 snapshot of the upcoming Reimagined 3.0.13 data layout. Supported target; the newest supported target is the default."
+    }
+  ],
+  "identityMappings": [
+    {
+      "table": "UniqueItems",
+      "sourceCheckpoint": "reimagined-2.1.2",
+      "sourceId": 1349,
+      "sourceKey": "Life & Death",
+      "code": "cm2",
+      "targetCheckpoint": "reimagined-3.0.12",
+      "targetKey": "Life and Death",
+      "description": "Renamed and rebalanced in 3.0.12 (unique 1349 -> 1386). Same cm2 base, still between Peacemaker and Throne of Power, which move by the same +37 offset."
+    },
+    {
+      "table": "UniqueItems",
+      "sourceCheckpoint": "reimagined-2.1.2",
+      "sourceId": 1392,
+      "sourceKey": "t9 Splash Charm",
+      "code": "cm5",
+      "targetCheckpoint": "reimagined-3.0.12",
+      "targetKey": "Collin's Destruction",
+      "description": "The tier-9 splash charm was renamed in 3.0.12 (unique 1392 -> 1409). Same cm5 base and proc_SplashDamage_Five, directly after t8 Splash Charm."
+    },
+    {
+      "table": "SetItems",
+      "sourceCheckpoint": "reimagined-2.1.2",
+      "sourceId": 207,
+      "sourceKey": "Tyrial's Grief",
+      "code": "rin",
+      "targetCheckpoint": "reimagined-3.0.12",
+      "targetKey": "Tyrael's Grief",
+      "description": "Spelling corrected in 3.0.12 (set item 207 -> 220). Same rin base, Forsaken Divinity set and properties."
+    },
+    {
+      "table": "MagicPrefix",
+      "sourceCheckpoint": "reimagined-2.1.2",
+      "sourceId": 301,
+      "lastSourceId": 328,
+      "sourceKey": "gnostics1",
+      "targetCheckpoint": "reimagined-3.0.12",
+      "targetKey": "Gnostics",
+      "description": "The 28 class skill prefixes were renamed in 3.0.12. Each row keeps its id and every other field."
+    }
+  ]
+}
