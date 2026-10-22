@@ -1,4 +1,4 @@
-<UserControl xmlns="https://github.com/avaloniaui"
+﻿<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="ReimaginedLauncher.Views.Plugins.PluginAuthoringGuideView">
     <UserControl.Styles>
@@ -17,14 +17,14 @@
     </UserControl.Styles>
     <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                   VerticalScrollBarVisibility="Auto">
-        <StackPanel Spacing="18">
+        <StackPanel Spacing="18" Margin="0,0,8,0">
             <Grid ColumnDefinitions="*,Auto"
                   ColumnSpacing="12">
                 <StackPanel Spacing="4">
                     <TextBlock Classes="view-title"
-                               Text="How To Write a Plugin" />
+                               Text="How To Write a Mod Add-on" />
                     <TextBlock Classes="muted"
-                               Text="Package a launcher plugin, declare parameters, and write supported JSON operations." />
+                               Text="Package a launcher add-on, declare parameters, and write supported JSON operations." />
                 </StackPanel>
 
                 <StackPanel Grid.Column="1"
@@ -33,7 +33,7 @@
                     <Button x:Name="OpenWikiButton"
                             Content="Open Full Wiki Guide"
                             Click="OnOpenWikiClicked" />
-                    <Button Content="Back to Plugins"
+                    <Button Content="Back to Mod Add-ons"
                             Click="OnBackToPluginsClicked" />
                 </StackPanel>
             </Grid>
@@ -45,7 +45,7 @@
                     <TextBlock Classes="section-title"
                                Text="Note" />
                     <TextBlock Classes="lead"
-                               Text="When making custom edits to the game files you need to have launched or dry run the plugins at least once and make those changes in launcher_excel_clean and launcher_excel_clean/base for them to persist through game launches via the launcher." />
+                               Text="When making custom edits to the game files you need to have launched or dry run the add-ons at least once and make those changes in launcher_excel_clean and launcher_excel_clean/base for them to persist through game launches via the launcher." />
                 </StackPanel>
             </Border>
 
@@ -56,7 +56,8 @@
                     <TextBlock Classes="section-title"
                                Text="At a Glance" />
                     <TextBlock Classes="lead"
-                               Text="A plugin is a .zip archive that bundles a plugininfo.json manifest and one or more operation files. When enabled, the launcher applies those operations to game data before launch." />
+                               Text="An add-on is a .zip archive that bundles a plugininfo.json manifest and one or more operation files. When enabled, the launcher applies those operations to game data before launch." />
+                    <TextBlock Classes="muted" TextWrapping="Wrap" Text="Mod add-ons use the existing plugininfo.json manifest and legacy metadata names for compatibility. Keep those filenames and fields unchanged. These are separate from D2RLoader plugins." />
                     <StackPanel Spacing="2">
                         <TextBlock Classes="bullet" Text="•  Manifest: plugininfo.json (name, version, modVersion, files)." />
                         <TextBlock Classes="bullet" Text="•  Excel edits: any base-folder .txt file except itemstatcost.txt." />
@@ -94,17 +95,17 @@
 
                     <TextBlock Classes="sub-title" Text="Required fields" />
                     <StackPanel Spacing="2">
-                        <TextBlock Classes="bullet" Text="•  name — display name of your plugin." />
-                        <TextBlock Classes="bullet" Text="•  version — your plugin's own version string." />
+                        <TextBlock Classes="bullet" Text="•  name — display name of your add-on." />
+                        <TextBlock Classes="bullet" Text="•  version — your add-on's own version string." />
                         <TextBlock Classes="bullet" Text="•  modVersion — the D2R Reimagined mod version you target, in #.#.# format (e.g. 3.0.7)." />
-                        <TextBlock Classes="bullet" Text="•  files — at least one path to a plugin JSON operation file inside the archive." />
+                        <TextBlock Classes="bullet" Text="•  files — at least one path to an add-on JSON operation file inside the archive." />
                     </StackPanel>
 
                     <TextBlock Classes="sub-title" Text="Optional fields" />
                     <StackPanel Spacing="2">
                         <TextBlock Classes="bullet" Text="•  author, description." />
-                        <TextBlock Classes="bullet" Text="•  parameters — each parameter requires key, name, and defaultValue. An optional 'type' field selects the editor: missing or 'text' renders as a textbox; 'checkbox' renders as a checkbox and persists 'true'/'false'. An optional 'group' field renders parameters under a section heading on the Plugins page; groups are display-only and never affect parameter lookup, conditions, saving, or apply." />
-                        <TextBlock Classes="bullet" Text="•  assets — list of {source, target} entries that copy raw files into the mod folder. Sources must live under the plugin's assets/ folder; targets are paths relative to the mod root (e.g. data/hd/global/sfx/...). Each entry may declare an optional 'condition' that gates the copy." />
+                        <TextBlock Classes="bullet" Text="•  parameters — each parameter requires key, name, and defaultValue. An optional 'type' field selects the editor: missing or 'text' renders as a textbox; 'checkbox' renders as a checkbox and persists 'true'/'false'. An optional 'group' field renders parameters under a section heading on the Add-ons page; groups are display-only and never affect parameter lookup, conditions, saving, or apply." />
+                        <TextBlock Classes="bullet" Text="•  assets — list of {source, target} entries that copy raw files into the mod folder. Sources must live under the add-on's assets/ folder; targets are paths relative to the mod root (e.g. data/hd/global/sfx/...). Each entry may declare an optional 'condition' that gates the copy." />
                     </StackPanel>
 
                     <TextBlock Classes="sub-title" Text="Asset copies" />
@@ -114,10 +115,10 @@
                                    Text="•  Asset copies are applied last, after every operation, and overwrite any existing file at the target path." />
                         <TextBlock Classes="bullet"
                                    TextWrapping="Wrap"
-                                   Text="•  Warning: This plugin directly copies an asset into the mod without reading the mods data, it may cause problems if it is not setup correctly." />
+                                   Text="•  Warning: This add-on directly copies an asset into the mod without reading the mods data, it may cause problems if it is not setup correctly." />
                         <TextBlock Classes="bullet"
                                    TextWrapping="Wrap"
-                                   Text="•  Animation pair safety net: data/global/animdata.d2 and data/global/exanimdata.d2 are read together by the game, so if your plugin only copies one of the two the launcher automatically copies that same file onto the other path so they stay in sync. Ship both files yourself if you actually want them to differ." />
+                                   Text="•  Animation pair safety net: data/global/animdata.d2 and data/global/exanimdata.d2 are read together by the game, so if your add-on only copies one of the two the launcher automatically copies that same file onto the other path so they stay in sync. Ship both files yourself if you actually want them to differ." />
                     </StackPanel>
 
                     <TextBlock Classes="sub-title" Text="Example" />
@@ -134,9 +135,9 @@
                     Padding="20">
                 <StackPanel Spacing="10">
                     <TextBlock Classes="section-title"
-                               Text="3. Plugin JSON Operations" />
+                               Text="3. Add-on JSON Operations" />
                     <TextBlock Classes="lead"
-                               Text="Each plugin JSON file is either a single operation object or an array of them." />
+                               Text="Each add-on JSON file is either a single operation object or an array of them." />
 
                     <TextBlock Classes="sub-title" Text="Excel (.txt) targets" />
                     <StackPanel Spacing="2">
@@ -270,7 +271,7 @@
                     <TextBlock Classes="section-title"
                                Text="6. Optional Parameter Types &amp; Conditions" />
                     <TextBlock Classes="lead"
-                               Text="Plugin authors can opt into checkbox-style parameters and gate individual operations or asset copies behind a small declarative JSON condition. Existing plugins without 'type' or 'condition' continue to behave exactly as before." />
+                               Text="Add-on authors can opt into checkbox-style parameters and gate individual operations or asset copies behind a small declarative JSON condition. Existing add-ons without 'type' or 'condition' continue to behave exactly as before." />
 
                     <TextBlock Classes="sub-title" Text="Parameter types" />
                     <StackPanel Spacing="2">
@@ -282,7 +283,7 @@
 
                     <TextBlock Classes="sub-title" Text="Conditional parameter visibility (visibleWhen)" />
                     <StackPanel Spacing="2">
-                        <TextBlock Classes="bullet" Text="•  Add an optional 'visibleWhen' condition to any parameter to show/hide its control on the Plugins page based on the current value of other parameters." />
+                        <TextBlock Classes="bullet" Text="•  Add an optional 'visibleWhen' condition to any parameter to show/hide its control on the Add-ons page based on the current value of other parameters." />
                         <TextBlock Classes="bullet" Text="•  'visibleWhen' uses the same condition shapes as operation/asset conditions (parameterKey + equals/notEquals, or all/any/not)." />
                         <TextBlock Classes="bullet" Text="•  Visibility updates live as the user changes a dropdown or checkbox the condition references; it is purely a UI concern and never affects saving, condition evaluation, or apply." />
                         <TextBlock Classes="bullet" Text="•  Missing 'visibleWhen' means the parameter is always shown." />
@@ -290,7 +291,7 @@
 
                     <TextBlock Classes="sub-title" Text="Parameter groups (display only)" />
                     <StackPanel Spacing="2">
-                        <TextBlock Classes="bullet" Text="•  Add an optional 'group' string to any parameter to render it under a section heading on the Plugins page." />
+                        <TextBlock Classes="bullet" Text="•  Add an optional 'group' string to any parameter to render it under a section heading on the Add-ons page." />
                         <TextBlock Classes="bullet" Text="•  Groups appear in the order they first occur in the parameters array; parameter order within a group is preserved." />
                         <TextBlock Classes="bullet" Text="•  Missing/empty 'group' means the parameter is ungrouped. If no parameter declares a group, the existing flat layout is used." />
                         <TextBlock Classes="bullet" Text="•  Grouping is purely visual: it never affects parameterKey lookup, {{parameter:key}} substitution, condition evaluation, saving, or apply." />
@@ -298,7 +299,7 @@
 
                     <TextBlock Classes="sub-title" Text="Conditions on operations and assets" />
                     <StackPanel Spacing="2">
-                        <TextBlock Classes="bullet" Text="•  Any operation entry inside a plugin JSON file or any asset entry in plugininfo.json may include an optional 'condition' object." />
+                        <TextBlock Classes="bullet" Text="•  Any operation entry inside an add-on JSON file or any asset entry in plugininfo.json may include an optional 'condition' object." />
                         <TextBlock Classes="bullet" Text="•  Missing condition means the operation/asset always applies (existing behavior)." />
                         <TextBlock Classes="bullet" Text="•  Conditions are pure declarative JSON — no scripts or expressions are executed." />
                         <TextBlock Classes="bullet" Text="•  Comparisons run against the effective parameter value: parameter.value if present, otherwise parameter.defaultValue. Boolean-like comparisons are case-insensitive." />
@@ -311,7 +312,7 @@
                         <TextBlock Classes="bullet" Text="•  { &quot;all&quot;: [ ...conditions ] } — every nested condition must be true." />
                         <TextBlock Classes="bullet" Text="•  { &quot;any&quot;: [ ...conditions ] } — at least one nested condition must be true." />
                         <TextBlock Classes="bullet" Text="•  { &quot;not&quot;: { ...condition } } — inverts the nested condition." />
-                        <TextBlock Classes="bullet" Text="•  Unknown parameterKey or malformed condition shapes produce a clear plugin validation error." />
+                        <TextBlock Classes="bullet" Text="•  Unknown parameterKey or malformed condition shapes produce a clear add-on validation error." />
                     </StackPanel>
 
                     <TextBlock Classes="sub-title" Text="Example" />
@@ -332,9 +333,9 @@
 
                     <TextBlock Classes="sub-title" Text="Manifest &amp; paths" />
                     <StackPanel Spacing="2">
-                        <TextBlock Classes="bullet" Text="•  File paths must be relative and stay inside the plugin folder; absolute or traversing paths are rejected." />
+                        <TextBlock Classes="bullet" Text="•  File paths must be relative and stay inside the add-on folder; absolute or traversing paths are rejected." />
                         <TextBlock Classes="bullet" Text="•  plugininfo.json must list files that actually exist in the archive." />
-                        <TextBlock Classes="bullet" Text="•  modVersion is required and must be in #.#.# format (e.g. 3.0.7) or the plugin is rejected." />
+                        <TextBlock Classes="bullet" Text="•  modVersion is required and must be in #.#.# format (e.g. 3.0.7) or the add-on is rejected." />
                     </StackPanel>
 
                     <TextBlock Classes="sub-title" Text="Numeric &amp; append operations" />
@@ -356,7 +357,7 @@
                                    TextWrapping="Wrap"
                                    Text="•  rowIdentifier array elements are validated like the single-value forms: object elements must list real columns (with the same two-columns-on-rowID-files warning), and string elements on rowID files must be a numeric row ID or a &quot;start-end&quot; range. Empty array elements and arrays attached to addRow / cloneRow / swapRow are rejected." />
                         <TextBlock Classes="bullet" Text="•  When using 'columns', each entry must reference a known target column; per-column parameterKey/updatedValue overrides the parent operation's values." />
-                        <TextBlock Classes="bullet" Text="•  Unknown parameters and unknown target columns are reported as plugin errors." />
+                        <TextBlock Classes="bullet" Text="•  Unknown parameters and unknown target columns are reported as add-on errors." />
                     </StackPanel>
 
                     <TextBlock Classes="sub-title" Text="Missiles &amp; Monsters JSON" />
@@ -373,13 +374,13 @@
                     <TextBlock Classes="section-title"
                                Text="8. Sharing on GitHub Discussions" />
                     <TextBlock Classes="lead"
-                               Text="The launcher's User Plugins page scrapes the Plugins discussion category on GitHub. Your post body must include these fields:" />
+                               Text="The launcher's Community Add-ons page reads the Plugins discussion category on GitHub. Your post body must include these fields:" />
                     <StackPanel Spacing="2">
-                        <TextBlock Classes="bullet" Text="•  Title: Your Plugin Name — shown as the plugin title." />
+                        <TextBlock Classes="bullet" Text="•  Title: Your Add-on Name — shown as the add-on title." />
                         <TextBlock Classes="bullet" Text="•  Desc: or Description: — short summary shown under the title." />
                         <TextBlock Classes="bullet" Text="•  Mod:, ModVer: or ModVersion: followed by a version in #.#.# format — shown beside the title. Posts without a valid mod version are skipped." />
-                        <TextBlock Classes="bullet" Text="•  Plug:, PlugVer: or PluginVersion: followed by a version in #.#.# format (optional) — your plugin's own version. When present it is shown beside the title on the User Plugins page, recorded on install, and enables an Update button on the Installed Plugins page so users can re-download the latest zip. Omit it and no plug-version badge or Update button is shown." />
-                        <TextBlock Classes="bullet" Text="•  Attach a .zip of your plugin to the post. Posts without a .zip attachment are skipped." />
+                        <TextBlock Classes="bullet" Text="•  Plug:, PlugVer: or PluginVersion: followed by a version in #.#.# format (optional) — your add-on's own version. When present it is shown beside the title on the Community Add-ons page, recorded on install, and enables an Update button on the Installed Add-ons page so users can re-download the latest zip. Omit it and no version badge or Update button is shown." />
+                        <TextBlock Classes="bullet" Text="•  Attach a .zip of your add-on to the post. Posts without a .zip attachment are skipped." />
                     </StackPanel>
                     <TextBlock Classes="muted"
                                TextWrapping="Wrap"

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -61,8 +61,8 @@ public partial class PluginsView : UserControl
             }
 
             PluginsSummaryTextBlock.Text = catalog.Count == 0
-                ? "Plugins you install appear here. Enable them to apply their JSON changes before launch."
-                : $"{catalog.Count} installed plugin(s). Enabled plugins run in the order shown here.";
+                ? "Add-ons you install appear here. Enable them to apply their JSON changes before launch."
+                : $"{catalog.Count} installed add-ons. Enabled add-ons run in the order shown here.";
         }
         finally
         {
@@ -147,7 +147,7 @@ public partial class PluginsView : UserControl
         _isDryRunning = true;
         mainWindow?.SetNavigationEnabled(false);
         ContentPanel.IsEnabled = false;
-        DryRunStatusText.Text = "Applying all tweaks and enabled plugins without launching the game.";
+        DryRunStatusText.Text = "Applying all tweaks and enabled add-ons without launching the game.";
         DryRunBanner.IsVisible = true;
 
         // Progress is created on the UI thread, so its callback marshals back to it.
@@ -159,7 +159,7 @@ public partial class PluginsView : UserControl
             if (prepared)
             {
                 Notifications.SendNotification(
-                    "Dry run complete. All tweaks and enabled plugins were applied without launching the game.",
+                    "Dry run complete. All tweaks and enabled add-ons were applied without launching the game.",
                     "Success");
             }
             else
@@ -199,7 +199,7 @@ public partial class PluginsView : UserControl
 
         var files = await window.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "Select Plugin Zip",
+            Title = "Select Add-on Zip",
             AllowMultiple = false,
             FileTypeFilter =
             [
@@ -218,7 +218,7 @@ public partial class PluginsView : UserControl
         var zipPath = files[0].Path.LocalPath;
         if (string.IsNullOrWhiteSpace(zipPath))
         {
-            Notifications.SendNotification("Selected plugin archive could not be accessed locally.", "Warning");
+            Notifications.SendNotification("Selected add-on archive could not be accessed locally.", "Warning");
             return;
         }
 
@@ -252,12 +252,12 @@ public partial class PluginsView : UserControl
 
             await RefreshPluginsStateAsync();
             Notifications.SendNotification(
-                existingPlugin == null ? "Plugin imported successfully." : "Plugin replaced successfully.",
+                existingPlugin == null ? "Add-on imported successfully." : "Add-on replaced successfully.",
                 "Success");
         }
         catch (Exception ex)
         {
-            Notifications.SendNotification($"Plugin import failed: {ex.Message}", "Warning");
+            Notifications.SendNotification($"Add-on import failed: {ex.Message}", "Warning");
         }
     }
 
@@ -321,11 +321,11 @@ public partial class PluginsView : UserControl
             }
 
             await RefreshPluginsStateAsync();
-            Notifications.SendNotification($"User plugin '{plugin.Name}' updated successfully.", "Success");
+            Notifications.SendNotification($"User add-on '{plugin.Name}' updated successfully.", "Success");
         }
         catch (Exception ex)
         {
-            Notifications.SendNotification($"User plugin update failed: {ex.Message}", "Warning");
+            Notifications.SendNotification($"User add-on update failed: {ex.Message}", "Warning");
         }
         finally
         {
@@ -386,7 +386,7 @@ public partial class PluginsView : UserControl
         {
             plugin.IsEnabled = wasEnabled;
             checkBox.IsChecked = wasEnabled;
-            Notifications.SendNotification($"Plugin update failed: {ex.Message}", "Warning");
+            Notifications.SendNotification($"Add-on update failed: {ex.Message}", "Warning");
         }
     }
 
@@ -471,11 +471,11 @@ public partial class PluginsView : UserControl
             }
 
             await RefreshPluginsStateAsync();
-            Notifications.SendNotification($"Plugin '{plugin.Name}' deleted.", "Success");
+            Notifications.SendNotification($"Add-on '{plugin.Name}' deleted.", "Success");
         }
         catch (Exception ex)
         {
-            Notifications.SendNotification($"Plugin delete failed: {ex.Message}", "Warning");
+            Notifications.SendNotification($"Add-on delete failed: {ex.Message}", "Warning");
         }
     }
 
@@ -509,7 +509,7 @@ public partial class PluginsView : UserControl
         }
         catch (Exception ex)
         {
-            Notifications.SendNotification($"Could not open plugin JSON: {ex.Message}", "Warning");
+            Notifications.SendNotification($"Could not open add-on JSON: {ex.Message}", "Warning");
         }
     }
 
@@ -531,11 +531,11 @@ public partial class PluginsView : UserControl
             }
 
             parameter.UpdateValue(value);
-            Notifications.SendNotification("Plugin parameter saved.", "Success");
+            Notifications.SendNotification("Add-on parameter saved.", "Success");
         }
         catch (Exception ex)
         {
-            Notifications.SendNotification($"Could not save plugin parameter: {ex.Message}", "Warning");
+            Notifications.SendNotification($"Could not save add-on parameter: {ex.Message}", "Warning");
         }
     }
 
@@ -563,7 +563,7 @@ public partial class PluginsView : UserControl
         }
         catch (Exception ex)
         {
-            Notifications.SendNotification($"Could not save plugin parameter: {ex.Message}", "Warning");
+            Notifications.SendNotification($"Could not save add-on parameter: {ex.Message}", "Warning");
         }
     }
 
@@ -594,7 +594,7 @@ public partial class PluginsView : UserControl
         }
         catch (Exception ex)
         {
-            Notifications.SendNotification($"Could not save plugin parameter: {ex.Message}", "Warning");
+            Notifications.SendNotification($"Could not save add-on parameter: {ex.Message}", "Warning");
         }
     }
 
@@ -630,7 +630,7 @@ public partial class PluginsView : UserControl
     {
         if (string.IsNullOrWhiteSpace(_selectedPluginId) || string.IsNullOrWhiteSpace(_selectedRelativePath))
         {
-            Notifications.SendNotification("Select a plugin JSON file before saving.", "Warning");
+            Notifications.SendNotification("Select an add-on JSON file before saving.", "Warning");
             return;
         }
 
@@ -645,11 +645,11 @@ public partial class PluginsView : UserControl
             _originalEditorContent = EditorTextBox.Text ?? string.Empty;
             SetEditorState(fileSelected: true, isDirty: false);
             await RefreshPluginsStateAsync();
-            Notifications.SendNotification("Plugin JSON saved.", "Success");
+            Notifications.SendNotification("Add-on JSON saved.", "Success");
         }
         catch (Exception ex)
         {
-            Notifications.SendNotification($"Could not save plugin JSON: {ex.Message}", "Warning");
+            Notifications.SendNotification($"Could not save add-on JSON: {ex.Message}", "Warning");
         }
     }
 
@@ -666,7 +666,7 @@ public partial class PluginsView : UserControl
         _isUpdatingEditorState = true;
         EditorTextBox.Text = string.Empty;
         _isUpdatingEditorState = false;
-        EditorTitleTextBlock.Text = "Select a plugin JSON file to edit it here.";
+        EditorTitleTextBlock.Text = "Select an add-on JSON file to edit it here.";
         SetEditorState(fileSelected: false, isDirty: false);
     }
 
@@ -716,7 +716,7 @@ public partial class PluginsView : UserControl
                 {
                     new TextBlock
                     {
-                        Text = "Editing these values can cause instability and crashes and is not recommended unless you are the plugin author. Would you like to proceed?",
+                        Text = "Editing these values can cause instability and crashes and is not recommended unless you are the add-on author. Would you like to proceed?",
                         TextWrapping = TextWrapping.Wrap
                     },
                     new StackPanel
@@ -749,7 +749,7 @@ public partial class PluginsView : UserControl
             SizeToContent = SizeToContent.Height,
             CanResize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Title = "Replace Plugin?"
+            Title = "Replace Add-on?"
         };
 
         var replaceButton = new Button
@@ -777,7 +777,7 @@ public partial class PluginsView : UserControl
                 {
                     new TextBlock
                     {
-                        Text = $"A plugin named '{pluginName}' is already installed.",
+                        Text = $"An add-on named '{pluginName}' is already installed.",
                         FontWeight = FontWeight.SemiBold,
                         TextWrapping = TextWrapping.Wrap
                     },

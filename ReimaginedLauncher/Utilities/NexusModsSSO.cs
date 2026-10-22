@@ -83,7 +83,7 @@ public class NexusModsSSO
                 }
                 else if (!string.IsNullOrEmpty(response.Data.ApiKey))
                 {
-                    Console.WriteLine("API Key Received: " + response.Data.ApiKey);
+                    Console.WriteLine("Nexus sign-in completed.");
                     OnApiKeyReceived?.Invoke(response.Data.ApiKey);
                 }
             }

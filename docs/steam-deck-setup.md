@@ -27,6 +27,17 @@ Open **Diablo II: Reimagined (Native Launcher)**. Setup also retains a hidden **
 
 The installed AppImage is `~/.local/share/ReimaginedLauncher/launcher/D2RReimagined.ReimaginedLauncher.AppImage`. Moving the Downloads copy does not break the registered entries. To install another AppImage manually, open it in Desktop Mode and rerun setup with Steam fully exited. Existing owned shortcut IDs are retained.
 
+Native shortcuts check for FUSE inside the environment Steam actually uses to
+launch them. Setup generates a small owned `.sh` startup script beside the
+installed AppImage and points the two owned entries at it while retaining their
+registered IDs. The script mounts the AppImage normally when the device and helper are
+available, or automatically use AppImage's extract-and-run mode otherwise. This
+supports the newer 64-bit Steam runtime without requiring a user setting or a
+different launcher architecture. Extraction can add startup time. Rerunning
+setup migrates recognized older launcher options while retaining the same
+shortcut IDs; unrecognized custom launch options are preserved and reported as
+a conflict.
+
 Controller configuration is optional. A missing, incompatible or unwritable template does not prevent shortcut registration. Setup reports that the layout was skipped; choose a layout in Steam Controller Settings if needed. Linux desktop users can restart desktop Steam and launch the registered entry without switching to Gaming Mode.
 
 ## Play and exit
@@ -52,3 +63,5 @@ After a fallback launch, Steam can retain the Game Session page in navigation hi
 Suspend/resume passed launch and input recovery on the test Deck, but temporary graphical glitches were observed until changing zones. Their cause is unconfirmed. Ladder requires an active connection and disconnected during sleep.
 
 See [validation results and limits](steam-deck-validation.md).
+
+Steam launches use AppImage extraction automatically because host FUSE-helper detection can disagree with the effective Steam launch environment. Outside Steam, the generated bootstrap uses FUSE when the device and helper are available, otherwise extraction. This does not change Steam architecture or choose a different client.

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
@@ -337,7 +337,7 @@ public partial class PluginAuthoringGuideView : UserControl
             // surface the failure so the user knows to copy the link manually.
             LaunchDiagnostics.LogException("Failed to open plugin creation wiki URL", ex);
             Notifications.SendNotification(
-                $"Could not open the plugin wiki in your browser: {ex.Message}",
+                $"Could not open the add-on wiki in your browser: {ex.Message}",
                 "Warning");
         }
     }

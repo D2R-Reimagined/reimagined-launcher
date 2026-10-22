@@ -10,21 +10,26 @@ using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using ReimaginedLauncher.Utilities;
+using ReimaginedLauncher.Views.Launch;
 
 namespace ReimaginedLauncher.Views.Update;
 
 public partial class UpdateView : UserControl
 {
     private bool _isLoading;
+    private readonly LaunchView _installationEditor;
 
     public UpdateView()
     {
         InitializeComponent();
+        _installationEditor = new LaunchView(installationOnly: true, collapsibleInstallation: true);
+        InstallationSettingsHost.Content = _installationEditor;
         RefreshUpdateState();
     }
 
     public void RefreshUpdateState()
     {
+        _installationEditor.RefreshInstallDirectoryState();
         var isAuthenticated = MainWindow.UserViewModel.User != null;
         var usesDownloadsWatcher = isAuthenticated && MainWindow.Settings.NexusPremiumDownloadAccess == false;
         var isInstallMissing = MainWindow.UpdateCurrentVersion.Equals("Not detected", StringComparison.OrdinalIgnoreCase);

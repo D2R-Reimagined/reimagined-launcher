@@ -80,6 +80,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _saveWindowStateTimer;
     private DispatcherTimer? _launcherUpdateCheckTimer;
     private bool _isRestoringWindowState;
+    private bool _isInitializingSettings = true;
     // Hourly auto-poll cadence for launcher update checks. The same check is also runnable on
     // demand by clicking the "Launcher v#.#.#" label in the navigation panel.
     private static readonly TimeSpan LauncherUpdateCheckInterval = TimeSpan.FromHours(1);
@@ -152,6 +153,7 @@ public partial class MainWindow : Window
         }
         finally
         {
+            _isInitializingSettings = false;
             Opacity = 1;
         }
     }
@@ -211,40 +213,8 @@ public partial class MainWindow : Window
         var installDir = Settings.CurrentProfile.InstallDirectory;
         RefreshLocalModState(installDir);
         ApplyUiScale();
-        PluginsView? pluginsViewToRefresh = null;
-
-        await Dispatcher.UIThread.InvokeAsync(() =>
-        {
-            if (ContentArea.Content is LaunchView launchView)
-            {
-                launchView.RefreshInstallDirectoryState();
-            }
-            else if (ContentArea.Content is BackupsView backupsView)
-            {
-                backupsView.RefreshBackupState();
-            }
-            else if (ContentArea.Content is SettingsView settingsView)
-            {
-                settingsView.RefreshSettingsState();
-            }
-            else if (ContentArea.Content is NewsAnnouncementsView newsAnnouncementsView)
-            {
-                newsAnnouncementsView.RefreshAnnouncementsState();
-            }
-            else if (ContentArea.Content is ModTweaksView modTweaksView)
-            {
-                modTweaksView.RefreshTweaksState();
-            }
-            else if (ContentArea.Content is PluginsView pluginsView)
-            {
-                pluginsViewToRefresh = pluginsView;
-            }
-        });
-
-        if (pluginsViewToRefresh != null)
-        {
-            await pluginsViewToRefresh.RefreshPluginsStateAsync();
-        }
+        _isInitializingSettings = false;
+        await RestoreLastNavigationAsync(Settings.LastNavigationTag);
 
         BackupService.UpdateSchedule();
         await SettingsManager.SaveAsync(Settings);
@@ -259,14 +229,32 @@ public partial class MainWindow : Window
         }
         RefreshReimaginedAccountUI();
 
-        // Network calls (can be slow; don't block UI setup)
-        var openedUnreadAnnouncements = await RefreshAnnouncementsStateAsync(openUnreadAnnouncements: true);
-
         if (!string.IsNullOrWhiteSpace(Settings.NexusModsSSOApiKey))
         {
-            User = await _nexusModsHttpClient.ValidateApiKeyAsync();
-            UserViewModel.User = User;
+            try
+            {
+                User = await _nexusModsHttpClient.ValidateApiKeyAsync();
+                UserViewModel.User = User;
+            }
+            catch (Exception exception)
+            {
+                LaunchDiagnostics.LogException("Could not restore Nexus sign-in", exception);
+            }
         }
+
+        var offeredSetup = SetupReadiness.ShouldOfferSetup(Settings,
+            _launcherAuthenticationService.IsSignedIn || UserViewModel.User is not null);
+        if (!offeredSetup && !Settings.FirstTimeSetupShown)
+        {
+            Settings.FirstTimeSetupShown = Settings.FirstTimeSetupCompleted = true;
+            await SettingsManager.SaveAsync(Settings);
+        }
+        if (offeredSetup)
+            await ShowSetupGuideAsync();
+
+        // Network calls (can be slow; don't block UI setup)
+        await RefreshAnnouncementsStateAsync(openUnreadAnnouncements: false);
+
 
         await RefreshUpdateStateAsync();
         LauncherUpdateService.AreUpdatesDisabled = Settings.DisableLauncherUpdates;
@@ -277,12 +265,9 @@ public partial class MainWindow : Window
         UserViewModel.PropertyChanged -= UserViewModelOnPropertyChanged;
         UserViewModel.PropertyChanged += UserViewModelOnPropertyChanged;
 
-        if (!IsLocalModDetected && Settings.CurrentProfile.LaunchExperience != LaunchExperience.Ladder)
+        if (!offeredSetup && !IsLocalModDetected && Settings.CurrentProfile.LaunchExperience != LaunchExperience.Ladder)
         {
-            if (!openedUnreadAnnouncements)
-            {
-                await PromptInstallForMissingModAsync();
-            }
+            await PromptInstallForMissingModAsync();
         }
     }
 
@@ -318,7 +303,7 @@ public partial class MainWindow : Window
             return 1.0;
         }
 
-        return Math.Clamp(uiScale, 0.8, 1.0);
+        return Math.Clamp(uiScale, 0.8, 1.5);
     }
 
     private async void UserViewModelOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -792,14 +777,94 @@ public partial class MainWindow : Window
         return ($"{NexusUrl}?tab=files&file_id={fileId}", false);
     }
     
+    private void PersistNavigationTag(string? tag)
+    {
+        if (_isInitializingSettings || string.IsNullOrWhiteSpace(tag))
+            return;
+
+        if (!string.Equals(Settings.LastNavigationTag, tag, StringComparison.Ordinal))
+        {
+            Settings.LastNavigationTag = tag;
+            _ = SettingsManager.SaveAsync(Settings);
+        }
+    }
+
+    private async Task RestoreLastNavigationAsync(string? navigationTag)
+    {
+        switch (navigationTag)
+        {
+            case "NewsAnnouncements":
+                await NavigateToNewsAnnouncementsViewAsync();
+                break;
+            case "PatchNotes":
+                await NavigateToPatchNotesAsync();
+                break;
+            case "Update":
+                await NavigateToUpdateViewAsync();
+                break;
+            case "Backups":
+                await NavigateToBackupsViewAsync();
+                break;
+            case "Settings":
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (SettingsNavItem != null && NavigationList.SelectedItem != SettingsNavItem)
+                        NavigationList.SelectedItem = SettingsNavItem;
+                    else
+                    {
+                        var settingsView = new SettingsView();
+                        settingsView.RefreshSettingsState();
+                        ContentArea.Content = settingsView;
+                    }
+                });
+                break;
+            case "ModTweaks":
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (ModTweaksNavItem != null && NavigationList.SelectedItem != ModTweaksNavItem)
+                        NavigationList.SelectedItem = ModTweaksNavItem;
+                    else
+                    {
+                        var modTweaksView = new ModTweaksView();
+                        modTweaksView.RefreshTweaksState();
+                        ContentArea.Content = modTweaksView;
+                    }
+                });
+                break;
+            case "Plugins":
+                await NavigateToPluginsViewAsync();
+                break;
+            default:
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (ContentArea.Content is LaunchView launchView)
+                    {
+                        launchView.RefreshInstallDirectoryState();
+                        if (LaunchNavItem != null && NavigationList.SelectedItem != LaunchNavItem)
+                            NavigationList.SelectedItem = LaunchNavItem;
+                    }
+                    else
+                    {
+                        _ = NavigateToLaunchViewAsync();
+                    }
+                });
+                break;
+        }
+    }
+
     private void OnNavigationSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (NavigationList.SelectedItem is ListBoxItem item)
         {
-            switch (item.Tag?.ToString())
+            var tag = item.Tag?.ToString();
+            PersistNavigationTag(tag);
+            switch (tag)
             {
                 case "NewsAnnouncements":
                     _ = NavigateToNewsAnnouncementsViewAsync();
+                    break;
+                case "PatchNotes":
+                    _ = NavigateToPatchNotesAsync();
                     break;
                 case "Launch":
                     var launchView = new LaunchView();
@@ -933,6 +998,11 @@ public partial class MainWindow : Window
         }
     }
 
+    public void NavigateToInstallationSettings()
+    {
+        NavigationList.SelectedItem = UpdateNavItem;
+    }
+
     public async Task NavigateToLaunchViewAsync()
     {
         await Dispatcher.UIThread.InvokeAsync(() =>
@@ -946,6 +1016,17 @@ public partial class MainWindow : Window
                 NavigationList.SelectedItem = LaunchNavItem;
             }
         });
+    }
+
+    public async Task NavigateToPatchNotesAsync(string? version = null)
+    {
+        PersistNavigationTag("PatchNotes");
+        NavigationList.SelectionChanged -= OnNavigationSelectionChanged;
+        try { NavigationList.SelectedItem = PatchNotesNavItem; }
+        finally { NavigationList.SelectionChanged += OnNavigationSelectionChanged; }
+        if (ContentArea.Content is not PatchNotesView)
+            ContentArea.Content = new PatchNotesView();
+        await ((PatchNotesView)ContentArea.Content).LoadAsync(version);
     }
 
     public async Task NavigateToNewsAnnouncementsViewAsync()
@@ -1197,6 +1278,12 @@ public partial class MainWindow : Window
 
     private async void OnNexusLoginClicked(object sender, RoutedEventArgs e)
     {
+        try { await SignInToNexusAsync(); }
+        catch (Exception exception) { Notifications.SendNotification(exception.Message, "Sign-in failed"); }
+    }
+
+    public async Task SignInToNexusAsync()
+    {
         _nexusSSO = new NexusModsSSO();
         _nexusSSO.OnApiKeyReceived += apiKey =>
         {
@@ -1216,7 +1303,7 @@ public partial class MainWindow : Window
         await SignInToReimaginedAsync();
     }
 
-    public async Task<bool> SignInToReimaginedAsync()
+    public async Task<bool> SignInToReimaginedAsync(CancellationToken cancellationToken = default)
     {
         if (_launcherAuthenticationService.IsSignedIn)
         {
@@ -1224,7 +1311,7 @@ public partial class MainWindow : Window
             return true;
         }
 
-        var cancellationTokenSource = new CancellationTokenSource();
+        var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         CancellationTokenSource? previousCancellationTokenSource;
         lock (_reimaginedSignInLock)
         {

@@ -3,12 +3,14 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using System.Threading.Tasks;
+using System.Threading;
 using ReimaginedLauncher.Generators;
 
 namespace ReimaginedLauncher.Utilities;
 
 public static class SettingsManager
 {
+    private static readonly SemaphoreSlim SaveGate = new(1, 1);
     private static readonly string AppDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ReimaginedLauncher");
 
@@ -86,6 +88,13 @@ public static class SettingsManager
     }
 
     public static async Task SaveAsync(AppSettings settings)
+    {
+        await SaveGate.WaitAsync();
+        try { await SaveCoreAsync(settings); }
+        finally { SaveGate.Release(); }
+    }
+
+    private static async Task SaveCoreAsync(AppSettings settings)
     {
         if (!Directory.Exists(AppDir))
             Directory.CreateDirectory(AppDir);

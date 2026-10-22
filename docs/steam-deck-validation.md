@@ -4,6 +4,15 @@ Validated on a physical Steam Deck with native Steam, the Steam edition of D2R a
 
 ## Live checks completed
 
+- Hero preview follow-up: the native shortcut failed before application startup
+  under the newer `steamrt64` client container because no suitable fusermount
+  helper was visible there. The same installed AppImage launched from Desktop
+  Mode. A FUSE-free Steam launch opened the native Hero window with the existing
+  Steam GameId. The automatic bootstrap is additionally checked with FUSE
+  present, helpers absent and an explicit helper path; quoted arguments are
+  preserved. See the local deployment receipt for the final automatic-launch
+  result. No new game-session/controller validation is implied by this GUI test.
+
 - Dedicated Online, Offline and Ladder launch, gamepad controls, persistent launcher return, and exit to the Native Launcher page without the helper page when fallback has not been used.
 - Repeated Online → Offline → Ladder launches from one open launcher, with LSFG enabled, gamepad input during play and trackpad movement/clicking on return.
 - Ladder package download and launch. Process inspection confirmed the integrated Ladder game uses the registered Native Launcher SteamGameId and compatibility app ID, rather than the helper identity.
@@ -40,3 +49,7 @@ Optional-layout regressions exercise missing, malformed, incompatible and unwrit
 - Focus is left to Steam. Gamescope property writes, official-entry wrappers, silent-launch experiments, CEF navigation, diagnostic shortcuts and temporary scripts are absent from the final setup flow.
 
 Steam identity and controller preferences are observed client contracts, not a guaranteed public API. The explicit helper fallback and manual controller editor remain available. Existing Windows and Battle.net/Lutris paths retain their launch implementation.
+
+Hero preview follow-up: host shell probes found `/dev/fuse` and both helpers, while Steam-origin AppImage startup still reported no suitable helper. Host presence alone therefore cannot establish FUSE availability in the effective launch environment. Steam startup uses the explicit `--appimage-extract-and-run` flag; launches outside Steam retain normal FUSE startup when available. Forty-eight focused tests passed. Final physical startup evidence is recorded in the local deployment receipt.
+
+Hero.18 physical GUI result: native Steam shortcut opened the installed stable AppImage, PID 410319, with original Steam GameId 15660535476714995712. Four shell branches passed (host FUSE, missing helper, explicit helper, Steam context). Existing shortcut registration retained owned IDs, 136 unrelated entries and controller preferences; repeated compiled setup was idempotent. Native game launch was not repeated in this follow-up.

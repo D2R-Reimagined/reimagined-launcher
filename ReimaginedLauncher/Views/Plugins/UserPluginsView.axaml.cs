@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -30,7 +30,7 @@ public partial class UserPluginsView : UserControl
         {
             _disclaimerShown = true;
             Notifications.SendNotification(
-                "These plugins are user submitted and may cause instability and crashes. It is the author's responsibility to ensure mod compatibility. Please post problems on the plugins GitHub discussion as the author may not always use our Discord.",
+                "These add-ons are user submitted and may cause instability and crashes. It is the author's responsibility to ensure mod compatibility. Please post problems on the add-ons GitHub discussion as the author may not always use our Discord.",
                 "Info");
         }
 
@@ -64,7 +64,7 @@ public partial class UserPluginsView : UserControl
         }
         catch (Exception ex)
         {
-            UserPluginsSummaryTextBlock.Text = $"Failed to load user plugins: {ex.Message}";
+            UserPluginsSummaryTextBlock.Text = $"Failed to load user add-ons: {ex.Message}";
             EmptyStatePanel.IsVisible = true;
         }
         finally
@@ -137,16 +137,16 @@ public partial class UserPluginsView : UserControl
 
         if (_allPlugins.Count == 0)
         {
-            UserPluginsSummaryTextBlock.Text = "No user plugins were found.";
+            UserPluginsSummaryTextBlock.Text = "No user add-ons were found.";
         }
         else if (query.Length == 0)
         {
-            UserPluginsSummaryTextBlock.Text = $"{_allPlugins.Count} user plugin(s) available.";
+            UserPluginsSummaryTextBlock.Text = $"{_allPlugins.Count} community add-ons available.";
         }
         else
         {
             UserPluginsSummaryTextBlock.Text =
-                $"{filtered.Count} of {_allPlugins.Count} user plugin(s) match \"{query}\".";
+                $"{filtered.Count} of {_allPlugins.Count} community add-ons match \"{query}\".";
         }
     }
 
@@ -276,8 +276,8 @@ public partial class UserPluginsView : UserControl
             await PluginsService.ImportPluginAsync(tempZipPath, replacePluginId, plugin.DiscussionUrl, plugin.PluginVersion);
             Notifications.SendNotification(
                 existingPlugin == null
-                    ? $"User plugin '{plugin.Title}' installed successfully."
-                    : $"User plugin '{plugin.Title}' replaced successfully.",
+                    ? $"User add-on '{plugin.Title}' installed successfully."
+                    : $"User add-on '{plugin.Title}' replaced successfully.",
                 "Success");
 
             // Refresh the list so the just-installed plugin's title colouring and
@@ -286,7 +286,7 @@ public partial class UserPluginsView : UserControl
         }
         catch (Exception ex)
         {
-            Notifications.SendNotification($"User plugin install failed: {ex.Message}", "Warning");
+            Notifications.SendNotification($"User add-on install failed: {ex.Message}", "Warning");
         }
         finally
         {
