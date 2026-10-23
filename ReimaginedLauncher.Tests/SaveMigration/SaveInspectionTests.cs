@@ -15,9 +15,13 @@ public sealed class SaveInspectionTests
         var inspection = InspectAndReport(
             "WereSorc.d2s",
             [SaveDataDefinition.FromSnapshot(Load(KnownSnapshots.Reimagined212))],
-            [Compare(KnownSnapshots.Reimagined212, KnownSnapshots.Reimagined3012), Compare(KnownSnapshots.Reimagined212, KnownSnapshots.PullRequest1181)]);
+            [
+                Compare(KnownSnapshots.Reimagined212, KnownSnapshots.Reimagined3012),
+                Compare(KnownSnapshots.Reimagined212, InstalledSnapshot)
+            ]);
 
-        Assert.Equal((SaveFileKind.Character, 99u, (bool?)true), (inspection.Header.Kind, inspection.Header.Version, inspection.Header.ChecksumValid));
+        Assert.Equal((SaveFileKind.Character, 99u, (bool?)true),
+            (inspection.Header.Kind, inspection.Header.Version, inspection.Header.ChecksumValid));
         AssertPhase1Ids(AssertParsedWith(inspection, "2.1.2"));
     }
 
@@ -27,11 +31,13 @@ public sealed class SaveInspectionTests
         var inspection = InspectAndReport(
             "Popsicle.d2s",
             [SaveDataDefinition.FromSnapshot(Load(KnownSnapshots.Reimagined3012))],
-            [Compare(KnownSnapshots.Reimagined3012, KnownSnapshots.PullRequest1181)]);
+            [Compare(KnownSnapshots.Reimagined3012, InstalledSnapshot)]);
 
-        Assert.Equal((SaveFileKind.Character, 105u, (bool?)true), (inspection.Header.Kind, inspection.Header.Version, inspection.Header.ChecksumValid));
+        Assert.Equal((SaveFileKind.Character, 105u, (bool?)true),
+            (inspection.Header.Kind, inspection.Header.Version, inspection.Header.ChecksumValid));
         // 1393 is Cold Rupture's 2.1.2 id carried over unmigrated; the z01 quiver keeps its pre-3.0.12 base code.
-        AssertPhase1Ids(AssertParsedWith(inspection, "3.0.12"), (TableKind.UniqueItems, 1393, "cm3"), (TableKind.UniqueItems, 1423, "z01"));
+        AssertPhase1Ids(AssertParsedWith(inspection, "3.0.12"), (TableKind.UniqueItems, 1393, "cm3"),
+            (TableKind.UniqueItems, 1423, "z01"));
     }
 
     [Fact]
@@ -39,11 +45,15 @@ public sealed class SaveInspectionTests
     {
         var inspection = InspectAndReport(
             "BonesMcPimp.d2s",
-            [Intermediate3013(), SaveDataDefinition.FromSnapshot(Load(KnownSnapshots.PullRequest1181)), SaveDataDefinition.FromSnapshot(Load(KnownSnapshots.Reimagined3012))],
-            [Compare(KnownSnapshots.Reimagined3012, KnownSnapshots.PullRequest1181)]);
+            [
+                NewItemsPreSwapStats(), SaveDataDefinition.FromSnapshot(InstalledSnapshot),
+                SaveDataDefinition.FromSnapshot(Load(KnownSnapshots.Reimagined3012))
+            ],
+            [Compare(KnownSnapshots.Reimagined3012, InstalledSnapshot)]);
 
-        Assert.Equal((SaveFileKind.Character, 105u, (bool?)true), (inspection.Header.Kind, inspection.Header.Version, inspection.Header.ChecksumValid));
-        var parsed = AssertParsedWith(inspection, Intermediate3013Label);
+        Assert.Equal((SaveFileKind.Character, 105u, (bool?)true),
+            (inspection.Header.Kind, inspection.Header.Version, inspection.Header.ChecksumValid));
+        var parsed = AssertParsedWith(inspection, NewItemsPreSwapStatsLabel);
         Assert.Equal((long?)84, parsed.CharacterStat("lab_boss_kill"));
         AssertPhase1Ids(parsed, (TableKind.MagicPrefix, 2047, "rin"), (TableKind.MagicSuffix, 2047, "rin"));
     }
@@ -53,28 +63,42 @@ public sealed class SaveInspectionTests
     {
         var inspection = InspectAndReport(
             "ModernSharedStashSoftCoreV2.d2i",
-            [SaveDataDefinition.FromSnapshot(Load(KnownSnapshots.Reimagined3012)), Intermediate3013(), SaveDataDefinition.FromSnapshot(Load(KnownSnapshots.PullRequest1181))],
-            [Compare(KnownSnapshots.Reimagined3012, KnownSnapshots.PullRequest1181)]);
+            [
+                SaveDataDefinition.FromSnapshot(Load(KnownSnapshots.Reimagined3012)), Intermediate3013(),
+                NewItemsPreSwapStats(), SaveDataDefinition.FromSnapshot(InstalledSnapshot)
+            ],
+            [Compare(KnownSnapshots.Reimagined3012, InstalledSnapshot)]);
 
-        Assert.Equal((SaveFileKind.SharedStash, 105u, (uint?)2u), (inspection.Header.Kind, inspection.Header.Version, inspection.Header.StashFormat));
+        Assert.Equal((SaveFileKind.SharedStash, 105u, (uint?)2u),
+            (inspection.Header.Kind, inspection.Header.Version, inspection.Header.StashFormat));
         var parsed = Assert.IsType<ParseAttempt>(inspection.Parsed);
-        AssertPhase1Ids(parsed, [.. Enumerable.Repeat((TableKind.MagicPrefix, 2047, "rin"), 5), .. Enumerable.Repeat((TableKind.MagicSuffix, 2047, "rin"), 5)]);
+        AssertPhase1Ids(parsed,
+        [
+            .. Enumerable.Repeat((TableKind.MagicPrefix, 2047, "rin"), 5),
+            .. Enumerable.Repeat((TableKind.MagicSuffix, 2047, "rin"), 5)
+        ]);
     }
 
-    private const string Intermediate3013Label = "3.0.13 candidate (3.0.12 + appended PR #1181 stats)";
+    private const string Intermediate3013Label = "3.0.12 with installed appended stats";
+    private const string NewItemsPreSwapStatsLabel = "Installed items with 3.0.12 stat encoding";
 
     private static SaveDataDefinition Intermediate3013() => SaveDataDefinition.WithAppendedStats(
-        Intermediate3013Label, Load(KnownSnapshots.Reimagined3012), Load(KnownSnapshots.PullRequest1181));
+        Intermediate3013Label, Load(KnownSnapshots.Reimagined3012), InstalledSnapshot);
+
+    private static SaveDataDefinition NewItemsPreSwapStats() => SaveDataDefinition.WithAppendedStats(
+        NewItemsPreSwapStatsLabel, Load(KnownSnapshots.Reimagined3012), InstalledSnapshot, InstalledSnapshot);
 
     private static SaveInspection InspectAndReport(
         string fixture, IReadOnlyList<SaveDataDefinition> candidates, IReadOnlyList<SnapshotComparison> comparisons)
     {
-        var path = Path.Combine(RepositoryRoot.Value, "ReimaginedLauncher.Tests", "TestFixtures", "SaveMigration", fixture);
+        var path = Path.Combine(RepositoryRoot.Value, "ReimaginedLauncher.Tests", "TestFixtures", "SaveMigration",
+            fixture);
         var inspection = SaveInspector.Inspect(path, candidates, comparisons);
 
         var reportDirectory = Path.Combine(AppContext.BaseDirectory, "SaveMigrationReports");
         Directory.CreateDirectory(reportDirectory);
-        File.WriteAllText(Path.Combine(reportDirectory, $"{fixture}.inspection.txt"), SaveInspectionReport.Write(inspection));
+        File.WriteAllText(Path.Combine(reportDirectory, $"{fixture}.inspection.txt"),
+            SaveInspectionReport.Write(inspection));
 
         Assert.True(inspection.Header.MagicValid);
         Assert.Equal(inspection.Sha256, Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path))));
@@ -89,10 +113,12 @@ public sealed class SaveInspectionTests
         return attempt;
     }
 
-    private static void AssertPhase1Ids(ParseAttempt parsed, params (TableKind Kind, int SaveId, string Code)[] expectedMismatches)
+    private static void AssertPhase1Ids(ParseAttempt parsed,
+        params (TableKind Kind, int SaveId, string Code)[] expectedMismatches)
     {
         Assert.All(parsed.IdValidations, validation =>
-            Assert.Equal(validation.Hypotheses.Max(hypothesis => hypothesis.Agreeing), validation.Hypotheses[0].Agreeing));
+            Assert.Equal(validation.Hypotheses.Max(hypothesis => hypothesis.Agreeing),
+                validation.Hypotheses[0].Agreeing));
         var mismatches = parsed.IdValidations
             .SelectMany(validation => validation.Phase1Mismatches)
             .Select(mismatch => (mismatch.Reference.Kind, mismatch.Reference.SaveId, mismatch.ItemCode))
@@ -104,13 +130,19 @@ public sealed class SaveInspectionTests
     private static SnapshotComparison Compare(KnownSnapshot source, KnownSnapshot target) =>
         TableComparer.Compare(Load(source), Load(target));
 
+    private static SnapshotComparison Compare(KnownSnapshot source, GameDataSnapshot target) =>
+        TableComparer.Compare(Load(source), target);
+
+    private static GameDataSnapshot InstalledSnapshot => SaveMigrationFixtures.InstalledTarget.Snapshot;
+
     private static GameDataSnapshot Load(KnownSnapshot snapshot)
     {
         lock (Snapshots)
         {
             if (!Snapshots.TryGetValue(snapshot, out var loaded))
             {
-                loaded = snapshot.Load(Path.Combine(RepositoryRoot.Value, "ReimaginedLauncher", "Assets", "SaveMigrationData"));
+                loaded = snapshot.Load(Path.Combine(RepositoryRoot.Value, "ReimaginedLauncher", "Assets",
+                    "SaveMigrationData"));
                 Snapshots[snapshot] = loaded;
             }
 
@@ -120,7 +152,9 @@ public sealed class SaveInspectionTests
 
     private static string FindRepositoryRoot()
     {
-        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
+             directory is not null;
+             directory = directory.Parent)
         {
             if (File.Exists(Path.Combine(directory.FullName, "ReimaginedLauncher.sln")))
             {
@@ -128,6 +162,7 @@ public sealed class SaveInspectionTests
             }
         }
 
-        throw new DirectoryNotFoundException("Could not locate ReimaginedLauncher.sln above the test output directory.");
+        throw new DirectoryNotFoundException(
+            "Could not locate ReimaginedLauncher.sln above the test output directory.");
     }
 }

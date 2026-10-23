@@ -17,13 +17,15 @@ namespace ReimaginedLauncher.Views.SaveConversion;
 public partial class SaveConversionWindow : Window
 {
     private readonly ObservableCollection<SaveConversionRowViewModel> _rows = [];
-    private readonly Dictionary<(SaveConversionRowViewModel Row, string? Source, bool Force), SaveConversionPlan> _plans = [];
+
+    private readonly Dictionary<(SaveConversionRowViewModel Row, string? Source, bool Force), SaveConversionPlan>
+        _plans = [];
+
     private readonly string _stagingDirectory =
         Path.Combine(Path.GetTempPath(), "ReimaginedSaveConversion", Guid.NewGuid().ToString("N"));
+
     private readonly string _saveDirectory;
     private readonly SaveCheckpointRegistry? _registry;
-    private IReadOnlyList<SaveCheckpoint> _targets = [];
-    private SaveTargetSelection? _defaultTarget;
     private SaveConversionService? _service;
     private bool _isBusy;
 
@@ -32,68 +34,66 @@ public partial class SaveConversionWindow : Window
         InitializeComponent();
         FilesItemsControl.ItemsSource = _rows;
         FilesScrollViewer.AddHandler(GotFocusEvent, OnListGotFocus);
-        _saveDirectory = MainWindow.Settings is null
-            ? string.Empty
-            : SaveConversionService.ResolveOfflineSaveDirectory(MainWindow.Settings.CurrentProfile);
+        _saveDirectory = SaveConversionService.ResolveOfflineSaveDirectory(MainWindow.Settings.CurrentProfile);
         try
         {
             _registry = SaveCheckpointRegistry.Load(SaveConversionService.DefaultDataDirectory);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                              or InvalidDataException or System.Text.Json.JsonException)
         {
             LaunchDiagnostics.LogException("Could not read the save migration checkpoint registry", exception);
         }
 
-        Opened += (_, _) => SelectInitialTarget();
+        Opened += async (_, _) => await InitializeConversionAsync();
         Closing += (_, args) => args.Cancel = _isBusy;
         Closed += (_, _) => DeleteStagingDirectory();
     }
 
-    /// <summary>Selects the newest supported target; selecting it starts the analysis.</summary>
-    private void SelectInitialTarget()
+    private async Task InitializeConversionAsync()
     {
         BackupDirectoryText.Text = $"Permanent conversion backups: {SaveConversionService.DefaultBackupRoot}";
         if (_registry is null)
         {
-            TargetComboBox.IsEnabled = false;
             ForceCheckBox.IsEnabled = false;
-            ShowBanner("The bundled save layout registry could not be read, so saves cannot be analyzed. Reinstall the launcher.");
+            ShowBanner(
+                "The bundled save layout registry could not be read, so saves cannot be analyzed. Reinstall the launcher.");
             return;
         }
 
-        _targets = _registry.Targets;
-        TargetComboBox.ItemsSource = _targets.Select(checkpoint => checkpoint.DisplayName).ToList();
-        var installed = MainWindow.Settings is null ? null : SaveConversionService.ReadInstalledReimaginedVersion(MainWindow.Settings.CurrentProfile);
-        _defaultTarget = _registry.SelectTarget(installed);
-        if (_defaultTarget.Target is { } target)
+        var profile = MainWindow.Settings.CurrentProfile;
+        if (profile is null)
         {
-            TargetComboBox.SelectedIndex = _targets.ToList().IndexOf(target);
-        }
-        else
-        {
-            TargetExplanationText.Text = _defaultTarget.Explanation;
             ForceCheckBox.IsEnabled = false;
-        }
-    }
-
-    private async void OnTargetSelectionChanged(object? sender, SelectionChangedEventArgs e)
-    {
-        if (_registry is null || _isBusy || TargetComboBox.SelectedIndex < 0 || TargetComboBox.SelectedIndex >= _targets.Count)
-        {
+            ShowBanner(
+                "Select a Diablo II: Resurrected installation profile with the normal Reimagined mod before converting saves. No saves were changed.");
             return;
         }
 
-        var target = _targets[TargetComboBox.SelectedIndex];
-        var isDefault = target == _defaultTarget?.Target;
-        _service = SaveConversionService.CreateForTarget(_registry, target.Id);
-        TargetExplanationText.Text = isDefault
-            ? _defaultTarget!.Explanation
-            : $"Chosen manually instead of the latest supported layout, {_defaultTarget?.Target?.DisplayName}."
-              + (target.DevelopmentTarget ? " This is a development build layout; use it only when testing that build." : "");
-        TargetWarningText.Text = isDefault ? _defaultTarget!.Warning : null;
-        TargetWarningText.IsVisible = isDefault && _defaultTarget!.Warning is not null;
-        StatusBanner.IsVisible = false;
-        await AnalyzeAsync(_service);
+        SetBusy(true, "Loading the installed Reimagined TXT files...");
+        try
+        {
+            var installedTarget = await Task.Run(() => SaveConversionService.LoadInstalledTarget(
+                profile, Path.Combine(_stagingDirectory, "installed-target")));
+            TargetText.Text = installedTarget.Label;
+            TargetExplanationText.Text =
+                "Uses the currently installed normal/offline Reimagined game data as the conversion target.";
+            _service = SaveConversionService.CreateForInstalledTarget(_registry, installedTarget);
+            StatusBanner.IsVisible = false;
+            await AnalyzeAsync(_service);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                              or InvalidDataException or InvalidOperationException)
+        {
+            LaunchDiagnostics.LogException("Could not load the installed Reimagined save data", exception);
+            ForceCheckBox.IsEnabled = false;
+            ShowBanner(exception.Message);
+            UpdateSummary();
+        }
+        finally
+        {
+            SetBusy(false);
+        }
     }
 
     private async Task AnalyzeAsync(SaveConversionService service)
@@ -108,8 +108,9 @@ public partial class SaveConversionWindow : Window
         if (string.IsNullOrWhiteSpace(_saveDirectory) || !Directory.Exists(_saveDirectory))
         {
             SaveDirectoryText.Text = "Offline save folder: not found";
-            ShowBanner("The offline Reimagined save folder could not be found. Install the normal mod on the Install/Update page, "
-                       + "or set the save directory on the Backups page.");
+            ShowBanner(
+                "The offline Reimagined save folder could not be found. Install the normal mod on the Install/Update page, "
+                + "or set the save directory on the Backups page.");
             UpdateSummary();
             return;
         }
@@ -139,7 +140,8 @@ public partial class SaveConversionWindow : Window
 
             if (MainWindow.IsGameRunning())
             {
-                ShowBanner("Diablo II: Resurrected is running. Close the game before converting; files cannot be changed while it runs.");
+                ShowBanner(
+                    "Diablo II: Resurrected is running. Close the game before converting; files cannot be changed while it runs.");
             }
         }
         finally
@@ -149,7 +151,8 @@ public partial class SaveConversionWindow : Window
     }
 
     /// <summary>Applies the row's source choice and the Force Conversion setting. Only the affected row's plan changes.</summary>
-    private async Task RefreshPlanAsync(SaveConversionService service, SaveConversionRowViewModel row, bool? select = null)
+    private async Task RefreshPlanAsync(SaveConversionService service, SaveConversionRowViewModel row,
+        bool? select = null)
     {
         if (row.IsDone)
         {
@@ -161,7 +164,9 @@ public partial class SaveConversionWindow : Window
             ? row.BasePlan
             : row.IsSourceUncertain
                 ? await PlanAsync(service, row, row.SelectedSourceChoice!.Layout, force)
-                : force && (row.BasePlan is { State: SaveConversionState.Unresolved, ForceOption.Kind: SaveForceKind.Force } || row.BasePlan.CanAttemptRecovery)
+                : force && (row.BasePlan is
+                                { State: SaveConversionState.Unresolved, ForceOption.Kind: SaveForceKind.Force } ||
+                            row.BasePlan.CanAttemptRecovery)
                     ? await PlanAsync(service, row, null, force)
                     : row.BasePlan;
         if (plan != row.Plan || select is not null)
@@ -170,7 +175,8 @@ public partial class SaveConversionWindow : Window
         }
     }
 
-    private async Task<SaveConversionPlan> PlanAsync(SaveConversionService service, SaveConversionRowViewModel row, string? source, bool force)
+    private async Task<SaveConversionPlan> PlanAsync(SaveConversionService service, SaveConversionRowViewModel row,
+        string? source, bool force)
     {
         if (_plans.TryGetValue((row, source, force), out var cached))
         {
@@ -181,7 +187,8 @@ public partial class SaveConversionWindow : Window
         var path = row.BasePlan.SourcePath;
         var staging = NewStagingDirectory();
         var plan = await Task.Run(() => service.Plan(path, staging, overrides));
-        LaunchDiagnostics.Log($"Save conversion analysis for {path} (source {source ?? "identified"}, force {force}): {plan.State} - {plan.Operation}");
+        LaunchDiagnostics.Log(
+            $"Save conversion analysis for {path} (source {source ?? "identified"}, force {force}): {plan.State} - {plan.Operation}");
         _plans[(row, source, force)] = plan;
         return plan;
     }
@@ -193,7 +200,10 @@ public partial class SaveConversionWindow : Window
             return;
         }
 
-        SetBusy(true, ForceCheckBox.IsChecked == true ? "Preparing experimental conversions..." : "Restoring verified conversions...");
+        SetBusy(true,
+            ForceCheckBox.IsChecked == true
+                ? "Preparing experimental conversions..."
+                : "Restoring verified conversions...");
         try
         {
             foreach (var row in _rows.ToList())
@@ -259,7 +269,8 @@ public partial class SaveConversionWindow : Window
                 var name = row.ApprovedName;
                 var outcome = await Task.Run(() => service.Apply(plan, name, batchDirectory));
                 row.SetResult(outcome);
-                LaunchDiagnostics.Log($"Save conversion {(outcome.Succeeded ? "succeeded" : "failed")} for {plan.SourcePath}: {outcome.Message}");
+                LaunchDiagnostics.Log(
+                    $"Save conversion {(outcome.Succeeded ? "succeeded" : "failed")} for {plan.SourcePath}: {outcome.Message}");
                 succeeded += outcome.Succeeded ? 1 : 0;
             }
 
@@ -291,7 +302,8 @@ public partial class SaveConversionWindow : Window
     /// <summary>Keyboard navigation still scrolls the focused control into view; pointer focus does not move the list.</summary>
     private void OnListGotFocus(object? sender, FocusChangedEventArgs e)
     {
-        if (e.NavigationMethod is (NavigationMethod.Tab or NavigationMethod.Directional) && e.Source is Control control && control != FilesScrollViewer)
+        if (e.NavigationMethod is (NavigationMethod.Tab or NavigationMethod.Directional) &&
+            e.Source is Control control && control != FilesScrollViewer)
         {
             control.BringIntoView();
         }
@@ -301,7 +313,8 @@ public partial class SaveConversionWindow : Window
     {
         var ready = _rows.Count(row => row.IsReadyToApply);
         var converted = _rows.Count(row => row.IsDone);
-        var compatible = _rows.Count(row => !row.IsDone && (row.IsTargetChoiceSelected || row.Plan.State == SaveConversionState.AlreadyCompatible));
+        var compatible = _rows.Count(row =>
+            !row.IsDone && (row.IsTargetChoiceSelected || row.Plan.State == SaveConversionState.AlreadyCompatible));
         var blocked = _rows.Count(row => !row.IsDone && !row.CanSelect && row.IsProblem);
         SummaryText.Text = _rows.Count == 0
             ? string.Empty
@@ -318,7 +331,6 @@ public partial class SaveConversionWindow : Window
         BusyText.Text = message ?? string.Empty;
         CloseButton.IsEnabled = !isBusy;
         FilesItemsControl.IsEnabled = !isBusy;
-        TargetComboBox.IsEnabled = !isBusy && _registry is not null;
         ForceCheckBox.IsEnabled = !isBusy && _service is not null;
         UpdateSummary();
     }

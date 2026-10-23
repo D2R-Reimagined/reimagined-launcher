@@ -18,10 +18,13 @@ public enum SaveConversionState
     AlreadyCompatible,
     Verified,
     VerifiedWithWarnings,
+
     /// <summary>Output that passed the critical structural checks, but only because Force Conversion or a source choice accepted uncertainties.</summary>
     Experimental,
+
     /// <summary>Recoverable but withheld: some data cannot be verified (Force Conversion may accept it) or the source version is uncertain.</summary>
     Unresolved,
+
     /// <summary>No usable output can be produced: the file cannot be decoded or serialized, or the output fails a critical check.</summary>
     Blocked
 }
@@ -49,7 +52,8 @@ public sealed record SaveIssueGroup(SaveIssueCategory Category, bool Blocking, i
     };
 
     public override string ToString() =>
-        $"{Title}: {Count} {(Blocking ? "blocking" : Count == 1 ? "warning" : "warnings")}" + (Items > 0 ? $" on {Items} item(s)" : "");
+        $"{Title}: {Count} {(Blocking ? "blocking" : Count == 1 ? "warning" : "warnings")}" +
+        (Items > 0 ? $" on {Items} item(s)" : "");
 }
 
 public enum SaveForceKind
@@ -61,7 +65,11 @@ public enum SaveForceKind
 /// <param name="SourceLayouts">Layouts the user may choose from, the default first, or the one chosen for an experimental plan.</param>
 /// <param name="Risks">Each issue Force Conversion accepts: unresolved identities, unverifiable stats, repaired headers, reported losses.</param>
 /// <param name="TargetAlsoFits">The file also reads completely as the target, so "already converted" is a valid choice too.</param>
-public sealed record SaveForceOption(SaveForceKind Kind, IReadOnlyList<string> SourceLayouts, IReadOnlyList<string> Risks, bool TargetAlsoFits = false);
+public sealed record SaveForceOption(
+    SaveForceKind Kind,
+    IReadOnlyList<string> SourceLayouts,
+    IReadOnlyList<string> Risks,
+    bool TargetAlsoFits = false);
 
 public sealed class SaveConversionPlan
 {
@@ -74,6 +82,7 @@ public sealed class SaveConversionPlan
     public required string SourceSha256 { get; init; }
 
     public string TargetLabel { get; init; } = string.Empty;
+    public string? TargetFingerprint { get; init; }
 
     /// <summary>The source layout the conversion reads the file as, when one was identified or chosen.</summary>
     public string? SourceLabel { get; init; }
@@ -112,7 +121,11 @@ public sealed class SaveConversionPlan
                                    && !string.Equals(EmbeddedName, FileStem, StringComparison.Ordinal);
 }
 
-public sealed record SaveConversionOutcome(bool Succeeded, string Message, string? FinalPath = null, string? BackupDirectory = null);
+public sealed record SaveConversionOutcome(
+    bool Succeeded,
+    string Message,
+    string? FinalPath = null,
+    string? BackupDirectory = null);
 
 /// <summary>
 /// Plans and applies offline save conversions with <see cref="SaveMigrator"/>. Planning only reads the save;
@@ -129,7 +142,8 @@ public sealed class SaveConversionService
     private const int V104NameLength = 96;
 
     // Per-character files the game keys by the save's file name.
-    private static readonly string[] CompanionExtensions = [".key", ".keyo", ".ctl", ".ctlo", ".map", ".ma0", ".ma1", ".ma2", ".ma3"];
+    private static readonly string[] CompanionExtensions =
+        [".key", ".keyo", ".ctl", ".ctlo", ".map", ".ma0", ".ma1", ".ma2", ".ma3"];
 
     private static readonly Regex ItemPathPrefix = new(
         @"^(?:Player|Corpse \d+|Mercenary|Iron golem|Stash tab \d+) #\d+ '[^']*' \([^)]*\)(?: > socket \d+ '[^']*')*: ",
@@ -139,18 +153,26 @@ public sealed class SaveConversionService
         @"^(?<location>Player|Corpse \d+|Mercenary|Iron golem|Stash tab \d+) #(?<index>\d+) '(?<code>[^']*)' \([^)]*\)(?<socket>(?: > socket \d+ '[^']*')*)",
         RegexOptions.Compiled);
 
-    private static readonly Regex LadderSaveFolderSuffix = new("-(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{32})$", RegexOptions.Compiled);
+    private static readonly Regex LadderSaveFolderSuffix =
+        new("-(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{32})$", RegexOptions.Compiled);
 
     private readonly Lazy<SaveMigrator> _migrator;
     private readonly Func<bool> _isGameRunning;
+    private readonly InstalledGameData? _installedTarget;
 
+    /// <param name="createMigrator">Creates the migration definitions used for analysis.</param>
+    /// <param name="backupRoot">Directory for permanent save backups and recovery candidates.</param>
+    /// <param name="isGameRunning">Checks whether D2R is running before any save is written.</param>
     /// <param name="defaultSourceLayout">Listed first when the source layout of a save is genuinely ambiguous.</param>
-    public SaveConversionService(Func<SaveMigrator> createMigrator, string backupRoot, Func<bool> isGameRunning, string? defaultSourceLayout = null)
+    /// <param name="installedTarget">Installed TXT snapshot whose fingerprint must still match when applying a plan.</param>
+    public SaveConversionService(Func<SaveMigrator> createMigrator, string backupRoot, Func<bool> isGameRunning,
+        string? defaultSourceLayout = null, InstalledGameData? installedTarget = null)
     {
         _migrator = new Lazy<SaveMigrator>(createMigrator);
         BackupRoot = Path.GetFullPath(backupRoot);
         _isGameRunning = isGameRunning;
         DefaultSourceLayout = defaultSourceLayout;
+        _installedTarget = installedTarget;
     }
 
     public static string DefaultDataDirectory => Path.Combine(AppContext.BaseDirectory, "Assets", "SaveMigrationData");
@@ -161,14 +183,50 @@ public sealed class SaveConversionService
 
     public string? DefaultSourceLayout { get; }
 
-    public static SaveConversionService CreateForTarget(SaveCheckpointRegistry registry, string targetId) => new(
-        () => SaveMigrator.ForTarget(registry, targetId),
-        DefaultBackupRoot,
-        MainWindow.IsGameRunning,
-        registry.PreviousRelease(registry.Get(targetId))?.Label);
+    public static SaveConversionService CreateForInstalledTarget(SaveCheckpointRegistry registry,
+        InstalledGameData installedTarget,
+        string? backupRoot = null, Func<bool>? isGameRunning = null) => new(
+        () => SaveMigrator.ForInstalledTarget(registry, installedTarget),
+        backupRoot ?? DefaultBackupRoot,
+        isGameRunning ?? MainWindow.IsGameRunning,
+        registry.LatestCheckpoint?.Label,
+        installedTarget);
 
     /// <summary>The modinfo.json version of the normal (offline) Reimagined mod, using the same folders as the save path.</summary>
     internal static string? ReadInstalledReimaginedVersion(InstallationProfile profile)
+    {
+        var modInfo = FindNormalModInfo(profile);
+        return modInfo is null ? null : ReadModInfoString(modInfo, "version");
+    }
+
+    internal static string ResolveInstalledExcelDirectory(InstallationProfile profile)
+    {
+        var modInfo = FindNormalModInfo(profile)
+                      ?? throw new InvalidDataException(
+                          "The normal/offline Reimagined installation could not be identified. Install or repair the normal mod before converting saves.");
+        var infoDirectory = Path.GetDirectoryName(modInfo)!;
+        var mpqDirectory = Path.GetFileName(infoDirectory).Equals("Reimagined.mpq", StringComparison.OrdinalIgnoreCase)
+            ? infoDirectory
+            : Path.Combine(infoDirectory, "Reimagined.mpq");
+        return Path.Combine(mpqDirectory, "data", "global", "excel");
+    }
+
+    internal static InstalledGameData LoadInstalledTarget(InstallationProfile profile, string copyDirectory)
+    {
+        var modInfo = FindNormalModInfo(profile)
+                      ?? throw new InvalidDataException(
+                          "The normal/offline Reimagined installation could not be identified. Install or repair the normal mod before converting saves.");
+        var infoDirectory = Path.GetDirectoryName(modInfo)!;
+        var mpqDirectory = Path.GetFileName(infoDirectory).Equals("Reimagined.mpq", StringComparison.OrdinalIgnoreCase)
+            ? infoDirectory
+            : Path.Combine(infoDirectory, "Reimagined.mpq");
+        return InstalledGameData.Load(
+            Path.Combine(mpqDirectory, "data", "global", "excel"),
+            copyDirectory,
+            ReadModInfoString(modInfo, "version"));
+    }
+
+    internal static string? FindNormalModInfo(InstallationProfile profile)
     {
         var installDirectory = profile.InstallDirectory;
         if (profile.Type == InstallationType.D2RMM || string.IsNullOrWhiteSpace(installDirectory))
@@ -176,11 +234,13 @@ public sealed class SaveConversionService
             return null;
         }
 
-        return new[] { Path.Combine(installDirectory, "mods", "Reimagined"), NormalModInstallationService.NormalModRoot(installDirectory) }
-            .Select(NormalModInstallationService.FindModInfo)
-            .Where(path => path is not null && NormalModInstallationService.HasNormalSavePath(path))
-            .Select(path => ReadModInfoString(path!, "version"))
-            .FirstOrDefault(version => !string.IsNullOrWhiteSpace(version));
+        var activeMod = Path.Combine(installDirectory, "mods", "Reimagined");
+        var managedNormalMod = NormalModInstallationService.NormalModRoot(installDirectory);
+        var candidates = NormalModInstallationService.HasLadderInstallation(installDirectory)
+            ? new[] { managedNormalMod, activeMod }
+            : new[] { activeMod, managedNormalMod };
+        return candidates.Select(NormalModInstallationService.FindModInfo)
+            .FirstOrDefault(path => path is not null && NormalModInstallationService.HasNormalSavePath(path));
     }
 
     /// <summary>
@@ -207,7 +267,11 @@ public sealed class SaveConversionService
         }
 
         // While Ladder is active, mods/Reimagined points at the ladder folder and the normal mod is kept aside.
-        var savePath = new[] { Path.Combine(installDirectory, "mods", "Reimagined"), NormalModInstallationService.NormalModRoot(installDirectory) }
+        var savePath = new[]
+            {
+                Path.Combine(installDirectory, "mods", "Reimagined"),
+                NormalModInstallationService.NormalModRoot(installDirectory)
+            }
             .Select(NormalModInstallationService.FindModInfo)
             .Where(path => path is not null && NormalModInstallationService.HasNormalSavePath(path))
             .Select(path => ReadModInfoString(path!, "savepath")?.Trim().Trim('/', '\\'))
@@ -304,21 +368,28 @@ public sealed class SaveConversionService
             var historicalIsClean = result.OutputPath is not null && !result.HasUncertainty;
             var report = new StringBuilder()
                 .AppendLine($"{target} read check: {targetCheck}")
-                .Append(targetFits && result.SourceLayout is not null && !historicalIsClean && overrides?.SourceLayout is null
+                .Append(targetFits && result.SourceLayout is not null && !historicalIsClean &&
+                        overrides?.SourceLayout is null
                     ? $"The file also decodes as {result.SourceLayout}, but that reading does not convert cleanly (see below), so the clean {target} reading is preferred."
                       + Environment.NewLine
                     : "")
-                .Append(forced ? "Force conversion (experimental) was requested for this analysis." + Environment.NewLine : "")
-                .Append(overrides?.SourceLayout is { } chosenSource ? $"Source layout {chosenSource} was chosen by the user." + Environment.NewLine : "")
+                .Append(forced
+                    ? "Force conversion (experimental) was requested for this analysis." + Environment.NewLine
+                    : "")
+                .Append(overrides?.SourceLayout is { } chosenSource
+                    ? $"Source layout {chosenSource} was chosen by the user." + Environment.NewLine
+                    : "")
                 .AppendLine()
                 .Append(SaveMigrationReport.Write(result))
                 .ToString();
-            var risks = result.References.Where(reference => reference.Blocking).Select(reference => DescribeRisk(reference, target))
+            var risks = result.References.Where(reference => reference.Blocking)
+                .Select(reference => DescribeRisk(reference, target))
                 .Concat(result.Uncertainties.Select(Friendly))
                 .Distinct()
                 .ToList();
 
-            SaveConversionPlan Create(SaveConversionState state, string operation, string summary, string? blockingReason, byte[]? converted,
+            SaveConversionPlan Create(SaveConversionState state, string operation, string summary,
+                string? blockingReason, byte[]? converted,
                 SaveForceOption? force = null, string? recoveryCandidate = null) => new()
             {
                 SourcePath = path,
@@ -329,19 +400,22 @@ public sealed class SaveConversionService
                 Report = report,
                 SourceSha256 = sha256,
                 TargetLabel = target,
+                TargetFingerprint = _installedTarget?.Fingerprint,
                 SourceLabel = result.SourceLayout,
                 Summary = summary,
                 BlockingReason = blockingReason,
                 IssueGroups = state == SaveConversionState.AlreadyCompatible ? [] : CategorizeIssues(result),
                 ForceOption = force,
-                CanAttemptRecovery = state == SaveConversionState.Blocked && !forced && result.RejectedOutputPath is not null,
+                CanAttemptRecovery = state == SaveConversionState.Blocked && !forced &&
+                                     result.RejectedOutputPath is not null,
                 RecoveryCandidatePath = recoveryCandidate,
                 ConvertedBytes = converted,
                 EmbeddedName = embeddedName,
                 SidecarPath = sidecar
             };
 
-            if (targetFits && (output is not null && output.AsSpan().SequenceEqual(data) || !historicalIsClean && overrides?.SourceLayout is null))
+            if (targetFits && (output is not null && output.AsSpan().SequenceEqual(data) ||
+                               !historicalIsClean && overrides?.SourceLayout is null))
             {
                 return Create(SaveConversionState.AlreadyCompatible,
                     $"Already compatible: the file reads completely with the {target} definitions. No conversion is needed.",
@@ -350,43 +424,56 @@ public sealed class SaveConversionService
 
             if (targetFits && overrides?.SourceLayout is null)
             {
-                var reason = $"The file reads completely both as {target} and as {result.SourceLayout}, and converting it would change it. "
-                             + "The launcher cannot tell which version made it.";
+                var reason =
+                    $"The file reads completely both as {target} and as {result.SourceLayout}, and converting it would change it. "
+                    + "The launcher cannot tell which version made it.";
                 return Create(SaveConversionState.Unresolved, $"Not converted: {reason} The file is left untouched.",
-                    "The launcher cannot tell which Reimagined version this save was made with. Review the details before continuing.", reason, null,
-                    new SaveForceOption(SaveForceKind.ChooseSourceLayout, [result.SourceLayout!], risks, TargetAlsoFits: true));
+                    "The launcher cannot tell which Reimagined version this save was made with. Review the details before continuing.",
+                    reason, null,
+                    new SaveForceOption(SaveForceKind.ChooseSourceLayout, [result.SourceLayout!], risks,
+                        TargetAlsoFits: true));
             }
 
             if (overrides?.SourceLayout is null && result.AmbiguousSourceLayouts.Count > 1)
             {
-                var reason = $"The file decodes as {string.Join(" and as ", result.AmbiguousSourceLayouts)}, which read it differently. "
-                             + "The launcher cannot tell which version made it.";
+                var reason =
+                    $"The file decodes as {string.Join(" and as ", result.AmbiguousSourceLayouts)}, which read it differently. "
+                    + "The launcher cannot tell which version made it.";
                 return Create(SaveConversionState.Unresolved, $"Not converted: {reason}",
-                    "The launcher cannot tell which Reimagined version this save was made with. Review the details before continuing.", reason, null,
+                    "The launcher cannot tell which Reimagined version this save was made with. Review the details before continuing.",
+                    reason, null,
                     new SaveForceOption(SaveForceKind.ChooseSourceLayout,
-                        [.. result.AmbiguousSourceLayouts.OrderBy(layout => layout == DefaultSourceLayout ? 0 : 1)], []));
+                        [.. result.AmbiguousSourceLayouts.OrderBy(layout => layout == DefaultSourceLayout ? 0 : 1)],
+                        []));
             }
 
-            var layouts = $"{result.SourceLayout ?? "unidentified layout"} (version {result.SourceVersion}) to {target} (version {SaveMigrator.TargetVersion})";
+            var layouts =
+                $"{result.SourceLayout ?? "unidentified layout"} (version {result.SourceVersion}) to {target} (version {SaveMigrator.TargetVersion})";
             switch (result.Status)
             {
                 case MigrationStatus.Verified:
-                    return Create(SaveConversionState.Verified, $"Convert {layouts}. The output passed every verification check.",
-                        $"Your save can be converted. The original will be backed up. It converts from {layouts}.", null, output);
+                    return Create(SaveConversionState.Verified,
+                        $"Convert {layouts}. The output passed every verification check.",
+                        $"Your save can be converted. The original will be backed up. It converts from {layouts}.",
+                        null, output);
                 case MigrationStatus.NeedsManualInspection:
                     return Create(SaveConversionState.VerifiedWithWarnings,
                         $"Convert {layouts}. The output passed verification, but some historical references need your attention.",
-                        "Some older items have unusual definitions. Their saved properties will be preserved, but their behavior may differ.", null, output);
+                        "Some older items have unusual definitions. Their saved properties will be preserved, but their behavior may differ.",
+                        null, output);
                 case MigrationStatus.Experimental:
                     return Create(SaveConversionState.Experimental,
                         $"EXPERIMENTAL conversion of {layouts}. The critical structural checks passed; "
-                        + (overrides?.SourceLayout is { } manual ? $"the source layout {manual} was chosen manually; " : "")
+                        + (overrides?.SourceLayout is { } manual
+                            ? $"the source layout {manual} was chosen manually; "
+                            : "")
                         + $"{risks.Count} unverified issue(s) were accepted by Force conversion. This output is NOT fully verified.",
                         risks.Count == 0
                             ? $"Converts from {result.SourceLayout} (chosen by you) to {target}. The launcher could not confirm the source version itself."
                             : "Force conversion prepared an experimental output. Some data may be changed, lost or appear differently; "
                               + "the full report lists every accepted issue.", null, output,
-                        new SaveForceOption(overrides?.SourceLayout is null ? SaveForceKind.Force : SaveForceKind.ChooseSourceLayout,
+                        new SaveForceOption(
+                            overrides?.SourceLayout is null ? SaveForceKind.Force : SaveForceKind.ChooseSourceLayout,
                             overrides?.SourceLayout is { } chosen ? [chosen] : [], risks));
             }
 
@@ -396,7 +483,8 @@ public sealed class SaveConversionService
                              + (risks.Count > 3 ? $" ({risks.Count - 3} more in the full report.)" : "")
                              + " All critical verification checks passed; Force conversion (experimental) can accept these issues.";
                 return Create(SaveConversionState.Unresolved, $"Not converted: {reason}",
-                    "Some data cannot be verified. Force conversion can attempt an experimental conversion.", reason, null,
+                    "Some data cannot be verified. Force conversion can attempt an experimental conversion.", reason,
+                    null,
                     overrides?.SourceLayout is { } selected
                         ? new SaveForceOption(SaveForceKind.ChooseSourceLayout, [selected], risks)
                         : new SaveForceOption(SaveForceKind.Force, [], risks));
@@ -410,21 +498,28 @@ public sealed class SaveConversionService
                 .ToList();
             var failure = problems.Count == 0
                 ? "The conversion could not be verified."
-                : problems[0] + (problems.Count > 1 ? $" ({problems.Count - 1} more problem(s) in the full report.)" : "");
-            var candidate = forced && result.RejectedOutputPath is { } rejected ? KeepRecoveryCandidate(path, rejected, report) : null;
+                : problems[0] + (problems.Count > 1
+                    ? $" ({problems.Count - 1} more problem(s) in the full report.)"
+                    : "");
+            var candidate = forced && result.RejectedOutputPath is { } rejected
+                ? KeepRecoveryCandidate(path, rejected, report)
+                : null;
             if (candidate is not null)
             {
-                failure += $" The unapproved output was kept as an experimental recovery candidate, not applied: {candidate}";
+                failure +=
+                    $" The unapproved output was kept as an experimental recovery candidate, not applied: {candidate}";
             }
 
-            return Create(SaveConversionState.Blocked, "Not converted: no usable output could be produced, so the file is left untouched.",
+            return Create(SaveConversionState.Blocked,
+                "Not converted: no usable output could be produced, so the file is left untouched.",
                 "The save could not be converted. Your original was not changed."
                 + (forced ? " Force conversion cannot override this." : ""),
                 failure, null, recoveryCandidate: candidate);
         }
         catch (Exception exception)
         {
-            return Blocked(path, kind, sha256, $"Analysis failed: {exception.GetType().Name}: {exception.Message}", embeddedName, sidecar);
+            return Blocked(path, kind, sha256, $"Analysis failed: {exception.GetType().Name}: {exception.Message}",
+                embeddedName, sidecar);
         }
     }
 
@@ -446,13 +541,15 @@ public sealed class SaveConversionService
         {
             if (string.Equals(newName, plan.FileStem, StringComparison.OrdinalIgnoreCase))
             {
-                return $"Use the file name exactly ('{plan.FileStem}') or a different name; changing only letter case is not supported.";
+                return
+                    $"Use the file name exactly ('{plan.FileStem}') or a different name; changing only letter case is not supported.";
             }
 
             if (plan.SidecarPath is not null)
             {
-                return $"'{Path.GetFileName(plan.SidecarPath)}' is a D2RLoader sidecar for this file. Its format is not documented, so the launcher "
-                       + $"cannot confirm it stays valid for a renamed file. Keep the name '{plan.FileStem}' or move the sidecar yourself first.";
+                return
+                    $"'{Path.GetFileName(plan.SidecarPath)}' is a D2RLoader sidecar for this file. Its format is not documented, so the launcher "
+                    + $"cannot confirm it stays valid for a renamed file. Keep the name '{plan.FileStem}' or move the sidecar yourself first.";
             }
 
             foreach (var extension in CompanionExtensions.Prepend(".d2s"))
@@ -513,7 +610,8 @@ public sealed class SaveConversionService
             WriteNewFile(destination, File.ReadAllBytes(candidatePath));
             WriteNewFile(destination + ".report.txt", Encoding.UTF8.GetBytes(
                 "EXPERIMENTAL RECOVERY CANDIDATE - FAILED A CRITICAL CHECK AND WAS NOT APPLIED. The original save was not changed."
-                + Environment.NewLine + $"Original file: {sourcePath}" + Environment.NewLine + Environment.NewLine + report));
+                + Environment.NewLine + $"Original file: {sourcePath}" + Environment.NewLine + Environment.NewLine +
+                report));
             return destination;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -532,7 +630,8 @@ public sealed class SaveConversionService
         try
         {
             var desiredName = newName?.Trim();
-            var changesName = !string.IsNullOrEmpty(desiredName) && (desiredName != plan.EmbeddedName || desiredName != plan.FileStem);
+            var changesName = !string.IsNullOrEmpty(desiredName) &&
+                              (desiredName != plan.EmbeddedName || desiredName != plan.FileStem);
             return ApplyCore(plan, changesName ? desiredName : null, backupBatchDirectory);
         }
         catch (Exception exception)
@@ -550,6 +649,15 @@ public sealed class SaveConversionService
             return new SaveConversionOutcome(false, "Blocked: this file is not converted.", plan.SourcePath);
         }
 
+        if (plan.TargetFingerprint is { } targetFingerprint
+            && (_installedTarget is null || _installedTarget.Fingerprint != targetFingerprint ||
+                !_installedTarget.IsUnchanged()))
+        {
+            return new SaveConversionOutcome(false,
+                "The installed Reimagined TXT files changed after analysis. Reanalyze the saves before converting; nothing was changed.",
+                plan.SourcePath);
+        }
+
         if (plan.ConvertedBytes is null && newName is null)
         {
             return new SaveConversionOutcome(true, "No changes needed.", plan.SourcePath);
@@ -558,7 +666,8 @@ public sealed class SaveConversionService
         if (_isGameRunning())
         {
             return new SaveConversionOutcome(false,
-                "Diablo II: Resurrected is running. Close the game and try again; nothing was changed.", plan.SourcePath);
+                "Diablo II: Resurrected is running. Close the game and try again; nothing was changed.",
+                plan.SourcePath);
         }
 
         var directory = Path.GetFullPath(Path.GetDirectoryName(plan.SourcePath)!);
@@ -572,7 +681,8 @@ public sealed class SaveConversionService
         if (Convert.ToHexStringLower(SHA256.HashData(original)) != plan.SourceSha256)
         {
             return new SaveConversionOutcome(false,
-                "The file changed after it was analyzed. Close this window and analyze it again; nothing was changed.", plan.SourcePath);
+                "The file changed after it was analyzed. Close this window and analyze it again; nothing was changed.",
+                plan.SourcePath);
         }
 
         var bytes = (plan.ConvertedBytes ?? original).ToArray();
@@ -582,19 +692,22 @@ public sealed class SaveConversionService
         {
             if (CheckRename(plan, newName) is { } renameProblem)
             {
-                return new SaveConversionOutcome(false, $"Rename blocked: {renameProblem} Nothing was changed.", plan.SourcePath);
+                return new SaveConversionOutcome(false, $"Rename blocked: {renameProblem} Nothing was changed.",
+                    plan.SourcePath);
             }
 
             if (newName != plan.EmbeddedName && WriteCharacterName(bytes, newName) is { } nameProblem)
             {
-                return new SaveConversionOutcome(false, $"Rename blocked: {nameProblem} Nothing was changed.", plan.SourcePath);
+                return new SaveConversionOutcome(false, $"Rename blocked: {nameProblem} Nothing was changed.",
+                    plan.SourcePath);
             }
 
             if (newName != plan.FileStem)
             {
                 destination = Path.Combine(directory, newName + ".d2s");
                 companions = CompanionExtensions
-                    .Select(extension => (Path.Combine(directory, plan.FileStem + extension), Path.Combine(directory, newName + extension)))
+                    .Select(extension => (Path.Combine(directory, plan.FileStem + extension),
+                        Path.Combine(directory, newName + extension)))
                     .Where(pair => File.Exists(pair.Item1))
                     .ToList();
             }
@@ -647,7 +760,8 @@ public sealed class SaveConversionService
         if (!File.ReadAllBytes(destination).AsSpan().SequenceEqual(bytes))
         {
             return new SaveConversionOutcome(false,
-                $"The written file does not match the verified output. Restore it from {backupBatchDirectory}.", destination, backupBatchDirectory);
+                $"The written file does not match the verified output. Restore it from {backupBatchDirectory}.",
+                destination, backupBatchDirectory);
         }
 
         var actions = new List<string>();
@@ -655,7 +769,8 @@ public sealed class SaveConversionService
         {
             actions.Add(plan.State switch
             {
-                SaveConversionState.Experimental => "Converted experimentally (accepted issues are not verified; see the experimental report in the backup)",
+                SaveConversionState.Experimental =>
+                    "Converted experimentally (accepted issues are not verified; see the experimental report in the backup)",
                 SaveConversionState.VerifiedWithWarnings => "Converted (with accepted warnings)",
                 _ => "Converted"
             });
@@ -676,7 +791,8 @@ public sealed class SaveConversionService
             actions.Add($"the file name still differs from the character name '{plan.EmbeddedName}'");
         }
 
-        return new SaveConversionOutcome(true, $"{string.Join("; ", actions)}. Backup: {backupBatchDirectory}", destination, backupBatchDirectory);
+        return new SaveConversionOutcome(true, $"{string.Join("; ", actions)}. Backup: {backupBatchDirectory}",
+            destination, backupBatchDirectory);
     }
 
     /// <returns>Null when the name was written and verified; otherwise the problem, with <paramref name="bytes"/> unusable.</returns>
@@ -694,7 +810,8 @@ public sealed class SaveConversionService
 
         for (var index = 0; index < bytes.Length; index++)
         {
-            var allowed = index is >= ChecksumOffset and < ChecksumOffset + 4 or >= V104NameOffset and < V104NameOffset + V104NameLength;
+            var allowed = index is >= ChecksumOffset and < ChecksumOffset + 4
+                or >= V104NameOffset and < V104NameOffset + V104NameLength;
             if (before[index] != bytes[index] && !allowed)
             {
                 return $"writing the name changed byte {index} outside the name field.";
@@ -733,7 +850,8 @@ public sealed class SaveConversionService
         {
             var reportPath = Path.Combine(batchDirectory, plan.FileName + ".experimental-report.txt");
             WriteNewFile(reportPath, Encoding.UTF8.GetBytes(plan.Report));
-            manifest.AppendLine("EXPERIMENTAL: the written file is not fully verified. The report lists every accepted change, loss and unverified item.")
+            manifest.AppendLine(
+                    "EXPERIMENTAL: the written file is not fully verified. The report lists every accepted change, loss and unverified item.")
                 .AppendLine($"Full technical report: {reportPath}");
         }
 
@@ -746,9 +864,11 @@ public sealed class SaveConversionService
 
         manifest
             .AppendLine()
-            .AppendLine("To restore: close the game, remove the written file and any renamed companion files, then copy")
+            .AppendLine(
+                "To restore: close the game, remove the written file and any renamed companion files, then copy")
             .AppendLine($"the backed-up file(s) from this folder back into {Path.GetDirectoryName(plan.SourcePath)}.");
-        WriteNewFile(Path.Combine(batchDirectory, plan.FileName + ".restore.txt"), Encoding.UTF8.GetBytes(manifest.ToString()));
+        WriteNewFile(Path.Combine(batchDirectory, plan.FileName + ".restore.txt"),
+            Encoding.UTF8.GetBytes(manifest.ToString()));
     }
 
     /// <summary>Writes a file that must not already exist, flushes it to disk and confirms the bytes read back.</summary>
@@ -796,7 +916,9 @@ public sealed class SaveConversionService
         }
 
         // Trailing extension data is carried by D2SSharp and is not an incompatibility.
-        var trailer = attempt.TrailingBytes > 0 ? $", {attempt.TrailingBytes} byte(s) of extension data after the standard sections" : "";
+        var trailer = attempt.TrailingBytes > 0
+            ? $", {attempt.TrailingBytes} byte(s) of extension data after the standard sections"
+            : "";
         return problems.Count == 0
             ? (true, $"complete parse, {attempt.AllItems.Count()} item(s){trailer}")
             : (false, $"parses, but {string.Join(", ", problems)}{trailer}");
@@ -807,7 +929,8 @@ public sealed class SaveConversionService
     {
         var entries = new List<(SaveIssueCategory Category, bool Blocking, string? Item)>();
         entries.AddRange(result.Blockers.Select(blocker => (SaveIssueCategory.SaveFormat, true, ItemOf(blocker))));
-        entries.AddRange(result.Checks.Where(check => check is { Passed: false, Critical: true }).Select(_ => (SaveIssueCategory.Verification, true, (string?)null)));
+        entries.AddRange(result.Checks.Where(check => check is { Passed: false, Critical: true })
+            .Select(_ => (SaveIssueCategory.Verification, true, (string?)null)));
         foreach (var reference in result.References)
         {
             if (reference.Blocking)
@@ -817,18 +940,23 @@ public sealed class SaveConversionService
             else if (reference.Outcome is ReferenceOutcome.PreservedWithWarning or ReferenceOutcome.ManualAttention)
             {
                 entries.Add((reference.Kind is TableKind.MagicPrefix or TableKind.MagicSuffix
-                    ? SaveIssueCategory.HistoricalModifiers
-                    : reference.Outcome == ReferenceOutcome.ManualAttention ? SaveIssueCategory.ItemIdentity : SaveIssueCategory.UnknownReferences,
+                        ? SaveIssueCategory.HistoricalModifiers
+                        : reference.Outcome == ReferenceOutcome.ManualAttention
+                            ? SaveIssueCategory.ItemIdentity
+                            : SaveIssueCategory.UnknownReferences,
                     false, reference.ItemPath));
             }
         }
 
-        entries.AddRange(result.Uncertainties.Select(line => (SaveIssueCategory.Unverified, !result.Overrides.Force, ItemOf(line))));
+        entries.AddRange(result.Uncertainties.Select(line =>
+            (SaveIssueCategory.Unverified, !result.Overrides.Force, ItemOf(line))));
         foreach (var warning in result.Warnings)
         {
-            var category = warning.Contains("maps by identity", StringComparison.Ordinal) || warning.StartsWith("Registered identity mapping", StringComparison.Ordinal)
+            var category = warning.Contains("maps by identity", StringComparison.Ordinal) ||
+                           warning.StartsWith("Registered identity mapping", StringComparison.Ordinal)
                 ? SaveIssueCategory.ItemIdentity
-                : warning.Contains("conversion changed", StringComparison.Ordinal) || warning.Contains("not marked Saved", StringComparison.Ordinal)
+                : warning.Contains("conversion changed", StringComparison.Ordinal) ||
+                  warning.Contains("not marked Saved", StringComparison.Ordinal)
                     ? SaveIssueCategory.SaveFormat
                     : SaveIssueCategory.UnknownReferences;
             entries.Add((category, false, ItemOf(warning)));
@@ -842,7 +970,8 @@ public sealed class SaveConversionService
                 group.Select(entry => entry.Item).OfType<string>().Distinct(StringComparer.Ordinal).Count()))
             .ToList();
 
-        static string? ItemOf(string line) => ItemPathPrefix.Match(line) is { Success: true } match ? match.Value : null;
+        static string? ItemOf(string line) =>
+            ItemPathPrefix.Match(line) is { Success: true } match ? match.Value : null;
     }
 
     private static string DescribeRisk(ReferenceResult reference, string target)
@@ -871,16 +1000,21 @@ public sealed class SaveConversionService
     private static List<string> GroupIssues(SaveMigrationResult result)
     {
         var lines = result.Blockers.Select(blocker => "Blocker: " + ItemPathPrefix.Replace(blocker, ""))
-            .Concat(result.Checks.Where(check => check is { Passed: false, Critical: true }).Select(check => $"Critical check failed: {check.Name}: {check.Detail}"))
-            .Concat(result.Uncertainties.Select(line => (result.Overrides.Force ? "Accepted by Force conversion: " : "Needs Force conversion: ")
-                                                        + ItemPathPrefix.Replace(line, "")))
+            .Concat(result.Checks.Where(check => check is { Passed: false, Critical: true })
+                .Select(check => $"Critical check failed: {check.Name}: {check.Detail}"))
+            .Concat(result.Uncertainties.Select(line =>
+                (result.Overrides.Force ? "Accepted by Force conversion: " : "Needs Force conversion: ")
+                + ItemPathPrefix.Replace(line, "")))
             .Concat(result.Warnings.Select(warning => "Warning: " + ItemPathPrefix.Replace(warning, "")))
             .Concat(result.References
-                .Where(reference => reference.Blocking || reference.Outcome is ReferenceOutcome.PreservedWithWarning or ReferenceOutcome.ManualAttention)
-                .Select(reference => $"{(reference.Blocking ? "Blocking" : reference.Outcome == ReferenceOutcome.ManualAttention ? "Needs attention" : "Preserved with warning")}: "
-                                     + $"{reference.Kind} {reference.Role} {reference.SourceId}"
-                                     + (reference.TargetId == reference.SourceId ? "" : $" -> {reference.TargetId}")
-                                     + $": {reference.Reason}"));
+                .Where(reference =>
+                    reference.Blocking ||
+                    reference.Outcome is ReferenceOutcome.PreservedWithWarning or ReferenceOutcome.ManualAttention)
+                .Select(reference =>
+                    $"{(reference.Blocking ? "Blocking" : reference.Outcome == ReferenceOutcome.ManualAttention ? "Needs attention" : "Preserved with warning")}: "
+                    + $"{reference.Kind} {reference.Role} {reference.SourceId}"
+                    + (reference.TargetId == reference.SourceId ? "" : $" -> {reference.TargetId}")
+                    + $": {reference.Reason}"));
         return lines
             .GroupBy(line => line, StringComparer.Ordinal)
             .Select(group => group.Count() > 1 ? $"{group.Key} (x{group.Count()})" : group.Key)
@@ -940,7 +1074,8 @@ public sealed class SaveConversionService
         try
         {
             using var document = JsonDocument.Parse(File.ReadAllText(modInfoPath));
-            return document.RootElement.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
+            return document.RootElement.TryGetProperty(propertyName, out var value) &&
+                   value.ValueKind == JsonValueKind.String
                 ? value.GetString()
                 : null;
         }
@@ -961,6 +1096,7 @@ public sealed class SaveConversionService
         var normalizedPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
         var normalizedDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
         return string.Equals(normalizedPath, normalizedDirectory, StringComparison.OrdinalIgnoreCase)
-               || normalizedPath.StartsWith(normalizedDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+               || normalizedPath.StartsWith(normalizedDirectory + Path.DirectorySeparatorChar,
+                   StringComparison.OrdinalIgnoreCase);
     }
 }

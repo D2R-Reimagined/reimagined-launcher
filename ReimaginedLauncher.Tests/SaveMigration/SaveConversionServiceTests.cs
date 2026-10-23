@@ -11,11 +11,14 @@ namespace ReimaginedLauncher.Tests.SaveMigration;
 
 public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : IDisposable
 {
-    // The deployed asset location, so these tests also prove the definitions are copied to the build output.
-    private static readonly Lazy<SaveMigrator> Migrator = new(() =>
-        SaveMigrator.ForTarget(SaveCheckpointRegistry.Load(SaveConversionService.DefaultDataDirectory), SaveCheckpointRegistry.PullRequest1181Id));
+    private static readonly Lazy<InstalledGameData> InstalledTarget = new(() => SaveMigrationFixtures.InstalledTarget);
 
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "reimagined-save-conversion-tests", Guid.NewGuid().ToString("N"));
+    private static readonly Lazy<SaveMigrator> Migrator = new(() =>
+        SaveMigrationFixtures.CreateMigrator(InstalledTarget.Value));
+
+    private readonly string _root = Path.Combine(Path.GetTempPath(), "reimagined-save-conversion-tests",
+        Guid.NewGuid().ToString("N"));
+
     private bool _gameRunning;
 
     private string SaveDirectory => Path.Combine(_root, "saves");
@@ -46,7 +49,8 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         }
         else
         {
-            Assert.Contains(plan.State, new[] { SaveConversionState.Verified, SaveConversionState.VerifiedWithWarnings });
+            Assert.Contains(plan.State,
+                new[] { SaveConversionState.Verified, SaveConversionState.VerifiedWithWarnings });
             var outcome = service.Apply(plan, null, service.CreateBackupBatchDirectory());
             Assert.True(outcome.Succeeded, outcome.Message);
             Assert.Equal(plan.ConvertedBytes, File.ReadAllBytes(path));
@@ -60,7 +64,8 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.Equal(SaveConversionState.AlreadyCompatible, replan.State);
         Assert.True(service.Apply(replan, null, service.CreateBackupBatchDirectory()).Succeeded);
         Assert.Equal(converted, File.ReadAllBytes(path));
-        Assert.Equal(alreadyCompatible ? 0 : 2, Directory.GetFiles(BackupRoot, "*", SearchOption.AllDirectories).Length);
+        Assert.Equal(alreadyCompatible ? 0 : 2,
+            Directory.GetFiles(BackupRoot, "*", SearchOption.AllDirectories).Length);
         Assert.Equal(SHA256.HashData(original), SHA256.HashData(File.ReadAllBytes(FixturePath(fixture))));
     }
 
@@ -91,9 +96,11 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
             index => Assert.True(index is >= 12 and < 16 or >= 299 and < 395, $"byte {index} changed"));
         Assert.Equal(chosenName != "WereSorc", !File.Exists(path));
         Assert.True(File.Exists(Path.Combine(SaveDirectory, chosenName + ".key")));
-        Assert.Equal(File.ReadAllBytes(FixturePath("WereSorc.d2s")), File.ReadAllBytes(Path.Combine(outcome.BackupDirectory!, "WereSorc.d2s")));
+        Assert.Equal(File.ReadAllBytes(FixturePath("WereSorc.d2s")),
+            File.ReadAllBytes(Path.Combine(outcome.BackupDirectory!, "WereSorc.d2s")));
 
-        var replan = service.Plan(Path.Combine(SaveDirectory, chosenName + ".d2s"), Path.Combine(StagingDirectory, "again"));
+        var replan = service.Plan(Path.Combine(SaveDirectory, chosenName + ".d2s"),
+            Path.Combine(StagingDirectory, "again"));
         Assert.Equal(SaveConversionState.AlreadyCompatible, replan.State);
         Assert.False(replan.HasNameMismatch);
     }
@@ -159,9 +166,12 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
     [Fact]
     public void AnUnresolvedIdentityBlocksSeparatelyAndOnlyAConfirmedForceConversionWritesIt()
     {
-        // Without the registered rename, BruhII's Life & Death keeps id 1349, which PR #1181 names Iniquity Razor.
-        var registry = SaveCheckpointRegistry.Load(SaveConversionService.DefaultDataDirectory) with { IdentityMappings = [] };
-        var service = new SaveConversionService(() => SaveMigrator.ForTarget(registry, SaveCheckpointRegistry.PullRequest1181Id), BackupRoot, () => _gameRunning);
+        // Without the registered rename, BruhII's Life & Death keeps id 1349, which the installed target names Iniquity Razor.
+        var registry = SaveMigrationFixtures.LoadRegistry() with { IdentityMappings = [] };
+        var installed = InstalledTarget.Value;
+        var service = new SaveConversionService(() => SaveMigrator.ForInstalledTarget(registry, installed), BackupRoot,
+            () => _gameRunning,
+            installedTarget: installed);
         var path = CopyFixture("BruhII.d2s");
         var original = File.ReadAllBytes(path);
 
@@ -177,7 +187,8 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.Equal(SaveForceKind.Force, plan.ForceOption?.Kind);
         Assert.Contains("Iniquity Razor", Assert.Single(plan.ForceOption!.Risks));
         var unforcedRow = new SaveConversionRowViewModel(plan, service.CheckRename);
-        Assert.Equal((false, false, "Needs Force"), (unforcedRow.CanSelect, unforcedRow.IsSelected, unforcedRow.StatusLabel));
+        Assert.Equal((false, false, "Needs Force"),
+            (unforcedRow.CanSelect, unforcedRow.IsSelected, unforcedRow.StatusLabel));
         Assert.False(service.Apply(plan, null, service.CreateBackupBatchDirectory()).Succeeded);
         Assert.Equal(original, File.ReadAllBytes(path));
 
@@ -188,16 +199,19 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.Contains("EXPERIMENTAL", forced.Report);
         Assert.DoesNotContain(forced.IssueGroups, group => group.Blocking);
         var forcedRow = new SaveConversionRowViewModel(forced, service.CheckRename);
-        Assert.Equal((true, "Experimental", "Experimental: 1 issue accepted without verification."), (forcedRow.IsSelected, forcedRow.StatusLabel, forcedRow.Explanation));
+        Assert.Equal((true, "Experimental", "Experimental: 1 issue accepted without verification."),
+            (forcedRow.IsSelected, forcedRow.StatusLabel, forcedRow.Explanation));
 
         var outcome = service.Apply(forced, null, service.CreateBackupBatchDirectory());
         Assert.True(outcome.Succeeded, outcome.Message);
         Assert.Contains("experimentally", outcome.Message);
         Assert.Equal(forced.ConvertedBytes, File.ReadAllBytes(path));
         Assert.Equal(original, File.ReadAllBytes(Path.Combine(outcome.BackupDirectory!, "BruhII.d2s")));
-        Assert.Contains("EXPERIMENTAL", File.ReadAllText(Path.Combine(outcome.BackupDirectory!, "BruhII.d2s.restore.txt")));
+        Assert.Contains("EXPERIMENTAL",
+            File.ReadAllText(Path.Combine(outcome.BackupDirectory!, "BruhII.d2s.restore.txt")));
         Assert.True(File.Exists(Path.Combine(outcome.BackupDirectory!, "BruhII.d2s.experimental-report.txt")));
-        Assert.NotEqual(SaveConversionState.Experimental, service.Plan(path, Path.Combine(StagingDirectory, "again")).State);
+        Assert.NotEqual(SaveConversionState.Experimental,
+            service.Plan(path, Path.Combine(StagingDirectory, "again")).State);
     }
 
     [Fact]
@@ -214,7 +228,8 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.Null(plan.ForceOption);
         Assert.Contains(plan.IssueGroups, group => group is { Category: SaveIssueCategory.SaveFormat, Blocking: true });
 
-        var forced = service.Plan(path, Path.Combine(StagingDirectory, "forced"), new MigrationOverrides(Force: true, SourceLayout: "2.1.2"));
+        var forced = service.Plan(path, Path.Combine(StagingDirectory, "forced"),
+            new MigrationOverrides(Force: true, SourceLayout: "2.1.2"));
         Assert.Equal(SaveConversionState.Blocked, forced.State);
         Assert.Null(forced.ConvertedBytes);
         Assert.False(service.Apply(forced, null, service.CreateBackupBatchDirectory()).Succeeded);
@@ -234,7 +249,8 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         var service = CreateService();
         var path = CopyFixture("Popsicle.d2s");
         // Opaque bytes after the standard sections, like a loader's extension block; content and length are arbitrary.
-        byte[] trailer = [.. "EXT1"u8, 1, 0, 2, 0, .. Enumerable.Range(0, 37).Select(value => (byte)(value * 7)), .. "ABCD"u8];
+        byte[] trailer =
+            [.. "EXT1"u8, 1, 0, 2, 0, .. Enumerable.Range(0, 37).Select(value => (byte)(value * 7)), .. "ABCD"u8];
         File.WriteAllBytes(path, WithValidHeader([.. File.ReadAllBytes(path), .. trailer]));
 
         var plan = service.Plan(path, StagingDirectory);
@@ -242,11 +258,13 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.Contains(plan.State, new[] { SaveConversionState.Verified, SaveConversionState.VerifiedWithWarnings });
         Assert.Contains("opaque extension data", plan.Report);
         Assert.Contains("[PASS] Trailing extension data preserved byte-for-byte", plan.Report);
-        var output = D2Save.Read(plan.ConvertedBytes!, Migrator.Value.Target.CreateExternalData(SaveMigrator.TargetVersion));
+        var output = D2Save.Read(plan.ConvertedBytes!,
+            Migrator.Value.Target.CreateExternalData(SaveMigrator.TargetVersion));
         Assert.Equal(trailer, output.TrailingData);
 
         Assert.True(service.Apply(plan, null, service.CreateBackupBatchDirectory()).Succeeded);
-        Assert.Equal(SaveConversionState.AlreadyCompatible, service.Plan(path, Path.Combine(StagingDirectory, "again")).State);
+        Assert.Equal(SaveConversionState.AlreadyCompatible,
+            service.Plan(path, Path.Combine(StagingDirectory, "again")).State);
     }
 
     [Fact]
@@ -283,12 +301,14 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         var service = CreateService();
         var earlier = service.Plan(CopyFixture("BruhII.d2s"), Path.Combine(StagingDirectory, "earlier"));
         Assert.True(service.Apply(earlier, null, service.CreateBackupBatchDirectory()).Succeeded);
-        var existingBackups = Directory.GetFiles(BackupRoot, "*", SearchOption.AllDirectories).ToDictionary(file => file, File.ReadAllBytes);
+        var existingBackups = Directory.GetFiles(BackupRoot, "*", SearchOption.AllDirectories)
+            .ToDictionary(file => file, File.ReadAllBytes);
 
         // A decodable save whose opaque trailer pushes it past the retail size limit: the source is recoverable, but any output that
         // preserves the trailer must fail the critical output header check.
         var path = CopyFixture("Popsicle.d2s");
-        var trailer = Enumerable.Range(0, SaveMigrator.RetailCharacterSizeLimit + 1).Select(value => (byte)(value * 31)).ToArray();
+        var trailer = Enumerable.Range(0, SaveMigrator.RetailCharacterSizeLimit + 1).Select(value => (byte)(value * 31))
+            .ToArray();
         var oversized = WithValidHeader([.. File.ReadAllBytes(path), .. trailer]);
         File.WriteAllBytes(path, oversized);
 
@@ -299,25 +319,29 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.Null(forced.ConvertedBytes);
         Assert.Equal((false, false, "Blocked"), (row.CanSelect, row.IsSelected, row.StatusLabel));
         Assert.Contains("[FAIL, critical] Header, declared size and checksum", forced.Report);
-        Assert.Contains($"exceeds the retail {SaveMigrator.RetailCharacterSizeLimit}-byte limit", forced.BlockingReason);
+        Assert.Contains($"exceeds the retail {SaveMigrator.RetailCharacterSizeLimit}-byte limit",
+            forced.BlockingReason);
         Assert.DoesNotContain("VERIFIED", forced.Report);
         Assert.DoesNotContain("EXPERIMENTAL -", forced.Report);
 
         var candidate = forced.RecoveryCandidatePath;
         Assert.NotNull(candidate);
-        Assert.Equal(Path.Combine(BackupRoot, "RecoveryCandidates"), Path.GetDirectoryName(Path.GetDirectoryName(candidate)));
+        Assert.Equal(Path.Combine(BackupRoot, "RecoveryCandidates"),
+            Path.GetDirectoryName(Path.GetDirectoryName(candidate)));
         Assert.Equal("Popsicle.d2s.recovery-candidate", Path.GetFileName(candidate));
         Assert.Contains(candidate, forced.BlockingReason);
         var candidateBytes = File.ReadAllBytes(candidate);
         Assert.True(candidateBytes.Length > SaveMigrator.RetailCharacterSizeLimit);
         Assert.Equal(trailer, candidateBytes[^trailer.Length..]);
         var candidateReport = File.ReadAllText(candidate + ".report.txt");
-        Assert.StartsWith("EXPERIMENTAL RECOVERY CANDIDATE - FAILED A CRITICAL CHECK AND WAS NOT APPLIED.", candidateReport);
+        Assert.StartsWith("EXPERIMENTAL RECOVERY CANDIDATE - FAILED A CRITICAL CHECK AND WAS NOT APPLIED.",
+            candidateReport);
         Assert.Contains("[FAIL, critical] Header, declared size and checksum", candidateReport);
 
         Assert.False(service.Apply(forced, null, service.CreateBackupBatchDirectory()).Succeeded);
         Assert.Equal(oversized, File.ReadAllBytes(path));
-        Assert.Equal(["BruhII.d2s", "Popsicle.d2s"], Directory.GetFiles(SaveDirectory).Select(Path.GetFileName).Order());
+        Assert.Equal(["BruhII.d2s", "Popsicle.d2s"],
+            Directory.GetFiles(SaveDirectory).Select(Path.GetFileName).Order());
         foreach (var (file, bytes) in existingBackups)
         {
             Assert.Equal(bytes, File.ReadAllBytes(file));
@@ -330,7 +354,8 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
     [Fact]
     public void ConfidentSourcesOverrideThePreviousReleaseDefaultAndEligibleFilesArePreselected()
     {
-        var service = new SaveConversionService(() => Migrator.Value, BackupRoot, () => _gameRunning, defaultSourceLayout: "3.0.12");
+        var service = new SaveConversionService(() => Migrator.Value, BackupRoot, () => _gameRunning,
+            defaultSourceLayout: "3.0.12");
         var plans = new[] { "BruhII.d2s", "BonesMcPimp.d2s", "FuckBenFuckingF.d2s" }
             .Select(fixture => service.Plan(CopyFixture(fixture), Path.Combine(StagingDirectory, fixture)))
             .ToList();
@@ -340,7 +365,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
             testOutput.WriteLine($"{row.FileName}: {row.StatusLabel} - {row.Explanation}");
         }
 
-        Assert.Equal(["2.1.2", SaveMigrator.Intermediate3013Label], plans.Take(2).Select(plan => plan.SourceLabel));
+        Assert.Equal(["2.1.2", "3.0.12 with installed appended stats"], plans.Take(2).Select(plan => plan.SourceLabel));
         Assert.All(rows, row => Assert.False(row.IsSourceUncertain));
         Assert.Equal([true, true, false], rows.Select(row => row.IsSelected));
         Assert.Equal(("Already compatible", false), (rows[2].StatusLabel, rows[2].CanSelect));
@@ -360,8 +385,9 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
             Issues = [],
             Report = "",
             SourceSha256 = "",
-            TargetLabel = "PR #1181",
-            ForceOption = new SaveForceOption(SaveForceKind.ChooseSourceLayout, ["3.0.12", "2.1.2"], [], TargetAlsoFits: true)
+            TargetLabel = "Current installed Reimagined",
+            ForceOption = new SaveForceOption(SaveForceKind.ChooseSourceLayout, ["3.0.12", "2.1.2"], [],
+                TargetAlsoFits: true)
         };
         var row = new SaveConversionRowViewModel(plan, (_, _) => null);
 
@@ -402,18 +428,113 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         var install = Path.Combine(_root, "install");
         var savedGames = Path.Combine(_root, "Saved Games");
         Directory.CreateDirectory(Path.Combine(savedGames, "Diablo II Resurrected", "mods"));
-        WriteModInfo(Path.Combine(install, "mods", "Reimagined"), "ReimaginedThree-Season-0123456789abcdef0123456789abcdef/");
+        WriteModInfo(Path.Combine(install, "mods", "Reimagined"),
+            "ReimaginedThree-Season-0123456789abcdef0123456789abcdef/");
         WriteModInfo(NormalModInstallationService.NormalModRoot(install), "ReimaginedThree/");
         var profile = new InstallationProfile
         {
             Type = InstallationType.BattleNet,
             LaunchExperience = experience,
             InstallDirectory = install,
-            SaveDirectory = Path.Combine(savedGames, "Diablo II Resurrected", "mods", "ReimaginedThree-Season-0123456789abcdef0123456789abcdef")
+            SaveDirectory = Path.Combine(savedGames, "Diablo II Resurrected", "mods",
+                "ReimaginedThree-Season-0123456789abcdef0123456789abcdef")
         };
 
         Assert.Equal(Path.Combine(savedGames, "Diablo II Resurrected", "mods", "ReimaginedThree"),
             SaveConversionService.ResolveOfflineSaveDirectory(profile, savedGames));
+    }
+
+    [Fact]
+    public void InstalledTargetUsesTheManagedNormalModWhileLadderIsActive()
+    {
+        var install = Path.Combine(_root, "install");
+        var activeMod = Path.Combine(install, "mods", "Reimagined");
+        var managedMod = NormalModInstallationService.NormalModRoot(install);
+        WriteModInfo(activeMod, "ReimaginedThree-Season-0123456789abcdef0123456789abcdef/");
+        WriteModInfo(managedMod, "ReimaginedThree/");
+        var ladderMarker = Path.Combine(activeMod, "d2rloader", "ladder-bundle-state.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(ladderMarker)!);
+        File.WriteAllText(ladderMarker, "{}");
+
+        var managedExcel = Path.Combine(managedMod, "Reimagined.mpq", "data", "global", "excel");
+        SaveMigrationFixtures.CopyInstalledTables(managedExcel);
+        var profile = new InstallationProfile { Type = InstallationType.BattleNet, InstallDirectory = install };
+
+        var target = SaveConversionService.LoadInstalledTarget(profile, Path.Combine(_root, "copied-target"));
+
+        Assert.Equal(Path.GetFullPath(managedExcel), target.SourceDirectory);
+        Assert.NotEqual(Path.GetFullPath(Path.Combine(activeMod, "Reimagined.mpq", "data", "global", "excel")),
+            target.SourceDirectory);
+    }
+
+    [Fact]
+    public void MissingInstalledTxtFileReportsActionAndDoesNotChangeSaves()
+    {
+        var sourceDirectory = Path.Combine(_root, "incomplete-install");
+        SaveMigrationFixtures.CopyInstalledTables(sourceDirectory);
+        File.Delete(Path.Combine(sourceDirectory, "misc.txt"));
+        var path = CopyFixture("BruhII.d2s");
+        var original = File.ReadAllBytes(path);
+
+        var error = Assert.Throws<InvalidDataException>(() =>
+            InstalledGameData.Load(sourceDirectory, Path.Combine(_root, "copy"), "3.0.13"));
+
+        Assert.Contains("misc.txt", error.Message);
+        Assert.Contains("No saves were changed", error.Message);
+        Assert.Equal(original, File.ReadAllBytes(path));
+        Assert.False(Directory.Exists(BackupRoot));
+    }
+
+    [Fact]
+    public void ChangedInstalledStatEncodingChangesTheSerializedMigration()
+    {
+        var path = CopyFixture("basetolabpr.d2s");
+        var baseline = CreateService().Plan(path, Path.Combine(StagingDirectory, "baseline"));
+        var sourceDirectory = CopyInstalledFixtureToCustomDirectory();
+        SetTableCell(Path.Combine(sourceDirectory, "itemstatcost.txt"), "Stat", "hpregen_perlevel", "Save Bits", "9");
+        var changedTarget = InstalledGameData.Load(sourceDirectory, Path.Combine(_root, "changed-copy"), "3.0.13");
+        var changed = CreateService(changedTarget).Plan(path, Path.Combine(StagingDirectory, "changed"));
+
+        Assert.NotNull(baseline.ConvertedBytes);
+        Assert.NotNull(changed.ConvertedBytes);
+        Assert.False(baseline.ConvertedBytes!.AsSpan().SequenceEqual(changed.ConvertedBytes));
+        var statId = TableSchema.Extract(TableKind.ItemStatCost, changedTarget.Snapshot[TableKind.ItemStatCost])
+            .Single(stat => stat.Key == "hpregen_perlevel").SaveId!.Value;
+        Assert.Equal("9", changedTarget.Snapshot[TableKind.ItemStatCost].Rows[statId].Text("Save Bits"));
+    }
+
+    [Fact]
+    public void ChangedInstalledUniqueTableMovesTheMappedTargetIdWithoutAProductionSnapshot()
+    {
+        var sourceDirectory = CopyInstalledFixtureToCustomDirectory();
+        InsertUniqueBefore(Path.Combine(sourceDirectory, "uniqueitems.txt"), "Life and Death");
+        var changedTarget = InstalledGameData.Load(sourceDirectory, Path.Combine(_root, "changed-copy"), "3.0.13");
+        var path = CopyFixture("BruhII.d2s");
+        var result = SaveMigrationFixtures.CreateMigrator(changedTarget)
+            .Migrate(path, Path.Combine(StagingDirectory, "shifted-unique"));
+
+        var lifeAndDeath = Assert.Single(result.References,
+            reference => reference is { Kind: TableKind.UniqueItems, SourceId: 1349 });
+        Assert.Equal(1387, lifeAndDeath.TargetId);
+    }
+
+    [Fact]
+    public void InstalledTargetChangeAfterAnalysisRequiresReanalysisBeforeBackupOrWrite()
+    {
+        var sourceDirectory = CopyInstalledFixtureToCustomDirectory();
+        var target = InstalledGameData.Load(sourceDirectory, Path.Combine(_root, "stale-copy"), "3.0.13");
+        var service = CreateService(target);
+        var path = CopyFixture("BruhII.d2s");
+        var original = File.ReadAllBytes(path);
+        var plan = service.Plan(path, StagingDirectory);
+
+        File.AppendAllText(Path.Combine(sourceDirectory, "misc.txt"), "changed");
+        var outcome = service.Apply(plan, null, service.CreateBackupBatchDirectory());
+
+        Assert.False(outcome.Succeeded);
+        Assert.Contains("Reanalyze", outcome.Message);
+        Assert.Equal(original, File.ReadAllBytes(path));
+        Assert.Empty(Directory.GetFiles(BackupRoot, "*", SearchOption.AllDirectories));
     }
 
     public void Dispose()
@@ -424,7 +545,11 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         }
     }
 
-    private SaveConversionService CreateService() => new(() => Migrator.Value, BackupRoot, () => _gameRunning);
+    private SaveConversionService CreateService(InstalledGameData? installedTarget = null) => new(
+        () => installedTarget is null
+            ? Migrator.Value
+            : SaveMigrator.ForInstalledTarget(SaveMigrationFixtures.LoadRegistry(), installedTarget),
+        BackupRoot, () => _gameRunning, installedTarget: installedTarget ?? InstalledTarget.Value);
 
     private string CopyFixture(string fixture)
     {
@@ -432,6 +557,40 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         var path = Path.Combine(SaveDirectory, fixture);
         File.Copy(FixturePath(fixture), path);
         return path;
+    }
+
+    private string CopyInstalledFixtureToCustomDirectory()
+    {
+        var directory = Path.Combine(_root, "installed", Guid.NewGuid().ToString("N"));
+        SaveMigrationFixtures.CopyInstalledTables(directory);
+        return directory;
+    }
+
+    private static void SetTableCell(string path, string keyColumn, string key, string valueColumn, string value)
+    {
+        var lines = File.ReadAllLines(path, System.Text.Encoding.Latin1);
+        var headers = lines[0].Split('\t');
+        var keyIndex = Array.IndexOf(headers, keyColumn);
+        var valueIndex = Array.IndexOf(headers, valueColumn);
+        var rowIndex = Array.FindIndex(lines, 1, line => line.Split('\t')[keyIndex] == key);
+        Assert.True(keyIndex >= 0 && valueIndex >= 0 && rowIndex >= 1);
+        var cells = lines[rowIndex].Split('\t');
+        cells[valueIndex] = value;
+        lines[rowIndex] = string.Join('\t', cells);
+        File.WriteAllLines(path, lines, System.Text.Encoding.Latin1);
+    }
+
+    private static void InsertUniqueBefore(string path, string key)
+    {
+        var lines = File.ReadAllLines(path, System.Text.Encoding.Latin1);
+        var keyIndex = Array.IndexOf(lines[0].Split('\t'), "index");
+        var rowIndex = Array.FindIndex(lines, 1, line => line.Split('\t')[keyIndex] == key);
+        Assert.True(keyIndex >= 0 && rowIndex >= 1);
+        var cells = lines[rowIndex].Split('\t');
+        cells[keyIndex] = "Development test insertion";
+        var inserted = string.Join('\t', cells);
+        File.WriteAllLines(path, lines.Take(rowIndex).Append(inserted).Concat(lines.Skip(rowIndex)),
+            System.Text.Encoding.Latin1);
     }
 
     private static byte[] WithValidHeader(byte[] bytes)
@@ -448,7 +607,8 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
     {
         var directory = Path.Combine(modRoot, "Reimagined.mpq");
         Directory.CreateDirectory(directory);
-        File.WriteAllText(Path.Combine(directory, "modinfo.json"), $$"""{ "name": "Reimagined", "savepath": "{{savePath}}" }""");
+        File.WriteAllText(Path.Combine(directory, "modinfo.json"),
+            $$"""{ "name": "Reimagined", "savepath": "{{savePath}}" }""");
     }
 
     private void Log(SaveConversionPlan plan)
@@ -464,7 +624,9 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
 
     private static string FindRepositoryRoot()
     {
-        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
+             directory is not null;
+             directory = directory.Parent)
         {
             if (File.Exists(Path.Combine(directory.FullName, "ReimaginedLauncher.sln")))
             {
@@ -472,6 +634,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
             }
         }
 
-        throw new DirectoryNotFoundException("Could not locate ReimaginedLauncher.sln above the test output directory.");
+        throw new DirectoryNotFoundException(
+            "Could not locate ReimaginedLauncher.sln above the test output directory.");
     }
 }

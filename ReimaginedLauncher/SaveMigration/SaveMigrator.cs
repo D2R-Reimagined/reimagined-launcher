@@ -14,15 +14,13 @@ using D2SSharp.Model;
 namespace ReimaginedLauncher.SaveMigration;
 
 /// <summary>
-/// Converts a character or shared stash from its historical source layout directly to one registered target checkpoint.
+/// Converts a character or shared stash from its historical source layout directly to the installed game data.
 /// The input file is only read. Output goes to a separate directory and is reparsed with the target definitions.
 /// </summary>
 public sealed class SaveMigrator
 {
     public const uint TargetVersion = 105;
     public const int RetailCharacterSizeLimit = 65535;
-    public const string Intermediate3013Label = "3.0.13 candidate (3.0.12 + appended PR #1181 stats)";
-
     private const uint SaveMagic = 0xAA55AA55;
     private const int StashTabHeaderSize = 64;
     private const int MaxListedProblems = 5;
@@ -32,47 +30,60 @@ public sealed class SaveMigrator
 
     // D2SSharp writes these as fixed groups keyed by the vanilla ids, so they must keep their ids.
     private static readonly HashSet<StatId> PairedStats =
-        [.. Enum.GetValues<StatId>().Where(id => id.GetPairedStats().Length > 0).SelectMany(id => id.GetPairedStats().Append(id))];
+    [
+        .. Enum.GetValues<StatId>().Where(id => id.GetPairedStats().Length > 0)
+            .SelectMany(id => id.GetPairedStats().Append(id))
+    ];
 
     private readonly IReadOnlyList<SaveDataDefinition> _sources;
     private readonly SaveDataDefinition _target;
     private readonly IReadOnlyList<SnapshotComparison> _comparisons;
     private readonly IReadOnlyList<ResolvedIdentityMapping> _identityMappings;
 
-    public SaveMigrator(IReadOnlyList<SaveDataDefinition> sources, SaveDataDefinition target, IReadOnlyList<SnapshotComparison> comparisons,
-        IReadOnlyList<ResolvedIdentityMapping>? identityMappings = null, SaveCheckpoint? targetCheckpoint = null)
+    public SaveMigrator(IReadOnlyList<SaveDataDefinition> sources, SaveDataDefinition target,
+        IReadOnlyList<SnapshotComparison> comparisons,
+        IReadOnlyList<ResolvedIdentityMapping>? identityMappings = null)
     {
         _sources = sources;
         _target = target;
         _comparisons = comparisons;
         _identityMappings = identityMappings ?? [];
-        TargetCheckpoint = targetCheckpoint;
     }
 
-    /// <summary>A migrator from every earlier registered checkpoint directly to <paramref name="targetId"/>.</summary>
-    public static SaveMigrator ForTarget(SaveCheckpointRegistry registry, string targetId)
+    /// <summary>A migrator from earlier frozen releases and compatible development layouts to the installed game data.</summary>
+    public static SaveMigrator ForInstalledTarget(SaveCheckpointRegistry registry, InstalledGameData installedTarget)
     {
-        var target = registry.Get(targetId);
-        if (!target.CanBeTarget)
+        var snapshots = new Dictionary<(string Label, string Path), GameDataSnapshot>();
+        var targetTables = installedTarget.Snapshot;
+        var matchingCheckpoint = registry.Checkpoints
+            .Where(checkpoint => installedTarget.HasSameTables(registry.PathOf(checkpoint.Directory)))
+            .MaxBy(checkpoint => checkpoint.Order);
+        var targetOrder = matchingCheckpoint?.Order ?? int.MaxValue;
+        var sources = registry.SourcesBefore(targetOrder)
+            .Select(checkpoint => SaveDataDefinition.FromSnapshot(Snapshot(checkpoint.Label, checkpoint.Directory)))
+            .ToList();
+
+        if (matchingCheckpoint is null && registry.LatestCheckpoint is { } latest
+                                       && targetOrder > latest.Order)
         {
-            throw new ArgumentException($"Checkpoint '{target.Id}' is source-only and cannot be a migration target.", nameof(targetId));
+            var release = Snapshot(latest.Label, latest.Directory);
+            if (TableSchema.Extract(TableKind.ItemStatCost, targetTables[TableKind.ItemStatCost]).Count
+                > TableSchema.Extract(TableKind.ItemStatCost, release[TableKind.ItemStatCost]).Count)
+            {
+                sources.Add(SaveDataDefinition.WithAppendedStats(
+                    $"{latest.Label} with installed appended stats", release, targetTables));
+                sources.Add(SaveDataDefinition.WithAppendedStats(
+                    $"Installed items with {latest.Label} stat encoding", release, targetTables, targetTables));
+            }
         }
 
-        var snapshots = new Dictionary<(string Label, string Path), GameDataSnapshot>();
-        var targetTables = Snapshot(target.Label, target.Directory);
-        var sources = registry.SourcesFor(target)
-            .Select(checkpoint => checkpoint.AppendedStatsDirectory is { } overlay
-                ? SaveDataDefinition.WithAppendedStats(checkpoint.Label,
-                    Snapshot(registry.SnapshotLabel(checkpoint.Directory), checkpoint.Directory), Snapshot(registry.SnapshotLabel(overlay), overlay),
-                    checkpoint.ItemTablesDirectory is { } items ? Snapshot(registry.SnapshotLabel(items), items) : null)
-                : SaveDataDefinition.FromSnapshot(Snapshot(checkpoint.Label, checkpoint.Directory)))
-            .ToList();
         var comparisons = sources
             .Select(source => source.ItemTables)
-            .DistinctBy(tables => tables.Label)
+            .DistinctBy(tables => (tables.Label, tables.Directory))
             .Select(tables => TableComparer.Compare(tables, targetTables))
             .ToList();
-        return new SaveMigrator(sources, SaveDataDefinition.FromSnapshot(targetTables), comparisons, registry.IdentityMappingsFor(target), target);
+        return new SaveMigrator(sources, SaveDataDefinition.FromSnapshot(targetTables), comparisons,
+            registry.IdentityMappingsUpTo(targetOrder));
 
         GameDataSnapshot Snapshot(string label, string directory)
         {
@@ -89,23 +100,30 @@ public sealed class SaveMigrator
 
     public SaveDataDefinition Target => _target;
 
-    /// <summary>The registered checkpoint this migrator writes; null for an ad-hoc migrator.</summary>
-    public SaveCheckpoint? TargetCheckpoint { get; }
+    internal IReadOnlyList<string> SourceLayouts => [.. _sources.Select(source => source.Label)];
 
     /// <summary>
     /// Writes <c>outputDirectory/&lt;file name&gt;</c> when no hard blocker or critical check failed and every reported uncertainty is
     /// either absent or accepted with <see cref="MigrationOverrides.Force"/>; any other serialized output gets a <c>.rejected</c> suffix.
     /// Nothing is written when the source cannot be decoded or the serializer fails.
     /// </summary>
-    public SaveMigrationResult Migrate(string inputPath, string outputDirectory, MigrationOverrides? overrides = null) =>
-        new Run(this, Path.GetFullPath(inputPath), Path.GetFullPath(outputDirectory), overrides ?? MigrationOverrides.None).Execute();
+    public SaveMigrationResult Migrate(string inputPath, string outputDirectory,
+        MigrationOverrides? overrides = null) =>
+        new Run(this, Path.GetFullPath(inputPath), Path.GetFullPath(outputDirectory),
+            overrides ?? MigrationOverrides.None).Execute();
 
     private sealed record FieldDifference(string Path, string? Before, string? After)
     {
         public override string ToString() => $"{Path}: {Before ?? "(absent)"} -> {After ?? "(absent)"}";
     }
 
-    private sealed class StatAccumulator(string scope, TableDefinition? source, TableDefinition? target, int sourceId, string sourceEncoding, string targetEncoding)
+    private sealed class StatAccumulator(
+        string scope,
+        TableDefinition? source,
+        TableDefinition? target,
+        int sourceId,
+        string sourceEncoding,
+        string targetEncoding)
     {
         public int Uses { get; private set; }
         public long Min { get; private set; } = long.MaxValue;
@@ -145,14 +163,18 @@ public sealed class SaveMigrator
 
     private sealed class Run(SaveMigrator owner, string input, string outputDirectory, MigrationOverrides overrides)
     {
-        private readonly SaveFileKind _kind = Path.GetExtension(input).Equals(".d2i", StringComparison.OrdinalIgnoreCase)
-            ? SaveFileKind.SharedStash
-            : SaveFileKind.Character;
+        private readonly SaveFileKind _kind =
+            Path.GetExtension(input).Equals(".d2i", StringComparison.OrdinalIgnoreCase)
+                ? SaveFileKind.SharedStash
+                : SaveFileKind.Character;
 
         private readonly List<string> _identification = [];
         private readonly List<ReferenceResult> _references = [];
         private readonly Dictionary<(string Scope, int Id), StatAccumulator> _stats = [];
-        private readonly Dictionary<Item, (int Source, int Target)> _setUniqueIds = new(ReferenceEqualityComparer.Instance);
+
+        private readonly Dictionary<Item, (int Source, int Target)> _setUniqueIds =
+            new(ReferenceEqualityComparer.Instance);
+
         private readonly List<string> _notes = [];
         private readonly List<string> _warnings = [];
         private readonly List<string> _blockers = [];
@@ -182,9 +204,11 @@ public sealed class SaveMigrator
         public SaveMigrationResult Execute()
         {
             var fileName = Path.GetFileName(input);
-            if (string.Equals(Path.GetDirectoryName(input), outputDirectory.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(Path.GetDirectoryName(input), outputDirectory.TrimEnd(Path.DirectorySeparatorChar),
+                    StringComparison.OrdinalIgnoreCase))
             {
-                throw new ArgumentException("The output directory must differ from the input directory; saves are never converted in place.");
+                throw new ArgumentException(
+                    "The output directory must differ from the input directory; saves are never converted in place.");
             }
 
             var data = File.ReadAllBytes(input);
@@ -199,7 +223,8 @@ public sealed class SaveMigrator
             _uncertain.AddRange(repairable.Select(problem => $"Source header: {problem}."));
             if (_kind == SaveFileKind.Character && File.Exists(Path.ChangeExtension(input, ".d2rl")))
             {
-                _warnings.Add("A D2RLoader .d2rl sidecar exists next to the input. It records the saved ItemStatCost schema and is not converted.");
+                _warnings.Add(
+                    "A D2RLoader .d2rl sidecar exists next to the input. It records the saved ItemStatCost schema and is not converted.");
             }
 
             _source = Identify();
@@ -209,8 +234,10 @@ public sealed class SaveMigrator
             }
 
             _comparison = owner._comparisons.FirstOrDefault(comparison =>
-                comparison.Source.Label == _source.ItemTables.Label && comparison.Target.Label == Target.ItemTables.Label)
-                ?? throw new InvalidOperationException($"No Phase 1 comparison from {_source.ItemTables.Label} to {Target.ItemTables.Label}.");
+                              comparison.Source.Label == _source.ItemTables.Label &&
+                              comparison.Target.Label == Target.ItemTables.Label)
+                          ?? throw new InvalidOperationException(
+                              $"No Phase 1 comparison from {_source.ItemTables.Label} to {Target.ItemTables.Label}.");
             _sourceTypes = SaveInspector.ItemTypeIndex.Load(_source.ItemTables.Directory);
             _targetTypes = SaveInspector.ItemTypeIndex.Load(Target.ItemTables.Directory);
             _sourceData = _source.CreateExternalData(_sourceVersion);
@@ -220,8 +247,9 @@ public sealed class SaveMigrator
             if (root is D2Save { TrailingData.Length: > 0 } withTrailer)
             {
                 _sourceTrailer = withTrailer.TrailingData.ToArray();
-                _warnings.Add($"{_sourceTrailer.Length} byte(s) of opaque extension data follow the standard sections ({DescribeTrailer(_sourceTrailer)}). "
-                              + "They are carried over byte-for-byte; the launcher cannot interpret or migrate them.");
+                _warnings.Add(
+                    $"{_sourceTrailer.Length} byte(s) of opaque extension data follow the standard sections ({DescribeTrailer(_sourceTrailer)}). "
+                    + "They are carried over byte-for-byte; the launcher cannot interpret or migrate them.");
             }
 
             var before = Flatten(root);
@@ -243,7 +271,8 @@ public sealed class SaveMigrator
             }
             catch (Exception exception)
             {
-                _blockers.Add($"D2SSharp could not serialize the converted save with the {Target.Label} definitions: {exception.GetType().Name}: {exception.Message}");
+                _blockers.Add(
+                    $"D2SSharp could not serialize the converted save with the {Target.Label} definitions: {exception.GetType().Name}: {exception.Message}");
                 return Result(null, null, null);
             }
 
@@ -251,9 +280,11 @@ public sealed class SaveMigrator
             var conversion = Diff(migrated, serialized).Where(difference => difference.Path != "$.Version").ToList();
             if (conversion.Count > 0)
             {
-                var message = $"D2SSharp's version {_sourceVersion} -> {TargetVersion} conversion changed {conversion.Count} field(s): "
-                              + string.Join("; ", conversion.Take(12)) + (conversion.Count > 12 ? "; ..." : "");
-                (_sourceVersion == TargetVersion || conversion.Any(difference => !difference.Path.StartsWith("$.Character.", StringComparison.Ordinal))
+                var message =
+                    $"D2SSharp's version {_sourceVersion} -> {TargetVersion} conversion changed {conversion.Count} field(s): "
+                    + string.Join("; ", conversion.Take(12)) + (conversion.Count > 12 ? "; ..." : "");
+                (_sourceVersion == TargetVersion || conversion.Any(difference =>
+                    !difference.Path.StartsWith("$.Character.", StringComparison.Ordinal))
                     ? _warnings
                     : _notes).Add(message);
             }
@@ -266,7 +297,8 @@ public sealed class SaveMigrator
             Directory.CreateDirectory(outputDirectory);
             var outputPath = Path.Combine(outputDirectory, fileName);
             var uncertain = _uncertain.Count > 0 || _references.Any(reference => reference.Blocking);
-            var approved = !_checks.Any(check => check is { Passed: false, Critical: true }) && (!uncertain || overrides.Force);
+            var approved = !_checks.Any(check => check is { Passed: false, Critical: true }) &&
+                           (!uncertain || overrides.Force);
             var writtenPath = approved ? outputPath : outputPath + ".rejected";
             File.WriteAllBytes(writtenPath, bytes);
             return approved ? Result(outputPath, null, TargetVersion) : Result(null, writtenPath, TargetVersion);
@@ -276,14 +308,18 @@ public sealed class SaveMigrator
         {
             if (_rareNames + _runewords + _autoAffixes + _chronicleItems > 0)
             {
-                _notes.Add($"Preserved without lookup tables: {_rareNames} rare/crafted/tempered name pair(s), {_runewords} runeword id(s), "
-                           + $"{_autoAffixes} automagic id(s), {_chronicleItems} chronicle item id(s).");
+                _notes.Add(
+                    $"Preserved without lookup tables: {_rareNames} rare/crafted/tempered name pair(s), {_runewords} runeword id(s), "
+                    + $"{_autoAffixes} automagic id(s), {_chronicleItems} chronicle item id(s).");
             }
 
-            var stats = _stats.Values.Select(accumulator => accumulator.ToResult()).OrderBy(stat => stat.Scope).ThenBy(stat => stat.SourceId).ToList();
+            var stats = _stats.Values.Select(accumulator => accumulator.ToResult()).OrderBy(stat => stat.Scope)
+                .ThenBy(stat => stat.SourceId).ToList();
             return new SaveMigrationResult(
-                input, outputPath, rejectedPath, _kind, _sourceVersion, outputVersion, _source?.Label, Target.Label, _identification,
-                _itemsInspected, _itemsChanged, _references, stats, _customPageItems, _notes, _warnings, _blockers, _checks, overrides, _ambiguousLayouts,
+                input, outputPath, rejectedPath, _kind, _sourceVersion, outputVersion, _source?.Label, Target.Label,
+                _identification,
+                _itemsInspected, _itemsChanged, _references, stats, _customPageItems, _notes, _warnings, _blockers,
+                _checks, overrides, _ambiguousLayouts,
                 _uncertain);
         }
 
@@ -293,7 +329,8 @@ public sealed class SaveMigrator
             var markers = new List<string>();
             for (var index = 0; index + 4 <= trailer.Length && markers.Count < 8; index++)
             {
-                if (trailer.AsSpan(index, 4).ToArray().All(value => value is >= (byte)'0' and <= (byte)'9' or >= (byte)'A' and <= (byte)'Z'))
+                if (trailer.AsSpan(index, 4).ToArray().All(value =>
+                        value is >= (byte)'0' and <= (byte)'9' or >= (byte)'A' and <= (byte)'Z'))
                 {
                     markers.Add(System.Text.Encoding.ASCII.GetString(trailer, index, 4));
                     index += 3;
@@ -324,38 +361,49 @@ public sealed class SaveMigrator
                 var references = attempt.IdValidations.Sum(validation => validation.ReferenceCount);
                 _identification.Add($"{definition.Label}: parses, {attempt.AllItems.Count()} item(s), "
                                     + $"{references - Disagreements(attempt)}/{references} saved ids fit their table rows"
-                                    + (attempt.TrailingBytes > 0 ? $", {attempt.TrailingBytes} trailing byte(s) after the standard sections" : "")
-                                    + (undefined.Count > 0 ? $", stat id(s) [{string.Join(", ", undefined)}] undefined in this layout" : ""));
+                                    + (attempt.TrailingBytes > 0
+                                        ? $", {attempt.TrailingBytes} trailing byte(s) after the standard sections"
+                                        : "")
+                                    + (undefined.Count > 0
+                                        ? $", stat id(s) [{string.Join(", ", undefined)}] undefined in this layout"
+                                        : ""));
                 decoded.Add((definition, attempt, undefined.Count));
             }
 
             if (decoded.Count == 0)
             {
-                _blockers.Add("No candidate source layout can decode this file.");
+                var available = string.Join(", ", owner._sources.Select(source => source.Label));
+                _blockers.Add($"No available source layout can decode this file (tried: {available}). "
+                              + "It may require definitions outside the frozen 2.1.2/3.0.12 data and the installed Reimagined mod; no mapping was guessed.");
                 return null;
             }
 
             if (overrides.SourceLayout is { } manual)
             {
-                var selected = decoded.Select(candidate => candidate.Definition).FirstOrDefault(definition => definition.Label == manual);
+                var selected = decoded.Select(candidate => candidate.Definition)
+                    .FirstOrDefault(definition => definition.Label == manual);
                 if (selected is null)
                 {
-                    _blockers.Add($"The manually selected source layout '{manual}' cannot decode this file; a manual choice cannot override a failed parse.");
+                    _blockers.Add(
+                        $"The manually selected source layout '{manual}' cannot decode this file; a manual choice cannot override a failed parse.");
                     return null;
                 }
 
-                _identification.Add($"Source layout selected manually: {manual} ({decoded.Count} layout(s) decode the file).");
+                _identification.Add(
+                    $"Source layout selected manually: {manual} ({decoded.Count} layout(s) decode the file).");
                 return selected;
             }
 
             // A layout that defines every decoded stat and leaves the least data unparsed explains the file better than one that does not.
             var cleanest = decoded.Min(candidate => Rank(candidate));
-            var viable = decoded.Where(candidate => Rank(candidate) == cleanest).Select(candidate => (candidate.Definition, candidate.Attempt)).ToList();
+            var viable = decoded.Where(candidate => Rank(candidate) == cleanest)
+                .Select(candidate => (candidate.Definition, candidate.Attempt)).ToList();
             if (viable.Count < decoded.Count)
             {
                 _identification.Add($"{Labels(viable)} explain the file best: "
-                                    + string.Join(", ", decoded.Where(candidate => Rank(candidate) != cleanest).Select(candidate =>
-                                        $"{candidate.Definition.Label} leaves {candidate.Undefined} stat id(s) undefined and {candidate.Attempt.TrailingBytes} trailing byte(s)"))
+                                    + string.Join(", ", decoded.Where(candidate => Rank(candidate) != cleanest)
+                                        .Select(candidate =>
+                                            $"{candidate.Definition.Label} leaves {candidate.Undefined} stat id(s) undefined and {candidate.Attempt.TrailingBytes} trailing byte(s)"))
                                     + ".");
             }
 
@@ -366,21 +414,25 @@ public sealed class SaveMigrator
             // file as well: a tied layout that decodes the file identically with its own item tables keeps the save on those.
             var unneeded = tied.Where(candidate => candidate.Definition.UsesNewerItemTables
                                                    && tied.Any(other => !other.Definition.UsesNewerItemTables
-                                                                        && Signature(other.Attempt) == Signature(candidate.Attempt)))
+                                                                        && Signature(other.Attempt) ==
+                                                                        Signature(candidate.Attempt)))
                 .ToList();
             if (unneeded.Count > 0)
             {
                 tied = tied.Except(unneeded).ToList();
-                _identification.Add($"{Labels(unneeded)}: not needed, the file decodes identically with the item tables of {Labels(tied)}.");
+                _identification.Add(
+                    $"{Labels(unneeded)}: not needed, the file decodes identically with the item tables of {Labels(tied)}.");
             }
 
             var others = viable.Except(tied).Except(unneeded).ToList();
             var chosen = tied.OrderBy(candidate => candidate.Definition.AppendedStats.Count).First().Definition;
-            if (tied.Select(candidate => (Signature(candidate.Attempt), candidate.Definition.ItemTables.Label)).Distinct().Count() > 1)
+            if (tied.Select(candidate => (Signature(candidate.Attempt), candidate.Definition.ItemTables.Label))
+                    .Distinct().Count() > 1)
             {
                 _ambiguousLayouts = [.. tied.Select(candidate => candidate.Definition.Label)];
-                _uncertain.Add($"Ambiguous source layout: {Labels(tied)} fit the saved ids equally well ({best} disagreement(s)) "
-                               + $"but decode the file differently or use different item tables; converting as {chosen.Label} is a guess.");
+                _uncertain.Add(
+                    $"Ambiguous source layout: {Labels(tied)} fit the saved ids equally well ({best} disagreement(s)) "
+                    + $"but decode the file differently or use different item tables; converting as {chosen.Label} is a guess.");
             }
 
             if (others.Count > 0)
@@ -391,7 +443,8 @@ public sealed class SaveMigrator
 
             if (tied.Count > 1)
             {
-                _identification.Add($"{Labels(tied)} decode this file identically with the same item tables; using {chosen.Label}.");
+                _identification.Add(
+                    $"{Labels(tied)} decode this file identically with the same item tables; using {chosen.Label}.");
             }
 
             _identification.Add($"Selected source layout: {chosen.Label}");
@@ -400,7 +453,8 @@ public sealed class SaveMigrator
             static string Labels(List<(SaveDataDefinition Definition, ParseAttempt Attempt)> group) =>
                 string.Join(" = ", group.Select(candidate => candidate.Definition.Label));
 
-            static (int Undefined, int Trailing) Rank((SaveDataDefinition Definition, ParseAttempt Attempt, int Undefined) candidate) =>
+            static (int Undefined, int Trailing) Rank(
+                (SaveDataDefinition Definition, ParseAttempt Attempt, int Undefined) candidate) =>
                 (candidate.Undefined, candidate.Attempt.TrailingBytes);
         }
 
@@ -450,7 +504,8 @@ public sealed class SaveMigrator
 
             foreach (var stat in _stats.Values.Where(stat => stat.ProblemCount > 0).Select(stat => stat.ToResult()))
             {
-                _uncertain.Add($"{stat.Scope} stat '{stat.SourceName}' ({stat.SourceId} -> {stat.TargetId}): {string.Join("; ", stat.Problems)}");
+                _uncertain.Add(
+                    $"{stat.Scope} stat '{stat.SourceName}' ({stat.SourceId} -> {stat.TargetId}): {string.Join("; ", stat.Problems)}");
             }
         }
 
@@ -466,7 +521,8 @@ public sealed class SaveMigrator
                 case SetUniqueQualityData setUnique when item.Quality is ItemQuality.Unique or ItemQuality.Set:
                     var kind = item.Quality == ItemQuality.Unique ? TableKind.UniqueItems : TableKind.SetItems;
                     var sourceId = (int)setUnique.SetUniqueFileIndex;
-                    var targetId = MapReference(kind, sourceId, kind == TableKind.UniqueItems ? "unique" : "set", path, code, 4095);
+                    var targetId = MapReference(kind, sourceId, kind == TableKind.UniqueItems ? "unique" : "set", path,
+                        code, 4095);
                     setUnique.SetUniqueFileIndex = (ushort)targetId;
                     _setUniqueIds[item] = (sourceId, targetId);
                     break;
@@ -483,12 +539,14 @@ public sealed class SaveMigrator
                     var role = item.Quality == ItemQuality.Craft ? "crafted" : "rare";
                     for (var slot = 0; slot < rare.Prefixes.Length; slot++)
                     {
-                        rare.Prefixes[slot] = MapAffix(TableKind.MagicPrefix, rare.Prefixes[slot], $"{role} prefix {slot + 1}", path, code);
+                        rare.Prefixes[slot] = MapAffix(TableKind.MagicPrefix, rare.Prefixes[slot],
+                            $"{role} prefix {slot + 1}", path, code);
                     }
 
                     for (var slot = 0; slot < rare.Suffixes.Length; slot++)
                     {
-                        rare.Suffixes[slot] = MapAffix(TableKind.MagicSuffix, rare.Suffixes[slot], $"{role} suffix {slot + 1}", path, code);
+                        rare.Suffixes[slot] = MapAffix(TableKind.MagicSuffix, rare.Suffixes[slot],
+                            $"{role} suffix {slot + 1}", path, code);
                     }
 
                     break;
@@ -532,7 +590,8 @@ public sealed class SaveMigrator
             var targetIndex = _targetData.GetItemIndex(item.ItemCode, TargetVersion);
             if (targetIndex < 0)
             {
-                _uncertain.Add($"{path}: base item '{code}' is not defined in {Target.Label}; it keeps its code if the serializer can write it.");
+                _uncertain.Add(
+                    $"{path}: base item '{code}' is not defined in {Target.Label}; it keeps its code if the serializer can write it.");
                 return;
             }
 
@@ -544,9 +603,11 @@ public sealed class SaveMigrator
                 // Only the decoded-field checks in Verify can show whether a metadata change actually alters the written item.
                 var changed = typeof(ItemTypeInfo).GetProperties()
                     .Where(property => !Equals(property.GetValue(sourceInfo), property.GetValue(targetInfo)))
-                    .Select(property => $"{property.Name} {property.GetValue(sourceInfo)} -> {property.GetValue(targetInfo)}");
-                AddOnce(_warnings, $"Base item '{code.Trim()}' has different item-type metadata in {Target.Label} ({string.Join(", ", changed)}); "
-                                   + "the verification checks compare every decoded field of the written items.");
+                    .Select(property =>
+                        $"{property.Name} {property.GetValue(sourceInfo)} -> {property.GetValue(targetInfo)}");
+                AddOnce(_warnings,
+                    $"Base item '{code.Trim()}' has different item-type metadata in {Target.Label} ({string.Join(", ", changed)}); "
+                    + "the verification checks compare every decoded field of the written items.");
             }
         }
 
@@ -558,7 +619,9 @@ public sealed class SaveMigrator
             var table = _comparison[kind];
             var sourceRow = table.SourceDefinitions.FirstOrDefault(definition => definition.SaveId == sourceId);
             var rawTarget = table.TargetDefinitions.FirstOrDefault(definition => definition.SaveId == sourceId);
-            var atRawId = rawTarget is null ? "the same id names no target row" : $"the same id names {rawTarget} in {Target.Label}";
+            var atRawId = rawTarget is null
+                ? "the same id names no target row"
+                : $"the same id names {rawTarget} in {Target.Label}";
 
             if (!SaveInspector.Agrees(kind, sourceRow, code, _sourceTypes))
             {
@@ -568,7 +631,8 @@ public sealed class SaveMigrator
             }
 
             var mapping = table.ForSourceSaveId(sourceId);
-            if (mapping is { Status: MappingStatus.Matched, Target.SaveId: { } targetId } && mapping.Method != MatchMethod.DefinitionFingerprint)
+            if (mapping is { Status: MappingStatus.Matched, Target.SaveId: { } targetId } &&
+                mapping.Method != MatchMethod.DefinitionFingerprint)
             {
                 if (targetId > maxId)
                 {
@@ -581,14 +645,17 @@ public sealed class SaveMigrator
                 if (!SaveInspector.Agrees(kind, mapping.Target, code, _targetTypes))
                 {
                     // The identity is established by the source row; only the target table moved the definition to another base.
-                    reason += $"; {Target.Label} defines it on base '{mapping.Target.Field(TableSchema.CodeColumn(kind)!)}', the item keeps '{code}'";
+                    reason +=
+                        $"; {Target.Label} defines it on base '{mapping.Target.Field(TableSchema.CodeColumn(kind)!)}', the item keeps '{code}'";
                     _warnings.Add($"{path}: {role} {sourceId} -> {targetId} maps by identity, but {reason}.");
                 }
 
-                return Record(targetId, targetId == sourceId ? ReferenceOutcome.AlreadyCompatible : ReferenceOutcome.Mapped, false, reason);
+                return Record(targetId,
+                    targetId == sourceId ? ReferenceOutcome.AlreadyCompatible : ReferenceOutcome.Mapped, false, reason);
             }
 
-            if (kind is TableKind.UniqueItems or TableKind.SetItems && RegisteredIdentity(table, sourceRow!, sourceId, code) is ({ } registered, { } entry))
+            if (kind is TableKind.UniqueItems or TableKind.SetItems &&
+                RegisteredIdentity(table, sourceRow!, sourceId, code) is ({ } registered, { } entry))
             {
                 if (registered.SaveId is not { } registeredId || registeredId > maxId)
                 {
@@ -596,13 +663,17 @@ public sealed class SaveMigrator
                         $"registered target '{registered.Key}' id {registered.SaveId} does not fit the 12-bit save field; preserved unchanged; {atRawId}");
                 }
 
-                AddOnce(_notes, $"Registered identity mapping: {kind} '{sourceRow!.Key}' ({_source!.Label} id {sourceId}) -> '{registered.Key}' "
-                                + $"({Target.Label} id {registeredId}); the item keeps its rolled properties. {entry.Mapping.Description}".TrimEnd());
-                return Record(registeredId, registeredId == sourceId ? ReferenceOutcome.AlreadyCompatible : ReferenceOutcome.Mapped, false,
+                AddOnce(_notes,
+                    $"Registered identity mapping: {kind} '{sourceRow!.Key}' ({_source!.Label} id {sourceId}) -> '{registered.Key}' "
+                    + $"({Target.Label} id {registeredId}); the item keeps its rolled properties. {entry.Mapping.Description}"
+                        .TrimEnd());
+                return Record(registeredId,
+                    registeredId == sourceId ? ReferenceOutcome.AlreadyCompatible : ReferenceOutcome.Mapped, false,
                     $"'{sourceRow.Key}' -> {registered} via registered identity mapping ({entry.Mapping.SourceCheckpoint} -> {entry.Mapping.TargetCheckpoint})");
             }
 
-            var affixRename = kind is TableKind.MagicPrefix or TableKind.MagicSuffix && rawTarget is { IsPlaceholder: false }
+            var affixRename = kind is TableKind.MagicPrefix or TableKind.MagicSuffix &&
+                              rawTarget is { IsPlaceholder: false }
                 ? RegisteredAffixRename(kind, sourceRow!, rawTarget, sourceId)
                 : null;
             if (kind is TableKind.MagicPrefix or TableKind.MagicSuffix
@@ -611,13 +682,15 @@ public sealed class SaveMigrator
                 && SaveInspector.Agrees(kind, rawTarget, code, _targetTypes))
             {
                 var changedFields = TableSchema.AffixDefinition
-                    .Where(field => !string.Equals(sourceRow!.Field(field), rawTarget.Field(field), StringComparison.Ordinal))
+                    .Where(field =>
+                        !string.Equals(sourceRow!.Field(field), rawTarget.Field(field), StringComparison.Ordinal))
                     .ToList();
                 var phase1 = $"Phase 1 left '{sourceRow!.Key}' {mapping?.Status.ToString() ?? "unmapped"}";
                 var keeps = affixRename is null
                     ? "keeps its name, mods"
                     : $"is its registered rename '{rawTarget.Key}' ({affixRename.Mapping.SourceCheckpoint} -> {affixRename.Mapping.TargetCheckpoint}) and keeps its mods";
-                return TableSchema.Fingerprint(rawTarget, TableSchema.AffixStructure) == TableSchema.Fingerprint(sourceRow, TableSchema.AffixStructure)
+                return TableSchema.Fingerprint(rawTarget, TableSchema.AffixStructure) ==
+                       TableSchema.Fingerprint(sourceRow, TableSchema.AffixStructure)
                     ? Record(sourceId, ReferenceOutcome.AlreadyCompatible, false,
                         $"{phase1}, but the row at the same id {keeps} and item types")
                     : Record(sourceId, ReferenceOutcome.PreservedWithWarning, false,
@@ -628,7 +701,8 @@ public sealed class SaveMigrator
             return Unresolved(mapping switch
             {
                 null => "no Phase 1 mapping",
-                { Method: MatchMethod.DefinitionFingerprint } => $"only a fingerprint rename match exists ({mapping.Reason}); not applied",
+                { Method: MatchMethod.DefinitionFingerprint } =>
+                    $"only a fingerprint rename match exists ({mapping.Reason}); not applied",
                 _ => $"Phase 1 status {mapping.Status}: {mapping.Reason}",
             });
 
@@ -643,8 +717,10 @@ public sealed class SaveMigrator
 
             int Record(int targetId, ReferenceOutcome outcome, bool blocking, string reason)
             {
-                _references.Add(new ReferenceResult(path, code, role, kind, sourceId, targetId, outcome, blocking, reason,
-                    sourceRow is { IsPlaceholder: false } ? sourceRow.Key : null, rawTarget is { IsPlaceholder: false } ? rawTarget.Key : null));
+                _references.Add(new ReferenceResult(path, code, role, kind, sourceId, targetId, outcome, blocking,
+                    reason,
+                    sourceRow is { IsPlaceholder: false } ? sourceRow.Key : null,
+                    rawTarget is { IsPlaceholder: false } ? rawTarget.Key : null));
                 if (targetId != sourceId)
                 {
                     _changes++;
@@ -658,11 +734,14 @@ public sealed class SaveMigrator
         /// A registered rename applies only when the saved id still names the registered row and base, and the target has exactly
         /// one row with the registered name on that base that fits the item and is not already another row's Phase 1 match.
         /// </summary>
-        private (TableDefinition Target, ResolvedIdentityMapping Entry)? RegisteredIdentity(TableComparison table, TableDefinition sourceRow, int sourceId, string code)
+        private (TableDefinition Target, ResolvedIdentityMapping Entry)? RegisteredIdentity(TableComparison table,
+            TableDefinition sourceRow, int sourceId, string code)
         {
             var entry = owner._identityMappings.FirstOrDefault(candidate => candidate.Mapping.Kind == table.Kind
-                                                                             && candidate.Mapping.SourceId == sourceId
-                                                                             && string.Equals(candidate.SourceDirectory, _source!.ItemTables.Directory, StringComparison.OrdinalIgnoreCase));
+                                                                            && candidate.Mapping.SourceId == sourceId
+                                                                            && string.Equals(candidate.SourceDirectory,
+                                                                                _source!.ItemTables.Directory,
+                                                                                StringComparison.OrdinalIgnoreCase));
             if (entry is null)
             {
                 return null;
@@ -671,11 +750,13 @@ public sealed class SaveMigrator
             var mapping = entry.Mapping;
             var codeColumn = TableSchema.CodeColumn(table.Kind)!;
             var candidates = table.TargetDefinitions
-                .Where(definition => !definition.IsPlaceholder && definition.Key.Equals(entry.TargetKey, StringComparison.OrdinalIgnoreCase))
+                .Where(definition => !definition.IsPlaceholder &&
+                                     definition.Key.Equals(entry.TargetKey, StringComparison.OrdinalIgnoreCase))
                 .ToList();
             // A Phase 1 fingerprint match of this same row confirms the registered rename rather than competing with it.
             var claimedBy = candidates.Count == 1
-                ? table.Matched.FirstOrDefault(matched => ReferenceEquals(matched.Target, candidates[0]) && !ReferenceEquals(matched.Source, sourceRow))
+                ? table.Matched.FirstOrDefault(matched =>
+                    ReferenceEquals(matched.Target, candidates[0]) && !ReferenceEquals(matched.Source, sourceRow))
                 : null;
             var problem = !sourceRow.Key.Equals(mapping.SourceKey, StringComparison.OrdinalIgnoreCase)
                           || !sourceRow.Field(codeColumn).Equals(mapping.Code, StringComparison.OrdinalIgnoreCase)
@@ -694,17 +775,23 @@ public sealed class SaveMigrator
                 return (candidates[0], entry);
             }
 
-            AddOnce(_warnings, $"Registered identity mapping '{mapping.SourceKey}' -> '{entry.TargetKey}' was not applied: {problem}.");
+            AddOnce(_warnings,
+                $"Registered identity mapping '{mapping.SourceKey}' -> '{entry.TargetKey}' was not applied: {problem}.");
             return null;
         }
 
         /// <summary>A registered affix rename keeps the saved id; it applies only when that id names the registered names on both sides.</summary>
-        private ResolvedIdentityMapping? RegisteredAffixRename(TableKind kind, TableDefinition sourceRow, TableDefinition rawTarget, int sourceId) =>
+        private ResolvedIdentityMapping? RegisteredAffixRename(TableKind kind, TableDefinition sourceRow,
+            TableDefinition rawTarget, int sourceId) =>
             owner._identityMappings.FirstOrDefault(candidate => candidate.Mapping.Kind == kind
                                                                 && candidate.Mapping.Covers(sourceId)
-                                                                && string.Equals(candidate.SourceDirectory, _source!.ItemTables.Directory, StringComparison.OrdinalIgnoreCase)
-                                                                && candidate.Mapping.SourceKey.Equals(sourceRow.Key, StringComparison.OrdinalIgnoreCase)
-                                                                && candidate.TargetKey.Equals(rawTarget.Key, StringComparison.OrdinalIgnoreCase));
+                                                                && string.Equals(candidate.SourceDirectory,
+                                                                    _source!.ItemTables.Directory,
+                                                                    StringComparison.OrdinalIgnoreCase)
+                                                                && candidate.Mapping.SourceKey.Equals(sourceRow.Key,
+                                                                    StringComparison.OrdinalIgnoreCase)
+                                                                && candidate.TargetKey.Equals(rawTarget.Key,
+                                                                    StringComparison.OrdinalIgnoreCase));
 
         private static void AddOnce(List<string> lines, string line)
         {
@@ -725,10 +812,12 @@ public sealed class SaveMigrator
             TableDefinition target;
             if (sourceId >= _source.Stats.Count - _source.AppendedStats.Count)
             {
-                var candidates = Target.Stats.Where(stat => stat.Key.Equals(source.Key, StringComparison.OrdinalIgnoreCase)).ToList();
+                var candidates = Target.Stats
+                    .Where(stat => stat.Key.Equals(source.Key, StringComparison.OrdinalIgnoreCase)).ToList();
                 if (candidates.Count != 1)
                 {
-                    return (source, null, $"appended stat '{source.Key}' has {candidates.Count} definition(s) in {Target.Label}");
+                    return (source, null,
+                        $"appended stat '{source.Key}' has {candidates.Count} definition(s) in {Target.Label}");
                 }
 
                 target = candidates[0];
@@ -738,7 +827,8 @@ public sealed class SaveMigrator
                 var mapping = _comparison[TableKind.ItemStatCost].ForSourceSaveId(sourceId);
                 if (mapping is not { Status: MappingStatus.Matched, Target: { } matched })
                 {
-                    return (source, null, $"'{source.Key}' is {mapping?.Status.ToString() ?? "unmapped"} in Phase 1 ({mapping?.Reason})");
+                    return (source, null,
+                        $"'{source.Key}' is {mapping?.Status.ToString() ?? "unmapped"} in Phase 1 ({mapping?.Reason})");
                 }
 
                 target = matched;
@@ -749,7 +839,8 @@ public sealed class SaveMigrator
                 : (source, target, $"target id {target.SaveId} does not fit the 9-bit stat id");
         }
 
-        private StatAccumulator Accumulate(string scope, int sourceId, TableDefinition? source, TableDefinition? target, string sourceEncoding, string targetEncoding)
+        private StatAccumulator Accumulate(string scope, int sourceId, TableDefinition? source, TableDefinition? target,
+            string sourceEncoding, string targetEncoding)
         {
             if (!_stats.TryGetValue((scope, sourceId), out var accumulator))
             {
@@ -777,7 +868,8 @@ public sealed class SaveMigrator
 
                 // D2SSharp appends a PoisonCount entry after each poison group on read and skips it on write.
                 var poisonCount = index + paired.Length + 1;
-                if (stats[index].Id == StatId.PoisonMinDamage && poisonCount < stats.Count && stats[poisonCount].Id == StatId.PoisonCount)
+                if (stats[index].Id == StatId.PoisonMinDamage && poisonCount < stats.Count &&
+                    stats[poisonCount].Id == StatId.PoisonCount)
                 {
                     synthetic.Add(poisonCount);
                 }
@@ -794,8 +886,11 @@ public sealed class SaveMigrator
                 var sourceId = (int)stat.Id;
                 var (source, target, problem) = MapStat(sourceId);
                 var sourceInfo = _sourceData.GetStatInfo(stat.Id, _sourceVersion);
-                var targetInfo = target is null || problem is not null ? default : _targetData.GetStatInfo((StatId)target.SaveId!.Value, TargetVersion);
-                var accumulator = Accumulate("item", sourceId, source, target, ItemEncoding(sourceInfo), target is null || problem is not null ? "-" : ItemEncoding(targetInfo));
+                var targetInfo = target is null || problem is not null
+                    ? default
+                    : _targetData.GetStatInfo((StatId)target.SaveId!.Value, TargetVersion);
+                var accumulator = Accumulate("item", sourceId, source, target, ItemEncoding(sourceInfo),
+                    target is null || problem is not null ? "-" : ItemEncoding(targetInfo));
                 accumulator.Use(stat.Value);
                 if (problem is not null)
                 {
@@ -806,12 +901,14 @@ public sealed class SaveMigrator
                 var targetId = target!.SaveId!.Value;
                 if (stat.Id == StatId.PoisonCount)
                 {
-                    accumulator.Problem($"{path}: id {sourceId} is D2SSharp's synthetic poison count and would be dropped on write");
+                    accumulator.Problem(
+                        $"{path}: id {sourceId} is D2SSharp's synthetic poison count and would be dropped on write");
                 }
 
                 if (targetId != sourceId && (PairedStats.Contains(stat.Id) || PairedStats.Contains((StatId)targetId)))
                 {
-                    accumulator.Problem($"{path}: a paired damage stat cannot change id under D2SSharp's fixed pairing; {KeptId(sourceId)}");
+                    accumulator.Problem(
+                        $"{path}: a paired damage stat cannot change id under D2SSharp's fixed pairing; {KeptId(sourceId)}");
                     targetId = sourceId;
                     targetInfo = _targetData.GetStatInfo(stat.Id, TargetVersion);
                 }
@@ -832,7 +929,8 @@ public sealed class SaveMigrator
         /// <summary>The fallback for a stat whose target identity cannot be established: its saved id is written unchanged.</summary>
         private string KeptId(int sourceId) =>
             $"saved id {sourceId} is kept, which names "
-            + (Target.Stat(sourceId) is { IsPlaceholder: false } same ? $"'{same.Key}'" : "no stat") + $" in {Target.Label}";
+            + (Target.Stat(sourceId) is { IsPlaceholder: false } same ? $"'{same.Key}'" : "no stat") +
+            $" in {Target.Label}";
 
         private static IEnumerable<string> ItemValueProblems(Stat stat, StatInfo info, bool secondary)
         {
@@ -852,7 +950,8 @@ public sealed class SaveMigrator
             var maxEncoded = (1L << info.SaveBits) - 1;
             if (encoded < 0 || encoded > maxEncoded)
             {
-                yield return $"value {stat.Value} needs raw {encoded}, outside 0..{maxEncoded} (Save Bits {info.SaveBits}, Save Add {info.SaveAdd})";
+                yield return
+                    $"value {stat.Value} needs raw {encoded}, outside 0..{maxEncoded} (Save Bits {info.SaveBits}, Save Add {info.SaveAdd})";
             }
 
             if (!secondary && shifted == 0)
@@ -874,7 +973,9 @@ public sealed class SaveMigrator
                 var sourceId = (int)stat.Id;
                 var (source, target, problem) = MapStat(sourceId);
                 var sourceInfo = _sourceData.GetStatInfo(stat.Id, _sourceVersion);
-                var targetInfo = target is null || problem is not null ? default : _targetData.GetStatInfo((StatId)target.SaveId!.Value, TargetVersion);
+                var targetInfo = target is null || problem is not null
+                    ? default
+                    : _targetData.GetStatInfo((StatId)target.SaveId!.Value, TargetVersion);
                 var accumulator = Accumulate(scope, sourceId, source, target, PlayerEncoding(sourceInfo, scope),
                     target is null || problem is not null ? "-" : PlayerEncoding(targetInfo, scope));
                 accumulator.Use(stat.Value);
@@ -891,7 +992,8 @@ public sealed class SaveMigrator
 
                 if (scope == "character" && target!.Field("Saved") != "1")
                 {
-                    _warnings.Add($"Character stat '{target.Key}' = {stat.Value} is not marked Saved in {Target.Label}.");
+                    _warnings.Add(
+                        $"Character stat '{target.Key}' = {stat.Value} is not marked Saved in {Target.Label}.");
                 }
 
                 var targetId = target!.SaveId!.Value;
@@ -928,7 +1030,8 @@ public sealed class SaveMigrator
                         : (0L, (1L << info.CsvBits) - 1);
                 if (stat.Value < min || stat.Value > max)
                 {
-                    yield return $"value {stat.Value} outside {min}..{max} (CSvBits {info.CsvBits}, CSvSigned {info.CsvSigned}); D2SSharp would clamp it";
+                    yield return
+                        $"value {stat.Value} outside {min}..{max} (CSvBits {info.CsvBits}, CSvSigned {info.CsvSigned}); D2SSharp would clamp it";
                 }
             }
 
@@ -966,19 +1069,24 @@ public sealed class SaveMigrator
                 }
 
                 var targets = save.Items
-                    .Where(item => item.Position.Mode == ItemMode.Equipped && locations.Contains(item.Position.BodyLocation) && item.ItemCode == slot.Code)
-                    .Select(item => _setUniqueIds.TryGetValue(item, out var ids) ? ids : ((int Source, int Target)?)null)
+                    .Where(item =>
+                        item.Position.Mode == ItemMode.Equipped && locations.Contains(item.Position.BodyLocation) &&
+                        item.ItemCode == slot.Code)
+                    .Select(item =>
+                        _setUniqueIds.TryGetValue(item, out var ids) ? ids : ((int Source, int Target)?)null)
                     .Where(ids => ids?.Source == slot.FileIndex)
                     .Select(ids => ids!.Value.Target)
                     .Distinct()
                     .ToList();
                 if (targets.Count != 1)
                 {
-                    _notes.Add($"Preview {name} ({slot.CodeString} {slot.Quality} {slot.FileIndex}) has no single matching equipped item; left unchanged.");
+                    _notes.Add(
+                        $"Preview {name} ({slot.CodeString} {slot.Quality} {slot.FileIndex}) has no single matching equipped item; left unchanged.");
                 }
                 else if (targets[0] != slot.FileIndex)
                 {
-                    _notes.Add($"Preview {name}: file index {slot.FileIndex} -> {targets[0]} to match the equipped item.");
+                    _notes.Add(
+                        $"Preview {name}: file index {slot.FileIndex} -> {targets[0]} to match the equipped item.");
                     slot.FileIndex = (ushort)targets[0];
                     _changes++;
                 }
@@ -994,14 +1102,16 @@ public sealed class SaveMigrator
                     continue;
                 }
 
-                var entries = chronicle.SetEntries.Count + chronicle.UniqueEntries.Count + chronicle.RunewordEntries.Count;
+                var entries = chronicle.SetEntries.Count + chronicle.UniqueEntries.Count +
+                              chronicle.RunewordEntries.Count;
                 if (entries == 0)
                 {
                     _notes.Add($"Stash tab {index + 1}: empty chronicle section preserved.");
                     continue;
                 }
 
-                var renamed = Renamed(chronicle.SetEntries, TableKind.SetItems) + Renamed(chronicle.UniqueEntries, TableKind.UniqueItems);
+                var renamed = Renamed(chronicle.SetEntries, TableKind.SetItems) +
+                              Renamed(chronicle.UniqueEntries, TableKind.UniqueItems);
                 (renamed > 0 ? _warnings : _notes).Add(
                     $"Stash tab {index + 1}: chronicle discoveries ({chronicle.SetEntries.Count} set, {chronicle.UniqueEntries.Count} unique, "
                     + $"{chronicle.RunewordEntries.Count} runeword) are preserved unchanged; {renamed} set/unique entr(ies) name a different "
@@ -1009,18 +1119,24 @@ public sealed class SaveMigrator
             }
 
             int Renamed(List<ChronicleEntry> entries, TableKind kind) => entries.Count(entry =>
-                _comparison[kind].SourceDefinitions.FirstOrDefault(definition => definition.SaveId == (int)entry.ItemId) is not { } source
-                || _comparison[kind].TargetDefinitions.FirstOrDefault(definition => definition.SaveId == (int)entry.ItemId) is not { } target
+                _comparison[kind].SourceDefinitions.FirstOrDefault(definition => definition.SaveId == (int)entry.ItemId)
+                    is not { } source
+                || _comparison[kind].TargetDefinitions
+                    .FirstOrDefault(definition => definition.SaveId == (int)entry.ItemId) is not { } target
                 || !source.Key.Equals(target.Key, StringComparison.OrdinalIgnoreCase));
         }
 
-        private void Verify(byte[] bytes, object migratedRoot, Dictionary<string, string> before, Dictionary<string, string> serialized,
+        private void Verify(byte[] bytes, object migratedRoot, Dictionary<string, string> before,
+            Dictionary<string, string> serialized,
             List<FieldDifference> intended, List<FieldDifference> conversion)
         {
             // The output must meet every header rule, including the ones a source may break and still be recovered from.
             var headerProblems = CheckHeader(bytes, _kind, out var version, null);
-            _checks.Add(new MigrationCheck("Header, declared size and checksum", headerProblems.Count == 0 && version == TargetVersion,
-                headerProblems.Count == 0 ? $"version {version}, {bytes.Length} bytes" : string.Join("; ", headerProblems), Critical: true));
+            _checks.Add(new MigrationCheck("Header, declared size and checksum",
+                headerProblems.Count == 0 && version == TargetVersion,
+                headerProblems.Count == 0
+                    ? $"version {version}, {bytes.Length} bytes"
+                    : string.Join("; ", headerProblems), Critical: true));
 
             object reparsed;
             try
@@ -1029,7 +1145,8 @@ public sealed class SaveMigrator
             }
             catch (Exception exception)
             {
-                _checks.Add(new MigrationCheck($"Reparse with {Target.Label} definitions", false, $"{exception.GetType().Name}: {exception.Message}", Critical: true));
+                _checks.Add(new MigrationCheck($"Reparse with {Target.Label} definitions", false,
+                    $"{exception.GetType().Name}: {exception.Message}", Critical: true));
                 return;
             }
 
@@ -1038,24 +1155,30 @@ public sealed class SaveMigrator
                 $"parses, {trailer.Length} trailing byte(s)", Critical: true));
             if (_sourceTrailer.Length > 0 || trailer.Length > 0)
             {
-                _checks.Add(new MigrationCheck("Trailing extension data preserved byte-for-byte", trailer.AsSpan().SequenceEqual(_sourceTrailer),
+                _checks.Add(new MigrationCheck("Trailing extension data preserved byte-for-byte",
+                    trailer.AsSpan().SequenceEqual(_sourceTrailer),
                     $"source {_sourceTrailer.Length} byte(s), output {trailer.Length} byte(s)"
                     + (trailer.AsSpan().SequenceEqual(_sourceTrailer) ? ", identical" : ", different")));
             }
 
             var after = Flatten(reparsed);
-            var fidelity = Diff(serialized, after).Where(difference => difference.Path is not ("$.FileSize" or "$.Checksum")).ToList();
-            _checks.Add(new MigrationCheck("Reparsed output equals the migrated model", fidelity.Count == 0, Summarize(fidelity, "identical")));
+            var fidelity = Diff(serialized, after)
+                .Where(difference => difference.Path is not ("$.FileSize" or "$.Checksum")).ToList();
+            _checks.Add(new MigrationCheck("Reparsed output equals the migrated model", fidelity.Count == 0,
+                Summarize(fidelity, "identical")));
 
-            var missing = intended.Where(difference => after.GetValueOrDefault(difference.Path) != difference.After).ToList();
+            var missing = intended.Where(difference => after.GetValueOrDefault(difference.Path) != difference.After)
+                .ToList();
             _checks.Add(new MigrationCheck("Intended id changes present in the output", missing.Count == 0,
-                $"{intended.Count - missing.Count}/{intended.Count} present" + (missing.Count == 0 ? "" : $"; missing: {Summarize(missing, "")}")));
+                $"{intended.Count - missing.Count}/{intended.Count} present" +
+                (missing.Count == 0 ? "" : $"; missing: {Summarize(missing, "")}")));
 
             var allowed = intended.Concat(conversion).Select(difference => difference.Path)
                 .Concat(["$.Version", "$.FileSize", "$.Checksum"])
                 .ToHashSet(StringComparer.Ordinal);
             var unexpected = Diff(before, after).Where(difference => !allowed.Contains(difference.Path)).ToList();
-            _checks.Add(new MigrationCheck("No unintended changes against the source", unexpected.Count == 0, Summarize(unexpected, "none")));
+            _checks.Add(new MigrationCheck("No unintended changes against the source", unexpected.Count == 0,
+                Summarize(unexpected, "none")));
 
             var sourceCounts = Count(migratedRoot);
             var outputCounts = Count(reparsed);
@@ -1064,7 +1187,8 @@ public sealed class SaveMigrator
                 + $"output {outputCounts.Items} / {outputCounts.Sockets} / {outputCounts.Stats}"));
 
             var outputCustom = CustomPageItems(reparsed);
-            _checks.Add(new MigrationCheck("Custom inventory page items preserved", _customPageItems.SequenceEqual(outputCustom),
+            _checks.Add(new MigrationCheck("Custom inventory page items preserved",
+                _customPageItems.SequenceEqual(outputCustom),
                 _customPageItems.Count == 0
                     ? "no items on non-retail store pages"
                     : $"{outputCustom.Count}/{_customPageItems.Count} item(s) on page(s) "
@@ -1072,9 +1196,16 @@ public sealed class SaveMigrator
 
             if (migratedRoot is D2Save source && reparsed is D2Save output)
             {
-                string[] sections = ["$.Character.", "$.Quests.", "$.Waypoints.", "$.PlayerIntro.", "$.Skills.", "$.Corpses", "$.MercItems", "$.IronGolem"];
-                var sectionChanges = unexpected.Where(difference => sections.Any(section => difference.Path.StartsWith(section, StringComparison.Ordinal))).ToList();
-                _checks.Add(new MigrationCheck("Character, quests, waypoints, NPC intro, skills and mercenary unchanged", sectionChanges.Count == 0,
+                string[] sections =
+                [
+                    "$.Character.", "$.Quests.", "$.Waypoints.", "$.PlayerIntro.", "$.Skills.", "$.Corpses",
+                    "$.MercItems", "$.IronGolem"
+                ];
+                var sectionChanges = unexpected.Where(difference =>
+                    sections.Any(section => difference.Path.StartsWith(section, StringComparison.Ordinal))).ToList();
+                _checks.Add(new MigrationCheck(
+                    "Character, quests, waypoints, NPC intro, skills and mercenary unchanged",
+                    sectionChanges.Count == 0,
                     $"'{DisplayName(source)}' {source.Character.Class} level {source.Character.Level} -> "
                     + $"'{DisplayName(output)}' {output.Character.Class} level {output.Character.Level}; {Summarize(sectionChanges, "no differences")}"));
             }
@@ -1085,7 +1216,8 @@ public sealed class SaveMigrator
 
         private static string Summarize(List<FieldDifference> differences, string empty) => differences.Count == 0
             ? empty
-            : $"{differences.Count} difference(s): {string.Join("; ", differences.Take(8))}" + (differences.Count > 8 ? "; ..." : "");
+            : $"{differences.Count} difference(s): {string.Join("; ", differences.Take(8))}" +
+              (differences.Count > 8 ? "; ..." : "");
 
         private static IEnumerable<(string Location, IReadOnlyList<Item> Items)> Containers(object root)
         {
@@ -1123,13 +1255,15 @@ public sealed class SaveMigrator
             var place = position.IsOnGround
                 ? $"ground {position.GroundX},{position.GroundY}"
                 : $"{position.Mode} {(Enum.IsDefined(position.StorePage) ? position.StorePage.ToString() : $"page {(int)position.StorePage}")} "
-                  + $"{position.InvX},{position.InvY}" + (position.BodyLocation == BodyLocation.None ? "" : $" {position.BodyLocation}");
+                  + $"{position.InvX},{position.InvY}" +
+                  (position.BodyLocation == BodyLocation.None ? "" : $" {position.BodyLocation}");
             return $"{location} #{index + 1} '{item.ItemCodeString}' ({place})";
         }
 
         /// <summary>Items stored on a page D2SSharp has no name for, such as the D2RLoader Charm Inventory page.</summary>
         private static List<CustomPageItem> CustomPageItems(object root) => Containers(root)
-            .SelectMany(container => container.Items.Select((item, index) => (container.Location, Item: item, Index: index)))
+            .SelectMany(container =>
+                container.Items.Select((item, index) => (container.Location, Item: item, Index: index)))
             .Where(entry => !entry.Item.Position.IsOnGround && !Enum.IsDefined(entry.Item.Position.StorePage))
             .Select(entry => new CustomPageItem(
                 $"{entry.Location} #{entry.Index + 1}",
@@ -1161,7 +1295,8 @@ public sealed class SaveMigrator
                     items++;
                 }
 
-                stats += item.Stats.Count + item.SetBonusStats.Sum(list => list.Count) + (item.RunewordStats?.Count ?? 0);
+                stats += item.Stats.Count + item.SetBonusStats.Sum(list => list.Count) +
+                         (item.RunewordStats?.Count ?? 0);
                 foreach (var socket in item.Sockets.OfType<Item>())
                 {
                     Visit(socket, true);
@@ -1191,23 +1326,27 @@ public sealed class SaveMigrator
             var declared = BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(8));
             if (!SupportedVersions.Contains(version))
             {
-                soft.Add($"binary version {version} is not one of the retail versions D2SSharp is known to read ({string.Join(", ", SupportedVersions)}); "
-                         + "it is decoded experimentally");
+                soft.Add(
+                    $"binary version {version} is not one of the retail versions D2SSharp is known to read ({string.Join(", ", SupportedVersions)}); "
+                    + "it is decoded experimentally");
             }
 
             if (declared != data.Length)
             {
-                soft.Add($"declared size {declared} differs from the file size {data.Length}; the output declares its real size");
+                soft.Add(
+                    $"declared size {declared} differs from the file size {data.Length}; the output declares its real size");
             }
 
             if (data.Length > RetailCharacterSizeLimit)
             {
-                soft.Add($"{data.Length} bytes exceeds the retail {RetailCharacterSizeLimit}-byte limit (D2RLoader extended save?)");
+                soft.Add(
+                    $"{data.Length} bytes exceeds the retail {RetailCharacterSizeLimit}-byte limit (D2RLoader extended save?)");
             }
 
             if (!ChecksumCalculator.Verify(data))
             {
-                soft.Add("checksum mismatch; the output gets a recalculated checksum, which does not prove the source data is uncorrupted");
+                soft.Add(
+                    "checksum mismatch; the output gets a recalculated checksum, which does not prove the source data is uncorrupted");
             }
 
             return problems;
@@ -1217,7 +1356,8 @@ public sealed class SaveMigrator
         var tabs = 0;
         while (offset < data.Length)
         {
-            if (data.Length - offset < StashTabHeaderSize || BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(offset)) != SaveMagic)
+            if (data.Length - offset < StashTabHeaderSize ||
+                BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(offset)) != SaveMagic)
             {
                 soft.Add($"{data.Length - offset} unrecognized byte(s) after tab {tabs} at offset {offset}");
                 break;
@@ -1229,7 +1369,8 @@ public sealed class SaveMigrator
             version = tabs == 0 ? itemFormat : version;
             if (stashFormat is < 1 or > 2 || !SupportedVersions.Contains(itemFormat) || itemFormat != version)
             {
-                soft.Add($"tab {tabs + 1}: stash format {stashFormat}, item format {itemFormat} is not a known retail layout; it is decoded experimentally");
+                soft.Add(
+                    $"tab {tabs + 1}: stash format {stashFormat}, item format {itemFormat} is not a known retail layout; it is decoded experimentally");
             }
 
             if (size < StashTabHeaderSize || offset + size > data.Length)
@@ -1301,10 +1442,11 @@ public sealed class SaveMigrator
         }
     }
 
-    private static List<FieldDifference> Diff(Dictionary<string, string> before, Dictionary<string, string> after) => before.Keys
-        .Union(after.Keys)
-        .Where(path => before.GetValueOrDefault(path) != after.GetValueOrDefault(path))
-        .Order(StringComparer.Ordinal)
-        .Select(path => new FieldDifference(path, before.GetValueOrDefault(path), after.GetValueOrDefault(path)))
-        .ToList();
+    private static List<FieldDifference> Diff(Dictionary<string, string> before, Dictionary<string, string> after) =>
+        before.Keys
+            .Union(after.Keys)
+            .Where(path => before.GetValueOrDefault(path) != after.GetValueOrDefault(path))
+            .Order(StringComparer.Ordinal)
+            .Select(path => new FieldDifference(path, before.GetValueOrDefault(path), after.GetValueOrDefault(path)))
+            .ToList();
 }

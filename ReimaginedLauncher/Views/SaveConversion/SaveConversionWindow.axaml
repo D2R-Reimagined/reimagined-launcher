@@ -26,12 +26,9 @@
                        Text="Converts offline characters (.d2s) and shared stashes (.d2i) to the target Reimagined game data. Every changed file is first copied to a permanent backup. Ladder characters are not touched." />
             <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
                 <TextBlock Text="Convert to" FontWeight="SemiBold" VerticalAlignment="Center" />
-                <ComboBox x:Name="TargetComboBox" Grid.Column="1" MinWidth="320" HorizontalAlignment="Left"
-                          FontWeight="SemiBold" SelectionChanged="OnTargetSelectionChanged" />
+                <TextBlock x:Name="TargetText" Grid.Column="1" FontWeight="SemiBold" VerticalAlignment="Center" />
             </Grid>
             <TextBlock x:Name="TargetExplanationText" Classes="muted" FontSize="12" TextWrapping="Wrap" />
-            <TextBlock x:Name="TargetWarningText" Foreground="{StaticResource GoldTextBrush}" FontSize="12" TextWrapping="Wrap"
-                       IsVisible="False" />
             <StackPanel Spacing="2">
                 <CheckBox x:Name="ForceCheckBox" Content="Force conversion (experimental)"
                           IsCheckedChanged="OnForceChanged" />

@@ -52,7 +52,8 @@ public sealed class GameDataSnapshot
     public GameDataSnapshot WithStatsOf(string label, GameDataSnapshot statsSnapshot) => new(
         label,
         Directory,
-        TableSchema.AllKinds.ToDictionary(kind => kind, kind => kind == TableKind.ItemStatCost ? statsSnapshot[kind] : this[kind]));
+        TableSchema.AllKinds.ToDictionary(kind => kind,
+            kind => kind == TableKind.ItemStatCost ? statsSnapshot[kind] : this[kind]));
 }
 
 public sealed record KnownSnapshot(string Label, string FolderName)
@@ -66,13 +67,8 @@ public static class KnownSnapshots
     public static readonly KnownSnapshot Reimagined212 = new("2.1.2", "D2RR 2.1.2");
     public static readonly KnownSnapshot Reimagined3012 = new("3.0.12", "D2RR 3.0.12");
 
-    // The proposed PR #1181 tables are stored in the "D2RR 3.0.13" folder.
-    public static readonly KnownSnapshot PullRequest1181 = new("PR #1181", "D2RR 3.0.13");
-
     public static readonly IReadOnlyList<(KnownSnapshot Source, KnownSnapshot Target)> SupportedComparisons =
     [
         (Reimagined212, Reimagined3012),
-        (Reimagined3012, PullRequest1181),
-        (Reimagined212, PullRequest1181),
     ];
 }

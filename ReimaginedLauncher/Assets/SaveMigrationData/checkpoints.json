@@ -18,37 +18,6 @@
       "order": 20,
       "directory": "D2RR 3.0.12",
       "installedVersions": [ "3.0.12" ]
-    },
-    {
-      "id": "reimagined-3.0.13-pre-swap",
-      "label": "3.0.13 candidate (3.0.12 + appended PR #1181 stats)",
-      "build": "Intermediate 3.0.13 (pre-swap)",
-      "type": "intermediate",
-      "order": 30,
-      "directory": "D2RR 3.0.12",
-      "appendedStatsDirectory": "D2RR 3.0.13",
-      "description": "3.0.12 tables plus only the lab stats appended past the end of 3.0.12's itemstatcost.txt. Source only."
-    },
-    {
-      "id": "reimagined-3.0.13-new-items-pre-swap-stats",
-      "label": "3.0.13 development (PR #1181 items + 3.0.12 stats + appended PR #1181 stats)",
-      "build": "Intermediate 3.0.13 (new items, pre-swap stats)",
-      "type": "intermediate",
-      "order": 35,
-      "directory": "D2RR 3.0.12",
-      "appendedStatsDirectory": "D2RR 3.0.13",
-      "itemTablesDirectory": "D2RR 3.0.13",
-      "description": "PR #1181 item tables and base items, 3.0.12 stat ids and encoding, plus only the lab stats appended past the end of 3.0.12's itemstatcost.txt. Source only."
-    },
-    {
-      "id": "pr-1181",
-      "label": "PR #1181",
-      "build": "PR #1181 (upcoming Reimagined 3.0.13)",
-      "type": "intermediate",
-      "order": 40,
-      "directory": "D2RR 3.0.13",
-      "supportedTarget": true,
-      "description": "PR #1181 snapshot of the upcoming Reimagined 3.0.13 data layout. Supported target; the newest supported target is the default."
     }
   ],
   "identityMappings": [

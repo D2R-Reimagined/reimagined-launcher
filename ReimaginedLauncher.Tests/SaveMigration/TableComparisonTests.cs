@@ -25,7 +25,8 @@ public sealed class TableComparisonTests
         var third = Assert.Single(comparison.ForSourceKey("third"));
         Assert.Equal((2, 1), (third.Source!.SaveId!.Value, third.Target!.SaveId!.Value));
 
-        var stats = TableSchema.Extract(TableKind.ItemStatCost, Load(KnownSnapshots.Reimagined212)[TableKind.ItemStatCost]);
+        var stats = TableSchema.Extract(TableKind.ItemStatCost,
+            Load(KnownSnapshots.Reimagined212)[TableKind.ItemStatCost]);
         Assert.Equal(("unused203", 203), (stats[203].Key, stats[203].SaveId!.Value));
         var oncrit = stats.Single(stat => stat.Key == "passive_mastery_replenish_oncrit");
         Assert.Equal((207, "206"), (oncrit.SaveId!.Value, oncrit.CommentId));
@@ -33,24 +34,27 @@ public sealed class TableComparisonTests
     }
 
     [Fact]
-    public void PullRequest1181StatMovesAndEncodingChangesAreDetected()
+    public void InstalledDevelopmentStatMovesAndEncodingChangesAreDetected()
     {
-        var stats = Compare(KnownSnapshots.Reimagined3012, KnownSnapshots.PullRequest1181)[TableKind.ItemStatCost];
+        var stats = Compare(KnownSnapshots.Reimagined3012, InstalledSnapshot)[TableKind.ItemStatCost];
 
         AssertMoved(stats, "hpregen_perlevel", 366, 432);
         AssertMoved(stats, "passive_dmg_pierce", 432, 366);
         Assert.Equal(2, stats.Moved.Count());
-        Assert.Contains(stats.FindSaveIdReassignments(), r => r is { SaveId: 366, Source.Key: "hpregen_perlevel", Target.Key: "passive_dmg_pierce" });
+        Assert.Contains(stats.FindSaveIdReassignments(),
+            r => r is { SaveId: 366, Source.Key: "hpregen_perlevel", Target.Key: "passive_dmg_pierce" });
 
         var maxHp = Assert.Single(stats.ForSourceKey("item_maxhp_percent"));
         Assert.Contains(new FieldChange("Save Bits", "6", "8"), maxHp.FieldChanges);
         Assert.Contains(new FieldChange("Save Add", "10", "100"), maxHp.FieldChanges);
-        Assert.Contains(new FieldChange("Save Bits", "7", "16"), Assert.Single(stats.ForSourceKey("item_attackertakesdamage")).FieldChanges);
+        Assert.Contains(new FieldChange("Save Bits", "7", "16"),
+            Assert.Single(stats.ForSourceKey("item_attackertakesdamage")).FieldChanges);
         Assert.Contains(stats.Added, added => added.Target is { Key: "extra_stbounce", SaveId: 441 });
         Assert.Empty(stats.Removed);
         Assert.Empty(stats.Ambiguous);
 
-        AssertMoved(Compare(KnownSnapshots.Reimagined212, KnownSnapshots.PullRequest1181)[TableKind.ItemStatCost], "hpregen_perlevel", 366, 432);
+        AssertMoved(Compare(KnownSnapshots.Reimagined212, InstalledSnapshot)[TableKind.ItemStatCost],
+            "hpregen_perlevel", 366, 432);
     }
 
     [Fact]
@@ -73,8 +77,10 @@ public sealed class TableComparisonTests
             Assert.Equal(349, Assert.Single(mapping.Candidates).SaveId!.Value);
         });
 
-        var azurewrath = Assert.Single(uniques.ForSourceKey("Azurewrath"), mapping => mapping.Source!.Field("code") == "7cr");
-        Assert.Equal((MappingStatus.Matched, MatchMethod.KeyAndCode, 301), (azurewrath.Status, azurewrath.Method, azurewrath.Target!.SaveId!.Value));
+        var azurewrath = Assert.Single(uniques.ForSourceKey("Azurewrath"),
+            mapping => mapping.Source!.Field("code") == "7cr");
+        Assert.Equal((MappingStatus.Matched, MatchMethod.KeyAndCode, 301),
+            (azurewrath.Status, azurewrath.Method, azurewrath.Target!.SaveId!.Value));
     }
 
     [Fact]
@@ -103,7 +109,9 @@ public sealed class TableComparisonTests
             File.WriteAllText(Path.Combine(reportDirectory, fileName), report);
         }
 
-        Assert.Contains(Compare(KnownSnapshots.Reimagined212, KnownSnapshots.Reimagined3012)[TableKind.MagicPrefix].SourceDuplicates,
+        Assert.Contains(
+            Compare(KnownSnapshots.Reimagined212, KnownSnapshots.Reimagined3012)[TableKind.MagicPrefix]
+                .SourceDuplicates,
             duplicate => duplicate.Definitions.Count > 1);
     }
 
@@ -117,6 +125,11 @@ public sealed class TableComparisonTests
 
     private static SnapshotComparison Compare(KnownSnapshot source, KnownSnapshot target) =>
         TableComparer.Compare(Load(source), Load(target));
+
+    private static SnapshotComparison Compare(KnownSnapshot source, GameDataSnapshot target) =>
+        TableComparer.Compare(Load(source), target);
+
+    private static GameDataSnapshot InstalledSnapshot => SaveMigrationFixtures.InstalledTarget.Snapshot;
 
     private static GameDataSnapshot Load(KnownSnapshot snapshot)
     {
@@ -134,7 +147,9 @@ public sealed class TableComparisonTests
 
     private static string FindDataDirectory()
     {
-        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
+             directory is not null;
+             directory = directory.Parent)
         {
             if (File.Exists(Path.Combine(directory.FullName, "ReimaginedLauncher.sln")))
             {
@@ -142,6 +157,7 @@ public sealed class TableComparisonTests
             }
         }
 
-        throw new DirectoryNotFoundException("Could not locate ReimaginedLauncher.sln above the test output directory.");
+        throw new DirectoryNotFoundException(
+            "Could not locate ReimaginedLauncher.sln above the test output directory.");
     }
 }
