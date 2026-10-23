@@ -87,6 +87,12 @@ public sealed class SaveConversionPlan
     /// <summary>The source layout the conversion reads the file as, when one was identified or chosen.</summary>
     public string? SourceLabel { get; init; }
 
+    /// <summary>A viable historical interpretation whose migration differs from the installed-target parse.</summary>
+    public string? HistoricalAlternative { get; init; }
+
+    /// <summary>The output was rebuilt by parsing with the installed target definitions.</summary>
+    public bool IsTargetRebuild { get; init; }
+
     /// <summary>One or two plain sentences for players; technical detail stays in <see cref="Report"/>.</summary>
     public string Summary { get; init; } = string.Empty;
 
@@ -362,26 +368,49 @@ public sealed class SaveConversionService
             var (targetFits, targetCheck) = DescribeTargetFit(inspection, targetAttempt);
 
             var forced = overrides?.Force == true;
-            var result = migrator.Migrate(path, stagingDirectory, overrides);
+            var targetRebuild = forced && targetFits && overrides?.SourceLayout is null;
+            var result = targetRebuild
+                ? migrator.Rebuild(path, Path.Combine(stagingDirectory, "target-rebuild"))
+                : migrator.Migrate(path, stagingDirectory, overrides);
             var output = result.OutputPath is { } outputPath ? File.ReadAllBytes(outputPath) : null;
-            // A clean target reading outranks a historical reading that only converts by accepting uncertainties.
-            var historicalIsClean = result.OutputPath is not null && !result.HasUncertainty;
-            var report = new StringBuilder()
+            var targetReadableWithoutHistoricalSource = targetFits && result.SourceLayout is null
+                                                                   && overrides?.SourceLayout is null && !forced;
+            var reportBuilder = new StringBuilder()
                 .AppendLine($"{target} read check: {targetCheck}")
-                .Append(targetFits && result.SourceLayout is not null && !historicalIsClean &&
-                        overrides?.SourceLayout is null
-                    ? $"The file also decodes as {result.SourceLayout}, but that reading does not convert cleanly (see below), so the clean {target} reading is preferred."
-                      + Environment.NewLine
-                    : "")
+                .AppendLine(
+                    "A parse with installed target definitions does not guarantee that the game can load the save or that its data is semantically correct.")
                 .Append(forced
                     ? "Force conversion (experimental) was requested for this analysis." + Environment.NewLine
                     : "")
                 .Append(overrides?.SourceLayout is { } chosenSource
                     ? $"Source layout {chosenSource} was chosen by the user." + Environment.NewLine
                     : "")
-                .AppendLine()
-                .Append(SaveMigrationReport.Write(result))
-                .ToString();
+                .AppendLine();
+            if (targetReadableWithoutHistoricalSource)
+            {
+                reportBuilder.AppendLine(
+                    "Historical source detection: no registered historical source layout decoded this save.");
+                foreach (var layoutFailure in result.Identification.Where(line =>
+                             line.Contains(": rejected", StringComparison.Ordinal)))
+                {
+                    reportBuilder.AppendLine($"  {layoutFailure}");
+                }
+
+                foreach (var blocker in result.Blockers)
+                {
+                    reportBuilder.AppendLine($"  Historical source failure: {Friendly(blocker)}");
+                }
+
+                reportBuilder.AppendLine(
+                    "An out-of-range stat id reported by a failed historical layout may come from the wrong bit widths; it is not proof that the id is present in the save.");
+                reportBuilder.AppendLine("No conversion was required or attempted.");
+            }
+            else
+            {
+                reportBuilder.Append(SaveMigrationReport.Write(result));
+            }
+
+            var report = reportBuilder.ToString();
             var risks = result.References.Where(reference => reference.Blocking)
                 .Select(reference => DescribeRisk(reference, target))
                 .Concat(result.Uncertainties.Select(Friendly))
@@ -390,7 +419,8 @@ public sealed class SaveConversionService
 
             SaveConversionPlan Create(SaveConversionState state, string operation, string summary,
                 string? blockingReason, byte[]? converted,
-                SaveForceOption? force = null, string? recoveryCandidate = null) => new()
+                SaveForceOption? force = null, string? recoveryCandidate = null,
+                string? historicalAlternative = null, bool isTargetRebuild = false) => new()
             {
                 SourcePath = path,
                 Kind = kind,
@@ -406,6 +436,8 @@ public sealed class SaveConversionService
                 BlockingReason = blockingReason,
                 IssueGroups = state == SaveConversionState.AlreadyCompatible ? [] : CategorizeIssues(result),
                 ForceOption = force,
+                HistoricalAlternative = historicalAlternative,
+                IsTargetRebuild = isTargetRebuild,
                 CanAttemptRecovery = state == SaveConversionState.Blocked && !forced &&
                                      result.RejectedOutputPath is not null,
                 RecoveryCandidatePath = recoveryCandidate,
@@ -414,24 +446,97 @@ public sealed class SaveConversionService
                 SidecarPath = sidecar
             };
 
-            if (targetFits && (output is not null && output.AsSpan().SequenceEqual(data) ||
-                               !historicalIsClean && overrides?.SourceLayout is null))
+            if (targetRebuild)
             {
-                return Create(SaveConversionState.AlreadyCompatible,
-                    $"Already compatible: the file reads completely with the {target} definitions. No conversion is needed.",
-                    "This save is already compatible with the selected Reimagined version.", null, null);
+                if (output is null)
+                {
+                    var rebuildProblems = result.Blockers.Select(Friendly)
+                        .Concat(result.Checks.Where(check => check is { Passed: false, Critical: true })
+                            .Select(check => $"Critical check failed: {check.Name} ({check.Detail})."))
+                        .ToList();
+                    var rebuildFailure = rebuildProblems.Count == 0
+                        ? "The target-definition rebuild could not be verified."
+                        : string.Join(" ", rebuildProblems);
+                    var rebuildCandidate = result.RejectedOutputPath is { } rejectedRebuild
+                        ? KeepRecoveryCandidate(path, rejectedRebuild, report)
+                        : null;
+                    if (rebuildCandidate is not null)
+                    {
+                        rebuildFailure +=
+                            $" The unapproved output was kept as an experimental recovery candidate, not applied: {rebuildCandidate}";
+                    }
+
+                    return Create(SaveConversionState.Blocked,
+                        "Not rebuilt: no structurally usable output could be produced, so the file is left untouched.",
+                        "The target-definition rebuild could not be verified. The original was not changed.",
+                        rebuildFailure, null, recoveryCandidate: rebuildCandidate, isTargetRebuild: true);
+                }
+
+                if (output.AsSpan().SequenceEqual(data))
+                {
+                    return Create(SaveConversionState.AlreadyCompatible,
+                        $"The forced {target} target-definition round-trip was byte-identical; no repair occurred. The parser cannot establish in-game compatibility.",
+                        "The target-definition round-trip produced identical bytes, so no repair occurred. The in-game error remains unexplained.",
+                        null, null, isTargetRebuild: true);
+                }
+
+                var rebuildDifferences = new List<string> { DescribeByteDifferences(data, output) };
+                rebuildDifferences.AddRange(result.Warnings.Where(warning =>
+                    warning.StartsWith("Target-definition rebuild model difference:", StringComparison.Ordinal)));
+                rebuildDifferences.AddRange(risks);
+                rebuildDifferences = rebuildDifferences.Distinct().ToList();
+                return Create(SaveConversionState.Experimental,
+                    $"EXPERIMENTAL target-definition rebuild with {target}. Structural checks passed; {DescribeByteDifferences(data, output)} "
+                    + "This does not guarantee that the game can load the save.",
+                    "Force prepared a best-effort round-trip using installed target definitions. Review every reported difference; game compatibility is not guaranteed.",
+                    null, output,
+                    new SaveForceOption(SaveForceKind.Force, [], rebuildDifferences),
+                    isTargetRebuild: true);
             }
 
             if (targetFits && overrides?.SourceLayout is null)
             {
-                var reason =
-                    $"The file reads completely both as {target} and as {result.SourceLayout}, and converting it would change it. "
-                    + "The launcher cannot tell which version made it.";
-                return Create(SaveConversionState.Unresolved, $"Not converted: {reason} The file is left untouched.",
-                    "The launcher cannot tell which Reimagined version this save was made with. Review the details before continuing.",
-                    reason, null,
-                    new SaveForceOption(SaveForceKind.ChooseSourceLayout, [result.SourceLayout!], risks,
-                        TargetAlsoFits: true));
+                var historicalOutputPath = result.OutputPath ?? result.RejectedOutputPath;
+                var historicalOutput =
+                    historicalOutputPath is not null ? File.ReadAllBytes(historicalOutputPath) : null;
+                var historicalLayouts = result.AmbiguousSourceLayouts.Count > 1
+                    ? result.AmbiguousSourceLayouts.OrderBy(layout => layout == DefaultSourceLayout ? 0 : 1).ToList()
+                    : result.SourceLayout is { } historical
+                        ? [historical]
+                        : [];
+                var hasHistoricalAlternative = result.IsRecoverable && result.SourceLayout is not null
+                                                                    && historicalOutput is not null
+                                                                    && !historicalOutput.AsSpan().SequenceEqual(data);
+                var failedAttempts = result.Identification
+                    .Where(line => line.Contains(": rejected", StringComparison.Ordinal))
+                    .ToList();
+                failedAttempts.AddRange(result.Blockers.Select(blocker =>
+                    $"historical migration blocker: {Friendly(blocker)}"));
+                failedAttempts.AddRange(result.Checks.Where(check => check is { Passed: false, Critical: true })
+                    .Select(check => $"historical migration critical check failed: {check.Name} ({check.Detail})"));
+                var attemptDetails = failedAttempts.Count == 0
+                    ? string.Empty
+                    : " Historical attempts: " + string.Join("; ", failedAttempts) + ".";
+                var alternativeDetails = hasHistoricalAlternative
+                    ? $" A recoverable historical interpretation ({string.Join(", ", historicalLayouts)}) also produces different output; choose it to attempt migration."
+                    : " No viable historical migration output differing from the input was established.";
+                var noHistoricalSource = result.SourceLayout is null;
+                var forceOption = hasHistoricalAlternative
+                    ? new SaveForceOption(SaveForceKind.ChooseSourceLayout, historicalLayouts, risks,
+                        TargetAlsoFits: true)
+                    : null;
+                return Create(SaveConversionState.AlreadyCompatible,
+                    noHistoricalSource
+                        ? $"Parses with installed {target} definitions; no historical source layout decoded the save, so no conversion was required or attempted. This does not prove game compatibility.{attemptDetails}"
+                        : $"Parses with installed {target} definitions; this does not prove game compatibility.{alternativeDetails}{attemptDetails}",
+                    hasHistoricalAlternative
+                        ? $"The save parses with installed {target} definitions, but a different historical migration is available. Either interpretation is experimental evidence, not a game-compatibility guarantee."
+                        : noHistoricalSource
+                            ? $"The save parses with the current installed layout. No historical source decoded it, so no conversion was required or attempted. This does not guarantee that the game can load it; Force Conversion remains available for an experimental target rebuild."
+                            : $"The save parses with installed {target} definitions. This does not guarantee that the game can load it; no different viable historical output was found.",
+                    null, null, forceOption, historicalAlternative: hasHistoricalAlternative
+                        ? string.Join(", ", historicalLayouts)
+                        : null);
             }
 
             if (overrides?.SourceLayout is null && result.AmbiguousSourceLayouts.Count > 1)
@@ -660,7 +765,10 @@ public sealed class SaveConversionService
 
         if (plan.ConvertedBytes is null && newName is null)
         {
-            return new SaveConversionOutcome(true, "No changes needed.", plan.SourcePath);
+            return new SaveConversionOutcome(true,
+                plan.IsTargetRebuild
+                    ? "The installed-target round-trip was byte-identical; no repair occurred. Game compatibility was not established."
+                    : "No changes needed.", plan.SourcePath);
         }
 
         if (_isGameRunning())
@@ -769,6 +877,8 @@ public sealed class SaveConversionService
         {
             actions.Add(plan.State switch
             {
+                SaveConversionState.Experimental when plan.IsTargetRebuild =>
+                    "Rebuilt experimentally with the installed target definitions (see the experimental report in the backup)",
                 SaveConversionState.Experimental =>
                     "Converted experimentally (accepted issues are not verified; see the experimental report in the backup)",
                 SaveConversionState.VerifiedWithWarnings => "Converted (with accepted warnings)",
@@ -922,6 +1032,19 @@ public sealed class SaveConversionService
         return problems.Count == 0
             ? (true, $"complete parse, {attempt.AllItems.Count()} item(s){trailer}")
             : (false, $"parses, but {string.Join(", ", problems)}{trailer}");
+    }
+
+    private static string DescribeByteDifferences(byte[] before, byte[] after)
+    {
+        var maxLength = Math.Max(before.Length, after.Length);
+        var changedOffsets = Enumerable.Range(0, maxLength)
+            .Where(offset => offset >= before.Length || offset >= after.Length || before[offset] != after[offset])
+            .ToList();
+        var lengthChange = before.Length == after.Length
+            ? $"length unchanged at {before.Length} byte(s)"
+            : $"length {before.Length} -> {after.Length} byte(s)";
+        return
+            $"{changedOffsets.Count} differing byte offset(s) [{string.Join(", ", changedOffsets)}]; {lengthChange}.";
     }
 
     /// <summary>Counts per category; blocking groups first. Individual technical lines stay in the report.</summary>

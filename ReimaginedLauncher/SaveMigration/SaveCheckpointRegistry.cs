@@ -27,6 +27,8 @@ public sealed record SaveCheckpoint(
     public string DisplayName => Build;
 }
 
+public sealed record SaveStatEncoding(string Id, string Label, int Order, string File, string? Description);
+
 /// <summary>
 /// An explicit identity for a row that was renamed between checkpoints. A unique or set mapping applies only when the saved id
 /// still names <see cref="SourceKey"/> on <see cref="Code"/> in the source checkpoint and the target has exactly one row
@@ -55,6 +57,7 @@ public sealed record ResolvedIdentityMapping(SaveIdentityMapping Mapping, string
 public sealed record SaveCheckpointRegistry(
     string DataDirectory,
     IReadOnlyList<SaveCheckpoint> Checkpoints,
+    IReadOnlyList<SaveStatEncoding> StatEncodings,
     IReadOnlyList<SaveIdentityMapping> IdentityMappings)
 {
     public const string FileName = "checkpoints.json";
@@ -91,17 +94,28 @@ public sealed record SaveCheckpointRegistry(
                 entry.Description))
             .OrderBy(checkpoint => checkpoint.Order)
             .ToList();
+        var statEncodings = (file.StatEncodings ?? []).Select(entry => new SaveStatEncoding(
+                Required(entry.Id, "id"),
+                Required(entry.Label, "label"),
+                entry.Order ?? throw new InvalidDataException($"Stat encoding '{entry.Id}' has no order."),
+                Required(entry.File, "file"),
+                entry.Description))
+            .OrderBy(encoding => encoding.Order)
+            .ToList();
 
-        if (checkpoints.GroupBy(checkpoint => checkpoint.Id, StringComparer.OrdinalIgnoreCase)
+        if (checkpoints.Select(checkpoint => checkpoint.Id).Concat(statEncodings.Select(encoding => encoding.Id))
+                .GroupBy(id => id, StringComparer.OrdinalIgnoreCase)
                 .FirstOrDefault(group => group.Count() > 1) is { } duplicateId)
         {
-            throw new InvalidDataException($"{FileName} registers checkpoint '{duplicateId.Key}' more than once.");
+            throw new InvalidDataException($"{FileName} registers save layout '{duplicateId.Key}' more than once.");
         }
 
-        if (checkpoints.GroupBy(checkpoint => checkpoint.Order).FirstOrDefault(group => group.Count() > 1) is
+        if (checkpoints.Select(checkpoint => checkpoint.Order).Concat(statEncodings.Select(encoding => encoding.Order))
+                .GroupBy(order => order).FirstOrDefault(group => group.Count() > 1) is
             { } duplicateOrder)
         {
-            throw new InvalidDataException($"{FileName} gives order {duplicateOrder.Key} to more than one checkpoint.");
+            throw new InvalidDataException(
+                $"{FileName} gives order {duplicateOrder.Key} to more than one save layout.");
         }
 
         var ids = checkpoints.Select(checkpoint => checkpoint.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -133,7 +147,7 @@ public sealed record SaveCheckpointRegistry(
                     entry.LastSourceId);
             })
             .ToList();
-        return new SaveCheckpointRegistry(Path.GetFullPath(dataDirectory), checkpoints, mappings);
+        return new SaveCheckpointRegistry(Path.GetFullPath(dataDirectory), checkpoints, statEncodings, mappings);
 
         string Known(string? id) => id is not null && ids.Contains(id)
             ? id
@@ -148,7 +162,12 @@ public sealed record SaveCheckpointRegistry(
     public IReadOnlyList<SaveCheckpoint> SourcesBefore(int targetOrder) =>
         [.. Checkpoints.Where(checkpoint => checkpoint.Order < targetOrder)];
 
+    public IReadOnlyList<SaveStatEncoding> StatEncodingsBefore(int targetOrder) =>
+        [.. StatEncodings.Where(encoding => encoding.Order < targetOrder)];
+
     public string PathOf(string directory) => Path.GetFullPath(Path.Combine(DataDirectory, directory));
+
+    public string PathOf(SaveStatEncoding encoding) => Path.GetFullPath(Path.Combine(DataDirectory, encoding.File));
 
     public SaveCheckpoint? LatestCheckpoint => Checkpoints.MaxBy(checkpoint => checkpoint.Order);
 
@@ -272,7 +291,17 @@ public sealed record SaveCheckpointRegistry(
     private sealed class RegistryFile
     {
         public List<CheckpointEntry>? Checkpoints { get; set; }
+        public List<StatEncodingEntry>? StatEncodings { get; set; }
         public List<IdentityMappingEntry>? IdentityMappings { get; set; }
+    }
+
+    private sealed class StatEncodingEntry
+    {
+        public string? Id { get; set; }
+        public string? Label { get; set; }
+        public int? Order { get; set; }
+        public string? File { get; set; }
+        public string? Description { get; set; }
     }
 
     private sealed class CheckpointEntry

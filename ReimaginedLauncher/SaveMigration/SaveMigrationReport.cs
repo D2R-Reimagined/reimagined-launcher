@@ -33,6 +33,10 @@ public static class SaveMigrationReport
         {
             report.AppendLine($"Overrides: Force Conversion {(result.Overrides.Force ? "yes" : "no")}, "
                               + $"manual source layout {result.Overrides.SourceLayout ?? "none"}");
+            if (result.Overrides.RebuildWithTarget)
+            {
+                report.AppendLine("This is a best-effort round-trip attempt using the installed target definitions, not a historical migration.");
+            }
         }
 
         report.AppendLine($"Items (including socketed): {result.ItemsInspected} inspected, {result.ItemsChanged} changed, {result.ItemsUnchanged} unchanged");

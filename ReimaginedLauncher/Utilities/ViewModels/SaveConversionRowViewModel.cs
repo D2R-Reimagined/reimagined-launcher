@@ -19,7 +19,7 @@ public class SaveConversionRowViewModel : INotifyPropertyChanged
     private static readonly string[] PlanProperties =
     [
         nameof(Plan), nameof(StatusLabel), nameof(Explanation), nameof(IsProblem), nameof(FullReport), nameof(HasNameMismatch),
-        nameof(NameMismatchText), nameof(CanSelect), nameof(CanChangeSource), nameof(IsSelected)
+        nameof(NameMismatchText), nameof(CanSelect), nameof(CanChangeSource), nameof(IsAlreadyCompatible), nameof(IsSelected)
     ];
 
     private readonly Func<SaveConversionPlan, string, string?> _checkRename;
@@ -38,10 +38,25 @@ public class SaveConversionRowViewModel : INotifyPropertyChanged
         _checkRename = checkRename;
         // The file name is what the player sees and what D2RLoader matches, so it is the default proposal.
         _proposedName = plan.FileStem;
-        SourceChoices = plan is { State: SaveConversionState.Unresolved, ForceOption: { Kind: SaveForceKind.ChooseSourceLayout } option }
-            ? [.. option.SourceLayouts.Select(layout => new SaveSourceChoice(layout, layout)),
-               .. option.TargetAlsoFits ? [new SaveSourceChoice(null, $"{plan.TargetLabel} (already converted)")] : Array.Empty<SaveSourceChoice>()]
-            : [];
+        SourceChoices = plan switch
+        {
+            { State: SaveConversionState.Unresolved, ForceOption: { Kind: SaveForceKind.ChooseSourceLayout } option } =>
+            [
+                .. option.SourceLayouts.Select(layout => new SaveSourceChoice(layout, layout)),
+                .. option.TargetAlsoFits
+                    ? [new SaveSourceChoice(null, $"{plan.TargetLabel} (target parse)")]
+                    : Array.Empty<SaveSourceChoice>()
+            ],
+            {
+                    State: SaveConversionState.AlreadyCompatible,
+                    ForceOption: { Kind: SaveForceKind.ChooseSourceLayout, TargetAlsoFits: true } option
+                } =>
+                [
+                    new SaveSourceChoice(null, $"{plan.TargetLabel} (target parse)"),
+                    .. option.SourceLayouts.Select(layout => new SaveSourceChoice(layout, layout))
+                ],
+            _ => []
+        };
         _selectedSourceChoice = SourceChoices.FirstOrDefault();
         _isSelected = IsSelectedByDefault;
     }
@@ -71,11 +86,15 @@ public class SaveConversionRowViewModel : INotifyPropertyChanged
         set => Set(ref _selectedSourceChoice, value);
     }
 
-    public bool IsTargetChoiceSelected => IsSourceUncertain && SelectedSourceChoice is { Layout: null };
+    public bool IsTargetChoiceSelected =>
+        IsSourceUncertain && SelectedSourceChoice is { Layout: null } && Plan == BasePlan;
+
+    public bool IsAlreadyCompatible => Plan.State == SaveConversionState.AlreadyCompatible && !Plan.IsTargetRebuild;
 
     private int ForcedIssues => Plan.ForceOption?.Risks.Count ?? 0;
 
-    private bool IsForced => Plan.State == SaveConversionState.Experimental && ForcedIssues > 0;
+    private bool IsForced =>
+        Plan.State == SaveConversionState.Experimental && (ForcedIssues > 0 || Plan.IsTargetRebuild);
 
     /// <summary>The uncertain source is still waiting for the user, rather than blocked under the chosen version.</summary>
     private bool AwaitsSourceConfirmation => IsSourceUncertain && (Plan == BasePlan || !Plan.IsBlocked) && !IsForced;
@@ -83,10 +102,12 @@ public class SaveConversionRowViewModel : INotifyPropertyChanged
     public string StatusLabel => _result is not null
         ? _resultIsProblem ? "Failed" : _isDone ? DoneLabel : "Skipped"
         : IsTargetChoiceSelected
-            ? "Already compatible"
+            ? "Parses with target"
             : Plan.State switch
             {
-                SaveConversionState.AlreadyCompatible => "Already compatible",
+                SaveConversionState.AlreadyCompatible when Plan.IsTargetRebuild && Plan.ConvertedBytes is null =>
+                    "No repair",
+                SaveConversionState.AlreadyCompatible => "Parses with target",
                 SaveConversionState.Verified => "Ready",
                 SaveConversionState.VerifiedWithWarnings => "Warnings",
                 SaveConversionState.Experimental when IsForced => "Experimental",
@@ -107,10 +128,12 @@ public class SaveConversionRowViewModel : INotifyPropertyChanged
     public bool IsProblem => _result is not null ? _resultIsProblem : Plan.IsBlocked && !IsTargetChoiceSelected && !AwaitsSourceConfirmation;
 
     public string Explanation => _result ?? (IsTargetChoiceSelected
-        ? "No conversion needed."
+        ? string.IsNullOrWhiteSpace(Plan.Summary)
+            ? "No conversion selected; a target parse does not guarantee game compatibility."
+            : Plan.Summary
         : Plan.State switch
         {
-            SaveConversionState.AlreadyCompatible => "No conversion needed.",
+            SaveConversionState.AlreadyCompatible => Plan.Summary,
             SaveConversionState.Verified => $"Ready to convert from {Plan.SourceLabel} to {Plan.TargetLabel}.",
             SaveConversionState.VerifiedWithWarnings => WarningsText(),
             SaveConversionState.Experimental when IsForced => $"Experimental: {Issues(ForcedIssues)} accepted without verification.",
@@ -170,7 +193,9 @@ public class SaveConversionRowViewModel : INotifyPropertyChanged
     public bool CanSelect => !_isDone && !IsTargetChoiceSelected && !Plan.IsBlocked && (Plan.ConvertedBytes is not null || Plan.HasNameMismatch);
 
     /// <summary>Every convertible file, except one whose uncertain source still needs the user's confirmation.</summary>
-    private bool IsSelectedByDefault => CanSelect && Plan.ConvertedBytes is not null && !IsSourceUncertain;
+    private bool IsSelectedByDefault => CanSelect && Plan.ConvertedBytes is not null && !IsSourceUncertain
+                                        && !(BasePlan.State == SaveConversionState.AlreadyCompatible &&
+                                             Plan.IsTargetRebuild);
 
     public bool IsSelected
     {
@@ -220,7 +245,11 @@ public class SaveConversionRowViewModel : INotifyPropertyChanged
     {
         if (_result is null && !_isDone && (CanSelect || IsTargetChoiceSelected || Plan.State == SaveConversionState.AlreadyCompatible))
         {
-            _result = IsTargetChoiceSelected || Plan.State == SaveConversionState.AlreadyCompatible ? "No conversion needed." : "Not selected; left unchanged.";
+            _result = Plan.IsTargetRebuild && Plan.ConvertedBytes is null
+                ? "The identical target round-trip did not repair the save."
+                : IsTargetChoiceSelected || Plan.State == SaveConversionState.AlreadyCompatible
+                    ? "No conversion needed."
+                    : "Not selected; left unchanged.";
             RaisePlanProperties();
         }
     }

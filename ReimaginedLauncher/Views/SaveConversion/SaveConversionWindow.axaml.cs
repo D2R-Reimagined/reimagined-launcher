@@ -160,15 +160,17 @@ public partial class SaveConversionWindow : Window
         }
 
         var force = ForceCheckBox.IsChecked == true;
-        var plan = row.IsTargetChoiceSelected
-            ? row.BasePlan
-            : row.IsSourceUncertain
-                ? await PlanAsync(service, row, row.SelectedSourceChoice!.Layout, force)
-                : force && (row.BasePlan is
-                                { State: SaveConversionState.Unresolved, ForceOption.Kind: SaveForceKind.Force } ||
-                            row.BasePlan.CanAttemptRecovery)
-                    ? await PlanAsync(service, row, null, force)
-                    : row.BasePlan;
+        var targetChoiceSelected = row.IsSourceUncertain && row.SelectedSourceChoice is { Layout: null };
+        var plan = row.IsSourceUncertain
+            ? targetChoiceSelected
+                ? force ? await PlanAsync(service, row, null, true) : row.BasePlan
+                : await PlanAsync(service, row, row.SelectedSourceChoice!.Layout, force)
+            : force && (row.BasePlan.State == SaveConversionState.AlreadyCompatible ||
+                        row.BasePlan is
+                            { State: SaveConversionState.Unresolved, ForceOption.Kind: SaveForceKind.Force } ||
+                        row.BasePlan.CanAttemptRecovery)
+                ? await PlanAsync(service, row, null, true)
+                : row.BasePlan;
         if (plan != row.Plan || select is not null)
         {
             row.ReplacePlan(plan, select);
@@ -235,7 +237,7 @@ public partial class SaveConversionWindow : Window
         SetBusy(true, $"Analyzing {row.FileName} as {row.SelectedSourceChoice}...");
         try
         {
-            await RefreshPlanAsync(service, row, select: !row.IsTargetChoiceSelected);
+            await RefreshPlanAsync(service, row, select: row.SelectedSourceChoice?.Layout is not null);
         }
         finally
         {
@@ -313,14 +315,13 @@ public partial class SaveConversionWindow : Window
     {
         var ready = _rows.Count(row => row.IsReadyToApply);
         var converted = _rows.Count(row => row.IsDone);
-        var compatible = _rows.Count(row =>
-            !row.IsDone && (row.IsTargetChoiceSelected || row.Plan.State == SaveConversionState.AlreadyCompatible));
+        var compatible = _rows.Count(row => !row.IsDone && (row.IsTargetChoiceSelected || row.IsAlreadyCompatible));
         var blocked = _rows.Count(row => !row.IsDone && !row.CanSelect && row.IsProblem);
         SummaryText.Text = _rows.Count == 0
             ? string.Empty
             : $"{_rows.Count} file(s): {ready} selected"
               + (converted > 0 ? $", {converted} converted" : "")
-              + $", {compatible} already compatible, {blocked} blocked.";
+              + $", {compatible} parse(s) with target definitions, {blocked} blocked.";
         ConvertButton.IsEnabled = !_isBusy && ready > 0;
     }
 

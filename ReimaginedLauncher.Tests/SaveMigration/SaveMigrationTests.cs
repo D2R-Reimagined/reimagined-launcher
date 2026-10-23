@@ -43,6 +43,9 @@ public sealed class SaveMigrationTests(ITestOutputHelper testOutput)
 
         const string sourceLabel = "3.0.12 with installed appended stats";
         Assert.Equal(sourceLabel, result.SourceLayout);
+        Assert.Contains(result.Identification, line =>
+            line.Contains("Installed items with 3.0.13 development pre-swap stat encoding: rejected",
+                StringComparison.Ordinal));
         AssertLogicalValuesPreserved("BonesMcPimp.d2s", SaveDataDefinition.WithAppendedStats(sourceLabel,
             KnownSnapshots.Reimagined3012.Load(DataDirectory), SaveMigrationFixtures.InstalledTarget.Snapshot), save);
         var labBossKill = Assert.Single(save.Stats,
@@ -161,6 +164,74 @@ public sealed class SaveMigrationTests(ITestOutputHelper testOutput)
         static string Location(Item item) =>
             $"{item.Position.Mode} {item.Position.StorePage} {item.Position.InvX},{item.Position.InvY} {item.Position.BodyLocation} "
             + $"ground {item.Position.IsOnGround} {item.Position.GroundX},{item.Position.GroundY}";
+    }
+
+    [Fact]
+    public void LaterPreSwapSaveUsesItsFrozenEncodingAndMigratesSwappedStatIds()
+    {
+        var target = Migrator.Value.Target;
+        var original = File.ReadAllBytes(FixturePath("FuckBenFuckingF.d2s"));
+        var version = BitConverter.ToUInt32(original, 4);
+        var save = D2Save.Read(original, target.CreateExternalData(version));
+        var registry = SaveMigrationFixtures.LoadRegistry();
+        var encoding = Assert.Single(registry.StatEncodings);
+        var source = SaveDataDefinition.WithFrozenStatEncoding(
+            $"Installed items with {encoding.Label} stat encoding", registry.PathOf(encoding),
+            SaveMigrationFixtures.InstalledTarget.Snapshot,
+            Path.Combine(SaveMigrationFixtures.InstalledTarget.CopiedDirectory, "stat-encoding-test",
+                Guid.NewGuid().ToString("N")));
+
+        void Swap(Stat stat)
+        {
+            var id = (int)stat.Id;
+            if (id is 366 or 432)
+            {
+                stat.Id = (StatId)(id == 366 ? 432 : 366);
+            }
+        }
+
+        IEnumerable<Stat> ItemStats(Item item) => item.Stats
+            .Concat(item.SetBonusStats.SelectMany(list => list))
+            .Concat(item.RunewordStats ?? [])
+            .Concat(item.Sockets.OfType<Item>().SelectMany(ItemStats));
+
+        foreach (var stat in save.Stats)
+        {
+            Swap(stat);
+        }
+
+        foreach (var stat in save.Items.SelectMany(ItemStats))
+        {
+            Swap(stat);
+        }
+
+        var historicalBytes = save.ToBytes(source.CreateExternalData(version), version);
+        var temporaryDirectory = Path.Combine(Path.GetTempPath(), "ReimaginedPreSwapMigration",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporaryDirectory);
+        try
+        {
+            var input = Path.Combine(temporaryDirectory, "PreSwap.d2s");
+            File.WriteAllBytes(input, historicalBytes);
+            var result = Migrator.Value.Migrate(input, Path.Combine(temporaryDirectory, "output"));
+
+            Assert.Equal(source.Label, result.SourceLayout);
+            Assert.NotEqual(MigrationStatus.Failed, result.Status);
+            Assert.Contains(result.Stats, stat => stat is
+                { SourceName: "hpregen_perlevel", SourceId: 366, TargetId: 432 });
+            Assert.Contains(result.Stats, stat => stat is
+                { SourceName: "passive_dmg_pierce", SourceId: 432, TargetId: 366 });
+            Assert.All(result.Checks, check => Assert.True(check.Passed, $"{check.Name}: {check.Detail}"));
+
+            var inputModel = D2Save.Read(historicalBytes, source.CreateExternalData(version));
+            var outputBytes = File.ReadAllBytes(result.OutputPath!);
+            var outputModel = D2Save.Read(outputBytes, target.CreateExternalData(SaveMigrator.TargetVersion));
+            Assert.Equal(LogicalValues(inputModel, source), LogicalValues(outputModel, target));
+        }
+        finally
+        {
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
     }
 
     [Fact]
@@ -429,25 +500,25 @@ public sealed class SaveMigrationTests(ITestOutputHelper testOutput)
         var data = File.ReadAllBytes(Path.Combine(RepositoryRoot.Value, "ReimaginedLauncher.Tests", "TestFixtures",
             "SaveMigration", fixture));
         var input = D2Save.Read(data, source.CreateExternalData(BitConverter.ToUInt32(data, 4)));
-        Assert.Equal(Values(input, source), Values(output, Migrator.Value.Target));
+        Assert.Equal(LogicalValues(input, source), LogicalValues(output, Migrator.Value.Target));
+    }
 
-        static List<string> Values(D2Save save, SaveDataDefinition definition)
-        {
-            string Describe(Stat stat) => $"{definition.Stat((int)stat.Id)!.Key}[{stat.Layer}]={stat.Value}";
+    private static List<string> LogicalValues(D2Save save, SaveDataDefinition definition)
+    {
+        string Describe(Stat stat) => $"{definition.Stat((int)stat.Id)!.Key}[{stat.Layer}]={stat.Value}";
 
-            IEnumerable<string> ItemValues(Item item) => item.Stats
-                .Concat(item.SetBonusStats.SelectMany(list => list))
-                .Concat(item.RunewordStats ?? [])
-                .Select(stat => $"{item.ItemCodeString} {Describe(stat)}")
-                .Concat(item.Sockets.OfType<Item>().SelectMany(ItemValues));
+        IEnumerable<string> ItemValues(Item item) => item.Stats
+            .Concat(item.SetBonusStats.SelectMany(list => list))
+            .Concat(item.RunewordStats ?? [])
+            .Select(stat => $"{item.ItemCodeString} {Describe(stat)}")
+            .Concat(item.Sockets.OfType<Item>().SelectMany(ItemValues));
 
-            return
-            [
-                .. save.Stats.Select(Describe),
-                .. save.Items.Concat(save.Corpses.SelectMany(corpse => corpse.Items))
-                    .Concat(save.MercItems?.Items ?? []).SelectMany(ItemValues),
-            ];
-        }
+        return
+        [
+            .. save.Stats.Select(Describe),
+            .. save.Items.Concat(save.Corpses.SelectMany(corpse => corpse.Items))
+                .Concat(save.MercItems?.Items ?? []).SelectMany(ItemValues),
+        ];
     }
 
     private static int CountWithSockets(IEnumerable<Item> items) =>

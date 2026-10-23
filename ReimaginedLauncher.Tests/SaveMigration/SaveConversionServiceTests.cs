@@ -69,6 +69,143 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.Equal(SHA256.HashData(original), SHA256.HashData(File.ReadAllBytes(FixturePath(fixture))));
     }
 
+    [Fact]
+    public void ForceCanRebuildATargetParsingSaveWithoutPreselectingIt()
+    {
+        var service = CreateService();
+        var path = CopyFixture("FuckBenFuckingF.d2s");
+        var original = File.ReadAllBytes(path);
+        var normal = service.Plan(path, Path.Combine(StagingDirectory, "normal"));
+        var normalRow = new SaveConversionRowViewModel(normal, service.CheckRename);
+        Assert.Equal(SaveConversionState.AlreadyCompatible, normal.State);
+        Assert.Equal("Parses with target", normalRow.StatusLabel);
+        Assert.False(normalRow.IsSelected);
+
+        var forced = service.Plan(path, Path.Combine(StagingDirectory, "forced"), new MigrationOverrides(Force: true));
+        var row = new SaveConversionRowViewModel(forced, service.CheckRename);
+        Assert.True(forced.IsTargetRebuild);
+        Assert.Contains("[PASS] Header, declared size and checksum", forced.Report);
+        Assert.Contains("[PASS] Reparse with", forced.Report);
+        Assert.Contains("installed target definitions", forced.Report);
+        Assert.False(row.IsSelected);
+
+        if (forced.ConvertedBytes is { } rebuilt)
+        {
+            Assert.Equal(SaveConversionState.Experimental, forced.State);
+            Assert.True(row.CanSelect);
+            row.IsSelected = true;
+            Assert.True(row.IsSelected);
+            var outcome = service.Apply(forced, null, service.CreateBackupBatchDirectory());
+            Assert.True(outcome.Succeeded, outcome.Message);
+            Assert.Equal(rebuilt, File.ReadAllBytes(path));
+            Assert.True(ChecksumCalculator.Verify(rebuilt));
+            Assert.Equal(original, File.ReadAllBytes(Path.Combine(outcome.BackupDirectory!, "FuckBenFuckingF.d2s")));
+            Assert.True(File.Exists(Path.Combine(outcome.BackupDirectory!,
+                "FuckBenFuckingF.d2s.experimental-report.txt")));
+        }
+        else
+        {
+            Assert.Equal(SaveConversionState.AlreadyCompatible, forced.State);
+            Assert.Contains("no repair occurred", forced.Operation);
+            var outcome = service.Apply(forced, null, service.CreateBackupBatchDirectory());
+            Assert.True(outcome.Succeeded, outcome.Message);
+            Assert.Contains("no repair occurred", outcome.Message);
+            Assert.Equal(original, File.ReadAllBytes(path));
+            Assert.Empty(Directory.GetFiles(BackupRoot, "*", SearchOption.AllDirectories));
+        }
+    }
+
+    [Fact]
+    public void TargetReadableSaveWithoutHistoricalSourceIsNotReportedAsConversionFailure()
+    {
+        var service = CreateService();
+        var path = CopyFixture("SoManyBones.d2s");
+
+        var plan = service.Plan(path, Path.Combine(StagingDirectory, "target-readable"));
+
+        Assert.Equal(SaveConversionState.AlreadyCompatible, plan.State);
+        Assert.Null(plan.BlockingReason);
+        Assert.Null(plan.ConvertedBytes);
+        Assert.Contains("no historical source layout decoded the save", plan.Operation);
+        Assert.Contains("Historical source detection", plan.Report);
+        Assert.Contains("Installed items with 3.0.13 development pre-swap stat encoding: rejected", plan.Report);
+        Assert.Contains("wrong bit widths", plan.Report);
+        Assert.Contains("No conversion was required or attempted", plan.Report);
+        Assert.DoesNotContain("Status: FAILED", plan.Report);
+        Assert.DoesNotContain("game compatibility is guaranteed", plan.Summary, StringComparison.OrdinalIgnoreCase);
+
+        var forced = service.Plan(path, Path.Combine(StagingDirectory, "target-readable-force"),
+            new MigrationOverrides(Force: true));
+        Assert.True(forced.IsTargetRebuild);
+        Assert.Contains("installed target definitions", forced.Report);
+    }
+
+    [Fact]
+    public void IdenticalTargetRoundTripIsReportedAsNoRepair()
+    {
+        var service = CreateService();
+        var path = CopyFixture("FuckBenFuckingF.d2s");
+        var normalized = Migrator.Value.Rebuild(path, Path.Combine(StagingDirectory, "normalize"));
+        Assert.NotNull(normalized.OutputPath);
+        File.WriteAllBytes(path, File.ReadAllBytes(normalized.OutputPath));
+        var original = File.ReadAllBytes(path);
+
+        var plan = service.Plan(path, Path.Combine(StagingDirectory, "identical"), new MigrationOverrides(Force: true));
+
+        Assert.Equal(SaveConversionState.AlreadyCompatible, plan.State);
+        Assert.True(plan.IsTargetRebuild);
+        Assert.Null(plan.ConvertedBytes);
+        Assert.Contains("byte-identical", plan.Operation);
+        Assert.Contains("no repair occurred", plan.Summary);
+        var row = new SaveConversionRowViewModel(plan, service.CheckRename);
+        Assert.Equal("No repair", row.StatusLabel);
+        Assert.False(row.IsAlreadyCompatible);
+        Assert.Equal(original, File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void TargetParsingDoesNotHideARecoverableHistoricalMigrationWithUncertainties()
+    {
+        var installed = InstalledTarget.Value;
+        var path = CopyFixture("FuckBenFuckingF.d2s");
+        var targetDefinition = SaveDataDefinition.FromSnapshot(installed.Snapshot);
+        var targetAttempt = SaveInspector.Inspect(path, [targetDefinition], []).Attempts[0];
+        Assert.True(targetAttempt.Succeeded, targetAttempt.Error);
+        var usedStat = targetAttempt.AllItems.SelectMany(item => item.Stats).First();
+        var sourceDirectory = CopyInstalledFixtureToCustomDirectory();
+        var stat = Assert.Single(TableSchema.Extract(TableKind.ItemStatCost,
+                TableSnapshot.Load(Path.Combine(sourceDirectory, "itemstatcost.txt"))),
+            definition => definition.SaveId == usedStat.Id);
+        SetTableCell(Path.Combine(sourceDirectory, "itemstatcost.txt"), "Stat", stat.Key, "Save Add", "2000000000");
+
+        var sourceSnapshot = GameDataSnapshot.Load("Synthetic historical source", sourceDirectory);
+        var source = SaveDataDefinition.WithAppendedStats(sourceSnapshot.Label, sourceSnapshot,
+            installed.Snapshot, installed.Snapshot);
+        var comparison = TableComparer.Compare(source.ItemTables, installed.Snapshot);
+        var historicalAttempt = SaveInspector.Inspect(path, [source], [comparison]).Attempts[0];
+        Assert.True(historicalAttempt.Succeeded, historicalAttempt.Error);
+        var migrator = new SaveMigrator([source], targetDefinition, [comparison]);
+        var service = new SaveConversionService(() => migrator, BackupRoot, () => _gameRunning,
+            installedTarget: installed);
+
+        var plan = service.Plan(path, Path.Combine(StagingDirectory, "historical"));
+
+        Assert.Equal(SaveConversionState.AlreadyCompatible, plan.State);
+        Assert.Equal(source.Label, plan.HistoricalAlternative);
+        Assert.Equal(SaveForceKind.ChooseSourceLayout, plan.ForceOption?.Kind);
+        Assert.Contains(source.Label, plan.ForceOption!.SourceLayouts);
+        Assert.Contains("recoverable historical interpretation", plan.Operation);
+        var row = new SaveConversionRowViewModel(plan, service.CheckRename);
+        Assert.Null(row.SelectedSourceChoice?.Layout);
+        Assert.Equal(source.Label, row.SourceChoices[1].Layout);
+
+        var chosen = service.Plan(path, Path.Combine(StagingDirectory, "chosen"),
+            new MigrationOverrides(Force: true, SourceLayout: source.Label));
+        Assert.Equal(SaveConversionState.Experimental, chosen.State);
+        Assert.Equal(source.Label, chosen.SourceLabel);
+        Assert.NotNull(chosen.ConvertedBytes);
+    }
+
     [Theory]
     [InlineData("WereSorc")]
     [InlineData("Frostbite")]
@@ -368,7 +505,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.Equal(["2.1.2", "3.0.12 with installed appended stats"], plans.Take(2).Select(plan => plan.SourceLabel));
         Assert.All(rows, row => Assert.False(row.IsSourceUncertain));
         Assert.Equal([true, true, false], rows.Select(row => row.IsSelected));
-        Assert.Equal(("Already compatible", false), (rows[2].StatusLabel, rows[2].CanSelect));
+        Assert.Equal(("Parses with target", false), (rows[2].StatusLabel, rows[2].CanSelect));
         rows[2].MarkSkipped();
         Assert.Equal(("Skipped", "No conversion needed."), (rows[2].StatusLabel, rows[2].Explanation));
     }
@@ -396,7 +533,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.Equal((false, false, "Source uncertain"), (row.IsSelected, row.IsProblem, row.StatusLabel));
 
         row.SelectedSourceChoice = row.SourceChoices[^1];
-        Assert.Equal(("Already compatible", false), (row.StatusLabel, row.CanSelect));
+        Assert.Equal(("Parses with target", false), (row.StatusLabel, row.CanSelect));
     }
 
     [Fact]

@@ -33,7 +33,7 @@
                 <CheckBox x:Name="ForceCheckBox" Content="Force conversion (experimental)"
                           IsCheckedChanged="OnForceChanged" />
                 <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Margin="28,0,0,0"
-                           Text="Attempt conversion of saves with data that cannot be verified, such as unresolved item identities, unknown stats or a damaged checksum. Every change or loss is reported and originals are backed up. Files that cannot be decoded or written remain blocked." />
+                           Text="Attempt conversion of unverified saves, or a best-effort target-definition rebuild for saves that already parse with the installed data. Every change or loss is reported and originals are backed up. Files that cannot be decoded or structurally verified remain blocked." />
             </StackPanel>
             <TextBlock x:Name="SaveDirectoryText" Classes="muted" FontSize="12" TextWrapping="Wrap" />
             <TextBlock x:Name="BackupDirectoryText" Classes="muted" FontSize="12" TextWrapping="Wrap" />

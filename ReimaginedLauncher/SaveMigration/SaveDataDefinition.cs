@@ -54,6 +54,27 @@ public sealed class SaveDataDefinition
         [],
         version => new TxtFileExternalData(snapshot.Directory, version));
 
+    public static SaveDataDefinition WithFrozenStatEncoding(
+        string label, string itemStatCostPath, GameDataSnapshot itemTablesSnapshot, string composedDirectory)
+    {
+        Directory.CreateDirectory(composedDirectory);
+        foreach (var file in Directory.EnumerateFiles(itemTablesSnapshot.Directory, "*.txt"))
+        {
+            File.Copy(file, Path.Combine(composedDirectory, Path.GetFileName(file)), overwrite: true);
+        }
+
+        File.Copy(itemStatCostPath, Path.Combine(composedDirectory, TableSchema.FileName(TableKind.ItemStatCost)),
+            overwrite: true);
+        var frozenSnapshot = GameDataSnapshot.Load(label, composedDirectory);
+        return new SaveDataDefinition(
+            label,
+            itemTablesSnapshot.WithStatsOf(label, frozenSnapshot),
+            TableSchema.Extract(TableKind.ItemStatCost, frozenSnapshot[TableKind.ItemStatCost]),
+            [],
+            version => new TxtFileExternalData(composedDirectory, version),
+            usesNewerItemTables: true);
+    }
+
     /// <summary>
     /// The base snapshot unchanged, plus only the overlay stats whose ids lie past the end of the base stat table.
     /// Moves and encoding changes the overlay makes to existing ids are deliberately not applied.

@@ -77,6 +77,21 @@ public sealed class SaveMigrator
             }
         }
 
+        foreach (var encoding in registry.StatEncodingsBefore(targetOrder))
+        {
+            var statPath = registry.PathOf(encoding);
+            if (File.ReadAllBytes(statPath).AsSpan()
+                .SequenceEqual(File.ReadAllBytes(Path.Combine(installedTarget.CopiedDirectory, "itemstatcost.txt"))))
+            {
+                continue;
+            }
+
+            var composedDirectory = Path.Combine(installedTarget.CopiedDirectory, "stat-encodings",
+                Guid.NewGuid().ToString("N"), encoding.Id);
+            sources.Add(SaveDataDefinition.WithFrozenStatEncoding(
+                $"Installed items with {encoding.Label} stat encoding", statPath, targetTables, composedDirectory));
+        }
+
         var comparisons = sources
             .Select(source => source.ItemTables)
             .DistinctBy(tables => (tables.Label, tables.Directory))
@@ -111,6 +126,9 @@ public sealed class SaveMigrator
         MigrationOverrides? overrides = null) =>
         new Run(this, Path.GetFullPath(inputPath), Path.GetFullPath(outputDirectory),
             overrides ?? MigrationOverrides.None).Execute();
+
+    public SaveMigrationResult Rebuild(string inputPath, string outputDirectory) =>
+        Migrate(inputPath, outputDirectory, new MigrationOverrides(Force: true, RebuildWithTarget: true));
 
     private sealed record FieldDifference(string Path, string? Before, string? After)
     {
@@ -233,11 +251,13 @@ public sealed class SaveMigrator
                 return Result(null, null, null);
             }
 
-            _comparison = owner._comparisons.FirstOrDefault(comparison =>
-                              comparison.Source.Label == _source.ItemTables.Label &&
-                              comparison.Target.Label == Target.ItemTables.Label)
-                          ?? throw new InvalidOperationException(
-                              $"No Phase 1 comparison from {_source.ItemTables.Label} to {Target.ItemTables.Label}.");
+            _comparison = overrides.RebuildWithTarget
+                ? TableComparer.Compare(Target.ItemTables, Target.ItemTables)
+                : owner._comparisons.FirstOrDefault(comparison =>
+                      comparison.Source.Label == _source.ItemTables.Label &&
+                      comparison.Target.Label == Target.ItemTables.Label)
+                  ?? throw new InvalidOperationException(
+                      $"No Phase 1 comparison from {_source.ItemTables.Label} to {Target.ItemTables.Label}.");
             _sourceTypes = SaveInspector.ItemTypeIndex.Load(_source.ItemTables.Directory);
             _targetTypes = SaveInspector.ItemTypeIndex.Load(Target.ItemTables.Directory);
             _sourceData = _source.CreateExternalData(_sourceVersion);
@@ -343,6 +363,24 @@ public sealed class SaveMigrator
 
         private SaveDataDefinition? Identify()
         {
+            if (overrides.RebuildWithTarget)
+            {
+                var targetAttempt = SaveInspector.Inspect(input, [Target], []).Attempts[0];
+                if (!targetAttempt.Succeeded)
+                {
+                    _identification.Add($"{Target.Label}: rejected, target parse failed ({targetAttempt.Error})");
+                    _blockers.Add(
+                        $"The installed target definitions could not decode this file: {targetAttempt.Error}");
+                    return null;
+                }
+
+                _identification.Add(
+                    $"{Target.Label}: parses with installed target definitions for an experimental rebuild, "
+                    + $"{targetAttempt.AllItems.Count()} item(s)");
+                _identification.Add($"Selected source layout for experimental target rebuild: {Target.Label}");
+                return Target;
+            }
+
             var inspection = SaveInspector.Inspect(input, owner._sources, owner._comparisons);
             var decoded = new List<(SaveDataDefinition Definition, ParseAttempt Attempt, int Undefined)>();
             foreach (var (definition, attempt) in owner._sources.Zip(inspection.Attempts))
@@ -1162,6 +1200,22 @@ public sealed class SaveMigrator
             }
 
             var after = Flatten(reparsed);
+            if (overrides.RebuildWithTarget)
+            {
+                var modelDifferences = Diff(before, after)
+                    .Where(difference => difference.Path is not ("$.FileSize" or "$.Checksum" or "$.Version"))
+                    .ToList();
+                if (modelDifferences.Count == 0)
+                {
+                    _notes.Add("Target-definition rebuild model comparison: no meaningful model differences.");
+                }
+                else
+                {
+                    _warnings.AddRange(modelDifferences.Select(difference =>
+                        $"Target-definition rebuild model difference: {difference}"));
+                }
+            }
+
             var fidelity = Diff(serialized, after)
                 .Where(difference => difference.Path is not ("$.FileSize" or "$.Checksum")).ToList();
             _checks.Add(new MigrationCheck("Reparsed output equals the migrated model", fidelity.Count == 0,

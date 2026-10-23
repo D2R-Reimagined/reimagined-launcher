@@ -28,11 +28,12 @@ public enum ReferenceOutcome
 /// </summary>
 /// <param name="Force">Accept every reported uncertainty: unresolved identities, unverifiable stats, repaired headers and reported value or field losses.</param>
 /// <param name="SourceLayout">Use this source layout instead of identifying one; it must still parse the file.</param>
-public sealed record MigrationOverrides(bool Force = false, string? SourceLayout = null)
+/// <param name="RebuildWithTarget">Decode and rebuild with the installed target definitions instead of historical layouts.</param>
+public sealed record MigrationOverrides(bool Force = false, string? SourceLayout = null, bool RebuildWithTarget = false)
 {
     public static readonly MigrationOverrides None = new();
 
-    public bool Any => Force || SourceLayout is not null;
+    public bool Any => Force || SourceLayout is not null || RebuildWithTarget;
 }
 
 /// <param name="Blocking">The reference cannot be carried into the target without silently changing what the item is.</param>
@@ -118,7 +119,8 @@ public sealed record SaveMigrationResult(
     public bool NeedsForce => IsRecoverable && OutputPath is null && HasUncertainty;
 
     /// <summary>An approved output exists only because an override accepted an uncertainty or a manual source choice.</summary>
-    public bool IsExperimental => OutputPath is not null && (Overrides.SourceLayout is not null || HasUncertainty);
+    public bool IsExperimental => OutputPath is not null &&
+                                  (Overrides.RebuildWithTarget || Overrides.SourceLayout is not null || HasUncertainty);
 
     public MigrationStatus Status =>
         OutputPath is null

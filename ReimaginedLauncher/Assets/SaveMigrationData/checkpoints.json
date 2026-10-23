@@ -20,6 +20,15 @@
       "installedVersions": [ "3.0.12" ]
     }
   ],
+  "statEncodings": [
+    {
+      "id": "reimagined-3.0.13-dev-pre-swap",
+      "label": "3.0.13 development pre-swap",
+      "order": 30,
+      "file": "D2RR 3.0.13 dev pre-swap/itemstatcost.txt",
+      "description": "Pre-swap stat IDs with the development Save Bits and Save Add changes and appended lab stats 438-441."
+    }
+  ],
   "identityMappings": [
     {
       "table": "UniqueItems",
