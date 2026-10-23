@@ -18,11 +18,11 @@ public enum SaveConversionState
     AlreadyCompatible,
     Verified,
     VerifiedWithWarnings,
-    /// <summary>Structurally verified output that exists only because Force Conversion overrides were requested.</summary>
+    /// <summary>Output that passed the critical structural checks, but only because Force Conversion or a source choice accepted uncertainties.</summary>
     Experimental,
-    /// <summary>Withheld for a policy reason Force Conversion may override: an unresolved item identity or an uncertain source version.</summary>
+    /// <summary>Recoverable but withheld: some data cannot be verified (Force Conversion may accept it) or the source version is uncertain.</summary>
     Unresolved,
-    /// <summary>The conversion failed or could not be verified safely; nothing can override this.</summary>
+    /// <summary>No usable output can be produced: the file cannot be decoded or serialized, or the output fails a critical check.</summary>
     Blocked
 }
 
@@ -32,6 +32,7 @@ public enum SaveIssueCategory
     ItemIdentity,
     UnknownReferences,
     SaveFormat,
+    Unverified,
     Verification
 }
 
@@ -43,6 +44,7 @@ public sealed record SaveIssueGroup(SaveIssueCategory Category, bool Blocking, i
         SaveIssueCategory.ItemIdentity => "Item identity changes",
         SaveIssueCategory.UnknownReferences => "Unsupported or unknown references",
         SaveIssueCategory.SaveFormat => "Save-format incompatibility",
+        SaveIssueCategory.Unverified => "Unverified, changed or lost data",
         _ => "Verification failure"
     };
 
@@ -52,12 +54,12 @@ public sealed record SaveIssueGroup(SaveIssueCategory Category, bool Blocking, i
 
 public enum SaveForceKind
 {
-    AcceptUnresolvedIdentities,
+    Force,
     ChooseSourceLayout
 }
 
 /// <param name="SourceLayouts">Layouts the user may choose from, the default first, or the one chosen for an experimental plan.</param>
-/// <param name="Risks">Each unresolved identity and what its unchanged saved id names in the target.</param>
+/// <param name="Risks">Each issue Force Conversion accepts: unresolved identities, unverifiable stats, repaired headers, reported losses.</param>
 /// <param name="TargetAlsoFits">The file also reads completely as the target, so "already converted" is a valid choice too.</param>
 public sealed record SaveForceOption(SaveForceKind Kind, IReadOnlyList<string> SourceLayouts, IReadOnlyList<string> Risks, bool TargetAlsoFits = false);
 
@@ -86,6 +88,12 @@ public sealed class SaveConversionPlan
 
     /// <summary>For <see cref="SaveConversionState.Unresolved"/>: what Force Conversion may override. For an experimental plan: what it overrode.</summary>
     public SaveForceOption? ForceOption { get; init; }
+
+    /// <summary>Blocked, but a serialized candidate exists that a Force Conversion analysis keeps as a recovery candidate.</summary>
+    public bool CanAttemptRecovery { get; init; }
+
+    /// <summary>An unapproved output kept outside the save folder by a Force Conversion analysis; it is never applied.</summary>
+    public string? RecoveryCandidatePath { get; init; }
 
     public bool IsBlocked => State is SaveConversionState.Blocked or SaveConversionState.Unresolved;
 
@@ -257,7 +265,8 @@ public sealed class SaveConversionService
 
     /// <summary>
     /// Reads the save and prepares a verified conversion in <paramref name="stagingDirectory"/>. The save is never written.
-    /// <paramref name="overrides"/> is only passed for one explicitly requested Force Conversion; it never relaxes structural checks.
+    /// <paramref name="overrides"/> carries the Force Conversion setting and a manual source choice; neither relaxes decoding, serialization or
+    /// the critical output checks. A forced analysis keeps an output that fails a critical check as a recovery candidate beside the backups.
     /// </summary>
     public SaveConversionPlan Plan(string path, string stagingDirectory, MigrationOverrides? overrides = null)
     {
@@ -288,19 +297,29 @@ public sealed class SaveConversionService
             var targetAttempt = inspection.Attempts[0];
             var (targetFits, targetCheck) = DescribeTargetFit(inspection, targetAttempt);
 
+            var forced = overrides?.Force == true;
             var result = migrator.Migrate(path, stagingDirectory, overrides);
             var output = result.OutputPath is { } outputPath ? File.ReadAllBytes(outputPath) : null;
+            // A clean target reading outranks a historical reading that only converts by accepting uncertainties.
+            var historicalIsClean = result.OutputPath is not null && !result.HasUncertainty;
             var report = new StringBuilder()
                 .AppendLine($"{target} read check: {targetCheck}")
-                .Append(overrides?.AcceptUnresolvedIdentities == true ? "Force Conversion (Experimental) was explicitly requested for this analysis." + Environment.NewLine : "")
+                .Append(targetFits && result.SourceLayout is not null && !historicalIsClean && overrides?.SourceLayout is null
+                    ? $"The file also decodes as {result.SourceLayout}, but that reading does not convert cleanly (see below), so the clean {target} reading is preferred."
+                      + Environment.NewLine
+                    : "")
+                .Append(forced ? "Force conversion (experimental) was requested for this analysis." + Environment.NewLine : "")
                 .Append(overrides?.SourceLayout is { } chosenSource ? $"Source layout {chosenSource} was chosen by the user." + Environment.NewLine : "")
                 .AppendLine()
                 .Append(SaveMigrationReport.Write(result))
                 .ToString();
-            var risks = result.References.Where(reference => reference.Blocking).Select(reference => DescribeRisk(reference, target)).Distinct().ToList();
+            var risks = result.References.Where(reference => reference.Blocking).Select(reference => DescribeRisk(reference, target))
+                .Concat(result.Uncertainties.Select(Friendly))
+                .Distinct()
+                .ToList();
 
             SaveConversionPlan Create(SaveConversionState state, string operation, string summary, string? blockingReason, byte[]? converted,
-                SaveForceOption? force = null) => new()
+                SaveForceOption? force = null, string? recoveryCandidate = null) => new()
             {
                 SourcePath = path,
                 Kind = kind,
@@ -315,12 +334,14 @@ public sealed class SaveConversionService
                 BlockingReason = blockingReason,
                 IssueGroups = state == SaveConversionState.AlreadyCompatible ? [] : CategorizeIssues(result),
                 ForceOption = force,
+                CanAttemptRecovery = state == SaveConversionState.Blocked && !forced && result.RejectedOutputPath is not null,
+                RecoveryCandidatePath = recoveryCandidate,
                 ConvertedBytes = converted,
                 EmbeddedName = embeddedName,
                 SidecarPath = sidecar
             };
 
-            if (targetFits && (output is null || output.AsSpan().SequenceEqual(data)))
+            if (targetFits && (output is not null && output.AsSpan().SequenceEqual(data) || !historicalIsClean && overrides?.SourceLayout is null))
             {
                 return Create(SaveConversionState.AlreadyCompatible,
                     $"Already compatible: the file reads completely with the {target} definitions. No conversion is needed.",
@@ -336,6 +357,16 @@ public sealed class SaveConversionService
                     new SaveForceOption(SaveForceKind.ChooseSourceLayout, [result.SourceLayout!], risks, TargetAlsoFits: true));
             }
 
+            if (overrides?.SourceLayout is null && result.AmbiguousSourceLayouts.Count > 1)
+            {
+                var reason = $"The file decodes as {string.Join(" and as ", result.AmbiguousSourceLayouts)}, which read it differently. "
+                             + "The launcher cannot tell which version made it.";
+                return Create(SaveConversionState.Unresolved, $"Not converted: {reason}",
+                    "The launcher cannot tell which Reimagined version this save was made with. Review the details before continuing.", reason, null,
+                    new SaveForceOption(SaveForceKind.ChooseSourceLayout,
+                        [.. result.AmbiguousSourceLayouts.OrderBy(layout => layout == DefaultSourceLayout ? 0 : 1)], []));
+            }
+
             var layouts = $"{result.SourceLayout ?? "unidentified layout"} (version {result.SourceVersion}) to {target} (version {SaveMigrator.TargetVersion})";
             switch (result.Status)
             {
@@ -348,51 +379,48 @@ public sealed class SaveConversionService
                         "Some older items have unusual definitions. Their saved properties will be preserved, but their behavior may differ.", null, output);
                 case MigrationStatus.Experimental:
                     return Create(SaveConversionState.Experimental,
-                        $"EXPERIMENTAL forced conversion of {layouts}. Every structural check passed; "
+                        $"EXPERIMENTAL conversion of {layouts}. The critical structural checks passed; "
                         + (overrides?.SourceLayout is { } manual ? $"the source layout {manual} was chosen manually; " : "")
-                        + $"{risks.Count} unresolved item identit(ies) were accepted and are not verified.",
+                        + $"{risks.Count} unverified issue(s) were accepted by Force conversion. This output is NOT fully verified.",
                         risks.Count == 0
                             ? $"Converts from {result.SourceLayout} (chosen by you) to {target}. The launcher could not confirm the source version itself."
-                            : "Force Conversion prepared an experimental output that passed every structural check. "
-                              + "Some items may appear under different identities or behave unexpectedly.", null, output,
-                        new SaveForceOption(overrides?.SourceLayout is null ? SaveForceKind.AcceptUnresolvedIdentities : SaveForceKind.ChooseSourceLayout,
+                            : "Force conversion prepared an experimental output. Some data may be changed, lost or appear differently; "
+                              + "the full report lists every accepted issue.", null, output,
+                        new SaveForceOption(overrides?.SourceLayout is null ? SaveForceKind.Force : SaveForceKind.ChooseSourceLayout,
                             overrides?.SourceLayout is { } chosen ? [chosen] : [], risks));
             }
 
-            if (overrides?.AcceptUnresolvedIdentities != true && result.Blockers.Count == 0 && result.RejectedOutputPath is not null
-                && result.Checks.Count > 0 && result.Checks.All(check => check.Passed) && risks.Count > 0)
+            if (result.NeedsForce)
             {
-                var blocking = result.References.Count(reference => reference.Blocking);
-                var reason = $"{blocking} saved item reference(s) have no reliable match in {target}: {string.Join(" ", risks.Take(3))}"
+                var reason = $"{risks.Count} issue(s) cannot be verified: {string.Join(" ", risks.Take(3))}"
                              + (risks.Count > 3 ? $" ({risks.Count - 3} more in the full report.)" : "")
-                             + $" All {result.Checks.Count} verification checks passed; the conversion is withheld only because of this.";
+                             + " All critical verification checks passed; Force conversion (experimental) can accept these issues.";
                 return Create(SaveConversionState.Unresolved, $"Not converted: {reason}",
-                    "One or more items could change identity. Review the affected items before continuing.", reason, null,
+                    "Some data cannot be verified. Force conversion can attempt an experimental conversion.", reason, null,
                     overrides?.SourceLayout is { } selected
                         ? new SaveForceOption(SaveForceKind.ChooseSourceLayout, [selected], risks)
-                        : new SaveForceOption(SaveForceKind.AcceptUnresolvedIdentities, [], risks));
-            }
-
-            if (overrides?.SourceLayout is null && result.AmbiguousSourceLayouts.Count > 1 && result.Blockers.Count == 1)
-            {
-                var reason = $"The file parses completely as {string.Join(" and as ", result.AmbiguousSourceLayouts)}, which read it differently. "
-                             + "The launcher cannot tell which version made it.";
-                return Create(SaveConversionState.Unresolved, $"Not converted: {reason}",
-                    "The launcher cannot tell which Reimagined version this save was made with. Review the details before continuing.", reason, null,
-                    new SaveForceOption(SaveForceKind.ChooseSourceLayout,
-                        [.. result.AmbiguousSourceLayouts.OrderBy(layout => layout == DefaultSourceLayout ? 0 : 1)], []));
+                        : new SaveForceOption(SaveForceKind.Force, [], risks));
             }
 
             var problems = result.Blockers.Select(Friendly)
-                .Concat(result.Checks.Where(check => !check.Passed).Select(check => $"Verification failed: {check.Name} ({check.Detail})."))
+                .Concat(result.Checks.Where(check => check is { Passed: false, Critical: true })
+                    .Select(check => $"Critical check failed: {check.Name} ({check.Detail})."))
+                .Concat(result.Checks.Where(check => check is { Passed: false, Critical: false })
+                    .Select(check => $"Verification failed: {check.Name} ({check.Detail})."))
                 .ToList();
             var failure = problems.Count == 0
                 ? "The conversion could not be verified."
                 : problems[0] + (problems.Count > 1 ? $" ({problems.Count - 1} more problem(s) in the full report.)" : "");
-            return Create(SaveConversionState.Blocked, "Not converted: the conversion could not be verified, so the file is left untouched.",
-                "The save could not be converted or verified safely. Your original was not changed."
-                + (overrides?.Any == true ? " Force Conversion cannot override this." : ""),
-                failure, null);
+            var candidate = forced && result.RejectedOutputPath is { } rejected ? KeepRecoveryCandidate(path, rejected, report) : null;
+            if (candidate is not null)
+            {
+                failure += $" The unapproved output was kept as an experimental recovery candidate, not applied: {candidate}";
+            }
+
+            return Create(SaveConversionState.Blocked, "Not converted: no usable output could be produced, so the file is left untouched.",
+                "The save could not be converted. Your original was not changed."
+                + (forced ? " Force conversion cannot override this." : ""),
+                failure, null, recoveryCandidate: candidate);
         }
         catch (Exception exception)
         {
@@ -451,17 +479,48 @@ public sealed class SaveConversionService
     }
 
     /// <summary>A new, uniquely named folder for one batch of conversions. Existing backups are never reused or overwritten.</summary>
-    public string CreateBackupBatchDirectory()
+    public string CreateBackupBatchDirectory() => CreateUniqueDirectory(BackupRoot);
+
+    private static string CreateUniqueDirectory(string root)
     {
         var name = DateTime.Now.ToString("yyyyMMdd-HHmmss");
-        var path = Path.Combine(BackupRoot, name);
+        var path = Path.Combine(root, name);
         for (var attempt = 2; Directory.Exists(path); attempt++)
         {
-            path = Path.Combine(BackupRoot, $"{name}-{attempt}");
+            path = Path.Combine(root, $"{name}-{attempt}");
         }
 
         Directory.CreateDirectory(path);
         return path;
+    }
+
+    /// <summary>
+    /// Copies an unapproved Force Conversion output beside the backups, never into the save folder, with a name the game does not load.
+    /// Returns null when it could not be kept.
+    /// </summary>
+    private string? KeepRecoveryCandidate(string sourcePath, string candidatePath, string report)
+    {
+        try
+        {
+            var saveDirectory = Path.GetDirectoryName(Path.GetFullPath(sourcePath))!;
+            if (IsWithin(BackupRoot, saveDirectory) || IsWithin(saveDirectory, BackupRoot))
+            {
+                return null;
+            }
+
+            var directory = CreateUniqueDirectory(Path.Combine(BackupRoot, "RecoveryCandidates"));
+            var destination = Path.Combine(directory, Path.GetFileName(sourcePath) + ".recovery-candidate");
+            WriteNewFile(destination, File.ReadAllBytes(candidatePath));
+            WriteNewFile(destination + ".report.txt", Encoding.UTF8.GetBytes(
+                "EXPERIMENTAL RECOVERY CANDIDATE - FAILED A CRITICAL CHECK AND WAS NOT APPLIED. The original save was not changed."
+                + Environment.NewLine + $"Original file: {sourcePath}" + Environment.NewLine + Environment.NewLine + report));
+            return destination;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            LaunchDiagnostics.LogException($"Could not keep the recovery candidate for {sourcePath}", exception);
+            return null;
+        }
     }
 
     /// <summary>
@@ -596,7 +655,7 @@ public sealed class SaveConversionService
         {
             actions.Add(plan.State switch
             {
-                SaveConversionState.Experimental => "Converted experimentally (Force Conversion; overridden identities are not verified)",
+                SaveConversionState.Experimental => "Converted experimentally (accepted issues are not verified; see the experimental report in the backup)",
                 SaveConversionState.VerifiedWithWarnings => "Converted (with accepted warnings)",
                 _ => "Converted"
             });
@@ -647,8 +706,11 @@ public sealed class SaveConversionService
             return "the recalculated checksum does not verify.";
         }
 
-        var save = D2Save.Read(bytes, _migrator.Value.Target.CreateExternalData(version));
-        return save.Character.Preview.Name == newName && save.TrailingData.Length == 0 && ReadEmbeddedName(bytes) == newName
+        var externalData = _migrator.Value.Target.CreateExternalData(version);
+        var save = D2Save.Read(bytes, externalData);
+        return save.Character.Preview.Name == newName
+               && save.TrailingData.AsSpan().SequenceEqual(D2Save.Read(before, externalData).TrailingData)
+               && ReadEmbeddedName(bytes) == newName
             ? null
             : "the renamed save did not reparse with the new name.";
     }
@@ -671,7 +733,7 @@ public sealed class SaveConversionService
         {
             var reportPath = Path.Combine(batchDirectory, plan.FileName + ".experimental-report.txt");
             WriteNewFile(reportPath, Encoding.UTF8.GetBytes(plan.Report));
-            manifest.AppendLine("EXPERIMENTAL: written by Force Conversion. Overridden item identities are not verified.")
+            manifest.AppendLine("EXPERIMENTAL: the written file is not fully verified. The report lists every accepted change, loss and unverified item.")
                 .AppendLine($"Full technical report: {reportPath}");
         }
 
@@ -723,11 +785,6 @@ public sealed class SaveConversionService
             problems.Add($"binary version {header.Version}");
         }
 
-        if (attempt.TrailingBytes != 0)
-        {
-            problems.Add($"{attempt.TrailingBytes} trailing byte(s)");
-        }
-
         if (undefined.Count > 0)
         {
             problems.Add($"undefined stat ids [{string.Join(", ", undefined)}]");
@@ -738,9 +795,11 @@ public sealed class SaveConversionService
             problems.Add("invalid checksum or declared size");
         }
 
+        // Trailing extension data is carried by D2SSharp and is not an incompatibility.
+        var trailer = attempt.TrailingBytes > 0 ? $", {attempt.TrailingBytes} byte(s) of extension data after the standard sections" : "";
         return problems.Count == 0
-            ? (true, $"complete parse, {attempt.AllItems.Count()} item(s)")
-            : (false, $"parses, but {string.Join(", ", problems)}");
+            ? (true, $"complete parse, {attempt.AllItems.Count()} item(s){trailer}")
+            : (false, $"parses, but {string.Join(", ", problems)}{trailer}");
     }
 
     /// <summary>Counts per category; blocking groups first. Individual technical lines stay in the report.</summary>
@@ -748,12 +807,12 @@ public sealed class SaveConversionService
     {
         var entries = new List<(SaveIssueCategory Category, bool Blocking, string? Item)>();
         entries.AddRange(result.Blockers.Select(blocker => (SaveIssueCategory.SaveFormat, true, ItemOf(blocker))));
-        entries.AddRange(result.Checks.Where(check => !check.Passed).Select(_ => (SaveIssueCategory.Verification, true, (string?)null)));
+        entries.AddRange(result.Checks.Where(check => check is { Passed: false, Critical: true }).Select(_ => (SaveIssueCategory.Verification, true, (string?)null)));
         foreach (var reference in result.References)
         {
             if (reference.Blocking)
             {
-                entries.Add((SaveIssueCategory.ItemIdentity, !result.Overrides.AcceptUnresolvedIdentities, reference.ItemPath));
+                entries.Add((SaveIssueCategory.ItemIdentity, !result.Overrides.Force, reference.ItemPath));
             }
             else if (reference.Outcome is ReferenceOutcome.PreservedWithWarning or ReferenceOutcome.ManualAttention)
             {
@@ -764,7 +823,8 @@ public sealed class SaveConversionService
             }
         }
 
-        foreach (var warning in result.Warnings.Where(warning => !warning.StartsWith("Experimental:", StringComparison.Ordinal)))
+        entries.AddRange(result.Uncertainties.Select(line => (SaveIssueCategory.Unverified, !result.Overrides.Force, ItemOf(line))));
+        foreach (var warning in result.Warnings)
         {
             var category = warning.Contains("maps by identity", StringComparison.Ordinal) || warning.StartsWith("Registered identity mapping", StringComparison.Ordinal)
                 ? SaveIssueCategory.ItemIdentity
@@ -811,7 +871,9 @@ public sealed class SaveConversionService
     private static List<string> GroupIssues(SaveMigrationResult result)
     {
         var lines = result.Blockers.Select(blocker => "Blocker: " + ItemPathPrefix.Replace(blocker, ""))
-            .Concat(result.Checks.Where(check => !check.Passed).Select(check => $"Verification failed: {check.Name}: {check.Detail}"))
+            .Concat(result.Checks.Where(check => check is { Passed: false, Critical: true }).Select(check => $"Critical check failed: {check.Name}: {check.Detail}"))
+            .Concat(result.Uncertainties.Select(line => (result.Overrides.Force ? "Accepted by Force conversion: " : "Needs Force conversion: ")
+                                                        + ItemPathPrefix.Replace(line, "")))
             .Concat(result.Warnings.Select(warning => "Warning: " + ItemPathPrefix.Replace(warning, "")))
             .Concat(result.References
                 .Where(reference => reference.Blocking || reference.Outcome is ReferenceOutcome.PreservedWithWarning or ReferenceOutcome.ManualAttention)

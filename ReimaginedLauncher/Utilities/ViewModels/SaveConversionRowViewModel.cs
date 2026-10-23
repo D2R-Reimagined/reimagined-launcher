@@ -73,12 +73,12 @@ public class SaveConversionRowViewModel : INotifyPropertyChanged
 
     public bool IsTargetChoiceSelected => IsSourceUncertain && SelectedSourceChoice is { Layout: null };
 
-    private int UnresolvedIdentities => Plan.ForceOption?.Risks.Count ?? 0;
+    private int ForcedIssues => Plan.ForceOption?.Risks.Count ?? 0;
 
-    private bool IsForcedIdentity => Plan.State == SaveConversionState.Experimental && UnresolvedIdentities > 0;
+    private bool IsForced => Plan.State == SaveConversionState.Experimental && ForcedIssues > 0;
 
     /// <summary>The uncertain source is still waiting for the user, rather than blocked under the chosen version.</summary>
-    private bool AwaitsSourceConfirmation => IsSourceUncertain && (Plan == BasePlan || !Plan.IsBlocked) && !IsForcedIdentity;
+    private bool AwaitsSourceConfirmation => IsSourceUncertain && (Plan == BasePlan || !Plan.IsBlocked) && !IsForced;
 
     public string StatusLabel => _result is not null
         ? _resultIsProblem ? "Failed" : _isDone ? DoneLabel : "Skipped"
@@ -89,9 +89,9 @@ public class SaveConversionRowViewModel : INotifyPropertyChanged
                 SaveConversionState.AlreadyCompatible => "Already compatible",
                 SaveConversionState.Verified => "Ready",
                 SaveConversionState.VerifiedWithWarnings => "Warnings",
-                SaveConversionState.Experimental when IsForcedIdentity => "Experimental",
+                SaveConversionState.Experimental when IsForced => "Experimental",
                 _ when AwaitsSourceConfirmation => "Source uncertain",
-                SaveConversionState.Unresolved when Plan.ForceOption?.Kind == SaveForceKind.AcceptUnresolvedIdentities => "Needs Force",
+                SaveConversionState.Unresolved when Plan.ForceOption?.Kind == SaveForceKind.Force => "Needs Force",
                 _ => "Blocked"
             };
 
@@ -113,11 +113,11 @@ public class SaveConversionRowViewModel : INotifyPropertyChanged
             SaveConversionState.AlreadyCompatible => "No conversion needed.",
             SaveConversionState.Verified => $"Ready to convert from {Plan.SourceLabel} to {Plan.TargetLabel}.",
             SaveConversionState.VerifiedWithWarnings => WarningsText(),
-            SaveConversionState.Experimental when IsForcedIdentity => $"{Identities(UnresolvedIdentities)} cannot be confirmed.",
+            SaveConversionState.Experimental when IsForced => $"Experimental: {Issues(ForcedIssues)} accepted without verification.",
             _ when AwaitsSourceConfirmation && Plan == BasePlan => "Source version uncertain. Choose the version this save was made with.",
             _ when AwaitsSourceConfirmation => $"Source version uncertain. Select this file to convert it from {Plan.SourceLabel} to {Plan.TargetLabel}.",
-            SaveConversionState.Unresolved when Plan.ForceOption?.Kind == SaveForceKind.AcceptUnresolvedIdentities =>
-                $"{Identities(UnresolvedIdentities)} cannot be confirmed. Check Force conversion to attempt it.",
+            SaveConversionState.Unresolved when Plan.ForceOption?.Kind == SaveForceKind.Force =>
+                $"{Issues(ForcedIssues)} cannot be verified. Check Force conversion to attempt it.",
             _ => BlockedText()
         });
 
@@ -137,7 +137,7 @@ public class SaveConversionRowViewModel : INotifyPropertyChanged
             : reason;
     }
 
-    private static string Identities(int count) => count == 1 ? "1 item identity" : $"{count} item identities";
+    private static string Issues(int count) => count == 1 ? "1 issue" : $"{count} issues";
 
     public string FullReport
     {

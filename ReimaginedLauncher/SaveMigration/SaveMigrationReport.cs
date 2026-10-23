@@ -16,21 +16,22 @@ public static class SaveMigrationReport
         {
             MigrationStatus.Verified => "VERIFIED - every check passed and every reference was mapped or already compatible",
             MigrationStatus.NeedsManualInspection => "WARNING - verified output, but entries below need manual inspection",
-            MigrationStatus.Experimental => "EXPERIMENTAL - structurally verified output written only because Force Conversion was confirmed; "
-                                           + "overridden identities are NOT verified",
+            MigrationStatus.Experimental => "EXPERIMENTAL - the output passed the critical structural checks, but the uncertainties below were "
+                                           + "accepted by Force Conversion or a manual source choice and are NOT verified",
+            _ when result.NeedsForce => "NOT CONVERTED - recoverable, but only by accepting the uncertainties below with Force Conversion",
             _ => "FAILED - no approved output",
         }}");
         report.AppendLine($"Input: {result.InputPath} ({result.Kind}, version {result.SourceVersion})");
         report.AppendLine($"Output: {result.OutputPath ?? "none"}{(result.OutputVersion is { } version ? $" (version {version})" : "")}");
         if (result.RejectedOutputPath is not null)
         {
-            report.AppendLine($"Rejected output kept for inspection: {result.RejectedOutputPath}");
+            report.AppendLine($"Unapproved output kept for inspection: {result.RejectedOutputPath}");
         }
 
         report.AppendLine($"Layouts: {result.SourceLayout ?? "not identified"} -> {result.TargetLayout}");
         if (result.Overrides.Any)
         {
-            report.AppendLine($"Force Conversion overrides: accept unresolved identities {(result.Overrides.AcceptUnresolvedIdentities ? "yes" : "no")}, "
+            report.AppendLine($"Overrides: Force Conversion {(result.Overrides.Force ? "yes" : "no")}, "
                               + $"manual source layout {result.Overrides.SourceLayout ?? "none"}");
         }
 
@@ -38,8 +39,11 @@ public static class SaveMigrationReport
         report.AppendLine("A D2SSharp parse does not prove the game loads this file; no in-game test has been performed.");
 
         Section(report, "Blockers", result.Blockers);
+        Section(report, result.Overrides.Force ? "Accepted uncertainties (changed, lost or unverified)" : "Uncertainties that need Force Conversion",
+            result.Uncertainties.Concat(result.References.Where(reference => reference.Blocking).Select(reference => $"Unresolved identity: {reference}")));
         Section(report, "Warnings", result.Warnings);
-        Section(report, "Verification", result.Checks.Select(check => $"[{(check.Passed ? "PASS" : "FAIL")}] {check.Name}: {check.Detail}"));
+        Section(report, "Verification", result.Checks.Select(check =>
+            $"[{(check.Passed ? "PASS" : check.Critical ? "FAIL, critical" : "FAIL")}] {check.Name}: {check.Detail}"));
         Section(report, "Source identification", result.Identification);
 
         Section(report, "Id changes", result.References.Where(reference => reference.Outcome == ReferenceOutcome.Mapped).Select(reference => reference.ToString()));

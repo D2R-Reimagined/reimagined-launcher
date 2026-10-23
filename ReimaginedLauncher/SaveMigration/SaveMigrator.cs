@@ -27,7 +27,7 @@ public sealed class SaveMigrator
     private const int StashTabHeaderSize = 64;
     private const int MaxListedProblems = 5;
 
-    // Retail binary versions D2SSharp 0.0.22 reads; anything else, including D2RLoader's extended format, is rejected.
+    // Retail binary versions D2SSharp 0.0.22 is known to read; any other version is only attempted experimentally.
     private static readonly HashSet<uint> SupportedVersions = [97, 98, 99, 105];
 
     // D2SSharp writes these as fixed groups keyed by the vanilla ids, so they must keep their ids.
@@ -93,9 +93,9 @@ public sealed class SaveMigrator
     public SaveCheckpoint? TargetCheckpoint { get; }
 
     /// <summary>
-    /// Writes <c>outputDirectory/&lt;file name&gt;</c> only when every check passes; a written but unapproved file gets a
-    /// <c>.rejected</c> suffix. Nothing is written when a blocker is found before serialization.
-    /// <paramref name="overrides"/> only relaxes identity policy and source selection, never a structural check.
+    /// Writes <c>outputDirectory/&lt;file name&gt;</c> when no hard blocker or critical check failed and every reported uncertainty is
+    /// either absent or accepted with <see cref="MigrationOverrides.Force"/>; any other serialized output gets a <c>.rejected</c> suffix.
+    /// Nothing is written when the source cannot be decoded or the serializer fails.
     /// </summary>
     public SaveMigrationResult Migrate(string inputPath, string outputDirectory, MigrationOverrides? overrides = null) =>
         new Run(this, Path.GetFullPath(inputPath), Path.GetFullPath(outputDirectory), overrides ?? MigrationOverrides.None).Execute();
@@ -156,6 +156,7 @@ public sealed class SaveMigrator
         private readonly List<string> _notes = [];
         private readonly List<string> _warnings = [];
         private readonly List<string> _blockers = [];
+        private readonly List<string> _uncertain = [];
         private readonly List<MigrationCheck> _checks = [];
         private List<CustomPageItem> _customPageItems = [];
         private List<string> _ambiguousLayouts = [];
@@ -166,6 +167,7 @@ public sealed class SaveMigrator
         private SaveInspector.ItemTypeIndex _targetTypes = null!;
         private IExternalData _sourceData = null!;
         private IExternalData _targetData = null!;
+        private byte[] _sourceTrailer = [];
         private uint _sourceVersion;
         private int _changes;
         private int _itemsInspected;
@@ -186,13 +188,15 @@ public sealed class SaveMigrator
             }
 
             var data = File.ReadAllBytes(input);
-            var headerProblems = CheckHeader(data, _kind, out _sourceVersion);
+            var repairable = new List<string>();
+            var headerProblems = CheckHeader(data, _kind, out _sourceVersion, repairable);
             if (headerProblems.Count > 0)
             {
                 _blockers.AddRange(headerProblems.Select(problem => $"Source rejected: {problem}."));
                 return Result(null, null, null);
             }
 
+            _uncertain.AddRange(repairable.Select(problem => $"Source header: {problem}."));
             if (_kind == SaveFileKind.Character && File.Exists(Path.ChangeExtension(input, ".d2rl")))
             {
                 _warnings.Add("A D2RLoader .d2rl sidecar exists next to the input. It records the saved ItemStatCost schema and is not converted.");
@@ -213,6 +217,13 @@ public sealed class SaveMigrator
             _targetData = Target.CreateExternalData(TargetVersion);
 
             var root = Parse(data, _sourceData);
+            if (root is D2Save { TrailingData.Length: > 0 } withTrailer)
+            {
+                _sourceTrailer = withTrailer.TrailingData.ToArray();
+                _warnings.Add($"{_sourceTrailer.Length} byte(s) of opaque extension data follow the standard sections ({DescribeTrailer(_sourceTrailer)}). "
+                              + "They are carried over byte-for-byte; the launcher cannot interpret or migrate them.");
+            }
+
             var before = Flatten(root);
             _customPageItems = CustomPageItems(root);
             MigrateRoot(root);
@@ -225,7 +236,17 @@ public sealed class SaveMigrator
                 return Result(null, null, null);
             }
 
-            var bytes = Serialize(root);
+            byte[] bytes;
+            try
+            {
+                bytes = Serialize(root);
+            }
+            catch (Exception exception)
+            {
+                _blockers.Add($"D2SSharp could not serialize the converted save with the {Target.Label} definitions: {exception.GetType().Name}: {exception.Message}");
+                return Result(null, null, null);
+            }
+
             var serialized = Flatten(root);
             var conversion = Diff(migrated, serialized).Where(difference => difference.Path != "$.Version").ToList();
             if (conversion.Count > 0)
@@ -239,16 +260,13 @@ public sealed class SaveMigrator
 
             Verify(bytes, root, before, serialized, intended, conversion);
 
+            _uncertain.AddRange(_checks.Where(check => check is { Passed: false, Critical: false })
+                .Select(check => $"Check not passed, the difference is in the output: {check.Name} ({check.Detail})."));
+
             Directory.CreateDirectory(outputDirectory);
             var outputPath = Path.Combine(outputDirectory, fileName);
-            var unresolved = _references.Count(reference => reference.Blocking);
-            var approved = _checks.All(check => check.Passed) && (unresolved == 0 || overrides.AcceptUnresolvedIdentities);
-            if (approved && unresolved > 0)
-            {
-                _warnings.Add($"Experimental: {unresolved} unresolved item identit(ies) were preserved unchanged because Force Conversion was confirmed; "
-                              + "those items may appear as different items in the target.");
-            }
-
+            var uncertain = _uncertain.Count > 0 || _references.Any(reference => reference.Blocking);
+            var approved = !_checks.Any(check => check is { Passed: false, Critical: true }) && (!uncertain || overrides.Force);
             var writtenPath = approved ? outputPath : outputPath + ".rejected";
             File.WriteAllBytes(writtenPath, bytes);
             return approved ? Result(outputPath, null, TargetVersion) : Result(null, writtenPath, TargetVersion);
@@ -265,13 +283,31 @@ public sealed class SaveMigrator
             var stats = _stats.Values.Select(accumulator => accumulator.ToResult()).OrderBy(stat => stat.Scope).ThenBy(stat => stat.SourceId).ToList();
             return new SaveMigrationResult(
                 input, outputPath, rejectedPath, _kind, _sourceVersion, outputVersion, _source?.Label, Target.Label, _identification,
-                _itemsInspected, _itemsChanged, _references, stats, _customPageItems, _notes, _warnings, _blockers, _checks, overrides, _ambiguousLayouts);
+                _itemsInspected, _itemsChanged, _references, stats, _customPageItems, _notes, _warnings, _blockers, _checks, overrides, _ambiguousLayouts,
+                _uncertain);
+        }
+
+        /// <summary>Length-independent description of an unknown trailer: its first bytes and any 4-character ASCII markers.</summary>
+        private static string DescribeTrailer(byte[] trailer)
+        {
+            var markers = new List<string>();
+            for (var index = 0; index + 4 <= trailer.Length && markers.Count < 8; index++)
+            {
+                if (trailer.AsSpan(index, 4).ToArray().All(value => value is >= (byte)'0' and <= (byte)'9' or >= (byte)'A' and <= (byte)'Z'))
+                {
+                    markers.Add(System.Text.Encoding.ASCII.GetString(trailer, index, 4));
+                    index += 3;
+                }
+            }
+
+            return $"starts {Convert.ToHexString(trailer.AsSpan(0, Math.Min(8, trailer.Length)))}"
+                   + (markers.Count == 0 ? "" : $", markers {string.Join(", ", markers.Distinct())}");
         }
 
         private SaveDataDefinition? Identify()
         {
             var inspection = SaveInspector.Inspect(input, owner._sources, owner._comparisons);
-            var viable = new List<(SaveDataDefinition Definition, ParseAttempt Attempt)>();
+            var decoded = new List<(SaveDataDefinition Definition, ParseAttempt Attempt, int Undefined)>();
             foreach (var (definition, attempt) in owner._sources.Zip(inspection.Attempts))
             {
                 if (!attempt.Succeeded)
@@ -285,36 +321,42 @@ public sealed class SaveMigrator
                     .Select(stat => stat.Id)
                     .Distinct()
                     .ToList();
-                if (attempt.TrailingBytes != 0 || undefined.Count > 0)
-                {
-                    _identification.Add($"{definition.Label}: rejected, {attempt.TrailingBytes} trailing byte(s), "
-                                        + $"undefined stat ids [{string.Join(", ", undefined)}]");
-                    continue;
-                }
-
                 var references = attempt.IdValidations.Sum(validation => validation.ReferenceCount);
-                _identification.Add($"{definition.Label}: complete parse, {attempt.AllItems.Count()} item(s), "
-                                    + $"{references - Disagreements(attempt)}/{references} saved ids fit their table rows");
-                viable.Add((definition, attempt));
+                _identification.Add($"{definition.Label}: parses, {attempt.AllItems.Count()} item(s), "
+                                    + $"{references - Disagreements(attempt)}/{references} saved ids fit their table rows"
+                                    + (attempt.TrailingBytes > 0 ? $", {attempt.TrailingBytes} trailing byte(s) after the standard sections" : "")
+                                    + (undefined.Count > 0 ? $", stat id(s) [{string.Join(", ", undefined)}] undefined in this layout" : ""));
+                decoded.Add((definition, attempt, undefined.Count));
             }
 
-            if (viable.Count == 0)
+            if (decoded.Count == 0)
             {
-                _blockers.Add("No candidate source layout parses this file completely.");
+                _blockers.Add("No candidate source layout can decode this file.");
                 return null;
             }
 
             if (overrides.SourceLayout is { } manual)
             {
-                var selected = viable.Select(candidate => candidate.Definition).FirstOrDefault(definition => definition.Label == manual);
+                var selected = decoded.Select(candidate => candidate.Definition).FirstOrDefault(definition => definition.Label == manual);
                 if (selected is null)
                 {
-                    _blockers.Add($"The manually selected source layout '{manual}' does not parse this file completely; a manual choice cannot override a failed parse.");
+                    _blockers.Add($"The manually selected source layout '{manual}' cannot decode this file; a manual choice cannot override a failed parse.");
                     return null;
                 }
 
-                _identification.Add($"Source layout selected manually for Force Conversion: {manual} ({viable.Count} layout(s) parse completely).");
+                _identification.Add($"Source layout selected manually: {manual} ({decoded.Count} layout(s) decode the file).");
                 return selected;
+            }
+
+            // A layout that defines every decoded stat and leaves the least data unparsed explains the file better than one that does not.
+            var cleanest = decoded.Min(candidate => Rank(candidate));
+            var viable = decoded.Where(candidate => Rank(candidate) == cleanest).Select(candidate => (candidate.Definition, candidate.Attempt)).ToList();
+            if (viable.Count < decoded.Count)
+            {
+                _identification.Add($"{Labels(viable)} explain the file best: "
+                                    + string.Join(", ", decoded.Where(candidate => Rank(candidate) != cleanest).Select(candidate =>
+                                        $"{candidate.Definition.Label} leaves {candidate.Undefined} stat id(s) undefined and {candidate.Attempt.TrailingBytes} trailing byte(s)"))
+                                    + ".");
             }
 
             // The best id fit wins. Ties are only acceptable between layouts that decode identically with the same item tables.
@@ -333,15 +375,14 @@ public sealed class SaveMigrator
             }
 
             var others = viable.Except(tied).Except(unneeded).ToList();
+            var chosen = tied.OrderBy(candidate => candidate.Definition.AppendedStats.Count).First().Definition;
             if (tied.Select(candidate => (Signature(candidate.Attempt), candidate.Definition.ItemTables.Label)).Distinct().Count() > 1)
             {
                 _ambiguousLayouts = [.. tied.Select(candidate => candidate.Definition.Label)];
-                _blockers.Add($"Ambiguous source layout: {Labels(tied)} fit the saved ids equally well ({best} disagreement(s)) "
-                              + "but decode the file differently or use different item tables.");
-                return null;
+                _uncertain.Add($"Ambiguous source layout: {Labels(tied)} fit the saved ids equally well ({best} disagreement(s)) "
+                               + $"but decode the file differently or use different item tables; converting as {chosen.Label} is a guess.");
             }
 
-            var chosen = tied.OrderBy(candidate => candidate.Definition.AppendedStats.Count).First().Definition;
             if (others.Count > 0)
             {
                 _identification.Add($"{Labels(tied)} fit the saved ids best ({best} disagreement(s)); "
@@ -358,6 +399,9 @@ public sealed class SaveMigrator
 
             static string Labels(List<(SaveDataDefinition Definition, ParseAttempt Attempt)> group) =>
                 string.Join(" = ", group.Select(candidate => candidate.Definition.Label));
+
+            static (int Undefined, int Trailing) Rank((SaveDataDefinition Definition, ParseAttempt Attempt, int Undefined) candidate) =>
+                (candidate.Undefined, candidate.Attempt.TrailingBytes);
         }
 
         private static int Disagreements(ParseAttempt attempt) =>
@@ -406,7 +450,7 @@ public sealed class SaveMigrator
 
             foreach (var stat in _stats.Values.Where(stat => stat.ProblemCount > 0).Select(stat => stat.ToResult()))
             {
-                _blockers.Add($"{stat.Scope} stat '{stat.SourceName}' ({stat.SourceId} -> {stat.TargetId}): {string.Join("; ", stat.Problems)}");
+                _uncertain.Add($"{stat.Scope} stat '{stat.SourceName}' ({stat.SourceId} -> {stat.TargetId}): {string.Join("; ", stat.Problems)}");
             }
         }
 
@@ -488,7 +532,7 @@ public sealed class SaveMigrator
             var targetIndex = _targetData.GetItemIndex(item.ItemCode, TargetVersion);
             if (targetIndex < 0)
             {
-                _blockers.Add($"{path}: base item '{code}' is not defined in {Target.Label}.");
+                _uncertain.Add($"{path}: base item '{code}' is not defined in {Target.Label}; it keeps its code if the serializer can write it.");
                 return;
             }
 
@@ -497,7 +541,12 @@ public sealed class SaveMigrator
                 && _targetData.GetItemInfo(targetIndex, TargetVersion) is var targetInfo
                 && sourceInfo != targetInfo)
             {
-                _blockers.Add($"{path}: base item '{code}' is saved differently in {Target.Label} ({sourceInfo} -> {targetInfo}).");
+                // Only the decoded-field checks in Verify can show whether a metadata change actually alters the written item.
+                var changed = typeof(ItemTypeInfo).GetProperties()
+                    .Where(property => !Equals(property.GetValue(sourceInfo), property.GetValue(targetInfo)))
+                    .Select(property => $"{property.Name} {property.GetValue(sourceInfo)} -> {property.GetValue(targetInfo)}");
+                AddOnce(_warnings, $"Base item '{code.Trim()}' has different item-type metadata in {Target.Label} ({string.Join(", ", changed)}); "
+                                   + "the verification checks compare every decoded field of the written items.");
             }
         }
 
@@ -523,8 +572,9 @@ public sealed class SaveMigrator
             {
                 if (targetId > maxId)
                 {
-                    _blockers.Add($"{path}: {role} target id {targetId} does not fit the {(maxId == 4095 ? 12 : 11)}-bit save field.");
-                    return Record(sourceId, ReferenceOutcome.ManualAttention, true, $"target id {targetId} exceeds {maxId}");
+                    return Record(sourceId, ReferenceOutcome.ManualAttention, true,
+                        $"'{sourceRow!.Key}' -> {mapping.Target} id {targetId} does not fit the {(maxId == 4095 ? 12 : 11)}-bit save field; "
+                        + $"preserved unchanged; {atRawId}");
                 }
 
                 var reason = $"'{sourceRow!.Key}' -> {mapping.Target} via {mapping.Method}";
@@ -542,8 +592,8 @@ public sealed class SaveMigrator
             {
                 if (registered.SaveId is not { } registeredId || registeredId > maxId)
                 {
-                    _blockers.Add($"{path}: {role} registered target id {registered.SaveId} does not fit the 12-bit save field.");
-                    return Record(sourceId, ReferenceOutcome.ManualAttention, true, $"registered target id {registered.SaveId} exceeds {maxId}");
+                    return Record(sourceId, ReferenceOutcome.ManualAttention, true,
+                        $"registered target '{registered.Key}' id {registered.SaveId} does not fit the 12-bit save field; preserved unchanged; {atRawId}");
                 }
 
                 AddOnce(_notes, $"Registered identity mapping: {kind} '{sourceRow!.Key}' ({_source!.Label} id {sourceId}) -> '{registered.Key}' "
@@ -744,12 +794,12 @@ public sealed class SaveMigrator
                 var sourceId = (int)stat.Id;
                 var (source, target, problem) = MapStat(sourceId);
                 var sourceInfo = _sourceData.GetStatInfo(stat.Id, _sourceVersion);
-                var targetInfo = target is null ? default : _targetData.GetStatInfo((StatId)target.SaveId!.Value, TargetVersion);
-                var accumulator = Accumulate("item", sourceId, source, target, ItemEncoding(sourceInfo), target is null ? "-" : ItemEncoding(targetInfo));
+                var targetInfo = target is null || problem is not null ? default : _targetData.GetStatInfo((StatId)target.SaveId!.Value, TargetVersion);
+                var accumulator = Accumulate("item", sourceId, source, target, ItemEncoding(sourceInfo), target is null || problem is not null ? "-" : ItemEncoding(targetInfo));
                 accumulator.Use(stat.Value);
                 if (problem is not null)
                 {
-                    accumulator.Problem($"{path}: {problem}");
+                    accumulator.Problem($"{path}: {problem}; {KeptId(sourceId)}");
                     continue;
                 }
 
@@ -761,7 +811,9 @@ public sealed class SaveMigrator
 
                 if (targetId != sourceId && (PairedStats.Contains(stat.Id) || PairedStats.Contains((StatId)targetId)))
                 {
-                    accumulator.Problem($"{path}: a paired damage stat cannot change id under D2SSharp's fixed pairing");
+                    accumulator.Problem($"{path}: a paired damage stat cannot change id under D2SSharp's fixed pairing; {KeptId(sourceId)}");
+                    targetId = sourceId;
+                    targetInfo = _targetData.GetStatInfo(stat.Id, TargetVersion);
                 }
 
                 foreach (var valueProblem in ItemValueProblems(stat, targetInfo, secondary.Contains(index)))
@@ -776,6 +828,11 @@ public sealed class SaveMigrator
                 }
             }
         }
+
+        /// <summary>The fallback for a stat whose target identity cannot be established: its saved id is written unchanged.</summary>
+        private string KeptId(int sourceId) =>
+            $"saved id {sourceId} is kept, which names "
+            + (Target.Stat(sourceId) is { IsPlaceholder: false } same ? $"'{same.Key}'" : "no stat") + $" in {Target.Label}";
 
         private static IEnumerable<string> ItemValueProblems(Stat stat, StatInfo info, bool secondary)
         {
@@ -817,12 +874,13 @@ public sealed class SaveMigrator
                 var sourceId = (int)stat.Id;
                 var (source, target, problem) = MapStat(sourceId);
                 var sourceInfo = _sourceData.GetStatInfo(stat.Id, _sourceVersion);
-                var targetInfo = target is null ? default : _targetData.GetStatInfo((StatId)target.SaveId!.Value, TargetVersion);
-                var accumulator = Accumulate(scope, sourceId, source, target, PlayerEncoding(sourceInfo, scope), target is null ? "-" : PlayerEncoding(targetInfo, scope));
+                var targetInfo = target is null || problem is not null ? default : _targetData.GetStatInfo((StatId)target.SaveId!.Value, TargetVersion);
+                var accumulator = Accumulate(scope, sourceId, source, target, PlayerEncoding(sourceInfo, scope),
+                    target is null || problem is not null ? "-" : PlayerEncoding(targetInfo, scope));
                 accumulator.Use(stat.Value);
                 if (problem is not null)
                 {
-                    accumulator.Problem(problem);
+                    accumulator.Problem($"{problem}; {KeptId(sourceId)}");
                     continue;
                 }
 
@@ -959,9 +1017,10 @@ public sealed class SaveMigrator
         private void Verify(byte[] bytes, object migratedRoot, Dictionary<string, string> before, Dictionary<string, string> serialized,
             List<FieldDifference> intended, List<FieldDifference> conversion)
         {
-            var headerProblems = CheckHeader(bytes, _kind, out var version);
+            // The output must meet every header rule, including the ones a source may break and still be recovered from.
+            var headerProblems = CheckHeader(bytes, _kind, out var version, null);
             _checks.Add(new MigrationCheck("Header, declared size and checksum", headerProblems.Count == 0 && version == TargetVersion,
-                headerProblems.Count == 0 ? $"version {version}, {bytes.Length} bytes" : string.Join("; ", headerProblems)));
+                headerProblems.Count == 0 ? $"version {version}, {bytes.Length} bytes" : string.Join("; ", headerProblems), Critical: true));
 
             object reparsed;
             try
@@ -970,13 +1029,19 @@ public sealed class SaveMigrator
             }
             catch (Exception exception)
             {
-                _checks.Add(new MigrationCheck($"Reparse with {Target.Label} definitions", false, $"{exception.GetType().Name}: {exception.Message}"));
+                _checks.Add(new MigrationCheck($"Reparse with {Target.Label} definitions", false, $"{exception.GetType().Name}: {exception.Message}", Critical: true));
                 return;
             }
 
-            var trailing = reparsed is D2Save reparsedSave ? reparsedSave.TrailingData.Length : 0;
-            _checks.Add(new MigrationCheck($"Reparse with {Target.Label} definitions", trailing == 0,
-                $"complete parse, {trailing} trailing byte(s)"));
+            var trailer = reparsed is D2Save reparsedSave ? reparsedSave.TrailingData : [];
+            _checks.Add(new MigrationCheck($"Reparse with {Target.Label} definitions", true,
+                $"parses, {trailer.Length} trailing byte(s)", Critical: true));
+            if (_sourceTrailer.Length > 0 || trailer.Length > 0)
+            {
+                _checks.Add(new MigrationCheck("Trailing extension data preserved byte-for-byte", trailer.AsSpan().SequenceEqual(_sourceTrailer),
+                    $"source {_sourceTrailer.Length} byte(s), output {trailer.Length} byte(s)"
+                    + (trailer.AsSpan().SequenceEqual(_sourceTrailer) ? ", identical" : ", different")));
+            }
 
             var after = Flatten(reparsed);
             var fidelity = Diff(serialized, after).Where(difference => difference.Path is not ("$.FileSize" or "$.Checksum")).ToList();
@@ -1105,9 +1170,14 @@ public sealed class SaveMigrator
         }
     }
 
-    private static List<string> CheckHeader(byte[] data, SaveFileKind kind, out uint version)
+    /// <summary>
+    /// Returns the problems that make the file undecodable. Problems a decodable source can be recovered from (version label, declared size,
+    /// checksum, size limit) go to <paramref name="recoverable"/>; when it is null, as for an output, every problem is returned.
+    /// </summary>
+    private static List<string> CheckHeader(byte[] data, SaveFileKind kind, out uint version, List<string>? recoverable)
     {
         var problems = new List<string>();
+        var soft = recoverable ?? problems;
         version = 0;
         if (data.Length < 16 || BinaryPrimitives.ReadUInt32LittleEndian(data) != SaveMagic)
         {
@@ -1121,23 +1191,23 @@ public sealed class SaveMigrator
             var declared = BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(8));
             if (!SupportedVersions.Contains(version))
             {
-                problems.Add($"binary version {version} is not a supported retail version ({string.Join(", ", SupportedVersions)}); "
-                             + "D2RLoader extended and unknown formats are left untouched");
+                soft.Add($"binary version {version} is not one of the retail versions D2SSharp is known to read ({string.Join(", ", SupportedVersions)}); "
+                         + "it is decoded experimentally");
             }
 
             if (declared != data.Length)
             {
-                problems.Add($"declared size {declared} differs from the file size {data.Length}");
+                soft.Add($"declared size {declared} differs from the file size {data.Length}; the output declares its real size");
             }
 
             if (data.Length > RetailCharacterSizeLimit)
             {
-                problems.Add($"{data.Length} bytes exceeds the retail {RetailCharacterSizeLimit}-byte limit (D2RLoader extended save?)");
+                soft.Add($"{data.Length} bytes exceeds the retail {RetailCharacterSizeLimit}-byte limit (D2RLoader extended save?)");
             }
 
             if (!ChecksumCalculator.Verify(data))
             {
-                problems.Add("checksum mismatch");
+                soft.Add("checksum mismatch; the output gets a recalculated checksum, which does not prove the source data is uncorrupted");
             }
 
             return problems;
@@ -1149,7 +1219,7 @@ public sealed class SaveMigrator
         {
             if (data.Length - offset < StashTabHeaderSize || BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(offset)) != SaveMagic)
             {
-                problems.Add($"{data.Length - offset} unrecognized byte(s) after tab {tabs} at offset {offset}");
+                soft.Add($"{data.Length - offset} unrecognized byte(s) after tab {tabs} at offset {offset}");
                 break;
             }
 
@@ -1159,12 +1229,12 @@ public sealed class SaveMigrator
             version = tabs == 0 ? itemFormat : version;
             if (stashFormat is < 1 or > 2 || !SupportedVersions.Contains(itemFormat) || itemFormat != version)
             {
-                problems.Add($"tab {tabs + 1}: stash format {stashFormat}, item format {itemFormat} is not a supported retail layout");
+                soft.Add($"tab {tabs + 1}: stash format {stashFormat}, item format {itemFormat} is not a known retail layout; it is decoded experimentally");
             }
 
             if (size < StashTabHeaderSize || offset + size > data.Length)
             {
-                problems.Add($"tab {tabs + 1}: declared size {size} does not fit the file");
+                soft.Add($"tab {tabs + 1}: declared size {size} does not fit the file");
                 break;
             }
 

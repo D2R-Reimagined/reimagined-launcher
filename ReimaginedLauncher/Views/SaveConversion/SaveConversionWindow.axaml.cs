@@ -161,7 +161,7 @@ public partial class SaveConversionWindow : Window
             ? row.BasePlan
             : row.IsSourceUncertain
                 ? await PlanAsync(service, row, row.SelectedSourceChoice!.Layout, force)
-                : force && row.BasePlan is { State: SaveConversionState.Unresolved, ForceOption.Kind: SaveForceKind.AcceptUnresolvedIdentities }
+                : force && (row.BasePlan is { State: SaveConversionState.Unresolved, ForceOption.Kind: SaveForceKind.Force } || row.BasePlan.CanAttemptRecovery)
                     ? await PlanAsync(service, row, null, force)
                     : row.BasePlan;
         if (plan != row.Plan || select is not null)
@@ -177,7 +177,7 @@ public partial class SaveConversionWindow : Window
             return cached;
         }
 
-        var overrides = new MigrationOverrides(AcceptUnresolvedIdentities: force, SourceLayout: source);
+        var overrides = new MigrationOverrides(Force: force, SourceLayout: source);
         var path = row.BasePlan.SourcePath;
         var staging = NewStagingDirectory();
         var plan = await Task.Run(() => service.Plan(path, staging, overrides));

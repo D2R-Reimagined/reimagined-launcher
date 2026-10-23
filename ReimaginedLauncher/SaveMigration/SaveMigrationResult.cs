@@ -9,9 +9,9 @@ public enum MigrationStatus
     Verified,
     /// <summary>Written and verified, but some entries were preserved with a warning or need a person to look at them.</summary>
     NeedsManualInspection,
-    /// <summary>Written and structurally verified only because the user confirmed a Force Conversion override; identities are not verified.</summary>
+    /// <summary>Written and structurally verified, but only because Force Conversion or a manual source choice accepted the listed uncertainties.</summary>
     Experimental,
-    /// <summary>No approved output: the source was rejected, a blocker was found, or verification failed.</summary>
+    /// <summary>No approved output: a hard blocker or critical check failed, or the listed uncertainties were not accepted.</summary>
     Failed,
 }
 
@@ -24,16 +24,15 @@ public enum ReferenceOutcome
 }
 
 /// <summary>
-/// Policy overrides for one explicitly confirmed Force Conversion. They never relax parsing, serialization,
-/// reparse, checksum, count, stat-encoding or unintended-change checks.
+/// Overrides for one Force Conversion analysis. They never relax decoding, serialization, the output header or the target reparse.
 /// </summary>
-/// <param name="AcceptUnresolvedIdentities">Write the output although some saved ids would name a different definition.</param>
-/// <param name="SourceLayout">Use this source layout instead of identifying one; it must still parse the file completely.</param>
-public sealed record MigrationOverrides(bool AcceptUnresolvedIdentities = false, string? SourceLayout = null)
+/// <param name="Force">Accept every reported uncertainty: unresolved identities, unverifiable stats, repaired headers and reported value or field losses.</param>
+/// <param name="SourceLayout">Use this source layout instead of identifying one; it must still parse the file.</param>
+public sealed record MigrationOverrides(bool Force = false, string? SourceLayout = null)
 {
     public static readonly MigrationOverrides None = new();
 
-    public bool Any => AcceptUnresolvedIdentities || SourceLayout is not null;
+    public bool Any => Force || SourceLayout is not null;
 }
 
 /// <param name="Blocking">The reference cannot be carried into the target without silently changing what the item is.</param>
@@ -81,7 +80,8 @@ public sealed record CustomPageItem(string Path, string Code, int Page, int X, i
     public override string ToString() => $"{Path} '{Code}' page {Page} (raw {Page + 1}) at {X},{Y}, {StatCount} stat(s)";
 }
 
-public sealed record MigrationCheck(string Name, bool Passed, string Detail);
+/// <param name="Critical">A failure means the output is structurally unusable; otherwise it is a reported difference Force Conversion may accept.</param>
+public sealed record MigrationCheck(string Name, bool Passed, string Detail, bool Critical = false);
 
 public sealed record SaveMigrationResult(
     string InputPath,
@@ -103,18 +103,25 @@ public sealed record SaveMigrationResult(
     IReadOnlyList<string> Blockers,
     IReadOnlyList<MigrationCheck> Checks,
     MigrationOverrides Overrides,
-    IReadOnlyList<string> AmbiguousSourceLayouts)
+    IReadOnlyList<string> AmbiguousSourceLayouts,
+    IReadOnlyList<string> Uncertainties)
 {
     public int ItemsUnchanged => ItemsInspected - ItemsChanged;
 
-    /// <summary>An approved output exists only because a confirmed override was actually needed.</summary>
-    public bool IsExperimental => OutputPath is not null
-                                  && (Overrides.SourceLayout is not null
-                                      || Overrides.AcceptUnresolvedIdentities && References.Any(reference => reference.Blocking));
+    /// <summary>Nothing makes an output impossible: no hard blocker and no failed critical check.</summary>
+    public bool IsRecoverable => Blockers.Count == 0 && SourceLayout is not null && !Checks.Any(check => check is { Critical: true, Passed: false });
+
+    /// <summary>Something could not be verified: an <see cref="Uncertainties"/> entry or an unresolved (blocking) item identity.</summary>
+    public bool HasUncertainty => Uncertainties.Count > 0 || References.Any(reference => reference.Blocking);
+
+    /// <summary>Recoverable, but only by accepting the uncertainties with Force Conversion.</summary>
+    public bool NeedsForce => IsRecoverable && OutputPath is null && HasUncertainty;
+
+    /// <summary>An approved output exists only because an override accepted an uncertainty or a manual source choice.</summary>
+    public bool IsExperimental => OutputPath is not null && (Overrides.SourceLayout is not null || HasUncertainty);
 
     public MigrationStatus Status =>
-        OutputPath is null || Blockers.Count > 0 || Checks.Any(check => !check.Passed)
-        || References.Any(reference => reference.Blocking) && !Overrides.AcceptUnresolvedIdentities
+        OutputPath is null
             ? MigrationStatus.Failed
             : IsExperimental
                 ? MigrationStatus.Experimental

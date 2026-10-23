@@ -174,21 +174,21 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.Contains("verification checks passed", plan.BlockingReason);
         var blocking = Assert.Single(plan.IssueGroups, group => group.Blocking);
         Assert.Equal((SaveIssueCategory.ItemIdentity, 1, 1), (blocking.Category, blocking.Count, blocking.Items));
-        Assert.Equal(SaveForceKind.AcceptUnresolvedIdentities, plan.ForceOption?.Kind);
+        Assert.Equal(SaveForceKind.Force, plan.ForceOption?.Kind);
         Assert.Contains("Iniquity Razor", Assert.Single(plan.ForceOption!.Risks));
         var unforcedRow = new SaveConversionRowViewModel(plan, service.CheckRename);
         Assert.Equal((false, false, "Needs Force"), (unforcedRow.CanSelect, unforcedRow.IsSelected, unforcedRow.StatusLabel));
         Assert.False(service.Apply(plan, null, service.CreateBackupBatchDirectory()).Succeeded);
         Assert.Equal(original, File.ReadAllBytes(path));
 
-        var forced = service.Plan(path, Path.Combine(StagingDirectory, "forced"), new MigrationOverrides(AcceptUnresolvedIdentities: true));
+        var forced = service.Plan(path, Path.Combine(StagingDirectory, "forced"), new MigrationOverrides(Force: true));
         Log(forced);
         Assert.Equal(SaveConversionState.Experimental, forced.State);
         Assert.NotNull(forced.ConvertedBytes);
         Assert.Contains("EXPERIMENTAL", forced.Report);
         Assert.DoesNotContain(forced.IssueGroups, group => group.Blocking);
         var forcedRow = new SaveConversionRowViewModel(forced, service.CheckRename);
-        Assert.Equal((true, "Experimental", "1 item identity cannot be confirmed."), (forcedRow.IsSelected, forcedRow.StatusLabel, forcedRow.Explanation));
+        Assert.Equal((true, "Experimental", "Experimental: 1 issue accepted without verification."), (forcedRow.IsSelected, forcedRow.StatusLabel, forcedRow.Explanation));
 
         var outcome = service.Apply(forced, null, service.CreateBackupBatchDirectory());
         Assert.True(outcome.Succeeded, outcome.Message);
@@ -214,7 +214,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.Null(plan.ForceOption);
         Assert.Contains(plan.IssueGroups, group => group is { Category: SaveIssueCategory.SaveFormat, Blocking: true });
 
-        var forced = service.Plan(path, Path.Combine(StagingDirectory, "forced"), new MigrationOverrides(AcceptUnresolvedIdentities: true, SourceLayout: "2.1.2"));
+        var forced = service.Plan(path, Path.Combine(StagingDirectory, "forced"), new MigrationOverrides(Force: true, SourceLayout: "2.1.2"));
         Assert.Equal(SaveConversionState.Blocked, forced.State);
         Assert.Null(forced.ConvertedBytes);
         Assert.False(service.Apply(forced, null, service.CreateBackupBatchDirectory()).Succeeded);
@@ -222,10 +222,109 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
 
         // A manually chosen source layout must still parse the file completely.
         var unknown = service.Plan(CopyFixture("Popsicle.d2s"), Path.Combine(StagingDirectory, "unknown"),
-            new MigrationOverrides(AcceptUnresolvedIdentities: true, SourceLayout: "not a registered layout"));
+            new MigrationOverrides(Force: true, SourceLayout: "not a registered layout"));
         Assert.Equal(SaveConversionState.Blocked, unknown.State);
         Assert.Null(unknown.ConvertedBytes);
         Assert.Empty(Directory.GetFiles(BackupRoot, "*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public void TrailingExtensionDataIsCarriedOverByteForByte()
+    {
+        var service = CreateService();
+        var path = CopyFixture("Popsicle.d2s");
+        // Opaque bytes after the standard sections, like a loader's extension block; content and length are arbitrary.
+        byte[] trailer = [.. "EXT1"u8, 1, 0, 2, 0, .. Enumerable.Range(0, 37).Select(value => (byte)(value * 7)), .. "ABCD"u8];
+        File.WriteAllBytes(path, WithValidHeader([.. File.ReadAllBytes(path), .. trailer]));
+
+        var plan = service.Plan(path, StagingDirectory);
+        Log(plan);
+        Assert.Contains(plan.State, new[] { SaveConversionState.Verified, SaveConversionState.VerifiedWithWarnings });
+        Assert.Contains("opaque extension data", plan.Report);
+        Assert.Contains("[PASS] Trailing extension data preserved byte-for-byte", plan.Report);
+        var output = D2Save.Read(plan.ConvertedBytes!, Migrator.Value.Target.CreateExternalData(SaveMigrator.TargetVersion));
+        Assert.Equal(trailer, output.TrailingData);
+
+        Assert.True(service.Apply(plan, null, service.CreateBackupBatchDirectory()).Succeeded);
+        Assert.Equal(SaveConversionState.AlreadyCompatible, service.Plan(path, Path.Combine(StagingDirectory, "again")).State);
+    }
+
+    [Fact]
+    public void ADamagedChecksumIsRepairedOnlyByAnExperimentalForceConversion()
+    {
+        var service = CreateService();
+        var path = CopyFixture("Popsicle.d2s");
+        var damaged = File.ReadAllBytes(path);
+        damaged[12] ^= 0x5A;
+        File.WriteAllBytes(path, damaged);
+
+        var plan = service.Plan(path, StagingDirectory);
+        Log(plan);
+        Assert.Equal((SaveConversionState.Unresolved, SaveForceKind.Force), (plan.State, plan.ForceOption?.Kind));
+        Assert.Null(plan.ConvertedBytes);
+        Assert.Contains(plan.ForceOption!.Risks, risk => risk.Contains("checksum mismatch"));
+        Assert.Equal("Needs Force", new SaveConversionRowViewModel(plan, service.CheckRename).StatusLabel);
+
+        var forced = service.Plan(path, Path.Combine(StagingDirectory, "forced"), new MigrationOverrides(Force: true));
+        Log(forced);
+        Assert.Equal(SaveConversionState.Experimental, forced.State);
+        Assert.True(ChecksumCalculator.Verify(forced.ConvertedBytes!));
+        Assert.Contains("does not prove the source data is uncorrupted", forced.Report);
+        Assert.Contains("EXPERIMENTAL", forced.Report);
+        var outcome = service.Apply(forced, null, service.CreateBackupBatchDirectory());
+        Assert.True(outcome.Succeeded, outcome.Message);
+        Assert.Equal(forced.ConvertedBytes, File.ReadAllBytes(path));
+        Assert.Equal(damaged, File.ReadAllBytes(Path.Combine(outcome.BackupDirectory!, "Popsicle.d2s")));
+    }
+
+    [Fact]
+    public void AForcedOutputThatFailsACriticalCheckIsKeptAsARecoveryCandidateAndNeverApplied()
+    {
+        var service = CreateService();
+        var earlier = service.Plan(CopyFixture("BruhII.d2s"), Path.Combine(StagingDirectory, "earlier"));
+        Assert.True(service.Apply(earlier, null, service.CreateBackupBatchDirectory()).Succeeded);
+        var existingBackups = Directory.GetFiles(BackupRoot, "*", SearchOption.AllDirectories).ToDictionary(file => file, File.ReadAllBytes);
+
+        // A decodable save whose opaque trailer pushes it past the retail size limit: the source is recoverable, but any output that
+        // preserves the trailer must fail the critical output header check.
+        var path = CopyFixture("Popsicle.d2s");
+        var trailer = Enumerable.Range(0, SaveMigrator.RetailCharacterSizeLimit + 1).Select(value => (byte)(value * 31)).ToArray();
+        var oversized = WithValidHeader([.. File.ReadAllBytes(path), .. trailer]);
+        File.WriteAllBytes(path, oversized);
+
+        var forced = service.Plan(path, Path.Combine(StagingDirectory, "forced"), new MigrationOverrides(Force: true));
+        Log(forced);
+        var row = new SaveConversionRowViewModel(forced, service.CheckRename);
+        Assert.Equal(SaveConversionState.Blocked, forced.State);
+        Assert.Null(forced.ConvertedBytes);
+        Assert.Equal((false, false, "Blocked"), (row.CanSelect, row.IsSelected, row.StatusLabel));
+        Assert.Contains("[FAIL, critical] Header, declared size and checksum", forced.Report);
+        Assert.Contains($"exceeds the retail {SaveMigrator.RetailCharacterSizeLimit}-byte limit", forced.BlockingReason);
+        Assert.DoesNotContain("VERIFIED", forced.Report);
+        Assert.DoesNotContain("EXPERIMENTAL -", forced.Report);
+
+        var candidate = forced.RecoveryCandidatePath;
+        Assert.NotNull(candidate);
+        Assert.Equal(Path.Combine(BackupRoot, "RecoveryCandidates"), Path.GetDirectoryName(Path.GetDirectoryName(candidate)));
+        Assert.Equal("Popsicle.d2s.recovery-candidate", Path.GetFileName(candidate));
+        Assert.Contains(candidate, forced.BlockingReason);
+        var candidateBytes = File.ReadAllBytes(candidate);
+        Assert.True(candidateBytes.Length > SaveMigrator.RetailCharacterSizeLimit);
+        Assert.Equal(trailer, candidateBytes[^trailer.Length..]);
+        var candidateReport = File.ReadAllText(candidate + ".report.txt");
+        Assert.StartsWith("EXPERIMENTAL RECOVERY CANDIDATE - FAILED A CRITICAL CHECK AND WAS NOT APPLIED.", candidateReport);
+        Assert.Contains("[FAIL, critical] Header, declared size and checksum", candidateReport);
+
+        Assert.False(service.Apply(forced, null, service.CreateBackupBatchDirectory()).Succeeded);
+        Assert.Equal(oversized, File.ReadAllBytes(path));
+        Assert.Equal(["BruhII.d2s", "Popsicle.d2s"], Directory.GetFiles(SaveDirectory).Select(Path.GetFileName).Order());
+        foreach (var (file, bytes) in existingBackups)
+        {
+            Assert.Equal(bytes, File.ReadAllBytes(file));
+        }
+
+        Assert.Equal([candidate, candidate + ".report.txt"],
+            Directory.GetFiles(BackupRoot, "*", SearchOption.AllDirectories).Except(existingBackups.Keys).Order());
     }
 
     [Fact]
@@ -282,7 +381,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         var path = Path.Combine(SaveDirectory, "LilSorcy.d2s");
         File.WriteAllBytes(path, new byte[9008]);
 
-        var forced = service.Plan(path, StagingDirectory, new MigrationOverrides(AcceptUnresolvedIdentities: true));
+        var forced = service.Plan(path, StagingDirectory, new MigrationOverrides(Force: true));
         var row = new SaveConversionRowViewModel(forced, service.CheckRename);
         testOutput.WriteLine($"{row.StatusLabel} - {row.Explanation}");
 
@@ -333,6 +432,13 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         var path = Path.Combine(SaveDirectory, fixture);
         File.Copy(FixturePath(fixture), path);
         return path;
+    }
+
+    private static byte[] WithValidHeader(byte[] bytes)
+    {
+        BitConverter.GetBytes((uint)bytes.Length).CopyTo(bytes, 8);
+        D2SaveLayoutV104.UpdateChecksum(bytes);
+        return bytes;
     }
 
     private static string FixturePath(string fixture) =>
