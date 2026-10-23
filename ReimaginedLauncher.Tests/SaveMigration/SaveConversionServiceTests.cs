@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using D2SSharp;
+using D2SSharp.Enums;
 using D2SSharp.Model;
 using ReimaginedLauncher.SaveMigration;
 using ReimaginedLauncher.Utilities;
@@ -301,7 +302,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
     }
 
     [Fact]
-    public void AnUnresolvedIdentityBlocksSeparatelyAndOnlyAConfirmedForceConversionWritesIt()
+    public void AnUnresolvedIdentityIsPreservedAsANonblockingWarning()
     {
         // Without the registered rename, BruhII's Life & Death keeps id 1349, which the installed target names Iniquity Razor.
         var registry = SaveMigrationFixtures.LoadRegistry() with { IdentityMappings = [] };
@@ -314,41 +315,91 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
 
         var plan = service.Plan(path, StagingDirectory);
         Log(plan);
-        Assert.Equal(SaveConversionState.Unresolved, plan.State);
-        Assert.Null(plan.ConvertedBytes);
-        Assert.Contains("'Life & Death'", plan.BlockingReason);
-        Assert.Contains("'Iniquity Razor'", plan.BlockingReason);
-        Assert.Contains("verification checks passed", plan.BlockingReason);
-        var blocking = Assert.Single(plan.IssueGroups, group => group.Blocking);
-        Assert.Equal((SaveIssueCategory.ItemIdentity, 1, 1), (blocking.Category, blocking.Count, blocking.Items));
-        Assert.Equal(SaveForceKind.Force, plan.ForceOption?.Kind);
-        Assert.Contains("Iniquity Razor", Assert.Single(plan.ForceOption!.Risks));
-        var unforcedRow = new SaveConversionRowViewModel(plan, service.CheckRename);
-        Assert.Equal((false, false, "Needs Force"),
-            (unforcedRow.CanSelect, unforcedRow.IsSelected, unforcedRow.StatusLabel));
-        Assert.False(service.Apply(plan, null, service.CreateBackupBatchDirectory()).Succeeded);
-        Assert.Equal(original, File.ReadAllBytes(path));
+        Assert.Equal(SaveConversionState.VerifiedWithWarnings, plan.State);
+        Assert.NotNull(plan.ConvertedBytes);
+        Assert.Null(plan.BlockingReason);
+        Assert.Null(plan.ForceOption);
+        var identity = Assert.Single(plan.IssueGroups, group => group.Category == SaveIssueCategory.ItemIdentity);
+        Assert.False(identity.Blocking);
+        Assert.Contains("1349", plan.Report);
+        Assert.Contains("Life & Death", plan.Report);
+        Assert.Contains("Iniquity Razor", plan.Report);
+        Assert.Contains("preserved unchanged", plan.Report);
+        Assert.Contains("[PASS] Item, socket and property counts", plan.Report);
+        Assert.Contains("[PASS] Reparse with", plan.Report);
 
-        var forced = service.Plan(path, Path.Combine(StagingDirectory, "forced"), new MigrationOverrides(Force: true));
-        Log(forced);
-        Assert.Equal(SaveConversionState.Experimental, forced.State);
-        Assert.NotNull(forced.ConvertedBytes);
-        Assert.Contains("EXPERIMENTAL", forced.Report);
-        Assert.DoesNotContain(forced.IssueGroups, group => group.Blocking);
-        var forcedRow = new SaveConversionRowViewModel(forced, service.CheckRename);
-        Assert.Equal((true, "Experimental", "Experimental: 1 issue accepted without verification."),
-            (forcedRow.IsSelected, forcedRow.StatusLabel, forcedRow.Explanation));
+        var source = SaveDataDefinition.FromSnapshot(
+            KnownSnapshots.Reimagined212.Load(SaveMigrationFixtures.DataDirectory));
+        var target = SaveDataDefinition.FromSnapshot(installed.Snapshot);
+        var input = D2Save.Read(original, source.CreateExternalData(BitConverter.ToUInt32(original, 4)));
+        var converted = D2Save.Read(plan.ConvertedBytes!, target.CreateExternalData(SaveMigrator.TargetVersion));
+        var inputItem = Assert.Single(input.Items, item => item.Quality == ItemQuality.Unique
+                                                           && ((SetUniqueQualityData)item.QualityData!)
+                                                           .SetUniqueFileIndex == 1349);
+        var convertedItem = Assert.Single(converted.Items, item => item.Quality == ItemQuality.Unique
+                                                                   && ((SetUniqueQualityData)item.QualityData!)
+                                                                   .SetUniqueFileIndex == 1349);
+        Assert.Equal(inputItem.Stats.Select(stat => (source.Stat((int)stat.Id)!.Key, stat.Layer, stat.Value)),
+            convertedItem.Stats.Select(stat => (target.Stat((int)stat.Id)!.Key, stat.Layer, stat.Value)));
 
-        var outcome = service.Apply(forced, null, service.CreateBackupBatchDirectory());
+        var outcome = service.Apply(plan, null, service.CreateBackupBatchDirectory());
         Assert.True(outcome.Succeeded, outcome.Message);
-        Assert.Contains("experimentally", outcome.Message);
-        Assert.Equal(forced.ConvertedBytes, File.ReadAllBytes(path));
+        Assert.Equal(plan.ConvertedBytes, File.ReadAllBytes(path));
         Assert.Equal(original, File.ReadAllBytes(Path.Combine(outcome.BackupDirectory!, "BruhII.d2s")));
-        Assert.Contains("EXPERIMENTAL",
-            File.ReadAllText(Path.Combine(outcome.BackupDirectory!, "BruhII.d2s.restore.txt")));
-        Assert.True(File.Exists(Path.Combine(outcome.BackupDirectory!, "BruhII.d2s.experimental-report.txt")));
-        Assert.NotEqual(SaveConversionState.Experimental,
-            service.Plan(path, Path.Combine(StagingDirectory, "again")).State);
+    }
+
+    [Fact]
+    public void NormalCharacterConversionBacksUpExistingCompanionsByteForByte()
+    {
+        var service = CreateService();
+        var path = CopyFixture("WereSorc.d2s");
+        var extensions = new[]
+            { ".d2rl", ".key", ".keyo", ".ctl", ".ctlo", ".map", ".ma0", ".ma1", ".ma2", ".ma3" };
+        var companionBytes = extensions.ToDictionary(extension => extension,
+            extension => System.Text.Encoding.ASCII.GetBytes($"companion:{extension}"));
+        foreach (var (extension, bytes) in companionBytes)
+        {
+            File.WriteAllBytes(Path.Combine(SaveDirectory, "WereSorc" + extension), bytes);
+        }
+
+        var plan = service.Plan(path, StagingDirectory);
+        Assert.NotNull(plan.ConvertedBytes);
+        var outcome = service.Apply(plan, null, service.CreateBackupBatchDirectory());
+
+        Assert.True(outcome.Succeeded, outcome.Message);
+        var manifest = File.ReadAllText(Path.Combine(outcome.BackupDirectory!, "WereSorc.d2s.restore.txt"));
+        foreach (var (extension, bytes) in companionBytes)
+        {
+            var companionName = "WereSorc" + extension;
+            Assert.Equal(bytes, File.ReadAllBytes(Path.Combine(SaveDirectory, companionName)));
+            Assert.Equal(bytes, File.ReadAllBytes(Path.Combine(outcome.BackupDirectory!, companionName)));
+            Assert.Contains($"Companion file: {Path.Combine(SaveDirectory, companionName)} (left unchanged)", manifest);
+        }
+    }
+
+    [Fact]
+    public void FailedCompanionBackupLeavesOriginalSaveAndCompanionsUnchanged()
+    {
+        var service = CreateService();
+        var path = CopyFixture("WereSorc.d2s");
+        var original = File.ReadAllBytes(path);
+        var sidecar = new byte[] { 1, 2, 3, 4 };
+        var key = new byte[] { 5, 6, 7, 8 };
+        File.WriteAllBytes(Path.ChangeExtension(path, ".d2rl"), sidecar);
+        File.WriteAllBytes(Path.ChangeExtension(path, ".key"), key);
+        var plan = service.Plan(path, StagingDirectory);
+        var backupBatch = service.CreateBackupBatchDirectory();
+        var collision = new byte[] { 9, 10, 11 };
+        File.WriteAllBytes(Path.Combine(backupBatch, "WereSorc.key"), collision);
+
+        var outcome = service.Apply(plan, null, backupBatch);
+
+        Assert.False(outcome.Succeeded);
+        Assert.Contains("original file was left in place", outcome.Message);
+        Assert.Equal(original, File.ReadAllBytes(path));
+        Assert.Equal(sidecar, File.ReadAllBytes(Path.ChangeExtension(path, ".d2rl")));
+        Assert.Equal(key, File.ReadAllBytes(Path.ChangeExtension(path, ".key")));
+        Assert.Equal(collision, File.ReadAllBytes(Path.Combine(backupBatch, "WereSorc.key")));
     }
 
     [Fact]

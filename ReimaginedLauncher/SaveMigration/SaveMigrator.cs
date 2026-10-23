@@ -746,11 +746,8 @@ public sealed class SaveMigrator
 
             int Unresolved(string why)
             {
-                var changesIdentity = rawTarget is null or { IsPlaceholder: true }
-                                      || !rawTarget.Key.Equals(sourceRow!.Key, StringComparison.OrdinalIgnoreCase);
-                return Record(sourceId, ReferenceOutcome.ManualAttention, changesIdentity,
-                    $"'{sourceRow!.Key}' {why}; preserved unchanged; {atRawId}"
-                    + (changesIdentity ? " (the item would silently become a different definition)" : ""));
+                return Record(sourceId, ReferenceOutcome.ManualAttention, false,
+                    $"'{sourceRow!.Key}' {why}; preserved unchanged; {atRawId}");
             }
 
             int Record(int targetId, ReferenceOutcome outcome, bool blocking, string reason)

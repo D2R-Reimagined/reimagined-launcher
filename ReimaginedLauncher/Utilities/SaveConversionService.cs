@@ -821,6 +821,18 @@ public sealed class SaveConversionService
             }
         }
 
+        if (plan.Kind == SaveFileKind.Character && (newName is null || newName == plan.FileStem))
+        {
+            companions = CompanionExtensions.Prepend(".d2rl")
+                .Select(extension =>
+                {
+                    var path = Path.Combine(directory, plan.FileStem + extension);
+                    return (From: path, To: path);
+                })
+                .Where(pair => File.Exists(pair.From))
+                .ToList();
+        }
+
         WriteBackup(backupBatchDirectory, plan, original, companions, destination);
 
         var temporary = $"{destination}.{Guid.NewGuid():N}.converting";
@@ -969,7 +981,9 @@ public sealed class SaveConversionService
         {
             var companionBackup = Path.Combine(batchDirectory, Path.GetFileName(companion.From));
             WriteNewFile(companionBackup, File.ReadAllBytes(companion.From));
-            manifest.AppendLine($"Companion file: {companion.From} -> {companion.To}");
+            manifest.AppendLine(SamePath(companion.From, companion.To)
+                ? $"Companion file: {companion.From} (left unchanged)"
+                : $"Companion file: {companion.From} -> {companion.To}");
         }
 
         manifest
