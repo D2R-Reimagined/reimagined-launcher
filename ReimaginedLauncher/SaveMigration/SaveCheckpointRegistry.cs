@@ -19,6 +19,10 @@ public enum SaveCheckpointType
 /// <param name="InstalledVersions">modinfo.json <c>version</c> values that identify an installation using this layout.</param>
 /// <param name="DevelopmentTarget">May be chosen as a target explicitly, but is never selected automatically.</param>
 /// <param name="SupportedTarget">An unreleased layout, such as an upcoming release snapshot, that is a supported conversion target.</param>
+/// <param name="ItemTablesDirectory">
+/// Item tables and base items to read the save with instead of <paramref name="Directory"/>'s; the stat encoding stays
+/// <paramref name="Directory"/>'s. Only valid together with <paramref name="AppendedStatsDirectory"/>.
+/// </param>
 public sealed record SaveCheckpoint(
     string Id,
     string Label,
@@ -30,9 +34,11 @@ public sealed record SaveCheckpoint(
     IReadOnlyList<string> InstalledVersions,
     bool DevelopmentTarget,
     string? Description,
-    bool SupportedTarget = false)
+    bool SupportedTarget = false,
+    string? ItemTablesDirectory = null)
 {
-    public bool CanBeTarget => AppendedStatsDirectory is null && (Type == SaveCheckpointType.Release || DevelopmentTarget || SupportedTarget);
+    public bool CanBeTarget => AppendedStatsDirectory is null && ItemTablesDirectory is null
+                               && (Type == SaveCheckpointType.Release || DevelopmentTarget || SupportedTarget);
 
     /// <summary>May become the default target; development-only layouts never do.</summary>
     public bool IsSupportedTarget => CanBeTarget && !DevelopmentTarget && (Type == SaveCheckpointType.Release || SupportedTarget);
@@ -103,9 +109,15 @@ public sealed record SaveCheckpointRegistry(
                 [.. (entry.InstalledVersions ?? []).Select(version => version.Trim()).Where(version => version.Length > 0)],
                 entry.DevelopmentTarget,
                 entry.Description,
-                entry.SupportedTarget))
+                entry.SupportedTarget,
+                string.IsNullOrWhiteSpace(entry.ItemTablesDirectory) ? null : entry.ItemTablesDirectory))
             .OrderBy(checkpoint => checkpoint.Order)
             .ToList();
+
+        if (checkpoints.FirstOrDefault(checkpoint => checkpoint is { ItemTablesDirectory: not null, AppendedStatsDirectory: null }) is { } itemTablesOnly)
+        {
+            throw new InvalidDataException($"Checkpoint '{itemTablesOnly.Id}' sets itemTablesDirectory without appendedStatsDirectory.");
+        }
 
         if (checkpoints.GroupBy(checkpoint => checkpoint.Id, StringComparer.OrdinalIgnoreCase).FirstOrDefault(group => group.Count() > 1) is { } duplicateId)
         {
@@ -320,6 +332,7 @@ public sealed record SaveCheckpointRegistry(
         public int? Order { get; set; }
         public string? Directory { get; set; }
         public string? AppendedStatsDirectory { get; set; }
+        public string? ItemTablesDirectory { get; set; }
         public List<string>? InstalledVersions { get; set; }
         public bool DevelopmentTarget { get; set; }
         public bool SupportedTarget { get; set; }

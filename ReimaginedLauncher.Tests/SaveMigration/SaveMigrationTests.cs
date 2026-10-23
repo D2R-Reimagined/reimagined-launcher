@@ -239,6 +239,37 @@ public sealed class SaveMigrationTests(ITestOutputHelper testOutput)
             reference is { Kind: TableKind.MagicPrefix, SourceId: 2047, Outcome: ReferenceOutcome.PreservedWithWarning });
     }
 
+    [Fact]
+    public void AStashWithPr1181ItemsAnd3012StatsIsIdentifiedAsTheNewItemsPreSwapStatsLayout()
+    {
+        // The stash fixture (3.0.12) with its r33 rune turned into a Brak rune (r34), which only PR #1181's tables define,
+        // written with PR #1181 items and 3.0.12's stat encoding.
+        var reimagined3012 = KnownSnapshots.Reimagined3012.Load(DataDirectory);
+        var pullRequest = KnownSnapshots.PullRequest1181.Load(DataDirectory);
+        const string label = "3.0.13 development (PR #1181 items + 3.0.12 stats + appended PR #1181 stats)";
+        var source = SaveDataDefinition.WithAppendedStats(label, reimagined3012, pullRequest, pullRequest);
+        var data = File.ReadAllBytes(FixturePath("ModernSharedStashSoftCoreV2.d2i"));
+        var version = BitConverter.ToUInt32(data, 8);
+        var stash = D2StashSave.Read(data, SaveDataDefinition.FromSnapshot(reimagined3012).CreateExternalData(version));
+        var rune = Assert.Single(stash.SelectMany(tab => tab.Items), item => item.ItemCodeString.Trim() == "r33");
+        rune.ItemCode = ItemTypeCodes.MakeCode("r34");
+
+        var directory = Path.Combine(RepositoryRoot.Value, "ReimaginedLauncher.Tests", "TestOutput", "SaveMigration", "Input");
+        Directory.CreateDirectory(directory);
+        var input = Path.Combine(directory, "NewItemsPreSwapStatsStash.d2i");
+        File.WriteAllBytes(input, stash.ToBytes(source.CreateExternalData(version), version));
+
+        var result = ConvertFile(input);
+
+        Assert.Equal(label, result.SourceLayout);
+        Assert.Contains(result.Identification, line => line.StartsWith("3.0.12: rejected, parse failed", StringComparison.Ordinal));
+        Assert.Contains(result.Identification, line => line.StartsWith($"{SaveMigrator.Intermediate3013Label}: rejected, parse failed", StringComparison.Ordinal));
+        Assert.DoesNotContain(result.References, reference => reference.Blocking);
+        var output = D2StashSave.Read(File.ReadAllBytes(result.OutputPath!), Migrator.Value.Target.CreateExternalData(SaveMigrator.TargetVersion));
+        Assert.Equal(result.ItemsInspected, output.Sum(tab => CountWithSockets(tab.Items)));
+        Assert.Single(output.SelectMany(tab => tab.Items), item => item.ItemCodeString.Trim() == "r34");
+    }
+
     /// <summary>BruhII (2.1.2) with four items rewritten to carry 2.1.2 identities that later releases renamed.</summary>
     private static (SaveMigrationResult Result, D2Save Save) ConvertHistoricalRenames()
     {

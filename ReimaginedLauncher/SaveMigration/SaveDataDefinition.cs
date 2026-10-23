@@ -17,13 +17,15 @@ public sealed class SaveDataDefinition
         GameDataSnapshot itemTables,
         IReadOnlyList<TableDefinition> stats,
         IReadOnlyList<TableDefinition> appendedStats,
-        Func<uint, IExternalData> createExternalData)
+        Func<uint, IExternalData> createExternalData,
+        bool usesNewerItemTables = false)
     {
         Label = label;
         ItemTables = itemTables;
         Stats = stats;
         AppendedStats = appendedStats;
         _createExternalData = createExternalData;
+        UsesNewerItemTables = usesNewerItemTables;
     }
 
     public string Label { get; }
@@ -34,6 +36,9 @@ public sealed class SaveDataDefinition
 
     /// <summary>Stats taken from an overlay snapshot past the end of the base stat table.</summary>
     public IReadOnlyList<TableDefinition> AppendedStats { get; }
+
+    /// <summary>The item tables are not the stat encoding's own: they come from a newer snapshot.</summary>
+    public bool UsesNewerItemTables { get; }
 
     public IExternalData CreateExternalData(uint saveVersion) => _createExternalData(saveVersion);
 
@@ -53,38 +58,50 @@ public sealed class SaveDataDefinition
     /// The base snapshot unchanged, plus only the overlay stats whose ids lie past the end of the base stat table.
     /// Moves and encoding changes the overlay makes to existing ids are deliberately not applied.
     /// </summary>
-    public static SaveDataDefinition WithAppendedStats(string label, GameDataSnapshot baseSnapshot, GameDataSnapshot overlaySnapshot)
+    public static SaveDataDefinition WithAppendedStats(string label, GameDataSnapshot baseSnapshot, GameDataSnapshot overlaySnapshot) =>
+        WithAppendedStats(label, baseSnapshot, overlaySnapshot, null);
+
+    /// <summary>
+    /// <see cref="WithAppendedStats(string, GameDataSnapshot, GameDataSnapshot)"/>, but with the item tables and base items of
+    /// <paramref name="itemTablesSnapshot"/> when it is set: a layout that already had newer items but still the base stat encoding.
+    /// </summary>
+    public static SaveDataDefinition WithAppendedStats(
+        string label, GameDataSnapshot baseSnapshot, GameDataSnapshot overlaySnapshot, GameDataSnapshot? itemTablesSnapshot)
     {
         var baseStats = TableSchema.Extract(TableKind.ItemStatCost, baseSnapshot[TableKind.ItemStatCost]);
         var appended = TableSchema.Extract(TableKind.ItemStatCost, overlaySnapshot[TableKind.ItemStatCost])
             .Skip(baseStats.Count)
             .ToList();
+        // The item tables carry the base stat table, so Phase 1 maps the existing stat ids from the base encoding.
+        var itemTables = itemTablesSnapshot?.WithStatsOf(label, baseSnapshot) ?? baseSnapshot;
         return new SaveDataDefinition(
             label,
-            baseSnapshot,
+            itemTables,
             [.. baseStats, .. appended],
             appended,
             version => new AppendedStatsExternalData(
                 new TxtFileExternalData(baseSnapshot.Directory, version),
                 new TxtFileExternalData(overlaySnapshot.Directory, version),
-                baseStats.Count));
+                new TxtFileExternalData(itemTables.Directory, version),
+                baseStats.Count),
+            itemTablesSnapshot is not null);
     }
 
-    private sealed class AppendedStatsExternalData(IExternalData baseData, IExternalData overlayData, int firstOverlayStatId)
+    private sealed class AppendedStatsExternalData(IExternalData baseData, IExternalData overlayData, IExternalData itemData, int firstOverlayStatId)
         : IExternalData
     {
         public StatInfo GetStatInfo(StatId statId, uint saveVersion) => (int)statId >= firstOverlayStatId
             ? overlayData.GetStatInfo(statId, saveVersion)
             : baseData.GetStatInfo(statId, saveVersion);
 
-        public int GetItemIndex(uint itemCode, uint saveVersion) => baseData.GetItemIndex(itemCode, saveVersion);
+        public int GetItemIndex(uint itemCode, uint saveVersion) => itemData.GetItemIndex(itemCode, saveVersion);
 
-        public ItemTypeInfo GetItemInfo(int itemIndex, uint saveVersion) => baseData.GetItemInfo(itemIndex, saveVersion);
+        public ItemTypeInfo GetItemInfo(int itemIndex, uint saveVersion) => itemData.GetItemInfo(itemIndex, saveVersion);
 
-        public int GetQuantityBits(uint saveVersion) => baseData.GetQuantityBits(saveVersion);
+        public int GetQuantityBits(uint saveVersion) => itemData.GetQuantityBits(saveVersion);
 
-        public int GetMagicPrefixOffset(uint saveVersion) => baseData.GetMagicPrefixOffset(saveVersion);
+        public int GetMagicPrefixOffset(uint saveVersion) => itemData.GetMagicPrefixOffset(saveVersion);
 
-        public int GetAutoMagicOffset(uint saveVersion) => baseData.GetAutoMagicOffset(saveVersion);
+        public int GetAutoMagicOffset(uint saveVersion) => itemData.GetAutoMagicOffset(saveVersion);
     }
 }

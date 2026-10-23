@@ -63,7 +63,8 @@ public sealed class SaveMigrator
         var sources = registry.SourcesFor(target)
             .Select(checkpoint => checkpoint.AppendedStatsDirectory is { } overlay
                 ? SaveDataDefinition.WithAppendedStats(checkpoint.Label,
-                    Snapshot(registry.SnapshotLabel(checkpoint.Directory), checkpoint.Directory), Snapshot(registry.SnapshotLabel(overlay), overlay))
+                    Snapshot(registry.SnapshotLabel(checkpoint.Directory), checkpoint.Directory), Snapshot(registry.SnapshotLabel(overlay), overlay),
+                    checkpoint.ItemTablesDirectory is { } items ? Snapshot(registry.SnapshotLabel(items), items) : null)
                 : SaveDataDefinition.FromSnapshot(Snapshot(checkpoint.Label, checkpoint.Directory)))
             .ToList();
         var comparisons = sources
@@ -319,7 +320,19 @@ public sealed class SaveMigrator
             // The best id fit wins. Ties are only acceptable between layouts that decode identically with the same item tables.
             var best = viable.Min(candidate => Disagreements(candidate.Attempt));
             var tied = viable.Where(candidate => Disagreements(candidate.Attempt) == best).ToList();
-            var others = viable.Except(tied).ToList();
+            // Newer item tables under an older stat encoding are only needed when the encoding's own item tables cannot explain the
+            // file as well: a tied layout that decodes the file identically with its own item tables keeps the save on those.
+            var unneeded = tied.Where(candidate => candidate.Definition.UsesNewerItemTables
+                                                   && tied.Any(other => !other.Definition.UsesNewerItemTables
+                                                                        && Signature(other.Attempt) == Signature(candidate.Attempt)))
+                .ToList();
+            if (unneeded.Count > 0)
+            {
+                tied = tied.Except(unneeded).ToList();
+                _identification.Add($"{Labels(unneeded)}: not needed, the file decodes identically with the item tables of {Labels(tied)}.");
+            }
+
+            var others = viable.Except(tied).Except(unneeded).ToList();
             if (tied.Select(candidate => (Signature(candidate.Attempt), candidate.Definition.ItemTables.Label)).Distinct().Count() > 1)
             {
                 _ambiguousLayouts = [.. tied.Select(candidate => candidate.Definition.Label)];

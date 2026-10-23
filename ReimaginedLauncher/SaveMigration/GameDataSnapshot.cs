@@ -47,6 +47,12 @@ public sealed class GameDataSnapshot
             kind => TableSnapshot.Load(Path.Combine(directory, TableSchema.FileName(kind))));
         return new GameDataSnapshot(label, Path.GetFullPath(directory), tables);
     }
+
+    /// <summary>These item tables and directory under <paramref name="label"/>, with <paramref name="statsSnapshot"/>'s stat table.</summary>
+    public GameDataSnapshot WithStatsOf(string label, GameDataSnapshot statsSnapshot) => new(
+        label,
+        Directory,
+        TableSchema.AllKinds.ToDictionary(kind => kind, kind => kind == TableKind.ItemStatCost ? statsSnapshot[kind] : this[kind]));
 }
 
 public sealed record KnownSnapshot(string Label, string FolderName)
