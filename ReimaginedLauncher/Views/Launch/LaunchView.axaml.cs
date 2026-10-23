@@ -16,6 +16,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ReimaginedLauncher.HttpClients;
 using ReimaginedLauncher.HttpClients.Models;
 using ReimaginedLauncher.Utilities;
+using ReimaginedLauncher.Views.SaveConversion;
 
 namespace ReimaginedLauncher.Views.Launch;
 
@@ -579,6 +580,17 @@ public partial class LaunchView : UserControl
 
         if (MainWindow.Instance is { } mainWindow)
             await mainWindow.NavigateToUpdateViewAsync();
+    }
+
+    private async void OnConvertSaveDataClick(object? sender, RoutedEventArgs e)
+    {
+        if (_isLaunching || _isRunningLadderAction || MainWindow.IsInstallInProgress
+            || TopLevel.GetTopLevel(this) is not Window owner)
+        {
+            return;
+        }
+
+        await new SaveConversionWindow().ShowDialog(owner);
     }
 
     private async void OnOfflineExperienceClick(object? sender, RoutedEventArgs e)

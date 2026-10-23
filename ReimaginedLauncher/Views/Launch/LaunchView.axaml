@@ -198,7 +198,7 @@
                 </Border>
 
                 <Border x:Name="InstallDirectoryPanel" Grid.Column="1" Classes="panel" Padding="18">
-                    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="12">
+                    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="12">
                         <StackPanel Spacing="4">
                             <TextBlock x:Name="InstallDirectoryTitle" Classes="section-title" Text="Installation" />
                             <TextBlock x:Name="InstallDirectoryDescription" Classes="muted" TextWrapping="Wrap" />
@@ -283,6 +283,12 @@
                                            Text="Optional: requires a configured executable ~/lsfg wrapper and Steam shortcut setup. Applies only to the game." />
                             </StackPanel>
                         </Expander>
+                        <StackPanel Grid.Row="8" Spacing="6">
+                            <TextBlock Text="Offline Save Data" Classes="muted" FontSize="12" />
+                            <Button x:Name="ConvertSaveDataButton" Content="Convert Save Data" Click="OnConvertSaveDataClick" />
+                            <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                                       Text="Review and convert offline characters and shared stashes from older Reimagined versions. Nothing changes until you confirm." />
+                        </StackPanel>
                     </Grid>
                 </Border>
             </Grid>
