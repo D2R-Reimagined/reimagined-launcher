@@ -19,6 +19,7 @@ public partial class MainWindow
     {
         var generation = ++_saveConversionCheckGeneration;
         var profile = Settings.CurrentProfile;
+        var installDirectory = profile.InstallDirectory;
         try
         {
             var (files, targetFingerprint) = await Task.Factory.StartNew(
@@ -30,7 +31,8 @@ public partial class MainWindow
                 SaveConversionService.WasAutomaticPromptShown(profile, targetFingerprint) ||
                 generation != _saveConversionCheckGeneration || IsInstallInProgress ||
                 IsGameRunning() || !IsVisible || OwnedWindows.Count > 0 ||
-                !ReferenceEquals(profile, Settings.CurrentProfile))
+                !ReferenceEquals(profile, Settings.CurrentProfile) ||
+                !SaveConversionService.IsAnalyzedInstallation(profile, installDirectory))
             {
                 return;
             }
@@ -40,7 +42,12 @@ public partial class MainWindow
                 + "Review them below; nothing is changed until you choose Convert Selected.");
             window.Opened += async (_, _) =>
             {
-                SaveConversionService.RecordAutomaticPromptShown(profile, targetFingerprint);
+                if (!SaveConversionService.RecordAutomaticPromptShown(profile, installDirectory, targetFingerprint))
+                {
+                    window.Close();
+                    return;
+                }
+
                 try
                 {
                     await SettingsManager.SaveAsync(Settings);

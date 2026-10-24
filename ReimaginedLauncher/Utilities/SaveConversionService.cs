@@ -311,14 +311,31 @@ public sealed class SaveConversionService
         || plan is { State: SaveConversionState.Unresolved, ForceOption.Kind: SaveForceKind.ChooseSourceLayout };
 
     internal static string AutomaticPromptKey(InstallationProfile profile, string targetFingerprint) =>
-        $"{Path.TrimEndingDirectorySeparator(profile.InstallDirectory?.Trim() ?? string.Empty)}|{targetFingerprint}";
+        $"{AutomaticPromptDirectory(profile.InstallDirectory)}|{targetFingerprint}";
+
+    private static string AutomaticPromptDirectory(string? installDirectory) =>
+        Path.TrimEndingDirectorySeparator(installDirectory?.Trim() ?? string.Empty);
+
+    /// <summary>True when the profile still points at the install directory captured before an automatic check began.</summary>
+    internal static bool IsAnalyzedInstallation(InstallationProfile profile, string? analyzedInstallDirectory) =>
+        AutomaticPromptDirectory(profile.InstallDirectory) == AutomaticPromptDirectory(analyzedInstallDirectory);
 
     /// <summary>True when the automatic prompt already opened for this profile's installation and installed target data.</summary>
     internal static bool WasAutomaticPromptShown(InstallationProfile profile, string targetFingerprint) =>
         profile.SaveConversionPromptKey == AutomaticPromptKey(profile, targetFingerprint);
 
-    internal static void RecordAutomaticPromptShown(InstallationProfile profile, string targetFingerprint) =>
+    /// <summary>Records the prompt unless the profile has moved away from <paramref name="analyzedInstallDirectory"/>.</summary>
+    internal static bool RecordAutomaticPromptShown(InstallationProfile profile, string? analyzedInstallDirectory,
+        string targetFingerprint)
+    {
+        if (!IsAnalyzedInstallation(profile, analyzedInstallDirectory))
+        {
+            return false;
+        }
+
         profile.SaveConversionPromptKey = AutomaticPromptKey(profile, targetFingerprint);
+        return true;
+    }
 
     /// <summary>Analyzes every save in <paramref name="saveDirectory"/> and returns those that need conversion. Nothing is written.</summary>
     public IReadOnlyList<string> FindSavesNeedingConversion(string saveDirectory, string stagingDirectory) =>

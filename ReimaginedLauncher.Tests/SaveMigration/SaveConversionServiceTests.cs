@@ -127,7 +127,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         var profile = new InstallationProfile { Type = InstallationType.BattleNet, InstallDirectory = install };
         Assert.False(SaveConversionService.WasAutomaticPromptShown(profile, "target-a"));
 
-        SaveConversionService.RecordAutomaticPromptShown(profile, "target-a");
+        Assert.True(SaveConversionService.RecordAutomaticPromptShown(profile, install, "target-a"));
         var settings = new AppSettings { Profiles = [profile, new InstallationProfile { Type = InstallationType.Steam }] };
         var restored = System.Text.Json.JsonSerializer.Deserialize<AppSettings>(
             System.Text.Json.JsonSerializer.Serialize(settings))!;
@@ -143,11 +143,42 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
     }
 
     [Fact]
+    public void AutomaticPromptForAnUnchangedInstallationIsStillRecorded()
+    {
+        var install = Path.Combine(_root, "install");
+        var profile = new InstallationProfile
+            { Type = InstallationType.BattleNet, InstallDirectory = install + Path.DirectorySeparatorChar };
+
+        Assert.True(SaveConversionService.IsAnalyzedInstallation(profile, $" {install} "));
+        Assert.True(SaveConversionService.RecordAutomaticPromptShown(profile, install, "target-a"));
+        Assert.True(SaveConversionService.WasAutomaticPromptShown(profile, "target-a"));
+    }
+
+    [Fact]
+    public void StaleAutomaticPromptCannotRecordSuppressionForAChangedInstallation()
+    {
+        var analyzedInstall = Path.Combine(_root, "install");
+        var newInstall = Path.Combine(_root, "other-install");
+        var profile = new InstallationProfile { Type = InstallationType.BattleNet, InstallDirectory = analyzedInstall };
+        Assert.True(SaveConversionService.RecordAutomaticPromptShown(profile, analyzedInstall, "target-a"));
+        var previousKey = profile.SaveConversionPromptKey;
+
+        profile.InstallDirectory = newInstall;
+
+        Assert.False(SaveConversionService.IsAnalyzedInstallation(profile, analyzedInstall));
+        Assert.False(SaveConversionService.RecordAutomaticPromptShown(profile, analyzedInstall, "target-b"));
+        Assert.Equal(previousKey, profile.SaveConversionPromptKey);
+        Assert.False(SaveConversionService.WasAutomaticPromptShown(profile, "target-a"));
+        Assert.False(SaveConversionService.WasAutomaticPromptShown(profile, "target-b"));
+    }
+
+    [Fact]
     public void AutomaticPromptSuppressionDoesNotAffectManualConversion()
     {
         var profile = new InstallationProfile
             { Type = InstallationType.BattleNet, InstallDirectory = Path.Combine(_root, "install") };
-        SaveConversionService.RecordAutomaticPromptShown(profile, InstalledTarget.Value.Fingerprint);
+        Assert.True(SaveConversionService.RecordAutomaticPromptShown(profile, profile.InstallDirectory,
+            InstalledTarget.Value.Fingerprint));
         var service = CreateService();
         var path = CopyFixture("BruhII.d2s");
         var original = File.ReadAllBytes(path);
