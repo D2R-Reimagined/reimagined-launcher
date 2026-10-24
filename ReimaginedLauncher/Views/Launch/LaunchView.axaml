@@ -218,7 +218,7 @@
                   <StackPanel Spacing="3">
                     <TextBlock Text="Signed Ladder Package" FontWeight="SemiBold" IsVisible="False"/>
                     <Grid>
-                      <TextBlock x:Name="HeroPolicySummary" Text="Checking Ladder…" TextWrapping="Wrap" FontWeight="SemiBold" MinHeight="38" VerticalAlignment="Top"/></Grid>
+                      <TextBlock x:Name="HeroPolicySummary" Foreground="{StaticResource TextBrush}" Text="Checking Ladder…" TextWrapping="Wrap" FontWeight="SemiBold" MinHeight="38" VerticalAlignment="Top"/></Grid>
                   </StackPanel>
                   <StackPanel x:Name="LadderBundleProblemsPanel" Spacing="12" IsVisible="False"/>
                   <StackPanel x:Name="LadderBundleProgressPanel" Spacing="4" IsVisible="False">
@@ -363,7 +363,7 @@
                   </Border>
                   <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="Custom edits must live in &lt;name&gt;_launcher_clean. For long-term update compatibility, use a launcher plugin."/>
                 </StackPanel>
-              </Flyout></Button.Flyout></Button></WrapPanel></StackPanel>
+              </Flyout></Button.Flyout></Button><Button Content="How To Setup" Classes="hero-compact" x:Name="SteamHowToSetupButton" IsVisible="False" Click="OnSteamHowToSetupClick"/><Border x:Name="LadderPolicyInlineBadge" Classes="warning-banner" Padding="8,4" CornerRadius="6" VerticalAlignment="Center" IsVisible="False"><TextBlock x:Name="LadderPolicyInlineText" Foreground="{StaticResource GoldTextBrush}" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center"/></Border></WrapPanel></StackPanel>
           </Border>
         </Border>
       </Expander>
@@ -392,12 +392,12 @@
             </StackPanel>
           </Flyout></Button.Flyout></Button></Grid>
             </StackPanel>
-            <Grid x:Name="LoaderActionsPanel" Grid.Column="1" ColumnDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="8" RowSpacing="6" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,-8,0">
+            <WrapPanel x:Name="LoaderActionsPanel" Grid.Column="1" Orientation="Horizontal" ItemSpacing="8" LineSpacing="6" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,-8,0">
               <Button x:Name="RefreshLoaderButton" Content="Refresh" Click="OnRefreshLoaderClick" Classes="hero-compact"/>
               <Button x:Name="InstallLocalPluginButton" Content="Install Plugin/Zip" Click="OnInstallLocalPluginClick" Classes="hero-compact"/>
               <Button x:Name="OpenLoaderFolderButton" Content="Global Folder" Click="OnOpenLoaderFolderClick" Classes="hero-compact"/>
               <Button x:Name="OpenModLoaderFolderButton" Content="Reimagined Folder" Click="OnOpenModLoaderFolderClick" Classes="hero-compact"/>
-            </Grid>
+            </WrapPanel>
           </Grid>
           </Expander.Header><StackPanel Spacing="7">
           <TextBox PlaceholderText="Search plugins and patches…" TextChanged="OnHeroSearchChanged" x:Name="HeroPluginSearch" Classes="hero-search"/>

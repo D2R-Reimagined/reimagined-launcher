@@ -42,9 +42,9 @@
         <SolidColorBrush Color="#7B1D18" x:Key="ButtonBackgroundPressed"/>
         <SolidColorBrush Color="#F7F1E3" x:Key="ButtonForegroundPressed"/>
         <SolidColorBrush Color="#7B1D18" x:Key="ButtonBorderBrushPressed"/>
-        <SolidColorBrush Color="#252321" x:Key="ButtonBackgroundDisabled"/>
-        <SolidColorBrush Color="#BCA77D" x:Key="ButtonForegroundDisabled"/>
-        <SolidColorBrush Color="#3D372D" x:Key="ButtonBorderBrushDisabled"/>
+        <SolidColorBrush Color="#141312" x:Key="ButtonBackgroundDisabled"/>
+        <SolidColorBrush Color="#6E6962" x:Key="ButtonForegroundDisabled"/>
+        <SolidColorBrush Color="#26231F" x:Key="ButtonBorderBrushDisabled"/>
         <SolidColorBrush Color="#9E2D1E" x:Key="AccentButtonBackground"/>
         <SolidColorBrush Color="#F7F1E3" x:Key="AccentButtonForeground"/>
         <SolidColorBrush Color="#7B1D18" x:Key="AccentButtonBorderBrush"/>
@@ -54,9 +54,9 @@
         <SolidColorBrush Color="#7B1D18" x:Key="AccentButtonBackgroundPressed"/>
         <SolidColorBrush Color="#F7F1E3" x:Key="AccentButtonForegroundPressed"/>
         <SolidColorBrush Color="#7B1D18" x:Key="AccentButtonBorderBrushPressed"/>
-        <SolidColorBrush Color="#252321" x:Key="AccentButtonBackgroundDisabled"/>
-        <SolidColorBrush Color="#BCA77D" x:Key="AccentButtonForegroundDisabled"/>
-        <SolidColorBrush Color="#3D372D" x:Key="AccentButtonBorderBrushDisabled"/>
+        <SolidColorBrush Color="#141312" x:Key="AccentButtonBackgroundDisabled"/>
+        <SolidColorBrush Color="#6E6962" x:Key="AccentButtonForegroundDisabled"/>
+        <SolidColorBrush Color="#26231F" x:Key="AccentButtonBorderBrushDisabled"/>
     </Application.Resources>
     <Application.Styles>
         <FluentTheme/>
@@ -143,7 +143,7 @@
             <Setter Property="Background" Value="{StaticResource ButtonBackgroundDisabled}"/>
             <Setter Property="BorderBrush" Value="{StaticResource ButtonBorderBrushDisabled}"/>
             <Setter Property="Foreground" Value="{StaticResource ButtonForegroundDisabled}"/>
-            <Setter Property="Opacity" Value="1"/>
+            <Setter Property="Opacity" Value="0.65"/>
         </Style>
 
         <Style Selector="Button.accent">

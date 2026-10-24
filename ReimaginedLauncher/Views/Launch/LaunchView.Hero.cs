@@ -103,12 +103,16 @@ public partial class LaunchView
     private void ApplyHeroPluginFilter()
     {
         if (HeroPluginSearch is null || HeroPluginCount is null) return;
-        var verified = _ladderBundleReadiness?.IsReady == true && _ladderPolicyVerified;
-        HeroPolicySummary.Text = verified ? "✓ Package and plugins verified"
-            : _isRefreshingLadders ? "Checking Ladder…"
+        var isCheckingLadder = _isRefreshingLadders || _isRefreshingLadderPolicy;
+        var verified = !isCheckingLadder && _ladderBundleReadiness?.IsReady == true && _ladderPolicyVerified;
+        HeroPolicySummary.Text = _isRunningLadderAction ? LadderBundleStatusText.Text
+            : isCheckingLadder ? "Checking Ladder…"
+            : verified ? "✓ Package and plugins verified"
             : _ladderBundleReadiness?.IsReady == true ? LadderExtensionPolicyStatusText.Text
             : LadderBundleStatusText.Text;
-        HeroPolicySummary.Foreground = verified ? Avalonia.Media.Brushes.LightGreen : LadderBundleStatusText.Foreground;
+        HeroPolicySummary.Foreground = verified && !_isRunningLadderAction
+            ? Avalonia.Media.Brushes.LightGreen
+            : new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#F7F1E3"));
         LootFilterStatusText.IsVisible = !string.IsNullOrWhiteSpace(LootFilterStatusText.Text);
         if (!PluginsExpander.IsExpanded) return;
         var query = HeroPluginSearch.Text?.Trim() ?? string.Empty;

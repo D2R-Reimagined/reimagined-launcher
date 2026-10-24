@@ -7,18 +7,30 @@ namespace ReimaginedLauncher.Utilities;
 
 internal static class OsAccentColors
 {
+    internal static readonly Color DefaultAccent = Color.FromRgb(0x9E, 0x2D, 0x1E);
+
     internal static void Initialize(Application application)
     {
         var platform = application.PlatformSettings;
-        Apply(application, platform?.GetColorValues().AccentColor1 ?? Color.FromRgb(0, 120, 212));
+        Apply(application, ResolveAccent(platform?.GetColorValues().AccentColor1));
         if (platform is not null)
             platform.ColorValuesChanged += (_, colors) =>
-                Dispatcher.UIThread.Post(() => Apply(application, colors.AccentColor1));
+                Dispatcher.UIThread.Post(() => Apply(application, ResolveAccent(colors.AccentColor1)));
+    }
+
+    internal static Color ResolveAccent(Color? candidate)
+    {
+        if (candidate is not { } color || color.A == 0)
+            return DefaultAccent;
+
+        var opaque = Color.FromRgb(color.R, color.G, color.B);
+        var maxChannel = Math.Max(opaque.R, Math.Max(opaque.G, opaque.B));
+        return maxChannel < 32 ? DefaultAccent : opaque;
     }
 
     private static void Apply(Application application, Color accent)
     {
-        var opaque = Color.FromRgb(accent.R, accent.G, accent.B);
+        var opaque = ResolveAccent(accent);
         application.Resources["LaunchAccentBrush"] = new SolidColorBrush(opaque);
         application.Resources["LaunchAccentForeground"] = new SolidColorBrush(GetForeground(opaque));
     }

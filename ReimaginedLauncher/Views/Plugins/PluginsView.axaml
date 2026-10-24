@@ -53,23 +53,13 @@
             <StackPanel x:Name="ContentPanel"
                         Spacing="18"
                         HorizontalAlignment="Stretch">
-            <Grid ColumnDefinitions="*,Auto"
-                  ColumnSpacing="12">
-                <StackPanel Grid.Column="0"
-                            Spacing="4">
-                    <TextBlock Classes="view-title"
-                               Text="Mod Add-ons" />
-                    <TextBlock Classes="muted"
-                               Text="Import zip-based add-ons, control execution order, and edit the JSON files that drive launcher-side patching." />
-                </StackPanel>
-                <Button x:Name="DryRunButton"
-                        Grid.Column="1"
-                        VerticalAlignment="Center"
-                        HorizontalAlignment="Right"
-                        Content="Dry Run (Apply Without Launch)"
-                        ToolTip.Tip="Applies all mod tweaks and enabled plugins exactly as a launch would, but does not start the game. All buttons and navigation are disabled until it finishes."
-                        Click="OnDryRunClicked" />
-            </Grid>
+            <StackPanel Spacing="4">
+                <TextBlock Classes="view-title"
+                           Text="Mod Add-ons" />
+                <TextBlock Classes="muted"
+                           TextWrapping="Wrap"
+                           Text="Import zip-based add-ons, control execution order, and edit the JSON files that drive launcher-side patching." />
+            </StackPanel>
 
             <Border Classes="panel"
                     Padding="20"
@@ -98,6 +88,10 @@
                                 Click="OnOpenAuthoringGuideClicked" />
                         <Button Content="Refresh"
                                 Click="OnRefreshClicked" />
+                        <Button x:Name="DryRunButton"
+                                Content="Dry Run (Apply Without Launch)"
+                                ToolTip.Tip="Applies all mod tweaks and enabled plugins exactly as a launch would, but does not start the game. All buttons and navigation are disabled until it finishes."
+                                Click="OnDryRunClicked" />
                         <Button Classes="accent"
                                 Content="Import Add-on Zip"
                                 Click="OnImportPluginClicked" />
