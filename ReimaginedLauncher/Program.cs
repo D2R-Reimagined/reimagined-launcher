@@ -15,6 +15,7 @@ class Program
     // SynchronizationContext-reliant code before AppMain is called: things aren't initialized
     // yet and stuff might break.
     public static IServiceProvider ServiceProvider { get; private set; } = null!;
+    internal static LauncherInstance? Instance { get; private set; }
     
     [STAThread]
     public static void Main(string[] args)
@@ -36,8 +37,20 @@ class Program
             }
             return;
         }
+        VelopackApp.Build().SetAutoApplyOnStartup(!LauncherUpdateService.IsPreviewBuild).Run();
+
+        using var instance = new LauncherInstance(LauncherInstance.DefaultIdentity);
+        if (!instance.IsPrimary)
+        {
+            if (!instance.ActivateExistingAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult())
+            {
+                Console.Error.WriteLine("The running launcher could not be reached. Close it from the tray and try again.");
+                Environment.ExitCode = 1;
+            }
+            return;
+        }
+        Instance = instance;
         SteamGameHandoff.TryInitializeLauncherSession();
-        VelopackApp.Build().Run();
 
         var services = new ServiceCollection();
         AddLauncherServices(services);
@@ -55,6 +68,10 @@ class Program
     internal static void AddLauncherServices(IServiceCollection services)
     {
         services.AddHttpClient<GitHubAnnouncementsHttpClient>();
+        services.AddHttpClient(nameof(PatchNotesService)).ConfigurePrimaryHttpMessageHandler(() =>
+            new HttpClientHandler { AutomaticDecompression = System.Net.DecompressionMethods.All, AllowAutoRedirect = false });
+        services.AddSingleton(provider => new PatchNotesService(
+            provider.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(PatchNotesService))));
         services.AddHttpClient<GitHubDiscussionPluginsHttpClient>();
         services.AddHttpClient<NexusModsHttpClient>();
         services.AddHttpClient(nameof(ReimaginedApiHttpClient)).ConfigurePrimaryHttpMessageHandler(() =>
@@ -66,6 +83,7 @@ class Program
         services.AddHttpClient<ModReleaseInstallerService>();
         services.AddSingleton<LauncherAuthenticationService>();
         services.AddSingleton<LadderBundleService>();
+        services.AddSingleton<AccountLootFilterService>();
     }
 
     public static AppBuilder BuildAvaloniaApp()

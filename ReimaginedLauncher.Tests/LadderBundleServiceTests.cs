@@ -543,6 +543,160 @@ public sealed class LadderBundleServiceTests : IDisposable
         Assert.All(old[..4], path => Assert.False(Directory.Exists(path)));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PlayerFilterIsNotHashEnforcedAndSurvivesRepair(bool simulateDifferentExistingPackage)
+    {
+        var files = new[]
+        {
+            ("maps-config", "maps.toml", "ladder rule = true"u8.ToArray()),
+            ("filter-config", "filter.json", "{\"version\":3,\"rules\":[]}"u8.ToArray())
+        };
+        var fixture = CreateBundle(files, files.Select(file => file.Item3).ToArray(), targetPaths: new Dictionary<string, string>
+        {
+            ["maps-config"] = "mods/Reimagined/d2rloader/config/maps.toml",
+            ["filter-config"] = "mods/Reimagined/d2rloader/config/filter.json"
+        });
+        var service = CreateService(fixture.Archive);
+        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+        var filter = LadderConfigPath("filter.json");
+        const string custom = "{\"version\":3,\"rules\":[{\"hide\":{\"ruleName\":\"My strict filter\"}}]}";
+        await File.WriteAllTextAsync(filter, custom);
+        var readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
+        Assert.True(readiness.IsReady, readiness.Status);
+        await File.WriteAllTextAsync(LadderConfigPath("maps.toml"), "tampered rules");
+        Assert.False((await service.GetReadinessAsync(_installDirectory, fixture.Descriptor)).IsReady);
+        if (simulateDifferentExistingPackage)
+        {
+            var state = Path.Combine(_installDirectory, ".reimagined-launcher", "ladder-bundles", "isolated-ladder-bundle-state.json");
+            // An absent installed-state record exercises replacing an unrecognized previous package.
+            if (File.Exists(state)) File.Delete(state);
+        }
+        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+        Assert.Equal(custom, await File.ReadAllTextAsync(filter));
+        Assert.Equal("ladder rule = true", await File.ReadAllTextAsync(LadderConfigPath("maps.toml")));
+        readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
+        Assert.True(readiness.IsReady, readiness.Status);
+    }
+
+    [Fact]
+    public async Task PackageUpdateKeepsThePlayersFilterInsteadOfTheNewDefault()
+    {
+        var targets = new Dictionary<string, string>
+        {
+            ["maps-config"] = "mods/Reimagined/d2rloader/config/maps.toml",
+            ["filter-config"] = "mods/Reimagined/d2rloader/config/filter.json"
+        };
+        var first = new[] { ("maps-config", "maps.toml", "first rules"u8.ToArray()), ("filter-config", "filter.json", "first default"u8.ToArray()) };
+        var original = CreateBundle(first, first.Select(file => file.Item3).ToArray(), targetPaths: targets);
+        await CreateService(original.Archive).InstallOrRepairAsync(_installDirectory, original.Descriptor);
+        await File.WriteAllTextAsync(LadderConfigPath("filter.json"), "player filter");
+        var second = new[] { ("maps-config", "maps.toml", "updated rules"u8.ToArray()), ("filter-config", "filter.json", "updated default"u8.ToArray()) };
+        var update = CreateBundle(second, second.Select(file => file.Item3).ToArray(), targetPaths: targets);
+        var service = CreateService(update.Archive);
+        await service.InstallOrRepairAsync(_installDirectory, update.Descriptor);
+        Assert.Equal("player filter", await File.ReadAllTextAsync(LadderConfigPath("filter.json")));
+        Assert.Equal("updated rules", await File.ReadAllTextAsync(LadderConfigPath("maps.toml")));
+        var readiness = await service.GetReadinessAsync(_installDirectory, update.Descriptor);
+        Assert.True(readiness.IsReady, readiness.Status);
+    }
+
+    [Fact]
+    public void DownloadedFilterPayloadStillRequiresItsSignedHash()
+    {
+        var files = new[] { ("filter-config", "filter.json", "signed filter"u8.ToArray()) };
+        var fixture = CreateBundle(files, ["tampered archive filter"u8.ToArray()], targetPaths: new Dictionary<string, string>
+        {
+            ["filter-config"] = "mods/Reimagined/d2rloader/config/filter.json"
+        });
+        Assert.Throws<InvalidDataException>(() => LadderBundleService.VerifyArchive(fixture.Descriptor, fixture.Archive));
+    }
+
+    [Theory]
+    [InlineData("mods/Reimagined/d2rloader/config/filter.json", true)]
+    [InlineData("mods/ReimaginedLadder/d2rloader/config/filter.json", true)]
+    [InlineData("mods/Reimagined/d2rloader/config/maps.toml", false)]
+    [InlineData("mods/Reimagined/d2rloader/config/subfolder/filter.json", false)]
+    [InlineData("mods/Reimagined/d2rloader/plugins/filter.json", false)]
+    public void PlayerFilterExceptionHasAnExactModScopedPath(string path, bool expected)
+        => Assert.Equal(expected, LadderRuntimeFileService.IsPlayerFilterPath(path));
+
+    [Fact]
+    public async Task InstallOrRepairWorksWhileTheModFolderIsOpenOnWindows()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var files = new[] { ("maps-config", "maps.toml", "ladder rule = true"u8.ToArray()),
+            ("mod-data", "levels.txt", "mod data"u8.ToArray()) };
+        var fixture = CreateBundle(files, files.Select(file => file.Item3).ToArray(), targetPaths: new Dictionary<string, string>
+        { ["maps-config"] = "mods/Reimagined/d2rloader/config/maps.toml" });
+        var service = CreateService(fixture.Archive);
+        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+        var mod = ModInstallationPaths.LadderModRoot(_installDirectory);
+        using var handle = OpenFolderWithoutDeleteSharing(mod);
+        Assert.False(handle.IsInvalid, "Could not reproduce an open-folder handle.");
+        await File.WriteAllTextAsync(LadderConfigPath("maps.toml"), "old package content");
+        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+        Assert.Equal("ladder rule = true", await File.ReadAllTextAsync(LadderConfigPath("maps.toml")));
+        Assert.True(File.Exists(Path.Combine(mod, "ReimaginedLadder.mpq", "data", "test", "levels.txt")));
+        var readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
+        Assert.True(readiness.IsReady, readiness.Status);
+    }
+
+    [Fact]
+    public async Task LockedPackageFileRollsBackEarlierChangesWhileTheFolderIsOpen()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var files = new[]
+        {
+            ("maps-config", "maps.toml", "old rules"u8.ToArray()),
+            ("maps", "d2rl-maps.dll", "old DLL"u8.ToArray())
+        };
+        var targets = new Dictionary<string, string> { ["maps-config"] = "mods/Reimagined/d2rloader/config/maps.toml" };
+        var original = CreateBundle(files, files.Select(file => file.Item3).ToArray(), targetPaths: targets);
+        await CreateService(original.Archive).InstallOrRepairAsync(_installDirectory, original.Descriptor);
+        var mod = ModInstallationPaths.LadderModRoot(_installDirectory);
+        var replacement = new[]
+        {
+            ("maps-config", "maps.toml", "new rules"u8.ToArray()),
+            ("maps", "d2rl-maps.dll", "new DLL"u8.ToArray())
+        };
+        var update = CreateBundle(replacement, replacement.Select(file => file.Item3).ToArray(), targetPaths: targets);
+        using var directoryHandle = OpenFolderWithoutDeleteSharing(mod);
+        using var lockedFile = new FileStream(Path.Combine(mod, "d2rloader", "plugins", "d2rl-maps.dll"), FileMode.Open, FileAccess.Read, FileShare.Read);
+        Assert.False(directoryHandle.IsInvalid);
+        var failure = await Assert.ThrowsAsync<IOException>(() => CreateService(update.Archive).InstallOrRepairAsync(_installDirectory, update.Descriptor));
+        Assert.Contains("previous files were restored", failure.Message);
+        Assert.Equal("old rules", await File.ReadAllTextAsync(LadderConfigPath("maps.toml")));
+        var readiness = await CreateService(original.Archive).GetReadinessAsync(_installDirectory, original.Descriptor);
+        Assert.True(readiness.IsReady, readiness.Status);
+        Assert.NotEmpty(Directory.GetFiles(Path.Combine(_installDirectory, ".reimagined-launcher", "ladder-bundles", "backups"), "maps.toml", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task OpenSubfolderAllowsUpdateAndRemovalOfOldUndeclaredFiles()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var fixture = CreateConfigBundle();
+        var service = CreateService(fixture.Archive);
+        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+        var folder = Path.Combine(ModInstallationPaths.LadderModRoot(_installDirectory), "obsolete");
+        Directory.CreateDirectory(folder);
+        var stale = Path.Combine(folder, "stale.txt"); await File.WriteAllTextAsync(stale, "stale");
+        using var directoryHandle = OpenFolderWithoutDeleteSharing(folder);
+        Assert.False(directoryHandle.IsInvalid);
+        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+        Assert.False(File.Exists(stale));
+        var readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
+        Assert.True(readiness.IsReady, readiness.Status);
+    }
+
+    private static Microsoft.Win32.SafeHandles.SafeFileHandle OpenFolderWithoutDeleteSharing(string path)
+        => CreateFile(path, 1, 3, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+    private static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFile(string name, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
+
     private BundleFixture CreateConfigBundle()
     {
         var files = new[]

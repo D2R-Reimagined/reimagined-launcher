@@ -19,12 +19,12 @@
                       Focusable="True"
                       PointerPressed="OnBackgroundPointerPressed">
             <StackPanel x:Name="TweaksContentPanel" Spacing="16"
-                        HorizontalAlignment="Stretch">
+                        HorizontalAlignment="Stretch" Margin="0,0,8,0">
                 <DockPanel>
                     <Button Content="Reset Tweaks"
                             DockPanel.Dock="Right"
                             VerticalAlignment="Center"
-                            Margin="0,0,20,0"
+                            Margin="24,0,20,0"
                             Click="OnResetTweaksClick"/>
                     <StackPanel Spacing="4">
                         <TextBlock Classes="view-title" Text="Mod Tweaks"/>

@@ -13,17 +13,24 @@ public static class InstallDirectoryValidator
         if (string.IsNullOrWhiteSpace(installDirectory))
             return null;
 
-        var directory = installDirectory.EndsWith(ExecutableName, StringComparison.OrdinalIgnoreCase)
-            ? Path.GetDirectoryName(installDirectory)
-            : installDirectory;
+        try
+        {
+            var directory = installDirectory.EndsWith(ExecutableName, StringComparison.OrdinalIgnoreCase)
+                ? Path.GetDirectoryName(installDirectory)
+                : installDirectory;
 
-        if (string.IsNullOrEmpty(directory))
+            if (string.IsNullOrEmpty(directory))
+                return directory;
+
+            if (!directory.EndsWith(Path.DirectorySeparatorChar) && !directory.EndsWith(Path.AltDirectorySeparatorChar))
+                directory += Path.DirectorySeparatorChar;
+
             return directory;
-
-        if (!directory.EndsWith(Path.DirectorySeparatorChar) && !directory.EndsWith(Path.AltDirectorySeparatorChar))
-            directory += Path.DirectorySeparatorChar;
-
-        return directory;
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
     }
 
     public static bool IsValidInstallDirectory(string? installDirectory)
@@ -32,7 +39,14 @@ public static class InstallDirectoryValidator
         if (string.IsNullOrWhiteSpace(normalizedDirectory))
             return false;
 
-        return File.Exists(Path.Combine(normalizedDirectory, ExecutableName));
+        try
+        {
+            return File.Exists(Path.Combine(normalizedDirectory, ExecutableName));
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
     }
 
     public static bool IsValidSteamInstallDirectory(string? installDirectory)
@@ -40,8 +54,15 @@ public static class InstallDirectoryValidator
         if (!IsValidInstallDirectory(installDirectory))
             return false;
 
-        var normalizedDirectory = NormalizeInstallDirectory(installDirectory)!;
-        return Directory.EnumerateFiles(normalizedDirectory, "steam_*.dll").Any();
+        try
+        {
+            var normalizedDirectory = NormalizeInstallDirectory(installDirectory)!;
+            return Directory.EnumerateFiles(normalizedDirectory, "steam_*.dll").Any();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return false;
+        }
     }
 
     public static bool IsValidD2RmmModsDirectory(string? modsDirectory)
@@ -49,15 +70,22 @@ public static class InstallDirectoryValidator
         if (string.IsNullOrWhiteSpace(modsDirectory))
             return false;
 
-        var dirName = Path.GetFileName(modsDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        if (!string.Equals(dirName, "mods", StringComparison.OrdinalIgnoreCase))
-            return false;
+        try
+        {
+            var dirName = Path.GetFileName(modsDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            if (!string.Equals(dirName, "mods", StringComparison.OrdinalIgnoreCase))
+                return false;
 
-        var parentDir = Path.GetDirectoryName(modsDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        if (string.IsNullOrEmpty(parentDir))
-            return false;
+            var parentDir = Path.GetDirectoryName(modsDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            if (string.IsNullOrEmpty(parentDir))
+                return false;
 
-        return File.Exists(Path.Combine(parentDir, "D2RMM.exe"));
+            return File.Exists(Path.Combine(parentDir, "D2RMM.exe"));
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
     }
 
     public static string GetD2RmmValidationMessage(string? modsDirectory)
@@ -65,17 +93,24 @@ public static class InstallDirectoryValidator
         if (string.IsNullOrWhiteSpace(modsDirectory))
             return "Invalid location. Please select the mods folder inside the D2RMM directory.";
 
-        var trimmed = modsDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var dirName = Path.GetFileName(trimmed);
+        try
+        {
+            var trimmed = modsDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var dirName = Path.GetFileName(trimmed);
 
-        if (!string.Equals(dirName, "mods", StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(dirName, "mods", StringComparison.OrdinalIgnoreCase))
+                return "Invalid location. Please select the mods folder inside the D2RMM directory.";
+
+            var parentDir = Path.GetDirectoryName(trimmed);
+            if (string.IsNullOrEmpty(parentDir))
+                return "Invalid location. Please select the mods folder inside the D2RMM directory.";
+
+            return $"Invalid location. D2RMM.exe not found in the {parentDir} directory.";
+        }
+        catch (ArgumentException)
+        {
             return "Invalid location. Please select the mods folder inside the D2RMM directory.";
-
-        var parentDir = Path.GetDirectoryName(trimmed);
-        if (string.IsNullOrEmpty(parentDir))
-            return "Invalid location. Please select the mods folder inside the D2RMM directory.";
-
-        return $"Invalid location. D2RMM.exe not found in the {parentDir} directory.";
+        }
     }
 
     public static string? GetExecutablePath(string? installDirectory)
@@ -84,8 +119,15 @@ public static class InstallDirectoryValidator
         if (string.IsNullOrWhiteSpace(normalizedDirectory))
             return null;
 
-        var executablePath = Path.Combine(normalizedDirectory, ExecutableName);
-        return File.Exists(executablePath) ? executablePath : null;
+        try
+        {
+            var executablePath = Path.Combine(normalizedDirectory, ExecutableName);
+            return File.Exists(executablePath) ? executablePath : null;
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -99,16 +141,23 @@ public static class InstallDirectoryValidator
         if (string.IsNullOrWhiteSpace(modsDirectory))
             return null;
 
-        var candidates = new[] { "Reimagined", "Reimagined.mpq" };
-        foreach (var candidate in candidates)
+        try
         {
-            var candidatePath = Path.Combine(modsDirectory, candidate);
-            if (Directory.Exists(candidatePath) &&
-                Directory.Exists(Path.Combine(candidatePath, "data")) &&
-                File.Exists(Path.Combine(candidatePath, "modinfo.json")))
+            string[] candidates = ["Reimagined", "Reimagined.mpq"];
+
+            foreach (var name in candidates)
             {
-                return candidatePath;
+                var candidatePath = Path.Combine(modsDirectory, name);
+                var modInfoPath = Path.Combine(candidatePath, "modinfo.json");
+                var dataFolder = Path.Combine(candidatePath, "data");
+
+                if (Directory.Exists(candidatePath) && Directory.Exists(dataFolder) && File.Exists(modInfoPath))
+                    return candidatePath;
             }
+        }
+        catch (ArgumentException)
+        {
+            return null;
         }
 
         return null;

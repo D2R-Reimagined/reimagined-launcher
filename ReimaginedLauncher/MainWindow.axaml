@@ -1,4 +1,4 @@
-<Window 
+<Window
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -36,49 +36,8 @@
             <Border Grid.Column="0"
                     Classes="panel"
                     Padding="16">
-            <Grid RowDefinitions="Auto,*,Auto" RowSpacing="18">
-                <Border Grid.Row="0"
-                        Classes="hero-panel"
-                        Padding="16">
-                    <Grid RowDefinitions="Auto,Auto"
-                          ColumnDefinitions="*,Auto"
-                          RowSpacing="10"
-                          ColumnSpacing="12">
-                        <TextBlock Grid.Row="0"
-                                   Grid.ColumnSpan="2"
-                                   Text="D2R Reimagined"
-                                   FontFamily="Georgia"
-                                   FontSize="24"
-                                   FontWeight="Bold"
-                                   Foreground="{StaticResource GoldTextBrush}" />
-
-                        <StackPanel Grid.Row="1"
-                                    Grid.Column="0"
-                                    Spacing="4"
-                                    VerticalAlignment="Center">
-                            <TextBlock Text="Launcher"
-                                       FontWeight="SemiBold"
-                                       Foreground="{StaticResource GoldBrush}" />
-                            <Button Content="Exit Launcher" Click="OnExitLauncherClick" />
-                        </StackPanel>
-
-                        <Border Grid.Row="1"
-                                Grid.Column="1"
-                                Width="72"
-                                Height="72"
-                                Background="#120809"
-                                BorderBrush="#7B2326"
-                                BorderThickness="1"
-                                CornerRadius="16"
-                                Padding="8"
-                                HorizontalAlignment="Right">
-                            <Image x:Name="LogoImage"
-                                   Stretch="Uniform" />
-                        </Border>
-                    </Grid>
-                </Border>
-
-                <DockPanel Grid.Row="1" LastChildFill="True">
+            <Grid RowDefinitions="*,Auto" RowSpacing="18">
+                <DockPanel Grid.Row="0" LastChildFill="True">
                     <TextBlock DockPanel.Dock="Top"
                                Text="Navigation"
                                FontWeight="SemiBold"
@@ -88,13 +47,14 @@
                              Classes="nav-list"
                              SelectionChanged="OnNavigationSelectionChanged">
                         <ListBoxItem x:Name="NewsAnnouncementsNavItem" Tag="NewsAnnouncements" Content="News &amp; Announcements" />
+                        <ListBoxItem x:Name="PatchNotesNavItem" Tag="PatchNotes" Content="Patch Notes" />
                         <ListBoxItem x:Name="LaunchNavItem" Tag="Launch" HorizontalContentAlignment="Stretch">
                             <Grid ColumnDefinitions="*,Auto">
                                 <TextBlock Grid.Column="0"
                                            Text="Launch"
                                            VerticalAlignment="Center" />
                                 <Button Grid.Column="1"
-                                        Classes="accent"
+                                        Classes="os-accent"
                                         Padding="8,2"
                                         MinWidth="0"
                                         MinHeight="0"
@@ -111,12 +71,13 @@
                         <ListBoxItem x:Name="BackupsNavItem" Tag="Backups" Content="Backups" />
                         <ListBoxItem x:Name="SettingsNavItem" Tag="Settings" Content="Settings" />
                         <ListBoxItem x:Name="ModTweaksNavItem" Tag="ModTweaks" Content="Mod Tweaks" />
-                        <ListBoxItem x:Name="PluginsNavItem" Tag="Plugins" Content="Plugins" />
+                        <ListBoxItem x:Name="PluginsNavItem" Tag="Plugins" Content="Mod Add-ons" />
                     </ListBox>
                 </DockPanel>
 
-                <StackPanel Grid.Row="2"
+                <StackPanel Grid.Row="1"
                             Spacing="10">
+                    <Button Content="Exit Launcher" Click="OnExitLauncherClick" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
                     <TextBlock x:Name="LauncherVersionTextBlock"
                                Classes="muted"
                                HorizontalAlignment="Center"
@@ -196,38 +157,33 @@
                         </Grid>
                     </Border>
 
-                    <Border Classes="panel"
-                            Padding="18,14">
+                    <Border x:Name="LauncherStatusToolbar" Classes="panel"
+                            Padding="14,8" MinHeight="54">
                         <Grid ColumnDefinitions="*,Auto"
                               ColumnSpacing="16">
-                            <StackPanel Spacing="3">
-                                <TextBlock Text="Sanctum Status"
-                                           Foreground="{StaticResource GoldBrush}"
-                                           FontWeight="SemiBold" />
-                                <StackPanel Orientation="Horizontal" Spacing="10">
-                                    <TextBlock x:Name="VersionTextBlock"
+
+                                <WrapPanel Orientation="Horizontal" ItemSpacing="10" LineSpacing="3" VerticalAlignment="Center">
+                                    <Image x:Name="LogoImage" Width="36" Height="36" Stretch="Uniform" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="VersionTextBlock" VerticalAlignment="Center"
                                                FontFamily="Georgia"
-                                               FontSize="24"
+                                               FontSize="18"
                                                FontWeight="Bold" />
                                     <TextBlock x:Name="UpdateAvailableTextBlock"
                                                FontFamily="Georgia"
-                                               FontSize="16"
+                                               FontSize="13"
                                                FontWeight="SemiBold"
                                                Foreground="{StaticResource GoldBrush}"
                                                VerticalAlignment="Bottom"
                                                Margin="0,0,0,2"
                                                IsVisible="False" />
-                                </StackPanel>
-                                <TextBlock Classes="muted"
-                                           Text="Use the launcher to keep your install current, backed up, and ready to descend." />
-                            </StackPanel>
+                                </WrapPanel>
 
-                            <StackPanel Grid.Column="1" 
-                                        Orientation="Horizontal" 
-                                        Spacing="8" 
+                            <StackPanel Grid.Column="1"
+                                        Orientation="Horizontal"
+                                        Spacing="8"
                                         VerticalAlignment="Center">
-                                <Button Classes="link-button" 
-                                        Content="{materialIcons:MaterialIconExt Kind=History}" 
+                                <Button Classes="link-button"
+                                        Content="{materialIcons:MaterialIconExt Kind=History}"
                                         ToolTip.Tip="Session Log"
                                         VerticalAlignment="Center">
                                     <Button.Flyout>
@@ -241,8 +197,8 @@
                                                                 <DataTemplate>
                                                                     <Border BorderBrush="#333" BorderThickness="0,0,0,1" Padding="0,8">
                                                                         <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto">
-                                                                            <materialIcons:MaterialIcon Grid.Row="0" Grid.Column="0" 
-                                                                                                        Kind="{Binding Type, Converter={StaticResource LogTypeToIconConverter}}" 
+                                                                            <materialIcons:MaterialIcon Grid.Row="0" Grid.Column="0"
+                                                                                                        Kind="{Binding Type, Converter={StaticResource LogTypeToIconConverter}}"
                                                                                                         Foreground="{Binding Type, Converter={StaticResource LogTypeToBrushConverter}}"
                                                                                                         Width="16" Height="16" Margin="0,2,8,0" VerticalAlignment="Top"/>
                                                                             <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap" FontSize="13"/>
@@ -314,5 +270,5 @@
             </Grid>
         </Grid>
     </LayoutTransformControl>
-    
+
 </Window>

@@ -8,6 +8,15 @@ public sealed class LobbyRegionChoice
 {
     public required string Id { get; init; }
     public required string Name { get; init; }
+    public string CompactName => Name switch
+    {
+        "North America East" => "NA East",
+        "North America West" => "NA West",
+        "Europe Central" => "EU Central",
+        "Frankfurt Germany eu-2" => "Frankfurt",
+        "Sydney Australia" => "Sydney",
+        _ => Name
+    };
     public bool IsAvailable { get; init; }
     public bool IsMeasured { get; init; }
     public double? PingMs { get; init; }

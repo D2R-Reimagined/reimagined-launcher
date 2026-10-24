@@ -11,6 +11,12 @@ public sealed class LadderExtensionChoice
     public required D2RLoaderExtensionKind Kind { get; init; }
     public string? Version { get; init; }
     public string VersionLabel => string.IsNullOrWhiteSpace(Version) ? string.Empty : $"v{Version}";
+    public string FileVersionDetail => string.IsNullOrWhiteSpace(Version) ? FileName : $"{FileName} · {VersionLabel}";
+    public string AvailabilityDetail => IsProvidedByLauncher
+        ? IsRequired ? "Supplied by signed Ladder package" : "Optional · select then Update to download"
+        : !IsInstalled ? "Not installed or hash mismatch"
+        : IsLadderDisabled ? IsRequired ? "Will be enabled at launch" : "Currently disabled for Ladder"
+        : "Installed in Ladder package";
     public bool IsRequired { get; init; }
     public bool IsInstalled { get; init; }
     public bool IsProvidedByLauncher { get; init; }

@@ -4,11 +4,13 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
              x:Class="ReimaginedLauncher.Views.Update.UpdateView">
-    <StackPanel Spacing="16">
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+    <StackPanel Spacing="16" Margin="0,0,8,0">
         <StackPanel Spacing="4">
             <TextBlock Classes="view-title" Text="Install/Update"/>
             <TextBlock Classes="muted" Text="Check the local install state and pull the newest Reimagined release."/>
         </StackPanel>
+        <ContentControl x:Name="InstallationSettingsHost" HorizontalContentAlignment="Stretch" />
         <Border x:Name="LoadingBanner"
                 Classes="panel"
                 Padding="16"
@@ -33,7 +35,7 @@
         <Border Classes="panel"
                 x:Name="VersionsBorder"
                 Padding="16">
-            <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto">
+            <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto" RowSpacing="8">
                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Current Version:" Margin="0,0,10,8"/>
                 <TextBlock x:Name="CurrentVersionText" Grid.Row="0" Grid.Column="1" FontWeight="Bold"/>
                 <TextBlock Grid.Row="1" Grid.Column="0" Text="Latest Version:" Margin="0,0,10,0"/>
@@ -95,4 +97,5 @@
                     Click="OnRecheckClick"/>
         </WrapPanel>
     </StackPanel>
+    </ScrollViewer>
 </UserControl>

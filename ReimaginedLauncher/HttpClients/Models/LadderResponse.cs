@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using ReimaginedLauncher.Utilities;
 
@@ -13,7 +13,7 @@ public sealed record LadderResponse(
     LadderBundleResponse? ActiveBundle)
 {
     public string DateRangeDisplay =>
-        $"{StartDateUtc.ToLocalTime():MMM d, yyyy h:mm tt} - {EndDateUtc.ToLocalTime():MMM d, yyyy h:mm tt} local";
+        $"{StartDateUtc.ToLocalTime():MMM d, yyyy h:mm tt} - {EndDateUtc.ToLocalTime():MMM d, yyyy h:mm tt}";
 }
 
 public sealed record LadderAllowedExtensionResponse(
