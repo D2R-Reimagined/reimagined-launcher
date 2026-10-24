@@ -71,6 +71,27 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
     }
 
     [Fact]
+    public void FindSavesNeedingConversionReportsOnlyConvertibleSavesAndWritesNothing()
+    {
+        var service = CreateService();
+        var compatible = CopyFixture("FuckBenFuckingF.d2s");
+        var outdated = CopyFixture("BruhII.d2s");
+        var stash = CopyFixture("ModernSharedStashSoftCoreV2.d2i");
+        var originals = new[] { compatible, outdated, stash }.ToDictionary(path => path, File.ReadAllBytes);
+
+        var found = service.FindSavesNeedingConversion(SaveDirectory, StagingDirectory);
+
+        Assert.Equal(new[] { outdated, stash }, found);
+        foreach (var (path, bytes) in originals)
+        {
+            Assert.Equal(bytes, File.ReadAllBytes(path));
+        }
+
+        Assert.False(Directory.Exists(BackupRoot));
+        Assert.Empty(service.FindSavesNeedingConversion(Path.Combine(_root, "missing"), StagingDirectory));
+    }
+
+    [Fact]
     public void ForceCanRebuildATargetParsingSaveWithoutPreselectingIt()
     {
         var service = CreateService();

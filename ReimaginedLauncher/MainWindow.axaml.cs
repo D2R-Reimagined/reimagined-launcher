@@ -253,6 +253,8 @@ public partial class MainWindow : Window
         if (offeredSetup)
             await ShowSetupGuideAsync();
 
+        _ = CheckSavesForConversionAsync("launcher start");
+
         // Network calls (can be slow; don't block UI setup)
         await RefreshAnnouncementsStateAsync(openUnreadAnnouncements: false);
 

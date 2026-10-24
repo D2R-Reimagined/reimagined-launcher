@@ -302,6 +302,53 @@ public sealed class SaveConversionService
             .ToList()
         : [];
 
+    /// <summary>A file the conversion window would offer to convert, or that Force Conversion or a source choice may recover.</summary>
+    public static bool NeedsConversion(SaveConversionPlan plan) => plan.State is SaveConversionState.Verified
+        or SaveConversionState.VerifiedWithWarnings or SaveConversionState.Unresolved;
+
+    /// <summary>Analyzes every save in <paramref name="saveDirectory"/> and returns those that need conversion. Nothing is written.</summary>
+    public IReadOnlyList<string> FindSavesNeedingConversion(string saveDirectory, string stagingDirectory) =>
+        DiscoverSaveFiles(saveDirectory)
+            .Where((path, index) =>
+                NeedsConversion(Plan(path, Path.Combine(stagingDirectory, index.ToString()))))
+            .ToList();
+
+    /// <summary>
+    /// Checks the offline saves of <paramref name="profile"/> against the installed normal Reimagined data.
+    /// Blocking; call it off the UI thread. Returns an empty list when there is nothing to analyze.
+    /// </summary>
+    internal static IReadOnlyList<string> FindOfflineSavesNeedingConversion(InstallationProfile profile)
+    {
+        var saveDirectory = ResolveOfflineSaveDirectory(profile);
+        if (DiscoverSaveFiles(saveDirectory).Count == 0 || FindNormalModInfo(profile) is null)
+        {
+            return [];
+        }
+
+        var registry = SaveCheckpointRegistry.Load(DefaultDataDirectory);
+        var staging = Path.Combine(Path.GetTempPath(), "ReimaginedSaveConversion", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var installedTarget = LoadInstalledTarget(profile, Path.Combine(staging, "installed-target"));
+            return CreateForInstalledTarget(registry, installedTarget)
+                .FindSavesNeedingConversion(saveDirectory, Path.Combine(staging, "plans"));
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(staging))
+                {
+                    Directory.Delete(staging, recursive: true);
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                LaunchDiagnostics.LogException("Could not remove the save conversion check staging folder", exception);
+            }
+        }
+    }
+
     /// <summary>
     /// Restrictions documented for Diablo II character names: 2-15 letters with at most one dash or underscore,
     /// which cannot be the first or last character. Non-Latin letters are accepted because D2R saves use them.

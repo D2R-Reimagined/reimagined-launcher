@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -34,6 +35,7 @@ public partial class SaveConversionWindow : Window
         InitializeComponent();
         FilesItemsControl.ItemsSource = _rows;
         FilesScrollViewer.AddHandler(GotFocusEvent, OnListGotFocus);
+        BackupDirectoryText.Text = $"Permanent conversion backups: {SaveConversionService.DefaultBackupRoot}";
         _saveDirectory = SaveConversionService.ResolveOfflineSaveDirectory(MainWindow.Settings.CurrentProfile);
         try
         {
@@ -50,9 +52,15 @@ public partial class SaveConversionWindow : Window
         Closed += (_, _) => DeleteStagingDirectory();
     }
 
+    /// <param name="promptMessage">Why the launcher opened this window on its own, shown above the description.</param>
+    public SaveConversionWindow(string promptMessage) : this()
+    {
+        PromptText.Text = promptMessage;
+        PromptBanner.IsVisible = true;
+    }
+
     private async Task InitializeConversionAsync()
     {
-        BackupDirectoryText.Text = $"Permanent conversion backups: {SaveConversionService.DefaultBackupRoot}";
         if (_registry is null)
         {
             ForceCheckBox.IsEnabled = false;
@@ -299,6 +307,28 @@ public partial class SaveConversionWindow : Window
     private void OnCloseClick(object? sender, RoutedEventArgs e)
     {
         Close();
+    }
+
+    private void OnBackupDirectoryClick(object? sender, RoutedEventArgs e)
+    {
+        var path = _service?.BackupRoot ?? SaveConversionService.DefaultBackupRoot;
+        try
+        {
+            Directory.CreateDirectory(path);
+            var startInfo = OperatingSystem.IsWindows()
+                ? new ProcessStartInfo("explorer.exe") { UseShellExecute = false }
+                : OperatingSystem.IsMacOS()
+                    ? new ProcessStartInfo("open") { UseShellExecute = false }
+                    : new ProcessStartInfo("xdg-open") { UseShellExecute = false };
+
+            startInfo.ArgumentList.Add(path);
+            Process.Start(startInfo);
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.LogException("Could not open the save conversion backup folder", exception);
+            ShowBanner($"Could not open the backup folder ({exception.Message}).");
+        }
     }
 
     /// <summary>Keyboard navigation still scrolls the focused control into view; pointer focus does not move the list.</summary>
