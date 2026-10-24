@@ -91,6 +91,76 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.Empty(service.FindSavesNeedingConversion(Path.Combine(_root, "missing"), StagingDirectory));
     }
 
+    [Theory]
+    [InlineData(SaveConversionState.Verified, null, true)]
+    [InlineData(SaveConversionState.VerifiedWithWarnings, null, true)]
+    [InlineData(SaveConversionState.Unresolved, SaveForceKind.ChooseSourceLayout, true)]
+    [InlineData(SaveConversionState.Unresolved, SaveForceKind.Force, false)]
+    [InlineData(SaveConversionState.Unresolved, null, false)]
+    [InlineData(SaveConversionState.AlreadyCompatible, null, false)]
+    [InlineData(SaveConversionState.AlreadyCompatible, SaveForceKind.ChooseSourceLayout, false)]
+    [InlineData(SaveConversionState.Blocked, null, false)]
+    [InlineData(SaveConversionState.Experimental, SaveForceKind.Force, false)]
+    [InlineData(SaveConversionState.Experimental, SaveForceKind.ChooseSourceLayout, false)]
+    public void AutomaticPromptOnlyIncludesVerifiedSavesAndSourceChoices(SaveConversionState state,
+        SaveForceKind? forceKind, bool expected)
+    {
+        var plan = new SaveConversionPlan
+        {
+            SourcePath = Path.Combine(SaveDirectory, "Hero.d2s"),
+            Kind = SaveFileKind.Character,
+            State = state,
+            Operation = "",
+            Issues = [],
+            Report = "",
+            SourceSha256 = "",
+            ForceOption = forceKind is { } kind ? new SaveForceOption(kind, ["3.0.12", "2.1.2"], []) : null
+        };
+
+        Assert.Equal(expected, SaveConversionService.NeedsConversion(plan));
+    }
+
+    [Fact]
+    public void AutomaticPromptIsSuppressedOnlyForTheSameProfileInstallationAndTarget()
+    {
+        var install = Path.Combine(_root, "install");
+        var profile = new InstallationProfile { Type = InstallationType.BattleNet, InstallDirectory = install };
+        Assert.False(SaveConversionService.WasAutomaticPromptShown(profile, "target-a"));
+
+        SaveConversionService.RecordAutomaticPromptShown(profile, "target-a");
+        var settings = new AppSettings { Profiles = [profile, new InstallationProfile { Type = InstallationType.Steam }] };
+        var restored = System.Text.Json.JsonSerializer.Deserialize<AppSettings>(
+            System.Text.Json.JsonSerializer.Serialize(settings))!;
+        var restoredProfile = restored.Profiles[0];
+
+        Assert.True(SaveConversionService.WasAutomaticPromptShown(restoredProfile, "target-a"));
+        Assert.False(SaveConversionService.WasAutomaticPromptShown(restoredProfile, "target-b"));
+        var otherProfile = restored.Profiles[1];
+        otherProfile.InstallDirectory = install;
+        Assert.False(SaveConversionService.WasAutomaticPromptShown(otherProfile, "target-a"));
+        restoredProfile.InstallDirectory = Path.Combine(_root, "other-install");
+        Assert.False(SaveConversionService.WasAutomaticPromptShown(restoredProfile, "target-a"));
+    }
+
+    [Fact]
+    public void AutomaticPromptSuppressionDoesNotAffectManualConversion()
+    {
+        var profile = new InstallationProfile
+            { Type = InstallationType.BattleNet, InstallDirectory = Path.Combine(_root, "install") };
+        SaveConversionService.RecordAutomaticPromptShown(profile, InstalledTarget.Value.Fingerprint);
+        var service = CreateService();
+        var path = CopyFixture("BruhII.d2s");
+        var original = File.ReadAllBytes(path);
+
+        Assert.True(SaveConversionService.WasAutomaticPromptShown(profile, InstalledTarget.Value.Fingerprint));
+        Assert.Equal(new[] { path }, service.FindSavesNeedingConversion(SaveDirectory, StagingDirectory));
+        var plan = service.Plan(path, Path.Combine(StagingDirectory, "manual"));
+        Assert.Contains(plan.State, new[] { SaveConversionState.Verified, SaveConversionState.VerifiedWithWarnings });
+        var outcome = service.Apply(plan, null, service.CreateBackupBatchDirectory());
+        Assert.True(outcome.Succeeded, outcome.Message);
+        Assert.Equal(original, File.ReadAllBytes(Path.Combine(outcome.BackupDirectory!, "BruhII.d2s")));
+    }
+
     [Fact]
     public void ForceCanRebuildATargetParsingSaveWithoutPreselectingIt()
     {

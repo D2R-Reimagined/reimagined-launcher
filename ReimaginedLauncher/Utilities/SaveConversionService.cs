@@ -302,9 +302,23 @@ public sealed class SaveConversionService
             .ToList()
         : [];
 
-    /// <summary>A file the conversion window would offer to convert, or that Force Conversion or a source choice may recover.</summary>
-    public static bool NeedsConversion(SaveConversionPlan plan) => plan.State is SaveConversionState.Verified
-        or SaveConversionState.VerifiedWithWarnings or SaveConversionState.Unresolved;
+    /// <summary>
+    /// A file the automatic prompt reports: verified conversions, and unresolved files that only need a source choice.
+    /// Files that would need experimental Force Conversion are left to the manual conversion window.
+    /// </summary>
+    public static bool NeedsConversion(SaveConversionPlan plan) =>
+        plan.State is SaveConversionState.Verified or SaveConversionState.VerifiedWithWarnings
+        || plan is { State: SaveConversionState.Unresolved, ForceOption.Kind: SaveForceKind.ChooseSourceLayout };
+
+    internal static string AutomaticPromptKey(InstallationProfile profile, string targetFingerprint) =>
+        $"{Path.TrimEndingDirectorySeparator(profile.InstallDirectory?.Trim() ?? string.Empty)}|{targetFingerprint}";
+
+    /// <summary>True when the automatic prompt already opened for this profile's installation and installed target data.</summary>
+    internal static bool WasAutomaticPromptShown(InstallationProfile profile, string targetFingerprint) =>
+        profile.SaveConversionPromptKey == AutomaticPromptKey(profile, targetFingerprint);
+
+    internal static void RecordAutomaticPromptShown(InstallationProfile profile, string targetFingerprint) =>
+        profile.SaveConversionPromptKey = AutomaticPromptKey(profile, targetFingerprint);
 
     /// <summary>Analyzes every save in <paramref name="saveDirectory"/> and returns those that need conversion. Nothing is written.</summary>
     public IReadOnlyList<string> FindSavesNeedingConversion(string saveDirectory, string stagingDirectory) =>
@@ -315,14 +329,15 @@ public sealed class SaveConversionService
 
     /// <summary>
     /// Checks the offline saves of <paramref name="profile"/> against the installed normal Reimagined data.
-    /// Blocking; call it off the UI thread. Returns an empty list when there is nothing to analyze.
+    /// Blocking; call it off the UI thread. Returns no files and no fingerprint when there is nothing to analyze.
     /// </summary>
-    internal static IReadOnlyList<string> FindOfflineSavesNeedingConversion(InstallationProfile profile)
+    internal static (IReadOnlyList<string> Files, string? TargetFingerprint) FindOfflineSavesNeedingConversion(
+        InstallationProfile profile)
     {
         var saveDirectory = ResolveOfflineSaveDirectory(profile);
         if (DiscoverSaveFiles(saveDirectory).Count == 0 || FindNormalModInfo(profile) is null)
         {
-            return [];
+            return ([], null);
         }
 
         var registry = SaveCheckpointRegistry.Load(DefaultDataDirectory);
@@ -330,8 +345,9 @@ public sealed class SaveConversionService
         try
         {
             var installedTarget = LoadInstalledTarget(profile, Path.Combine(staging, "installed-target"));
-            return CreateForInstalledTarget(registry, installedTarget)
+            var files = CreateForInstalledTarget(registry, installedTarget)
                 .FindSavesNeedingConversion(saveDirectory, Path.Combine(staging, "plans"));
+            return (files, installedTarget.Fingerprint);
         }
         finally
         {

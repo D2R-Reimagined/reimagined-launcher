@@ -12,7 +12,8 @@ public partial class MainWindow
 
     /// <summary>
     /// Analyzes the offline saves on a dedicated background thread and opens the conversion window
-    /// when any of them need converting. Only the most recent check may prompt, and never over another dialog.
+    /// when any of them need converting or review. Only the most recent check may prompt, never over another dialog,
+    /// and only once per installation and installed target data.
     /// </summary>
     public async Task CheckSavesForConversionAsync(string trigger)
     {
@@ -20,21 +21,36 @@ public partial class MainWindow
         var profile = Settings.CurrentProfile;
         try
         {
-            var files = await Task.Factory.StartNew(
+            var (files, targetFingerprint) = await Task.Factory.StartNew(
                 () => SaveConversionService.FindOfflineSavesNeedingConversion(profile),
                 CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
-            LaunchDiagnostics.Log($"Save conversion check ({trigger}): {files.Count} file(s) may need conversion.");
-            if (files.Count == 0 || generation != _saveConversionCheckGeneration || IsInstallInProgress ||
+            LaunchDiagnostics.Log(
+                $"Save conversion check ({trigger}): {files.Count} file(s) may need conversion or review.");
+            if (files.Count == 0 || targetFingerprint is null ||
+                SaveConversionService.WasAutomaticPromptShown(profile, targetFingerprint) ||
+                generation != _saveConversionCheckGeneration || IsInstallInProgress ||
                 IsGameRunning() || !IsVisible || OwnedWindows.Count > 0 ||
                 !ReferenceEquals(profile, Settings.CurrentProfile))
             {
                 return;
             }
 
-            await new SaveConversionWindow(
-                    $"{files.Count} save file(s) may need to be converted to the installed Reimagined version. "
-                    + "Review them below; nothing is changed until you choose Convert Selected.")
-                .ShowDialog(this);
+            var window = new SaveConversionWindow(
+                "Some offline saves may need conversion or review for the installed Reimagined version. "
+                + "Review them below; nothing is changed until you choose Convert Selected.");
+            window.Opened += async (_, _) =>
+            {
+                SaveConversionService.RecordAutomaticPromptShown(profile, targetFingerprint);
+                try
+                {
+                    await SettingsManager.SaveAsync(Settings);
+                }
+                catch (Exception exception)
+                {
+                    LaunchDiagnostics.LogException("Could not save the save conversion prompt state", exception);
+                }
+            };
+            await window.ShowDialog(this);
         }
         catch (Exception exception)
         {
