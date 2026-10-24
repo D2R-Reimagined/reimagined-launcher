@@ -1,0 +1,23 @@
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:edit="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
+        x:Class="ReimaginedLauncher.Views.Launch.ConfigEditorWindow" Title="Edit Config"
+        Width="900" Height="600" MinWidth="540" MinHeight="400" WindowStartupLocation="CenterOwner">
+  <Grid Margin="16" RowDefinitions="Auto,*,Auto,Auto" RowSpacing="10">
+    <StackPanel Spacing="5">
+      <TextBlock x:Name="ConfigTitle" Classes="section-title" />
+      <TextBlock x:Name="ConfigPath" Classes="muted" TextWrapping="Wrap" />
+      <TextBlock Classes="muted" Text="Saves locally. The previous file is backed up; changes may require restarting the game." TextWrapping="Wrap" />
+    </StackPanel>
+    <edit:TextEditor Grid.Row="1" x:Name="Editor" Classes="code-editor" ShowLineNumbers="True"
+                     FontFamily="Cascadia Mono, Consolas, DejaVu Sans Mono, Liberation Mono, monospace" FontSize="14" WordWrap="False" Padding="10,8" />
+    <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="12">
+      <TextBlock x:Name="StatusText" Foreground="#E8C37D" TextWrapping="Wrap" />
+      <TextBlock Grid.Column="1" x:Name="CaretStatus" Classes="muted" Text="Line 1 · Column 1" VerticalAlignment="Center" />
+    </Grid>
+    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10">
+      <Button x:Name="DiscardButton" Content="Discard changes" IsVisible="False" Click="OnDiscard" />
+      <Button Content="Cancel" Click="OnCancel" />
+      <Button x:Name="SaveButton" Content="Save" Click="OnSave" MinWidth="100" />
+    </StackPanel>
+  </Grid>
+</Window>

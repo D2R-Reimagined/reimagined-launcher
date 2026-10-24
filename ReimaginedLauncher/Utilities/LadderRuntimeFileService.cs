@@ -70,6 +70,10 @@ internal static class LadderRuntimeFileService
         return Path.Combine(root, ManagementDirectoryName, RuntimeDirectoryName, relativePath);
     }
 
+    internal static bool IsPlayerFilterPath(string targetPath)
+        => ModInstallationPaths.ToSignedPath(targetPath.Replace('\\', '/')).Equals(
+            "mods/Reimagined/d2rloader/config/filter.json", StringComparison.OrdinalIgnoreCase);
+
     internal static bool IsMutableSignedPath(string targetPath)
     {
         var normalized = ModInstallationPaths.ToSignedPath(targetPath);

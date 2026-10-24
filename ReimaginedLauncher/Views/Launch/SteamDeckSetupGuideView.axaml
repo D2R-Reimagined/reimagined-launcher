@@ -1,0 +1,106 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="ReimaginedLauncher.Views.Launch.SteamDeckSetupGuideView">
+    <UserControl.Styles>
+        <Style Selector="TextBlock.sub-title">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="Margin" Value="0,4,0,2" />
+        </Style>
+        <Style Selector="TextBlock.bullet">
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="14,0,0,0" />
+        </Style>
+        <Style Selector="TextBlock.lead">
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+    </UserControl.Styles>
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                  VerticalScrollBarVisibility="Auto">
+        <StackPanel Spacing="18" Margin="0,0,8,0">
+            <Grid ColumnDefinitions="*,Auto"
+                  ColumnSpacing="12">
+                <StackPanel Spacing="4">
+                    <TextBlock Classes="view-title"
+                               Text="Steam Deck &amp; Linux Steam Setup" />
+                    <TextBlock Classes="muted"
+                               TextWrapping="Wrap"
+                               Text="Configure Diablo II: Resurrected through native Steam on Steam Deck and Linux without Decky, Lutris, or terminal commands." />
+                </StackPanel>
+
+                <Button Grid.Column="1"
+                        VerticalAlignment="Center"
+                        Content="Back"
+                        Click="OnBackClicked" />
+            </Grid>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="10">
+                    <TextBlock Classes="section-title"
+                               Text="1. Prepare in Desktop Mode" />
+                    <TextBlock Classes="lead"
+                               Text="Use your normal desktop session for initial setup, browser sign-in, and downloads. On Steam Deck or systems with Gaming Mode, switch to Desktop Mode first." />
+                    <StackPanel Spacing="4">
+                        <TextBlock Classes="bullet" Text="1. Install Diablo II: Resurrected through Steam. Download the launcher AppImage, make it executable in its file properties, and open it." />
+                        <TextBlock Classes="bullet" Text="2. Under Install Directory, select Steam and confirm the detected installation. Sign in with Nexus Mods (for mod downloads) and your Reimagined account (for Loot Filters and Ladder)." />
+                        <TextBlock Classes="bullet" Text="3. Open Install/Update → Download and Install to install the mod. If using a free Nexus account, complete the browser download on the desktop while keeping the launcher open." />
+                        <TextBlock Classes="bullet" Text="4. Stay on the desktop and launch the official Diablo II: Resurrected entry from Steam once. Sign in to Battle.net, reach character select, and exit through the game menu so Proton initializes the official prefix." />
+                        <TextBlock Classes="bullet" Text="5. Back in the launcher's Install Directory section, verify that the Proton executable path is detected (click Locate Proton to retry automatic detection after running the official game once)." />
+                        <TextBlock Classes="bullet" Text="6. For Mod + D2RLoader or Ladder, select that Play Mode on the Launch tab and accept the D2RLoader installation prompt. Enable -forcedesktop under Settings → Launch Parameters if you need desktop multiplayer menus." />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="10">
+                    <TextBlock Classes="section-title"
+                               Text="2. Register Steam Shortcuts" />
+                    <TextBlock Classes="lead"
+                               Text="The launcher can register itself directly in Steam and configure a controller layout that supports both launcher navigation and in-game controller play." />
+                    <StackPanel Spacing="4">
+                        <TextBlock Classes="bullet" Text="1. In Install Directory → Steam shortcuts, select your Steam account." />
+                        <TextBlock Classes="bullet" Text="2. Exit desktop Steam completely using Steam → Exit (closing the window with X is not enough). Keep the launcher open." />
+                        <TextBlock Classes="bullet" Text="3. Leave 'Reset layout to Gamepad with Mouse Trackpad' checked to configure gamepad controls plus right-trackpad mouse movement and left-click press. Uncheck it if you want to keep a custom layout." />
+                        <TextBlock Classes="bullet" Text="4. Click 'Set up Steam shortcuts'. The launcher copies the AppImage to ~/.local/share/ReimaginedLauncher/launcher/D2RReimagined.ReimaginedLauncher.AppImage, creates a FUSE-aware startup script, and backs up your Steam shortcut files." />
+                        <TextBlock Classes="bullet" Text="5. Close the launcher and restart Steam, or switch back to Gaming Mode." />
+                    </StackPanel>
+                    <TextBlock Classes="muted"
+                               TextWrapping="Wrap"
+                               Text="Important: Do not enable Proton compatibility on 'Diablo II: Reimagined (Native Launcher)' or 'Diablo II: Reimagined (Launcher Game Session)' in Steam properties—both are native Linux entries that invoke Proton for the game automatically." />
+                </StackPanel>
+            </Border>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="10">
+                    <TextBlock Classes="section-title"
+                               Text="3. Playing in Gaming Mode or Desktop Steam" />
+                    <StackPanel Spacing="4">
+                        <TextBlock Classes="bullet" Text="• Open 'Diablo II: Reimagined (Native Launcher)' in Steam, choose Mod Only, Mod + D2RLoader, or Ladder, and press Start Game." />
+                        <TextBlock Classes="bullet" Text="• The launcher and game share the same Steam session and controller layout. Exiting the game through the in-game menu returns you to the launcher." />
+                        <TextBlock Classes="bullet" Text="• Use 'Exit Launcher' in the bottom-left sidebar to close the launcher and return to Steam (even when minimize-to-tray is enabled)." />
+                        <TextBlock Classes="bullet" Text="• Your official Diablo II: Resurrected Steam entry remains untouched. Use it whenever Battle.net asks to renew authentication, and avoid running vanilla D2R and Reimagined at the same time." />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Classes="panel"
+                    Padding="20">
+                <StackPanel Spacing="10">
+                    <TextBlock Classes="section-title"
+                               Text="4. Advanced Options &amp; Troubleshooting" />
+                    <TextBlock Classes="sub-title" Text="Controller clicking in the launcher" />
+                    <TextBlock Classes="bullet" Text="If right-trackpad clicking does not click buttons in the launcher, re-run 'Set up Steam shortcuts' with Steam fully exited and layout reset checked, or open Steam Controller Settings → select 'Gamepad with Mouse Trackpad' → bind Right Trackpad Click to Left Mouse Click." />
+
+                    <TextBlock Classes="sub-title" Text="Lossless Scaling Frame Generation (LSFG)" />
+                    <TextBlock Classes="bullet" Text="Under Install Directory → Advanced, check 'Enable LSFG for the game' if you have an executable ~/lsfg wrapper configured (for example via Decky LSFG-VK). LSFG applies only to the game process and does not require editing Steam launch options." />
+
+                    <TextBlock Classes="sub-title" Text="Separate Game Session Compatibility Fallback" />
+                    <TextBlock Classes="bullet" Text="If the single-session launch route has issues on your setup, open Install Directory → Advanced and enable 'Use separate game session (compatibility fallback)'. The launcher will hand off game launches to the hidden 'Diablo II: Reimagined (Launcher Game Session)' entry." />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

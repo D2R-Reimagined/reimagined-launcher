@@ -152,6 +152,9 @@ public sealed class LadderBundleService(
                     continue;
                 }
 
+                // The downloaded payload is verified, but the installed loot filter belongs to the player.
+                if (LadderRuntimeFileService.IsPlayerFilterPath(file.TargetPath)) continue;
+
                 var info = new FileInfo(path);
                 var currentMatches = info.Length == file.SizeBytes
                                      && string.Equals(
@@ -502,6 +505,7 @@ public sealed class LadderBundleService(
         var backupModRoot = Path.Combine(backupRoot, "Reimagined");
         var backedUp = false;
         var installed = false;
+        DirectoryContentTransaction? contentTransaction = null;
         try
         {
             await StageVerifiedFilesAsync(stagingRoot, downloaded, cancellationToken);
@@ -512,19 +516,34 @@ public sealed class LadderBundleService(
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(modRoot)!);
-            if (Directory.Exists(modRoot))
-            {
-                CarryOverPlayerFiles(modRoot, stagedModRoot, bundle);
-                Directory.Move(modRoot, backupModRoot);
-                backedUp = true;
-            }
+            if (Directory.Exists(modRoot)) CarryOverPlayerFiles(modRoot, stagedModRoot, bundle);
             var stagedMpq = Path.Combine(stagedModRoot, "Reimagined.mpq");
             if (Directory.Exists(stagedMpq))
                 Directory.Move(stagedMpq, Path.Combine(stagedModRoot, ModInstallationPaths.LadderModName + ".mpq"));
             else if (File.Exists(stagedMpq))
                 File.Move(stagedMpq, Path.Combine(stagedModRoot, ModInstallationPaths.LadderModName + ".mpq"));
-            Directory.Move(stagedModRoot, modRoot);
-            installed = true;
+            if (Directory.Exists(modRoot))
+            {
+                try
+                {
+                    Directory.Move(modRoot, backupModRoot);
+                    backedUp = true;
+                }
+                catch (Exception ex) when (OperatingSystem.IsWindows()
+                    && ex is IOException or UnauthorizedAccessException
+                    && (ex.HResult & 0xffff) is 5 or 32 or 33
+                    && Directory.Exists(modRoot) && !Directory.Exists(backupModRoot))
+                {
+                    LaunchDiagnostics.Log("Ladder folder rename was blocked; installing verified contents in place with a full backup.");
+                    contentTransaction = new DirectoryContentTransaction(stagedModRoot, modRoot, backupModRoot, cancellationToken);
+                    contentTransaction.Apply();
+                }
+            }
+            if (contentTransaction is null)
+            {
+                Directory.Move(stagedModRoot, modRoot);
+                installed = true;
+            }
 
             var state = new InstalledLadderBundleState(
                 bundle.Id,
@@ -544,27 +563,29 @@ public sealed class LadderBundleService(
             // while, so keep it off the caller's (often the UI) thread.
             await Task.Run(() => PruneBackups(Path.Combine(managementRoot, "backups"), transactionId), CancellationToken.None);
         }
-        catch
+        catch (Exception failure)
         {
-            if (installed && Directory.Exists(modRoot))
+            var failures = new List<Exception> { failure };
+            try
             {
-                Directory.Delete(modRoot, recursive: true);
+                if (contentTransaction is not null) contentTransaction.Rollback();
+                else
+                {
+                    if (installed && Directory.Exists(modRoot)) Directory.Delete(modRoot, recursive: true);
+                    if (backedUp && Directory.Exists(backupModRoot)) Directory.Move(backupModRoot, modRoot);
+                }
             }
-
-            if (backedUp && Directory.Exists(backupModRoot))
+            catch (Exception recovery) { failures.Add(recovery); }
+            try
             {
-                Directory.Move(backupModRoot, modRoot);
+                if (previous is null) DeleteState(installDirectory);
+                else await WriteStateAsync(installDirectory, previous, CancellationToken.None);
             }
-
-            if (previous is null)
-            {
-                DeleteState(installDirectory);
-            }
-            else
-            {
-                await WriteStateAsync(installDirectory, previous, CancellationToken.None);
-            }
-
+            catch (Exception recovery) { failures.Add(recovery); }
+            if (failures.Count > 1)
+                throw new AggregateException("Ladder installation failed; some files may require recovery from " + backupRoot, failures);
+            if (contentTransaction is not null && failure is IOException or UnauthorizedAccessException)
+                throw new IOException("Ladder installation stopped and previous files were restored. Close applications holding package files, check folder permissions, and retry. " + failure.Message, failure);
             throw;
         }
         finally
@@ -615,13 +636,13 @@ public sealed class LadderBundleService(
                 var relative = Path.GetRelativePath(modRoot, path).Replace('\\', '/');
                 var signedPath = "mods/Reimagined/" + relative;
                 var target = Path.Combine(stagedModRoot, relative.Replace('/', Path.DirectorySeparatorChar));
-                if (bundleTargets.Contains(signedPath)
-                    || File.Exists(target)
+                var playerFilter = LadderRuntimeFileService.IsPlayerFilterPath(signedPath);
+                if ((!playerFilter && (bundleTargets.Contains(signedPath) || File.Exists(target)))
                     || !LadderRuntimeFileService.IsGeneratedRuntimePath(signedPath))
                     continue;
 
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                File.Copy(path, target, overwrite: false);
+                File.Copy(path, target, overwrite: playerFilter);
             }
         }
     }

@@ -1,0 +1,19 @@
+# Setup and config editing
+
+The Hero preview keeps the installation editor under Install/Update. Launch retains its existing compact path status and collapsible installation card. Settings retains launch preferences and folder shortcuts.
+
+First-start setup checks the restored account state and existing profiles before opening. Existing signed-in users with a readable valid installation skip the popup; the existing settings.json is marked shown/completed. Saved Reimagined or Nexus sign-in also counts during temporary network failures. A missing/invalid installation still offers setup for a new client, and previously shown or completed setup does not repeat. The two guide steps remain optional browser sign-in and installation confirmation; no game files are installed by the guide.
+
+Install/Update hosts the installation editor as a single collapsible card, with its expansion saved under UpdateInstallDirectory in the existing LaunchCardExpansion settings. An invalid path expands it automatically and retains the attention indicator. The redundant Setup guide and Read patch notes buttons are removed; Patch Notes remains under News & Announcements. Launch Details opens its command and explanation directly without a nested expander. Loot-filter sign-in and website actions use hyperlink controls.
+
+Interface scaling includes 80%, 90%, 100%, 110%, 120% and 150%, with the saved scale retained on startup. Start Game and the navigation Launch arrow use the platform-provided accent color, update when that color changes and choose black or white text for contrast. Other launcher buttons retain their existing styling.
+
+Edit Config opens a local Avalonia editor rather than an external file association. It is available while Mod + D2RLoader is running; plugin enable/disable operations still require the game to be closed. Ladder and missing/ambiguous-config actions remain disabled. The save operation rechecks the selected context, installation lock and safe path. It refuses to replace a file changed since opening. JSON syntax is checked, including support for comments and trailing commas; other supported text formats are edited without schema validation. UTF-8 and UTF-16 encoding, BOM and untouched line endings are preserved; unsupported/binary and larger-than-2-MB files are refused. The wider line-number gutter, current-line highlight and line/column indicator help track edits. Plugin-specific reload behavior is unchanged.
+
+Before replacement, the original bytes are backed up in `.launcher-config-backups` beside the config, retaining three backups per file. A same-directory temporary file is renamed over the target. Cancel/close with unsaved changes offers Save or Discard changes. The editor does not upload configs or confirm in-game application.
+
+Validation: 20 focused automated tests passed for setup readiness/settings, scoped config resolution, encoding/backups, conflicts, JSON errors and save guards. Actual Avalonia fixtures confirmed Settings/Install-Update placement, popup layout at a simulated Deck size, invalid-path gating, setup completion, unsaved-close handling and editor saves. Browser authentication, physical Linux rendering and live-game behavior were not exercised in this update.
+
+Follow-up validation: 23 config/resolution/toggle tests passed. Actual Avalonia fixtures verified running-state config actions remain enabled while toggles are disabled, the current-line indicator and wider gutter, and the logo in the header. Live-game config reload and physical Linux rendering remain untested.
+
+Hero.20 validation: 13 focused setup, card-settings and accent-contrast tests passed. Native Avalonia fixtures checked the active accent presenter, hyperlink controls, one-click launch details, Update card collapse persistence and scale restoration at 110/120/150 percent. Windows/Linux previews rebuilt. Physical Steam Deck and live-game validation remain pending.

@@ -80,6 +80,8 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _saveWindowStateTimer;
     private DispatcherTimer? _launcherUpdateCheckTimer;
     private bool _isRestoringWindowState;
+    private bool _isInitializingSettings = true;
+    public static bool IsInitializingSettings => Instance?._isInitializingSettings ?? false;
     // Hourly auto-poll cadence for launcher update checks. The same check is also runnable on
     // demand by clicking the "Launcher v#.#.#" label in the navigation panel.
     private static readonly TimeSpan LauncherUpdateCheckInterval = TimeSpan.FromHours(1);
@@ -152,6 +154,7 @@ public partial class MainWindow : Window
         }
         finally
         {
+            _isInitializingSettings = false;
             Opacity = 1;
         }
     }
@@ -211,40 +214,8 @@ public partial class MainWindow : Window
         var installDir = Settings.CurrentProfile.InstallDirectory;
         RefreshLocalModState(installDir);
         ApplyUiScale();
-        PluginsView? pluginsViewToRefresh = null;
-
-        await Dispatcher.UIThread.InvokeAsync(() =>
-        {
-            if (ContentArea.Content is LaunchView launchView)
-            {
-                launchView.RefreshInstallDirectoryState();
-            }
-            else if (ContentArea.Content is BackupsView backupsView)
-            {
-                backupsView.RefreshBackupState();
-            }
-            else if (ContentArea.Content is SettingsView settingsView)
-            {
-                settingsView.RefreshSettingsState();
-            }
-            else if (ContentArea.Content is NewsAnnouncementsView newsAnnouncementsView)
-            {
-                newsAnnouncementsView.RefreshAnnouncementsState();
-            }
-            else if (ContentArea.Content is ModTweaksView modTweaksView)
-            {
-                modTweaksView.RefreshTweaksState();
-            }
-            else if (ContentArea.Content is PluginsView pluginsView)
-            {
-                pluginsViewToRefresh = pluginsView;
-            }
-        });
-
-        if (pluginsViewToRefresh != null)
-        {
-            await pluginsViewToRefresh.RefreshPluginsStateAsync();
-        }
+        _isInitializingSettings = false;
+        await RestoreLastNavigationAsync(Settings.LastNavigationTag);
 
         BackupService.UpdateSchedule();
         await SettingsManager.SaveAsync(Settings);
@@ -259,14 +230,32 @@ public partial class MainWindow : Window
         }
         RefreshReimaginedAccountUI();
 
-        // Network calls (can be slow; don't block UI setup)
-        var openedUnreadAnnouncements = await RefreshAnnouncementsStateAsync(openUnreadAnnouncements: true);
-
         if (!string.IsNullOrWhiteSpace(Settings.NexusModsSSOApiKey))
         {
-            User = await _nexusModsHttpClient.ValidateApiKeyAsync();
-            UserViewModel.User = User;
+            try
+            {
+                User = await _nexusModsHttpClient.ValidateApiKeyAsync();
+                UserViewModel.User = User;
+            }
+            catch (Exception exception)
+            {
+                LaunchDiagnostics.LogException("Could not restore Nexus sign-in", exception);
+            }
         }
+
+        var offeredSetup = SetupReadiness.ShouldOfferSetup(Settings,
+            _launcherAuthenticationService.IsSignedIn || UserViewModel.User is not null);
+        if (!offeredSetup && !Settings.FirstTimeSetupShown)
+        {
+            Settings.FirstTimeSetupShown = Settings.FirstTimeSetupCompleted = true;
+            await SettingsManager.SaveAsync(Settings);
+        }
+        if (offeredSetup)
+            await ShowSetupGuideAsync();
+
+        // Network calls (can be slow; don't block UI setup)
+        await RefreshAnnouncementsStateAsync(openUnreadAnnouncements: false);
+
 
         await RefreshUpdateStateAsync();
         LauncherUpdateService.AreUpdatesDisabled = Settings.DisableLauncherUpdates;
@@ -277,12 +266,9 @@ public partial class MainWindow : Window
         UserViewModel.PropertyChanged -= UserViewModelOnPropertyChanged;
         UserViewModel.PropertyChanged += UserViewModelOnPropertyChanged;
 
-        if (!IsLocalModDetected && Settings.CurrentProfile.LaunchExperience != LaunchExperience.Ladder)
+        if (!offeredSetup && !IsLocalModDetected && Settings.CurrentProfile.LaunchExperience != LaunchExperience.Ladder)
         {
-            if (!openedUnreadAnnouncements)
-            {
-                await PromptInstallForMissingModAsync();
-            }
+            await PromptInstallForMissingModAsync();
         }
     }
 
@@ -299,10 +285,10 @@ public partial class MainWindow : Window
         if (bounds.Width > 0 && bounds.Height > 0 && _currentScale > 0)
         {
             var logicalWidth = bounds.Width / _currentScale;
-            var useCompactShell = logicalWidth < 1200;
+            var useCompactShell = logicalWidth < 1320;
             RootGrid.Margin = useCompactShell ? new Thickness(12) : new Thickness(20);
             RootGrid.ColumnSpacing = useCompactShell ? 12 : 18;
-            RootGrid.ColumnDefinitions[0].Width = new GridLength(useCompactShell ? 250 : 300);
+            RootGrid.ColumnDefinitions[0].Width = new GridLength(useCompactShell ? 210 : 280);
 
             var horizontalMargin = RootGrid.Margin.Left + RootGrid.Margin.Right;
             var verticalMargin = RootGrid.Margin.Top + RootGrid.Margin.Bottom;
@@ -318,15 +304,22 @@ public partial class MainWindow : Window
             return 1.0;
         }
 
-        return Math.Clamp(uiScale, 0.8, 1.0);
+        return Math.Clamp(uiScale, 0.8, 1.5);
     }
 
     private async void UserViewModelOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(UserViewModel.User) && UserViewModel.User != null)
         {
-            await RefreshUpdateStateAsync();
-            RefreshCurrentContent();
+            try
+            {
+                await RefreshUpdateStateAsync();
+                RefreshCurrentContent();
+            }
+            catch (Exception exception)
+            {
+                LaunchDiagnostics.LogException("Failed to refresh update state after user sign-in", exception);
+            }
         }
     }
 
@@ -792,14 +785,95 @@ public partial class MainWindow : Window
         return ($"{NexusUrl}?tab=files&file_id={fileId}", false);
     }
     
+    private void PersistNavigationTag(string? tag)
+    {
+        if (_isInitializingSettings || string.IsNullOrWhiteSpace(tag))
+            return;
+
+        if (!string.Equals(Settings.LastNavigationTag, tag, StringComparison.Ordinal))
+        {
+            Settings.LastNavigationTag = tag;
+            _ = SettingsManager.SaveAsync(Settings);
+        }
+    }
+
+    private async Task RestoreLastNavigationAsync(string? navigationTag)
+    {
+        switch (navigationTag)
+        {
+            case "NewsAnnouncements":
+                await NavigateToNewsAnnouncementsViewAsync();
+                break;
+            case "PatchNotes":
+                await NavigateToPatchNotesAsync();
+                break;
+            case "Update":
+                await NavigateToUpdateViewAsync();
+                break;
+            case "Backups":
+                await NavigateToBackupsViewAsync();
+                break;
+            case "Settings":
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (SettingsNavItem != null && NavigationList.SelectedItem != SettingsNavItem)
+                        NavigationList.SelectedItem = SettingsNavItem;
+                    else
+                    {
+                        var settingsView = new SettingsView();
+                        settingsView.RefreshSettingsState();
+                        ContentArea.Content = settingsView;
+                    }
+                });
+                break;
+            case "ModTweaks":
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (ModTweaksNavItem != null && NavigationList.SelectedItem != ModTweaksNavItem)
+                        NavigationList.SelectedItem = ModTweaksNavItem;
+                    else
+                    {
+                        var modTweaksView = new ModTweaksView();
+                        modTweaksView.RefreshTweaksState();
+                        ContentArea.Content = modTweaksView;
+                    }
+                });
+                break;
+            case "Plugins":
+                await NavigateToPluginsViewAsync();
+                break;
+            default:
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (ContentArea.Content is LaunchView launchView)
+                    {
+                        launchView.RunStartupInstallDetectionIfNeeded();
+                        launchView.RefreshInstallDirectoryState();
+                        if (LaunchNavItem != null && NavigationList.SelectedItem != LaunchNavItem)
+                            NavigationList.SelectedItem = LaunchNavItem;
+                    }
+                    else
+                    {
+                        _ = NavigateToLaunchViewAsync();
+                    }
+                });
+                break;
+        }
+    }
+
     private void OnNavigationSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (NavigationList.SelectedItem is ListBoxItem item)
         {
-            switch (item.Tag?.ToString())
+            var tag = item.Tag?.ToString();
+            PersistNavigationTag(tag);
+            switch (tag)
             {
                 case "NewsAnnouncements":
                     _ = NavigateToNewsAnnouncementsViewAsync();
+                    break;
+                case "PatchNotes":
+                    _ = NavigateToPatchNotesAsync();
                     break;
                 case "Launch":
                     var launchView = new LaunchView();
@@ -933,6 +1007,11 @@ public partial class MainWindow : Window
         }
     }
 
+    public void NavigateToInstallationSettings()
+    {
+        NavigationList.SelectedItem = UpdateNavItem;
+    }
+
     public async Task NavigateToLaunchViewAsync()
     {
         await Dispatcher.UIThread.InvokeAsync(() =>
@@ -946,6 +1025,17 @@ public partial class MainWindow : Window
                 NavigationList.SelectedItem = LaunchNavItem;
             }
         });
+    }
+
+    public async Task NavigateToPatchNotesAsync(string? version = null)
+    {
+        PersistNavigationTag("PatchNotes");
+        NavigationList.SelectionChanged -= OnNavigationSelectionChanged;
+        try { NavigationList.SelectedItem = PatchNotesNavItem; }
+        finally { NavigationList.SelectionChanged += OnNavigationSelectionChanged; }
+        if (ContentArea.Content is not PatchNotesView)
+            ContentArea.Content = new PatchNotesView();
+        await ((PatchNotesView)ContentArea.Content).LoadAsync(version);
     }
 
     public async Task NavigateToNewsAnnouncementsViewAsync()
@@ -1113,6 +1203,27 @@ public partial class MainWindow : Window
         }
     }
 
+    public void NavigateToSteamDeckSetupGuideView(bool returnToUpdateView = false)
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => NavigateToSteamDeckSetupGuideView(returnToUpdateView));
+            return;
+        }
+
+        ContentArea.Content = new SteamDeckSetupGuideView(() =>
+        {
+            if (returnToUpdateView)
+            {
+                _ = NavigateToUpdateViewAsync();
+            }
+            else
+            {
+                _ = NavigateToLaunchViewAsync();
+            }
+        });
+    }
+
     private void RefreshCurrentContent()
     {
         if (!Dispatcher.UIThread.CheckAccess())
@@ -1197,6 +1308,12 @@ public partial class MainWindow : Window
 
     private async void OnNexusLoginClicked(object sender, RoutedEventArgs e)
     {
+        try { await SignInToNexusAsync(); }
+        catch (Exception exception) { Notifications.SendNotification(exception.Message, "Sign-in failed"); }
+    }
+
+    public async Task SignInToNexusAsync()
+    {
         _nexusSSO = new NexusModsSSO();
         _nexusSSO.OnApiKeyReceived += apiKey =>
         {
@@ -1216,7 +1333,7 @@ public partial class MainWindow : Window
         await SignInToReimaginedAsync();
     }
 
-    public async Task<bool> SignInToReimaginedAsync()
+    public async Task<bool> SignInToReimaginedAsync(CancellationToken cancellationToken = default)
     {
         if (_launcherAuthenticationService.IsSignedIn)
         {
@@ -1224,7 +1341,7 @@ public partial class MainWindow : Window
             return true;
         }
 
-        var cancellationTokenSource = new CancellationTokenSource();
+        var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         CancellationTokenSource? previousCancellationTokenSource;
         lock (_reimaginedSignInLock)
         {
@@ -1511,23 +1628,36 @@ public partial class MainWindow : Window
         _isRestoringWindowState = true;
         try
         {
-            if (Settings.WindowWidth.HasValue && Settings.WindowHeight.HasValue)
+            SettingsManager.SanitizeSettings(Settings);
+
+            if (Settings.WindowWidth is { } savedWidth && Settings.WindowHeight is { } savedHeight)
             {
-                Width = Settings.WindowWidth.Value;
-                Height = Settings.WindowHeight.Value;
+                Width = Math.Max(MinWidth, savedWidth);
+                Height = Math.Max(MinHeight, savedHeight);
+            }
+            else if (Screens.Primary is { WorkingArea: var primaryArea })
+            {
+                var scale = Screens.Primary.Scaling > 0 ? Screens.Primary.Scaling : 1.0;
+                Width = Math.Clamp(primaryArea.Width / scale, 1180, 1340);
+                Height = Math.Clamp((primaryArea.Height / scale) - 48, 720, 860);
             }
 
-            if (Settings.WindowX.HasValue && Settings.WindowY.HasValue)
+            if (Settings.WindowX is { } savedX && Settings.WindowY is { } savedY)
             {
-                var x = (int)Settings.WindowX.Value;
-                var y = (int)Settings.WindowY.Value;
-                var w = (int)(Settings.WindowWidth ?? Width);
-                var h = (int)(Settings.WindowHeight ?? Height);
+                var x = (int)Math.Round(savedX);
+                var y = (int)Math.Round(savedY);
+                var w = (int)Math.Round(Settings.WindowWidth ?? Width);
+                var h = (int)Math.Round(Settings.WindowHeight ?? Height);
 
                 if (IsPositionWithinScreenBounds(x, y, w, h))
                 {
                     Position = new PixelPoint(x, y);
                     WindowStartupLocation = WindowStartupLocation.Manual;
+                }
+                else
+                {
+                    Settings.WindowX = Settings.WindowY = null;
+                    WindowStartupLocation = WindowStartupLocation.CenterScreen;
                 }
             }
 
@@ -1548,17 +1678,22 @@ public partial class MainWindow : Window
         if (screens.ScreenCount == 0)
             return false;
 
-        // Check that at least a meaningful portion of the window is visible on some screen
-        const int minVisiblePixels = 50;
+        // Check that at least a meaningful portion of the window (and its top titlebar region) is visible on some screen
+        const int minVisiblePixels = 100;
+        const int titleBarHeight = 40;
         foreach (var screen in screens.All)
         {
+            var scale = screen.Scaling > 0 ? screen.Scaling : 1.0;
+            var physicalWidth = (int)Math.Round(Math.Max(MinWidth, width) * scale);
+            var physicalHeight = (int)Math.Round(Math.Max(MinHeight, height) * scale);
             var workArea = screen.WorkingArea;
             var overlapLeft = Math.Max(x, workArea.X);
             var overlapTop = Math.Max(y, workArea.Y);
-            var overlapRight = Math.Min(x + width, workArea.X + workArea.Width);
-            var overlapBottom = Math.Min(y + height, workArea.Y + workArea.Height);
+            var overlapRight = Math.Min(x + physicalWidth, workArea.X + workArea.Width);
+            var overlapBottom = Math.Min(y + physicalHeight, workArea.Y + workArea.Height);
 
-            if (overlapRight - overlapLeft >= minVisiblePixels && overlapBottom - overlapTop >= minVisiblePixels)
+            var titleBarVisible = y >= workArea.Y - 10 && y + titleBarHeight <= workArea.Y + workArea.Height;
+            if (titleBarVisible && overlapRight - overlapLeft >= minVisiblePixels && overlapBottom - overlapTop >= minVisiblePixels)
                 return true;
         }
 
@@ -1576,17 +1711,24 @@ public partial class MainWindow : Window
 
     private void OnWindowPositionOrSizeChanged(object? sender, EventArgs e)
     {
-        if (_isRestoringWindowState)
+        if (_isRestoringWindowState || _isInitializingSettings)
+            return;
+
+        if (WindowState == WindowState.Minimized)
             return;
 
         Settings.IsMaximized = WindowState == WindowState.Maximized;
 
         if (WindowState == WindowState.Normal)
         {
-            Settings.WindowWidth = Bounds.Width;
-            Settings.WindowHeight = Bounds.Height;
-            Settings.WindowX = Position.X;
-            Settings.WindowY = Position.Y;
+            if (Bounds.Width >= MinWidth && Bounds.Height >= MinHeight
+                && Position.X > -16000 && Position.Y > -16000)
+            {
+                Settings.WindowWidth = Bounds.Width;
+                Settings.WindowHeight = Bounds.Height;
+                Settings.WindowX = Position.X;
+                Settings.WindowY = Position.Y;
+            }
         }
 
         _saveWindowStateTimer?.Stop();

@@ -6,12 +6,12 @@
              xmlns:primitives="clr-namespace:Avalonia.Controls.Primitives;assembly=Avalonia.Controls"
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
              x:Class="ReimaginedLauncher.Views.NewsAnnouncements.NewsAnnouncementsView">
-    <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+    <Grid RowDefinitions="Auto,*" RowSpacing="8">
+        <TextBlock Classes="view-title" Text="News &amp; Announcements" />
+    <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled"
                   VerticalScrollBarVisibility="Auto">
-        <StackPanel Spacing="16">
+        <StackPanel Spacing="16" Margin="0,0,8,0">
             <StackPanel Spacing="4">
-                <TextBlock Classes="view-title"
-                           Text="News &amp; Announcements" />
                 <TextBlock Classes="muted"
                            Text="Latest updates pulled from the GitHub Discussions announcement channel." />
             </StackPanel>
@@ -257,4 +257,5 @@
             </ItemsControl>
         </StackPanel>
     </ScrollViewer>
+    </Grid>
 </UserControl>

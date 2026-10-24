@@ -1,203 +1,240 @@
-<Application xmlns="https://github.com/avaloniaui"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:avaloniaEdit="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
-             xmlns:valueConverters="clr-namespace:ReimaginedLauncher.Utilities.ValueConverters"
-             x:Class="ReimaginedLauncher.App"
-             RequestedThemeVariant="Dark">
+<Application xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:avaloniaEdit="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit" xmlns:valueConverters="clr-namespace:ReimaginedLauncher.Utilities.ValueConverters" x:Class="ReimaginedLauncher.App" RequestedThemeVariant="Dark">
     <Application.Resources>
-        <SolidColorBrush x:Key="AppBackgroundBrush" Color="#070707" />
-        <SolidColorBrush x:Key="SurfaceBrush" Color="#141313" />
-        <SolidColorBrush x:Key="SurfaceRaisedBrush" Color="#1C1A19" />
-        <SolidColorBrush x:Key="SurfaceMutedBrush" Color="#252321" />
-        <SolidColorBrush x:Key="AccentBrush" Color="#9E2D1E" />
-        <SolidColorBrush x:Key="AccentHoverBrush" Color="#C83C22" />
-        <SolidColorBrush x:Key="AccentPressedBrush" Color="#7B1D18" />
-        <SolidColorBrush x:Key="AccentSoftBrush" Color="#2A1815" />
-        <SolidColorBrush x:Key="BorderBrush" Color="#3D372D" />
-        <SolidColorBrush x:Key="BorderStrongBrush" Color="#7B1D18" />
-        <SolidColorBrush x:Key="TextBrush" Color="#F7F1E3" />
-        <SolidColorBrush x:Key="MutedTextBrush" Color="#BCA77D" />
-        <SolidColorBrush x:Key="GoldBrush" Color="#BCA77D" />
-        <SolidColorBrush x:Key="GoldTextBrush" Color="#F7E4B8" />
-        <SolidColorBrush x:Key="SuccessTextBrush" Color="#5CB85C" />
-        <SolidColorBrush x:Key="DangerTextBrush" Color="#E0575F" />
+        <SolidColorBrush x:Key="AppBackgroundBrush" Color="#070707"/>
+        <SolidColorBrush x:Key="SurfaceBrush" Color="#141313"/>
+        <SolidColorBrush x:Key="SurfaceRaisedBrush" Color="#1C1A19"/>
+        <SolidColorBrush x:Key="SurfaceMutedBrush" Color="#252321"/>
+        <SolidColorBrush x:Key="AccentBrush" Color="#9E2D1E"/>
+        <SolidColorBrush x:Key="AccentHoverBrush" Color="#C83C22"/>
+        <SolidColorBrush x:Key="AccentPressedBrush" Color="#7B1D18"/>
+        <SolidColorBrush x:Key="AccentSoftBrush" Color="#2A1815"/>
+        <SolidColorBrush x:Key="BorderBrush" Color="#3D372D"/>
+        <SolidColorBrush x:Key="BorderStrongBrush" Color="#7B1D18"/>
+        <SolidColorBrush x:Key="TextBrush" Color="#F7F1E3"/>
+        <SolidColorBrush x:Key="MutedTextBrush" Color="#BCA77D"/>
+        <SolidColorBrush x:Key="GoldBrush" Color="#BCA77D"/>
+        <SolidColorBrush x:Key="GoldTextBrush" Color="#F7E4B8"/>
+        <SolidColorBrush x:Key="SuccessTextBrush" Color="#5CB85C"/>
+        <SolidColorBrush x:Key="DangerTextBrush" Color="#E0575F"/>
         <LinearGradientBrush x:Key="WindowBackgroundBrush" StartPoint="0,0" EndPoint="1,1">
-            <GradientStop Color="#0D0D0E" Offset="0" />
-            <GradientStop Color="#11100F" Offset="0.55" />
-            <GradientStop Color="#070707" Offset="1" />
+            <GradientStop Color="#0D0D0E" Offset="0"/>
+            <GradientStop Color="#11100F" Offset="0.55"/>
+            <GradientStop Color="#070707" Offset="1"/>
         </LinearGradientBrush>
         <LinearGradientBrush x:Key="PanelBackgroundBrush" StartPoint="0,0" EndPoint="0,1">
-            <GradientStop Color="#171615" Offset="0" />
-            <GradientStop Color="#11100F" Offset="1" />
+            <GradientStop Color="#171615" Offset="0"/>
+            <GradientStop Color="#11100F" Offset="1"/>
         </LinearGradientBrush>
         <LinearGradientBrush x:Key="HeroBackgroundBrush" StartPoint="0,0" EndPoint="1,1">
-            <GradientStop Color="#211714" Offset="0" />
-            <GradientStop Color="#171413" Offset="0.5" />
-            <GradientStop Color="#0D0D0E" Offset="1" />
+            <GradientStop Color="#211714" Offset="0"/>
+            <GradientStop Color="#171413" Offset="0.5"/>
+            <GradientStop Color="#0D0D0E" Offset="1"/>
         </LinearGradientBrush>
-        <valueConverters:InverseBooleanConverter x:Key="InverseBooleanConverter" />
-        <valueConverters:LogTypeToIconConverter x:Key="LogTypeToIconConverter" />
-        <valueConverters:LogTypeToBrushConverter x:Key="LogTypeToBrushConverter" />
+        <valueConverters:InverseBooleanConverter x:Key="InverseBooleanConverter"/>
+        <valueConverters:LogTypeToIconConverter x:Key="LogTypeToIconConverter"/>
+        <valueConverters:LogTypeToBrushConverter x:Key="LogTypeToBrushConverter"/>
+        <SolidColorBrush Color="#1C1A19" x:Key="ButtonBackground"/>
+        <SolidColorBrush Color="#F7F1E3" x:Key="ButtonForeground"/>
+        <SolidColorBrush Color="#3D372D" x:Key="ButtonBorderBrush"/>
+        <SolidColorBrush Color="#2A1815" x:Key="ButtonBackgroundPointerOver"/>
+        <SolidColorBrush Color="#F7F1E3" x:Key="ButtonForegroundPointerOver"/>
+        <SolidColorBrush Color="#7B1D18" x:Key="ButtonBorderBrushPointerOver"/>
+        <SolidColorBrush Color="#7B1D18" x:Key="ButtonBackgroundPressed"/>
+        <SolidColorBrush Color="#F7F1E3" x:Key="ButtonForegroundPressed"/>
+        <SolidColorBrush Color="#7B1D18" x:Key="ButtonBorderBrushPressed"/>
+        <SolidColorBrush Color="#141312" x:Key="ButtonBackgroundDisabled"/>
+        <SolidColorBrush Color="#6E6962" x:Key="ButtonForegroundDisabled"/>
+        <SolidColorBrush Color="#26231F" x:Key="ButtonBorderBrushDisabled"/>
+        <SolidColorBrush Color="#9E2D1E" x:Key="AccentButtonBackground"/>
+        <SolidColorBrush Color="#F7F1E3" x:Key="AccentButtonForeground"/>
+        <SolidColorBrush Color="#7B1D18" x:Key="AccentButtonBorderBrush"/>
+        <SolidColorBrush Color="#C83C22" x:Key="AccentButtonBackgroundPointerOver"/>
+        <SolidColorBrush Color="#F7F1E3" x:Key="AccentButtonForegroundPointerOver"/>
+        <SolidColorBrush Color="#7B1D18" x:Key="AccentButtonBorderBrushPointerOver"/>
+        <SolidColorBrush Color="#7B1D18" x:Key="AccentButtonBackgroundPressed"/>
+        <SolidColorBrush Color="#F7F1E3" x:Key="AccentButtonForegroundPressed"/>
+        <SolidColorBrush Color="#7B1D18" x:Key="AccentButtonBorderBrushPressed"/>
+        <SolidColorBrush Color="#141312" x:Key="AccentButtonBackgroundDisabled"/>
+        <SolidColorBrush Color="#6E6962" x:Key="AccentButtonForegroundDisabled"/>
+        <SolidColorBrush Color="#26231F" x:Key="AccentButtonBorderBrushDisabled"/>
     </Application.Resources>
     <Application.Styles>
-        <FluentTheme />
+        <FluentTheme/>
         <Style Selector="ScrollViewer">
-            <Setter Property="AllowAutoHide" Value="False" />
+            <Setter Property="AllowAutoHide" Value="False"/>
         </Style>
-        <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
+        <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml"/>
         <Style Selector="Window">
-            <Setter Property="Background" Value="{StaticResource WindowBackgroundBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-            <Setter Property="FontFamily" Value="Segoe UI" />
+            <Setter Property="Background" Value="{StaticResource WindowBackgroundBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="FontFamily" Value="Segoe UI"/>
         </Style>
 
         <Style Selector="Border.panel">
-            <Setter Property="Background" Value="{StaticResource PanelBackgroundBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Background" Value="{StaticResource PanelBackgroundBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="10"/>
         </Style>
 
         <Style Selector="Border.hero-panel">
-            <Setter Property="Background" Value="{StaticResource HeroBackgroundBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource BorderStrongBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Background" Value="{StaticResource HeroBackgroundBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderStrongBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="12"/>
         </Style>
 
         <Style Selector="Border.warning-banner">
-            <Setter Property="Background" Value="#2A2016" />
-            <Setter Property="BorderBrush" Value="{StaticResource GoldBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Background" Value="#2A2016"/>
+            <Setter Property="BorderBrush" Value="{StaticResource GoldBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="8"/>
         </Style>
 
         <Style Selector="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
         </Style>
 
         <Style Selector="TextBlock.muted">
-            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}"/>
         </Style>
 
         <Style Selector="TextBlock.plugin-title-up-to-date">
-            <Setter Property="Foreground" Value="{StaticResource SuccessTextBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource SuccessTextBrush}"/>
         </Style>
 
         <Style Selector="TextBlock.plugin-title-out-of-date">
-            <Setter Property="Foreground" Value="{StaticResource DangerTextBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource DangerTextBrush}"/>
         </Style>
 
         <Style Selector="TextBlock.view-title">
-            <Setter Property="FontFamily" Value="Georgia" />
-            <Setter Property="FontSize" Value="27" />
-            <Setter Property="FontWeight" Value="Bold" />
-            <Setter Property="Foreground" Value="{StaticResource GoldTextBrush}" />
+            <Setter Property="FontFamily" Value="Georgia"/>
+            <Setter Property="FontSize" Value="27"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Foreground" Value="{StaticResource GoldTextBrush}"/>
         </Style>
 
         <Style Selector="TextBlock.section-title">
-            <Setter Property="FontFamily" Value="Georgia" />
-            <Setter Property="FontSize" Value="20" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Foreground" Value="{StaticResource GoldTextBrush}" />
+            <Setter Property="FontFamily" Value="Georgia"/>
+            <Setter Property="FontSize" Value="20"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource GoldTextBrush}"/>
         </Style>
 
         <Style Selector="Button">
-            <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="14,10" />
-            <Setter Property="MinHeight" Value="40" />
-        </Style>
+            <Setter Property="Background" Value="{StaticResource ButtonBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource ButtonForeground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ButtonBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="12,7"/>
+            <Setter Property="MinHeight" Value="36"/>
+        <Setter Property="CornerRadius" Value="6"/><Setter Property="HorizontalContentAlignment" Value="Center"/><Setter Property="VerticalContentAlignment" Value="Center"/></Style>
 
         <Style Selector="Button:pointerover">
-            <Setter Property="Background" Value="{StaticResource AccentSoftBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource BorderStrongBrush}" />
+            <Setter Property="Background" Value="{StaticResource ButtonBackgroundPointerOver}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ButtonBorderBrushPointerOver}"/>
         </Style>
 
         <Style Selector="Button:pressed">
-            <Setter Property="Background" Value="{StaticResource AccentPressedBrush}" />
-        </Style>
+            <Setter Property="Background" Value="{StaticResource ButtonBackgroundPressed}"/>
+        <Setter Property="RenderTransform" Value="none"/></Style>
 
         <Style Selector="Button:disabled">
-            <Setter Property="Background" Value="{StaticResource SurfaceMutedBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
-            <Setter Property="Opacity" Value="0.9" />
+            <Setter Property="Background" Value="{StaticResource ButtonBackgroundDisabled}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ButtonBorderBrushDisabled}"/>
+            <Setter Property="Foreground" Value="{StaticResource ButtonForegroundDisabled}"/>
+            <Setter Property="Opacity" Value="0.65"/>
         </Style>
 
         <Style Selector="Button.accent">
-            <Setter Property="Background" Value="{StaticResource AccentBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource BorderStrongBrush}" />
-            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Background" Value="{StaticResource AccentButtonBackground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource AccentButtonBorderBrush}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
         </Style>
 
         <Style Selector="Button.accent:pointerover">
-            <Setter Property="Background" Value="{StaticResource AccentHoverBrush}" />
+            <Setter Property="Background" Value="{StaticResource AccentButtonBackgroundPointerOver}"/>
+        </Style>
+
+        <Style Selector="Button.os-accent:not(:disabled)">
+            <Setter Property="Background" Value="{DynamicResource LaunchAccentBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource LaunchAccentForeground}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource LaunchAccentBrush}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style Selector="Button.os-accent:not(:disabled) /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource LaunchAccentBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource LaunchAccentForeground}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource LaunchAccentBrush}"/>
+        </Style>
+        <Style Selector="Button.os-accent:not(:disabled):pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Opacity" Value="0.9"/>
+        </Style>
+        <Style Selector="Button.os-accent:not(:disabled):pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Opacity" Value="0.8"/>
         </Style>
 
         <Style Selector="Button.link-button">
-            <Setter Property="Background" Value="#151414" />
-            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
-            <Setter Property="Padding" Value="10,8" />
-            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="Background" Value="#151414"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
         </Style>
 
         <Style Selector="TextBox">
-            <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
-            <Setter Property="MinHeight" Value="40" />
-            <Setter Property="Padding" Value="12,0" />
-            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="MinHeight" Value="40"/>
+            <Setter Property="Padding" Value="12,0"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
 
         <Style Selector="avaloniaEdit|TextEditor.code-editor">
-            <Setter Property="Background" Value="#0B0909" />
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource BorderStrongBrush}" />
-            <Setter Property="FontFamily" Value="Cascadia Mono, Consolas, Menlo, monospace" />
-            <Setter Property="FontSize" Value="13" />
-            <Setter Property="LineNumbersForeground" Value="{StaticResource MutedTextBrush}" />
+            <Setter Property="Background" Value="#0B0909"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderStrongBrush}"/>
+            <Setter Property="FontFamily" Value="Cascadia Mono, Consolas, Menlo, monospace"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="LineNumbersForeground" Value="{StaticResource MutedTextBrush}"/>
         </Style>
 
         <Style Selector="ComboBox">
-            <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
-            <Setter Property="MinHeight" Value="40" />
+            <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="MinHeight" Value="40"/>
         </Style>
 
         <Style Selector="CheckBox">
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
         </Style>
 
         <Style Selector="ListBox.nav-list">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
         </Style>
 
         <Style Selector="ListBox.nav-list ListBoxItem">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="7" />
-            <Setter Property="Padding" Value="13,10" />
-            <Setter Property="Margin" Value="0,0,0,4" />
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="7"/>
+            <Setter Property="Padding" Value="13,10"/>
+            <Setter Property="Margin" Value="0,0,0,4"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
         </Style>
 
         <Style Selector="ListBox.nav-list ListBoxItem:pointerover">
-            <Setter Property="Background" Value="{StaticResource AccentSoftBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource BorderStrongBrush}" />
+            <Setter Property="Background" Value="{StaticResource AccentSoftBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderStrongBrush}"/>
         </Style>
 
         <Style Selector="ListBox.nav-list ListBoxItem:selected">
-            <Setter Property="Background" Value="{StaticResource AccentSoftBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource GoldTextBrush}" />
+            <Setter Property="Background" Value="{StaticResource AccentSoftBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource GoldTextBrush}"/>
         </Style>
-    </Application.Styles>
+    <Style Selector="Button:focus-visible /template/ ContentPresenter#PART_ContentPresenter"><Setter Property="BorderBrush" Value="#E6C68A"/></Style></Application.Styles>
 </Application>

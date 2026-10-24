@@ -1,0 +1,38 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="ReimaginedLauncher.Views.NewsAnnouncements.PatchNotesView">
+    <Grid RowDefinitions="Auto,*" RowSpacing="12">
+        <TextBlock Text="Patch Notes" Classes="view-title"/>
+    <Grid Grid.Row="1" RowDefinitions="Auto,Auto,*" RowSpacing="12" Margin="0,0,8,0">
+        <WrapPanel>
+            <TextBlock Text="Version" VerticalAlignment="Center" Margin="0,0,10,8" />
+            <ComboBox x:Name="VersionPicker" MinWidth="150" MaxWidth="240" Margin="0,0,10,8"
+                      SelectionChanged="OnVersionChanged" />
+            <Button x:Name="RefreshNotesButton" Content="Refresh" Click="OnRefresh" Margin="0,0,8,8" />
+            <Button x:Name="SourceButton" Content="View on Wiki" Click="OnViewSource" Margin="0,0,8,8" />
+        </WrapPanel>
+        <StackPanel Grid.Row="1" Spacing="6">
+            <TextBlock x:Name="ReaderStatus" Classes="muted" TextWrapping="Wrap" />
+            <Border Height="3">
+                <ProgressBar x:Name="ReaderProgress" IsIndeterminate="True" Height="3" IsVisible="False" />
+            </Border>
+        </StackPanel>
+        <ScrollViewer x:Name="ArticleScroller" Grid.Row="2" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="0,0,8,16" Spacing="14" MaxWidth="1100" HorizontalAlignment="Stretch">
+                <Border x:Name="ReleaseHeader" Classes="panel" Padding="16" IsVisible="False">
+                    <StackPanel Spacing="8">
+                        <WrapPanel>
+                            <TextBlock x:Name="ReleaseVersion" Classes="section-title" Margin="0,0,12,0" />
+                            <TextBlock x:Name="InstalledBadge" Text="INSTALLED" VerticalAlignment="Center" FontWeight="SemiBold" IsVisible="False" />
+                        </WrapPanel>
+                        <TextBlock x:Name="ReleaseTitle" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ReleaseDate" Classes="muted" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ReleaseHighlights" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+                <StackPanel x:Name="ArticleBody" Spacing="12" Margin="4,0" />
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+    </Grid>
+</UserControl>

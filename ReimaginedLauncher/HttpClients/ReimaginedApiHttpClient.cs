@@ -22,7 +22,7 @@ public sealed record LadderBundleDownloadProgress(
     double BytesPerSecond,
     TimeSpan? EstimatedTimeRemaining);
 
-public sealed class ReimaginedApiHttpClient
+public sealed partial class ReimaginedApiHttpClient
 {
     private const string ApiBaseAddressEnvironmentVariable = "D2R_REIMAGINED_API_BASE_URL";
 #if DEBUG

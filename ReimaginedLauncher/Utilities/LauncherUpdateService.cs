@@ -34,7 +34,19 @@ public static class LauncherUpdateService
     // hourly poll, and the version-label click) are skipped, no update is downloaded so
     // no reminder banner appears, and any previously downloaded update is never applied
     // on close/restart. Driven by the "Disable automatic launcher updates" setting.
-    public static bool AreUpdatesDisabled { get; set; }
+    public static bool IsPreviewBuild { get; } =
+#if LAUNCHER_PREVIEW_BUILD
+        true;
+#else
+        false;
+#endif
+
+    private static bool _updatesDisabled;
+    public static bool AreUpdatesDisabled
+    {
+        get => IsPreviewBuild || _updatesDisabled;
+        set => _updatesDisabled = value;
+    }
 
     public static string? LatestVersion { get; private set; }
     public static event EventHandler? UpdateDownloaded;
