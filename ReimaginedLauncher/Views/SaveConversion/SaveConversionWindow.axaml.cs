@@ -27,6 +27,7 @@ public partial class SaveConversionWindow : Window
 
     private readonly string _saveDirectory;
     private readonly SaveCheckpointRegistry? _registry;
+    private readonly Func<bool>? _canStartPrompt;
     private SaveConversionService? _service;
     private bool _isBusy;
 
@@ -47,16 +48,28 @@ public partial class SaveConversionWindow : Window
             LaunchDiagnostics.LogException("Could not read the save migration checkpoint registry", exception);
         }
 
-        Opened += async (_, _) => await InitializeConversionAsync();
+        Opened += async (_, _) =>
+        {
+            // Dismiss a stale automatic prompt before initialization makes the window busy and uncloseable.
+            if (_canStartPrompt?.Invoke() == false)
+            {
+                Close();
+                return;
+            }
+
+            await InitializeConversionAsync();
+        };
         Closing += (_, args) => args.Cancel = _isBusy;
         Closed += (_, _) => DeleteStagingDirectory();
     }
 
     /// <param name="promptMessage">Why the launcher opened this window on its own, shown above the description.</param>
-    public SaveConversionWindow(string promptMessage) : this()
+    /// <param name="canStartPrompt">Checked once the window opens, before analysis starts; false closes it untouched.</param>
+    public SaveConversionWindow(string promptMessage, Func<bool>? canStartPrompt = null) : this()
     {
         PromptText.Text = promptMessage;
         PromptBanner.IsVisible = true;
+        _canStartPrompt = canStartPrompt;
     }
 
     private async Task InitializeConversionAsync()

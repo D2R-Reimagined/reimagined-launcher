@@ -39,29 +39,35 @@ public partial class MainWindow
 
             var window = new SaveConversionWindow(
                 "Some offline saves may need conversion or review for the installed Reimagined version. "
-                + "Review them below; nothing is changed until you choose Convert Selected.");
-            window.Opened += async (_, _) =>
-            {
-                if (!SaveConversionService.RecordAutomaticPromptShown(profile, installDirectory, targetFingerprint))
+                + "Review them below; nothing is changed until you choose Convert Selected.",
+                () =>
                 {
-                    window.Close();
-                    return;
-                }
+                    if (!ReferenceEquals(profile, Settings.CurrentProfile) ||
+                        !SaveConversionService.RecordAutomaticPromptShown(profile, installDirectory, targetFingerprint))
+                    {
+                        return false;
+                    }
 
-                try
-                {
-                    await SettingsManager.SaveAsync(Settings);
-                }
-                catch (Exception exception)
-                {
-                    LaunchDiagnostics.LogException("Could not save the save conversion prompt state", exception);
-                }
-            };
+                    _ = SaveAutomaticPromptStateAsync();
+                    return true;
+                });
             await window.ShowDialog(this);
         }
         catch (Exception exception)
         {
             LaunchDiagnostics.LogException($"Save conversion check ({trigger}) failed", exception);
+        }
+    }
+
+    private static async Task SaveAutomaticPromptStateAsync()
+    {
+        try
+        {
+            await SettingsManager.SaveAsync(Settings);
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.LogException("Could not save the save conversion prompt state", exception);
         }
     }
 }
