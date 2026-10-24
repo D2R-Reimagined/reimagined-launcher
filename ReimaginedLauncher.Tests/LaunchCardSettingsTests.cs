@@ -28,4 +28,31 @@ public sealed class LaunchCardSettingsTests
         Assert.True(restored.LaunchCardExpansion["LootFilter"]);
         Assert.False(restored.LaunchCardExpansion["InstallDirectory"]);
     }
+
+    [Fact]
+    public void SanitizeSettingsResetsMinimizedOrTinyWindowGeometryAndNullCollections()
+    {
+        var settings = new AppSettings
+        {
+            WindowWidth = 0,
+            WindowHeight = 200,
+            WindowX = -32000,
+            WindowY = -32000,
+            LastNavigationTag = "",
+            Profiles = null!,
+            LaunchCardExpansion = null!,
+            InstalledLootFilters = null!
+        };
+
+        SettingsManager.SanitizeSettings(settings);
+
+        Assert.Null(settings.WindowWidth);
+        Assert.Null(settings.WindowHeight);
+        Assert.Null(settings.WindowX);
+        Assert.Null(settings.WindowY);
+        Assert.Equal("Launch", settings.LastNavigationTag);
+        Assert.NotNull(settings.Profiles);
+        Assert.NotNull(settings.LaunchCardExpansion);
+        Assert.NotNull(settings.InstalledLootFilters);
+    }
 }

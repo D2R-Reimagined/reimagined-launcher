@@ -81,6 +81,7 @@ public partial class MainWindow : Window
     private DispatcherTimer? _launcherUpdateCheckTimer;
     private bool _isRestoringWindowState;
     private bool _isInitializingSettings = true;
+    public static bool IsInitializingSettings => Instance?._isInitializingSettings ?? false;
     // Hourly auto-poll cadence for launcher update checks. The same check is also runnable on
     // demand by clicking the "Launcher v#.#.#" label in the navigation panel.
     private static readonly TimeSpan LauncherUpdateCheckInterval = TimeSpan.FromHours(1);
@@ -284,10 +285,10 @@ public partial class MainWindow : Window
         if (bounds.Width > 0 && bounds.Height > 0 && _currentScale > 0)
         {
             var logicalWidth = bounds.Width / _currentScale;
-            var useCompactShell = logicalWidth < 1200;
+            var useCompactShell = logicalWidth < 1320;
             RootGrid.Margin = useCompactShell ? new Thickness(12) : new Thickness(20);
             RootGrid.ColumnSpacing = useCompactShell ? 12 : 18;
-            RootGrid.ColumnDefinitions[0].Width = new GridLength(useCompactShell ? 250 : 300);
+            RootGrid.ColumnDefinitions[0].Width = new GridLength(useCompactShell ? 210 : 280);
 
             var horizontalMargin = RootGrid.Margin.Left + RootGrid.Margin.Right;
             var verticalMargin = RootGrid.Margin.Top + RootGrid.Margin.Bottom;
@@ -310,8 +311,15 @@ public partial class MainWindow : Window
     {
         if (e.PropertyName == nameof(UserViewModel.User) && UserViewModel.User != null)
         {
-            await RefreshUpdateStateAsync();
-            RefreshCurrentContent();
+            try
+            {
+                await RefreshUpdateStateAsync();
+                RefreshCurrentContent();
+            }
+            catch (Exception exception)
+            {
+                LaunchDiagnostics.LogException("Failed to refresh update state after user sign-in", exception);
+            }
         }
     }
 
@@ -839,6 +847,7 @@ public partial class MainWindow : Window
                 {
                     if (ContentArea.Content is LaunchView launchView)
                     {
+                        launchView.RunStartupInstallDetectionIfNeeded();
                         launchView.RefreshInstallDirectoryState();
                         if (LaunchNavItem != null && NavigationList.SelectedItem != LaunchNavItem)
                             NavigationList.SelectedItem = LaunchNavItem;
@@ -1192,6 +1201,27 @@ public partial class MainWindow : Window
         {
             NavigationList.SelectedItem = PluginsNavItem;
         }
+    }
+
+    public void NavigateToSteamDeckSetupGuideView(bool returnToUpdateView = false)
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => NavigateToSteamDeckSetupGuideView(returnToUpdateView));
+            return;
+        }
+
+        ContentArea.Content = new SteamDeckSetupGuideView(() =>
+        {
+            if (returnToUpdateView)
+            {
+                _ = NavigateToUpdateViewAsync();
+            }
+            else
+            {
+                _ = NavigateToLaunchViewAsync();
+            }
+        });
     }
 
     private void RefreshCurrentContent()
@@ -1598,23 +1628,36 @@ public partial class MainWindow : Window
         _isRestoringWindowState = true;
         try
         {
-            if (Settings.WindowWidth.HasValue && Settings.WindowHeight.HasValue)
+            SettingsManager.SanitizeSettings(Settings);
+
+            if (Settings.WindowWidth is { } savedWidth && Settings.WindowHeight is { } savedHeight)
             {
-                Width = Settings.WindowWidth.Value;
-                Height = Settings.WindowHeight.Value;
+                Width = Math.Max(MinWidth, savedWidth);
+                Height = Math.Max(MinHeight, savedHeight);
+            }
+            else if (Screens.Primary is { WorkingArea: var primaryArea })
+            {
+                var scale = Screens.Primary.Scaling > 0 ? Screens.Primary.Scaling : 1.0;
+                Width = Math.Clamp(primaryArea.Width / scale, 1180, 1340);
+                Height = Math.Clamp((primaryArea.Height / scale) - 48, 720, 860);
             }
 
-            if (Settings.WindowX.HasValue && Settings.WindowY.HasValue)
+            if (Settings.WindowX is { } savedX && Settings.WindowY is { } savedY)
             {
-                var x = (int)Settings.WindowX.Value;
-                var y = (int)Settings.WindowY.Value;
-                var w = (int)(Settings.WindowWidth ?? Width);
-                var h = (int)(Settings.WindowHeight ?? Height);
+                var x = (int)Math.Round(savedX);
+                var y = (int)Math.Round(savedY);
+                var w = (int)Math.Round(Settings.WindowWidth ?? Width);
+                var h = (int)Math.Round(Settings.WindowHeight ?? Height);
 
                 if (IsPositionWithinScreenBounds(x, y, w, h))
                 {
                     Position = new PixelPoint(x, y);
                     WindowStartupLocation = WindowStartupLocation.Manual;
+                }
+                else
+                {
+                    Settings.WindowX = Settings.WindowY = null;
+                    WindowStartupLocation = WindowStartupLocation.CenterScreen;
                 }
             }
 
@@ -1635,17 +1678,22 @@ public partial class MainWindow : Window
         if (screens.ScreenCount == 0)
             return false;
 
-        // Check that at least a meaningful portion of the window is visible on some screen
-        const int minVisiblePixels = 50;
+        // Check that at least a meaningful portion of the window (and its top titlebar region) is visible on some screen
+        const int minVisiblePixels = 100;
+        const int titleBarHeight = 40;
         foreach (var screen in screens.All)
         {
+            var scale = screen.Scaling > 0 ? screen.Scaling : 1.0;
+            var physicalWidth = (int)Math.Round(Math.Max(MinWidth, width) * scale);
+            var physicalHeight = (int)Math.Round(Math.Max(MinHeight, height) * scale);
             var workArea = screen.WorkingArea;
             var overlapLeft = Math.Max(x, workArea.X);
             var overlapTop = Math.Max(y, workArea.Y);
-            var overlapRight = Math.Min(x + width, workArea.X + workArea.Width);
-            var overlapBottom = Math.Min(y + height, workArea.Y + workArea.Height);
+            var overlapRight = Math.Min(x + physicalWidth, workArea.X + workArea.Width);
+            var overlapBottom = Math.Min(y + physicalHeight, workArea.Y + workArea.Height);
 
-            if (overlapRight - overlapLeft >= minVisiblePixels && overlapBottom - overlapTop >= minVisiblePixels)
+            var titleBarVisible = y >= workArea.Y - 10 && y + titleBarHeight <= workArea.Y + workArea.Height;
+            if (titleBarVisible && overlapRight - overlapLeft >= minVisiblePixels && overlapBottom - overlapTop >= minVisiblePixels)
                 return true;
         }
 
@@ -1663,17 +1711,24 @@ public partial class MainWindow : Window
 
     private void OnWindowPositionOrSizeChanged(object? sender, EventArgs e)
     {
-        if (_isRestoringWindowState)
+        if (_isRestoringWindowState || _isInitializingSettings)
+            return;
+
+        if (WindowState == WindowState.Minimized)
             return;
 
         Settings.IsMaximized = WindowState == WindowState.Maximized;
 
         if (WindowState == WindowState.Normal)
         {
-            Settings.WindowWidth = Bounds.Width;
-            Settings.WindowHeight = Bounds.Height;
-            Settings.WindowX = Position.X;
-            Settings.WindowY = Position.Y;
+            if (Bounds.Width >= MinWidth && Bounds.Height >= MinHeight
+                && Position.X > -16000 && Position.Y > -16000)
+            {
+                Settings.WindowWidth = Bounds.Width;
+                Settings.WindowHeight = Bounds.Height;
+                Settings.WindowX = Position.X;
+                Settings.WindowY = Position.Y;
+            }
         }
 
         _saveWindowStateTimer?.Stop();
