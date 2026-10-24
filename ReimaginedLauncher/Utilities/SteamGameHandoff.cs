@@ -121,6 +121,58 @@ internal sealed class SteamGameHandoff : IDisposable
         return Install(steamRoot, userId, path, resetControllerLayout);
     }
 
+    internal static string GetShortcutBootstrap(string launcherPath)
+    {
+        var quotedPath = "'" + Path.GetFullPath(launcherPath).Replace("'", "'\\''") + "'";
+        return "#!/bin/sh\n# ReimaginedLauncher owned AppImage bootstrap\n"
+            + "if [ -n \"${SteamAppId:-}\" ] || [ ! -c /dev/fuse ] || ! { [ -x \"${FUSERMOUNT_PROG:-}\" ] || command -v fusermount3 >/dev/null 2>&1 || command -v fusermount >/dev/null 2>&1; }; then\n"
+            + "    exec " + quotedPath + " --appimage-extract-and-run \"$@\"\nfi\nexec " + quotedPath + " \"$@\"\n";
+    }
+
+    internal static LauncherSteamShortcut CreateLauncherShortcut(string name, string launcherPath, string arguments,
+        string legacyName, bool? hidden = null)
+    {
+        var quotedPath = "\"" + Path.GetFullPath(launcherPath) + "\"";
+        var original = new LauncherSteamShortcut(name, quotedPath, arguments, legacyName, hidden);
+        if (!launcherPath.EndsWith(".AppImage", StringComparison.OrdinalIgnoreCase)) return original;
+        return original with
+        {
+            Executable = "\"" + Path.ChangeExtension(Path.GetFullPath(launcherPath), ".sh") + "\"",
+            StableAppId = original.AppId,
+            LegacyExecutable = quotedPath,
+            LegacyArguments = [arguments, "--appimage-extract-and-run" + (arguments.Length == 0 ? "" : " " + arguments)]
+        };
+    }
+
+    internal static void PrepareShortcutBootstrap(string launcherPath)
+    {
+        if (!launcherPath.EndsWith(".AppImage", StringComparison.OrdinalIgnoreCase)) return;
+        var path = Path.ChangeExtension(Path.GetFullPath(launcherPath), ".sh");
+        var contents = GetShortcutBootstrap(launcherPath);
+        if (File.Exists(path))
+        {
+            var previous = File.ReadAllText(path);
+            if (previous == contents)
+            {
+                if (OperatingSystem.IsLinux()) File.SetUnixFileMode(path, File.GetUnixFileMode(path) | UnixFileMode.UserExecute);
+                return;
+            }
+            if (!previous.StartsWith("#!/bin/sh\n# ReimaginedLauncher owned AppImage bootstrap\n", StringComparison.Ordinal))
+                throw new InvalidDataException("The Steam startup-script path contains another file; it was preserved.");
+            File.Copy(path, path + "." + Guid.NewGuid().ToString("N") + ".bak");
+        }
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, contents, new UTF8Encoding(false));
+            if (OperatingSystem.IsLinux()) File.SetUnixFileMode(temporary,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+                | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+            File.Move(temporary, path, true);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+
     /// <summary>Registers owned shortcuts independently of optional controller-layout configuration.</summary>
     /// <param name="stateDirectory">An isolated registration directory for tests; defaults to the launcher state directory.</param>
     internal static SteamShortcutSetupResult Install(string steamRoot, string userId, string launcherPath,
@@ -134,11 +186,12 @@ internal sealed class SteamGameHandoff : IDisposable
             throw new InvalidOperationException("Specify the installed native Steam root, existing userdata ID, and stable launcher executable.");
         var directory = stateDirectory ?? StateDirectory;
         Directory.CreateDirectory(directory);
-        var quotedPath = "\"" + Path.GetFullPath(launcherPath) + "\"";
-        var game = new LauncherSteamShortcut("Diablo II: Reimagined (Launcher Game Session)", quotedPath,
-            "--steam-game \"" + directory + "\"", "D2R Reimagined (Launcher Game Session)", Hidden: true);
-        var gui = new LauncherSteamShortcut("Diablo II: Reimagined (Native Launcher)", quotedPath, "",
-            "D2R Reimagined (Native Launcher)");
+        PrepareShortcutBootstrap(launcherPath);
+        var gameArguments = "--steam-game \"" + directory + "\"";
+        var game = CreateLauncherShortcut("Diablo II: Reimagined (Launcher Game Session)", launcherPath,
+            gameArguments, "D2R Reimagined (Launcher Game Session)", hidden: true);
+        var gui = CreateLauncherShortcut("Diablo II: Reimagined (Native Launcher)", launcherPath,
+            "", "D2R Reimagined (Native Launcher)");
         var path = Path.Combine(steamRoot, "userdata", userId, "config", "shortcuts.vdf");
         var original = File.Exists(path) ? File.ReadAllBytes(path) : [];
         var updated = SteamShortcutFile.AppendOwnedShortcuts(original, game, gui);

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System;
 using System.Text.Json.Serialization;
 
@@ -101,6 +101,10 @@ public class InstallationProfile
 
 public class AppSettings
 {
+    public bool FirstTimeSetupShown { get; set; }
+    public bool FirstTimeSetupCompleted { get; set; }
+    public Dictionary<string, bool> LaunchCardExpansion { get; set; } = [];
+    public Dictionary<string, InstalledLootFilter> InstalledLootFilters { get; set; } = [];
     public double UiScale { get; set; } = 1.0;
     public bool MinimizeToTray { get; set; }
     public bool MinimizeToTrayOnClose { get; set; }
@@ -111,6 +115,7 @@ public class AppSettings
     public double? WindowY { get; set; }
     public bool IsMaximized { get; set; }
     public int LastReadAnnouncementNumber { get; set; }
+    public string LastNavigationTag { get; set; } = "Launch";
 
     // User-located overrides for the quick-open folder buttons on the Settings
     // tab. Only populated when the default location is unavailable or the user

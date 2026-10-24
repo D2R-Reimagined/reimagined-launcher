@@ -1,6 +1,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -23,20 +24,75 @@ public enum D2RLoaderExtensionScope
     Reimagined
 }
 
-public sealed class D2RLoaderExtensionInfo
+public sealed class D2RLoaderExtensionInfo : INotifyPropertyChanged
 {
+    private string _filePath = string.Empty;
+    private bool _isEnabled = true;
+    private bool _canEditConfig;
+    private bool _toggleControlsEnabled = true;
+    public event PropertyChangedEventHandler? PropertyChanged;
+
     public required string Name { get; init; }
     public required string FileName { get; init; }
-    public required string FilePath { get; init; }
+    public required string FilePath { get => _filePath; init => _filePath = value; }
     public required D2RLoaderExtensionKind Kind { get; init; }
     public required D2RLoaderExtensionScope Scope { get; init; }
     public string? Version { get; init; }
     public string? Author { get; init; }
     public bool HasAuthor => !string.IsNullOrWhiteSpace(Author);
     public string? Description { get; init; }
+    public bool HasDescription => !string.IsNullOrWhiteSpace(Description);
     public int PatchCount { get; init; }
     public string? Error { get; init; }
     public bool IsLadderDisabled { get; init; }
+    public bool IsEnabled { get => _isEnabled; init => _isEnabled = value; }
+    public bool HasToggleConflict { get; set; }
+    public bool CanToggle => _toggleControlsEnabled && !HasToggleConflict;
+    internal bool ToggleControlsEnabled
+    {
+        set
+        {
+            if (_toggleControlsEnabled == value) return;
+            _toggleControlsEnabled = value;
+            PropertyChanged?.Invoke(this, new(nameof(CanToggle)));
+        }
+    }
+    public bool CanEditConfig
+    {
+        get => _canEditConfig;
+        set
+        {
+            if (_canEditConfig == value) return;
+            _canEditConfig = value;
+            PropertyChanged?.Invoke(this, new(nameof(CanEditConfig)));
+            PropertyChanged?.Invoke(this, new(nameof(ConfigEditHint)));
+        }
+    }
+
+    internal void ApplyToggleState(string filePath, bool enabled)
+    {
+        if (_filePath != filePath)
+        {
+            _filePath = filePath;
+            PropertyChanged?.Invoke(this, new(nameof(FilePath)));
+        }
+        if (_isEnabled == enabled) return;
+        _isEnabled = enabled;
+        foreach (var name in new[] { nameof(IsEnabled), nameof(IsDisabled), nameof(ToggleStatus), nameof(InstallationDetail) })
+            PropertyChanged?.Invoke(this, new(name));
+    }
+
+    public string ConfigEditHint => CanEditConfig ? "Open the existing configuration file. Unavailable on Ladder." : "No unique matching config found, or editing is unavailable on Ladder. Refresh after a config is created.";
+    public string ScopeBadge => Scope == D2RLoaderExtensionScope.Global ? "GLOBAL" : "MOD";
+    public bool IsDisabled => !IsEnabled;
+    public string ScopeLabel => Scope == D2RLoaderExtensionScope.Global ? "GLOBAL - affects other mods" : "SELECTED MOD";
+    public string ToggleStatus => HasToggleConflict ? "Active and disabled copies conflict; resolve the files before toggling."
+        : IsEnabled ? "Enabled file" : "Disabled file";
+
+    public string FileVersionDetail => string.IsNullOrWhiteSpace(Version) ? FileName : $"{FileName} · {VersionLabel}";
+    public string InstallationDetail => (Scope == D2RLoaderExtensionScope.Global ? "Installed globally" : "Installed in mod")
+        + (HasAuthor ? $" · by {Author!.Trim()}" : string.Empty)
+        + (IsDisabled ? " · Disabled" : string.Empty);
 
     public string VersionLabel => string.IsNullOrWhiteSpace(Version) ? string.Empty : $"v{Version}";
     public string Detail => !string.IsNullOrWhiteSpace(Error)
@@ -89,7 +145,7 @@ public static partial class D2RLoaderService
         return !string.IsNullOrWhiteSpace(loaderPath) && File.Exists(loaderPath);
     }
 
-    public static D2RLoaderInventory Discover(string? installDirectory, LaunchExperience experience = LaunchExperience.Online)
+    public static D2RLoaderInventory Discover(string? installDirectory, LaunchExperience experience = LaunchExperience.Online, bool includeManualDisabled = false)
     {
         var normalized = InstallDirectoryValidator.NormalizeInstallDirectory(installDirectory) ?? string.Empty;
         var loaderPath = Path.Combine(normalized, LoaderExecutableName);
@@ -100,9 +156,12 @@ public static partial class D2RLoaderService
 
         if (installed)
         {
-            AddExtensions(extensions, globalRoot, D2RLoaderExtensionScope.Global);
-            AddExtensions(extensions, modRoot, D2RLoaderExtensionScope.Reimagined);
+            AddExtensions(extensions, globalRoot, D2RLoaderExtensionScope.Global, includeManualDisabled: includeManualDisabled);
+            AddExtensions(extensions, modRoot, D2RLoaderExtensionScope.Reimagined, includeManualDisabled: includeManualDisabled);
         }
+
+        foreach (var group in extensions.GroupBy(extension => (extension.Scope, extension.Kind, Name: extension.FileName.ToUpperInvariant())))
+            if (group.Count() > 1) foreach (var extension in group) extension.HasToggleConflict = true;
 
         var (allowGlobal, allowMod) = ReadExtensionSettings(Path.Combine(globalRoot, "config", "d2rloader.toml"));
 
@@ -152,32 +211,25 @@ public static partial class D2RLoaderService
         List<D2RLoaderExtensionInfo> extensions,
         string root,
         D2RLoaderExtensionScope scope,
-        bool isLadderDisabled = false)
+        bool isLadderDisabled = false,
+        bool includeManualDisabled = false)
     {
-        var pluginsDirectory = Path.Combine(root, "plugins");
-        if (Directory.Exists(pluginsDirectory))
+        void Scan(string folder, bool enabled)
         {
-            foreach (var file in EnumerateFilesSafe(pluginsDirectory, "*.dll"))
-            {
-                extensions.Add(ReadPlugin(file, scope, isLadderDisabled));
-            }
+            foreach (var file in EnumerateFilesSafe(Path.Combine(folder, "plugins"), "*").Where(path => Path.GetExtension(path).Equals(".dll", StringComparison.OrdinalIgnoreCase)))
+                extensions.Add(ReadPlugin(file, scope, isLadderDisabled, enabled));
+            foreach (var file in EnumerateFilesSafe(Path.Combine(folder, "patches"), "*").Where(path => Path.GetExtension(path).Equals(".json", StringComparison.OrdinalIgnoreCase)))
+                extensions.Add(ReadPatch(file, scope, isLadderDisabled, enabled));
         }
-
-        var patchesDirectory = Path.Combine(root, "patches");
-        if (Directory.Exists(patchesDirectory))
-        {
-            foreach (var file in EnumerateFilesSafe(patchesDirectory, "*.json"))
-            {
-                extensions.Add(ReadPatch(file, scope, isLadderDisabled));
-            }
-        }
+        Scan(root, true);
+        if (includeManualDisabled) Scan(Path.Combine(root, "launcher-disabled"), false);
     }
 
     private static IEnumerable<string> EnumerateFilesSafe(string directory, string pattern)
     {
         try
         {
-            return Directory.GetFiles(directory, pattern, SearchOption.TopDirectoryOnly);
+            return Directory.Exists(directory) ? Directory.GetFiles(directory, pattern, SearchOption.TopDirectoryOnly) : [];
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -188,7 +240,7 @@ public static partial class D2RLoaderService
     private static D2RLoaderExtensionInfo ReadPlugin(
         string path,
         D2RLoaderExtensionScope scope,
-        bool isLadderDisabled = false)
+        bool isLadderDisabled = false, bool isEnabled = true)
     {
         var fileName = Path.GetFileName(path);
         try
@@ -208,6 +260,7 @@ public static partial class D2RLoaderService
                 Kind = D2RLoaderExtensionKind.Plugin,
                 Scope = scope,
                 IsLadderDisabled = isLadderDisabled,
+                IsEnabled = isEnabled,
                 Version = D2RLoaderPluginVersion.Read(path) ?? NormalizeVersion(versionInfo.FileVersion),
                 Author = D2RLoaderPluginVersion.ReadAuthor(path),
                 Description = versionInfo.FileDescription
@@ -223,6 +276,7 @@ public static partial class D2RLoaderService
                 Kind = D2RLoaderExtensionKind.Plugin,
                 Scope = scope,
                 IsLadderDisabled = isLadderDisabled,
+                IsEnabled = isEnabled,
                 Error = $"Could not read file metadata: {ex.Message}"
             };
         }
@@ -231,7 +285,7 @@ public static partial class D2RLoaderService
     private static D2RLoaderExtensionInfo ReadPatch(
         string path,
         D2RLoaderExtensionScope scope,
-        bool isLadderDisabled = false)
+        bool isLadderDisabled = false, bool isEnabled = true)
     {
         try
         {
@@ -254,6 +308,7 @@ public static partial class D2RLoaderService
                 Kind = D2RLoaderExtensionKind.Patch,
                 Scope = scope,
                 IsLadderDisabled = isLadderDisabled,
+                IsEnabled = isEnabled,
                 Version = version,
                 Author = GetString(root, "author")?.Trim(),
                 Description = GetString(root, "description"),
@@ -270,6 +325,7 @@ public static partial class D2RLoaderService
                 Kind = D2RLoaderExtensionKind.Patch,
                 Scope = scope,
                 IsLadderDisabled = isLadderDisabled,
+                IsEnabled = isEnabled,
                 Error = $"Could not read manifest: {ex.Message}"
             };
         }

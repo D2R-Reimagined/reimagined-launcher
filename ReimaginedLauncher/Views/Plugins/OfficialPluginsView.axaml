@@ -1,4 +1,4 @@
-<UserControl xmlns="https://github.com/avaloniaui"
+﻿<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -7,12 +7,12 @@
              x:Class="ReimaginedLauncher.Views.Plugins.OfficialPluginsView">
     <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                   VerticalScrollBarVisibility="Auto">
-        <StackPanel Spacing="18">
+        <StackPanel Spacing="18" Margin="0,0,8,0">
             <StackPanel Spacing="4">
                 <TextBlock Classes="view-title"
-                           Text="Official Plugins" />
+                           Text="Official Add-ons" />
                 <TextBlock Classes="muted"
-                           Text="Install bundled plugins here. Installed official plugins are also listed on the main plugins page." />
+                           Text="Install bundled add-ons here. Installed official add-ons are also listed on the main add-ons page." />
             </StackPanel>
 
             <Border Classes="panel"
@@ -25,15 +25,15 @@
                                 Grid.Column="0"
                                 Spacing="4">
                         <TextBlock Classes="section-title"
-                                   Text="Available Official Plugins" />
+                                   Text="Available Official Add-ons" />
                         <TextBlock x:Name="OfficialPluginsSummaryTextBlock"
                                    Classes="muted"
-                                   Text="Bundled plugins appear here." />
+                                   Text="Bundled add-ons appear here." />
                     </StackPanel>
 
                     <Button Grid.Row="0"
                             Grid.Column="1"
-                            Content="Back to Installed Plugins"
+                            Content="Back to Installed Add-ons"
                             Click="OnBackClicked" />
                     <Button Grid.Row="0"
                             Grid.Column="2"
@@ -45,7 +45,7 @@
                                 Grid.ColumnSpan="3"
                                 Spacing="4"
                                 IsVisible="False">
-                        <TextBlock Text="No official plugins are currently bundled."
+                        <TextBlock Text="No official add-ons are currently bundled."
                                    FontWeight="SemiBold" />
                     </StackPanel>
 

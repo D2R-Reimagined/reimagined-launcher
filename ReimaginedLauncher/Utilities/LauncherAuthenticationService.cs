@@ -361,7 +361,7 @@ public sealed class LauncherAuthenticationService(ReimaginedApiHttpClient apiCli
         return builder.Uri;
     }
 
-    private static Uri ResolveWebsiteBaseAddress()
+    internal static Uri ResolveWebsiteBaseAddress()
     {
         var configuredAddress = Environment.GetEnvironmentVariable(WebsiteBaseAddressEnvironmentVariable);
         if (string.IsNullOrWhiteSpace(configuredAddress))

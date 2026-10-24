@@ -8,7 +8,7 @@
                   HorizontalScrollBarVisibility="Disabled"
                   VerticalScrollBarVisibility="Auto"
                   Focusable="True">
-        <StackPanel Spacing="18">
+        <StackPanel Spacing="18" Margin="0,0,8,0">
             <StackPanel Spacing="4">
                 <TextBlock Classes="view-title"
                            Text="Settings" />
@@ -16,9 +16,9 @@
                            Text="Tune launch flags before you descend into Sanctuary." />
             </StackPanel>
 
-            <UniformGrid Columns="4">
+
+            <UniformGrid Columns="5">
                 <Button x:Name="GameFolderButton"
-                        Classes="accent"
                         Margin="0,0,4,0"
                         HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Center"
@@ -26,7 +26,6 @@
                         Click="OnGameFolderClicked"
                         ToolTip.Tip="Open the Reimagined.mpq game mod folder. Ctrl+Click to choose a different folder." />
                 <Button x:Name="SaveFolderButton"
-                        Classes="accent"
                         Margin="4,0"
                         HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Center"
@@ -34,7 +33,6 @@
                         Click="OnSaveFolderClicked"
                         ToolTip.Tip="Open the save folder (mods/reimaginedthree). Ctrl+Click to choose a different folder." />
                 <Button x:Name="LauncherFolderButton"
-                        Classes="accent"
                         Margin="4,0"
                         HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Center"
@@ -42,13 +40,19 @@
                         Click="OnLauncherFolderClicked"
                         ToolTip.Tip="Open the launcher installation folder. Ctrl+Click to choose a different folder." />
                 <Button x:Name="SettingsFolderButton"
-                        Classes="accent"
-                        Margin="4,0,0,0"
+                        Margin="4,0"
                         HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Center"
                         Content="Settings Folder"
                         Click="OnSettingsFolderClicked"
                         ToolTip.Tip="Open the launcher settings folder. Ctrl+Click to choose a different folder." />
+                <Button x:Name="ConvertSaveDataButton"
+                        Margin="4,0,0,0"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center"
+                        Content="Convert Save Data"
+                        Click="OnConvertSaveDataClicked"
+                        ToolTip.Tip="Review and convert offline characters and shared stashes from older Reimagined versions. Nothing changes until you confirm." />
             </UniformGrid>
 
             <Border Classes="panel"
@@ -194,6 +198,9 @@
                             <ComboBoxItem Content="80%"/>
                             <ComboBoxItem Content="90%"/>
                             <ComboBoxItem Content="100%"/>
+                            <ComboBoxItem Content="110%"/>
+                            <ComboBoxItem Content="120%"/>
+                            <ComboBoxItem Content="150%"/>
                         </ComboBox>
                     </StackPanel>
                     <StackPanel Spacing="4">

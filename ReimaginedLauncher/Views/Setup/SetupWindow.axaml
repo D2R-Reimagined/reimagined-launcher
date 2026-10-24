@@ -1,0 +1,45 @@
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="ReimaginedLauncher.Views.Setup.SetupWindow" Title="Welcome to D2R Reimagined"
+        Width="780" Height="600" MinWidth="560" MinHeight="420" WindowStartupLocation="CenterOwner">
+  <Grid RowDefinitions="Auto,*,Auto" Margin="20" RowSpacing="16">
+    <StackPanel Spacing="6">
+      <TextBlock Classes="view-title" Text="Let's get you ready to play" />
+      <TextBlock x:Name="StepLabel" Classes="muted" Text="1 of 2 · Accounts" />
+    </StackPanel>
+    <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+      <StackPanel Spacing="12" Margin="0,0,8,0">
+        <StackPanel x:Name="AccountsStep" Spacing="14">
+          <TextBlock Text="Connect your accounts, or continue without signing in." TextWrapping="Wrap" />
+          <Border Classes="panel" Padding="16">
+            <StackPanel Spacing="10">
+              <TextBlock Classes="section-title" Text="D2R Reimagined" />
+              <TextBlock Text="For Ladder and filters saved to your website account." TextWrapping="Wrap" />
+              <TextBlock x:Name="ReimaginedStatus" Classes="muted" TextWrapping="Wrap" />
+              <Button x:Name="ReimaginedSignIn" Content="Sign in to Reimagined" Click="OnReimaginedSignIn" />
+            </StackPanel>
+          </Border>
+          <Border Classes="panel" Padding="16">
+            <StackPanel Spacing="10">
+              <TextBlock Classes="section-title" Text="Nexus Mods" />
+              <TextBlock Text="For downloading and updating the normal Reimagined mod. You can also install from a local ZIP." TextWrapping="Wrap" />
+              <TextBlock x:Name="NexusStatus" Classes="muted" TextWrapping="Wrap" />
+              <Button x:Name="NexusSignIn" Content="Sign in to Nexus Mods" Click="OnNexusSignIn" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+        <StackPanel x:Name="InstallationStep" IsVisible="False" Spacing="12">
+          <TextBlock Text="Confirm the detected installation, or choose its location below. This step does not download or replace game files." TextWrapping="Wrap" />
+          <ContentControl x:Name="InstallationHost" HorizontalContentAlignment="Stretch" />
+          <TextBlock x:Name="InstallationStatus" TextWrapping="Wrap" />
+          <TextBlock Classes="muted" Text="After setup, use Install/Update to install the mod or manage its location." TextWrapping="Wrap" />
+        </StackPanel>
+        <TextBlock x:Name="ErrorText" Foreground="#E8C37D" TextWrapping="Wrap" />
+      </StackPanel>
+    </ScrollViewer>
+    <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+      <Button Content="Finish later" Click="OnFinishLater" HorizontalAlignment="Left" />
+      <Button Grid.Column="1" x:Name="BackButton" Content="Back" IsVisible="False" Click="OnBack" />
+      <Button Grid.Column="2" x:Name="NextButton" Content="Continue" Click="OnNext" MinWidth="155" />
+    </Grid>
+  </Grid>
+</Window>

@@ -16,7 +16,6 @@ using Microsoft.Extensions.DependencyInjection;
 using ReimaginedLauncher.HttpClients;
 using ReimaginedLauncher.HttpClients.Models;
 using ReimaginedLauncher.Utilities;
-using ReimaginedLauncher.Views.SaveConversion;
 
 namespace ReimaginedLauncher.Views.Launch;
 
@@ -33,6 +32,7 @@ public partial class LaunchView : UserControl
     private bool _hasPromptedForMissingLoader;
     private string? _loaderUpdatePromptedVersion;
     private bool _isRefreshingLadders;
+    private bool _isRefreshingLadderPolicy;
     private bool _ladderAuthenticationRefreshPending;
     private bool _isRefreshingLadderControls;
     private bool _ladderStatusLoaded;
@@ -45,7 +45,7 @@ public partial class LaunchView : UserControl
     private LadderAction _ladderAction = LadderAction.Blocked;
     private bool _isRunningLadderAction;
     private D2RLoaderInventory? _loaderInventory;
-    private bool? _isCompactLayout;
+    private (bool Compact, bool CompactModes, bool StackedActions)? _layoutState;
     private readonly DispatcherTimer _ladderScheduleTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private ServerSaveMonitor? _preparedServerSaves;
     // The secrets this launch hands to the game, gathered while preparing and
@@ -75,15 +75,44 @@ public partial class LaunchView : UserControl
         Play
     }
 
-    public LaunchView()
+    private readonly bool _installationOnly;
+    private readonly bool _collapsibleInstallation;
+
+    public LaunchView() : this(false) { }
+
+    public LaunchView(bool installationOnly, bool collapsibleInstallation = false)
     {
+        _installationOnly = installationOnly;
+        _collapsibleInstallation = collapsibleInstallation;
         InitializeComponent();
+        StartGameButton.PropertyChanged += (_, change) =>
+        {
+            if (change.Property == Button.ContentProperty || change.Property == IsEffectivelyEnabledProperty)
+                UpdateStartButtonSheen();
+        };
+        if (installationOnly && collapsibleInstallation)
+        {
+            ((Panel)InstallDirectoryAttentionContainer.Parent!).Children.Remove(InstallDirectoryAttentionContainer);
+            Content = InstallDirectoryAttentionContainer;
+        }
+        else if (installationOnly)
+        {
+            ((Panel)HeroInstallExpander.Parent!).Children.Remove(HeroInstallExpander);
+            HeroInstallExpander.Content = null;
+            Content = InstallDirectoryPanel;
+        }
+        if (!installationOnly || collapsibleInstallation)
+        {
+            InstallDirectoryPanel.Classes.Remove("panel");
+            InstallDirectoryPanel.Padding = new Thickness(0);
+            InstallDirectoryTitle.IsVisible = false;
+        }
         _apiHttpClient = Program.ServiceProvider.GetRequiredService<ReimaginedApiHttpClient>();
         _launcherAuthenticationService = Program.ServiceProvider.GetRequiredService<LauncherAuthenticationService>();
         _d2rLoaderInstallerService = Program.ServiceProvider.GetRequiredService<D2RLoaderInstallerService>();
         _ladderBundleService = Program.ServiceProvider.GetRequiredService<LadderBundleService>();
         SizeChanged += (_, _) => UpdateResponsiveLayout();
-        Loaded += async (_, _) => await PromptForMissingD2RLoaderAsync();
+        if (!installationOnly) Loaded += async (_, _) => await PromptForMissingD2RLoaderAsync();
         _ladderScheduleTimer.Tick += OnLadderScheduleTick;
 
         if (!InstallationTypes.IsAvailable(InstallationType.Lutris))
@@ -93,61 +122,77 @@ public partial class LaunchView : UserControl
             ToolTip.SetTip(LutrisInstallationTypeItem, "Lutris is a Linux application and is not available on this platform.");
         }
 
+        if (!installationOnly) InitializeLocalFeatures();
+        RestoreCardExpansion();
         RefreshInstallDirectoryState();
+        TrackCardExpansion();
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
+        RestoreCardExpansion();
         UpdateResponsiveLayout();
 
-        if (MainWindow.Settings is not null && !LauncherService.IsDetecting)
+        if (MainWindow.Settings is not null)
         {
-            // Skip D2R.exe detection entirely when the active profile is D2RMM —
-            // it doesn't need a game executable.
-            var currentType = MainWindow.Settings.CurrentProfile.Type;
-            var needsDetection = false;
-
-            if (currentType != InstallationType.D2RMM)
-            {
-                // Run detection if the current profile isn't validated, or if any
-                // non-D2RMM profile is still missing its install directory (dual-install check).
-                needsDetection = !MainWindow.Settings.CurrentProfile.IsInstallDirectoryValidated;
-                if (!needsDetection)
-                {
-                    foreach (var p in MainWindow.Settings.Profiles)
-                    {
-                        if (p.Type != InstallationType.D2RMM && !p.IsInstallDirectoryValidated)
-                        {
-                            needsDetection = true;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if (needsDetection)
-            {
-                _ = LauncherService.CheckForD2RExecutableAsync(async () =>
-                {
-                    await Dispatcher.UIThread.InvokeAsync(async () =>
-                    {
-                        RefreshInstallDirectoryState();
-                        if (TopLevel.GetTopLevel(this) is MainWindow mw)
-                        {
-                            mw.RefreshLocalModState();
-                            await mw.RefreshUpdateStateAsync();
-                        }
-                        await PromptForMissingD2RLoaderAsync();
-                    });
-                });
-            }
-
+            RunStartupInstallDetectionIfNeeded();
             RefreshInstallDirectoryState();
         }
 
-        _ladderScheduleTimer.Start();
-        _ = RefreshLadderStateAsync();
+        if (!_installationOnly)
+        {
+            _ladderScheduleTimer.Start();
+            _ = RefreshLadderStateAsync();
+        }
+    }
+
+    public void RunStartupInstallDetectionIfNeeded()
+    {
+        if (MainWindow.Settings is null || MainWindow.IsInitializingSettings || LauncherService.IsDetecting)
+        {
+            return;
+        }
+
+        // Skip D2R.exe detection entirely when the active profile is D2RMM —
+        // it doesn't need a game executable.
+        var currentType = MainWindow.Settings.CurrentProfile.Type;
+        var needsDetection = false;
+
+        if (currentType != InstallationType.D2RMM)
+        {
+            // Run detection if the current profile isn't validated, or if any
+            // non-D2RMM profile is still missing its install directory (dual-install check).
+            needsDetection = !MainWindow.Settings.CurrentProfile.IsInstallDirectoryValidated;
+            if (!needsDetection)
+            {
+                foreach (var p in MainWindow.Settings.Profiles)
+                {
+                    if (p.Type != InstallationType.D2RMM && !p.IsInstallDirectoryValidated)
+                    {
+                        needsDetection = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (needsDetection)
+        {
+            _ = LauncherService.CheckForD2RExecutableAsync(async () =>
+            {
+                await Dispatcher.UIThread.InvokeAsync(async () =>
+                {
+                    RefreshInstallDirectoryState();
+                    if (TopLevel.GetTopLevel(this) is MainWindow mw)
+                    {
+                        mw.RefreshLocalModState();
+                        await mw.RefreshUpdateStateAsync();
+                    }
+                    await PromptForMissingD2RLoaderAsync();
+                });
+            });
+        }
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
@@ -175,50 +220,101 @@ public partial class LaunchView : UserControl
 
     private void UpdateResponsiveLayout()
     {
+        if (_installationOnly) return;
         if (Bounds.Width <= 0)
         {
             return;
         }
 
-        var isCompact = Bounds.Width < 960;
-        if (_isCompactLayout == isCompact)
+        UpdateFilterSectionLayout();
+        var isCompact = Bounds.Width < 760;
+        var compactModes = Bounds.Width < 560;
+        var stackedActions = Bounds.Width < 760;
+        var layoutState = (isCompact, compactModes, stackedActions);
+        if (_layoutState == layoutState)
         {
             return;
         }
 
-        _isCompactLayout = isCompact;
+        _layoutState = layoutState;
 
         const int experienceCount = 3;
-        ConfigureGrid(ExperienceGrid, isCompact ? 1 : experienceCount, isCompact ? experienceCount : 1);
-        ExperienceGrid.ColumnSpacing = isCompact ? 0 : 12;
-        ExperienceGrid.RowSpacing = isCompact ? 12 : 0;
+        ConfigureGrid(ExperienceGrid, compactModes ? 1 : experienceCount, compactModes ? experienceCount : 1);
+        if (!compactModes) ExperienceGrid.RowDefinitions[0].Height = new GridLength(1, GridUnitType.Star);
+        ExperienceGrid.ColumnSpacing = compactModes ? 0 : 8;
+        ExperienceGrid.RowSpacing = compactModes ? 12 : 0;
         PositionGridChild(OfflineExperienceButton, 0, 0);
-        PositionGridChild(OnlineExperienceButton, isCompact ? 0 : 1, isCompact ? 1 : 0);
-        PositionGridChild(LadderExperienceButton, isCompact ? 0 : 2, isCompact ? 2 : 0);
+        PositionGridChild(OnlineExperienceButton, compactModes ? 0 : 1, compactModes ? 1 : 0);
+        PositionGridChild(LadderExperienceButton, compactModes ? 0 : 2, compactModes ? 2 : 0);
 
-        ConfigureTwoPanelGrid(
-            LaunchSetupGrid,
-            LaunchPanel,
-            InstallDirectoryPanel,
-            isCompact);
+        ConfigureGrid(LadderExtensionsGrid, 1, 2);
+        PositionGridChild(AllowedLadderPluginsPanel, 0, 0);
+        PositionGridChild(AllowedLadderPatchesPanel, 0, 1);
+        ConfigureGrid(LoaderExtensionsGrid, 1, 2);
+        PositionGridChild(LoaderPluginsPanel, 0, 0);
+        PositionGridChild(LoaderPatchesPanel, 0, 1);
+        LoaderExtensionsGrid.RowSpacing = LadderExtensionsGrid.RowSpacing = 8;
 
-        ConfigureTwoPanelGrid(
-            LadderExtensionsGrid,
-            AllowedLadderPluginsPanel,
-            AllowedLadderPatchesPanel,
-            isCompact);
-        ConfigureTwoPanelGrid(
-            LoaderExtensionsGrid,
-            LoaderPluginsPanel,
-            LoaderPatchesPanel,
-            isCompact);
+        ConfigureGrid(LoaderHeaderGrid, stackedActions ? 1 : 2, stackedActions ? 2 : 1, secondColumnAuto: true);
+        LoaderHeaderGrid.ColumnSpacing = stackedActions ? 0 : 16;
+        LoaderHeaderGrid.RowSpacing = stackedActions ? 8 : 0;
+        PositionGridChild(LoaderActionsPanel, stackedActions ? 0 : 1, stackedActions ? 1 : 0);
+        LoaderActionsPanel.HorizontalAlignment = stackedActions ? HorizontalAlignment.Left : HorizontalAlignment.Right;
+        LoaderActionsPanel.Margin = stackedActions ? new Thickness(0, 0, 0, 2) : new Thickness(0, 0, -8, 0);
 
-        ConfigureGrid(LoaderHeaderGrid, isCompact ? 1 : 2, isCompact ? 2 : 1, secondColumnAuto: true);
-        LoaderHeaderGrid.ColumnSpacing = isCompact ? 0 : 16;
-        LoaderHeaderGrid.RowSpacing = isCompact ? 12 : 0;
-        PositionGridChild(LoaderActionsPanel, isCompact ? 0 : 1, isCompact ? 1 : 0);
 
-        LaunchActionsPanel.Orientation = isCompact ? Orientation.Vertical : Orientation.Horizontal;
+
+        LaunchActionsPanel.Spacing = 8;
+    }
+
+    private (double Width, bool Ladder)? _heroLayout;
+
+    private void UpdateFilterSectionLayout()
+    {
+        var wide = Bounds.Width >= 900;
+        var ladder = MainWindow.Settings.CurrentProfile.LaunchExperience == LaunchExperience.Ladder;
+        var state = (Bounds.Width, ladder);
+        if (_heroLayout == state) return;
+        _heroLayout = state;
+        var available = Math.Max(0, Bounds.Width - 16);
+        ConfigureGrid(HeroGrid, wide ? 2 : 1, wide ? 2 : 4);
+        if (wide) HeroGrid.ColumnDefinitions = new ColumnDefinitions(Bounds.Width < 1150 ? "*,230" : "*,280");
+                PositionGridChild(ExperienceGrid, 0, 0);
+        PositionGridChild(LaunchPanel, wide ? 1 : 0, wide ? 0 : 1);
+        PositionGridChild(HeroLaunchWarnings, wide ? 1 : 0, wide ? 1 : 2);
+        PositionGridChild(NormalModRepairBanner, 0, wide ? 1 : 3);
+        HeroGrid.RowSpacing = 6;
+        ConfigureGrid(LaunchSectionsGrid, wide && ladder ? 3 : 1, wide || !ladder ? 1 : 3);
+        LaunchSectionsGrid.ColumnSpacing = wide ? 12 : 0;
+        LaunchSectionsGrid.RowSpacing = 12;
+        foreach (var panel in new Control[] { LootFilterPanel, LadderRegionsPanel, LadderPolicyPanel, HeroSummaryPanel })
+            Grid.SetColumnSpan(panel, 1);
+        PositionGridChild(LootFilterPanel, 0, 0);
+        PositionGridChild(LadderRegionsPanel, wide ? 1 : 0, wide ? 0 : 1);
+        PositionGridChild(LadderPolicyPanel, wide ? 2 : 0, wide ? 0 : 2);
+        PositionGridChild(HeroSummaryPanel, wide ? 1 : 0, wide ? 0 : 1);
+        HeroSummaryPanel.IsVisible = false;
+        ServerRegionsPlaceholder.IsVisible = false;
+        LaunchActionsPanel.Orientation = Orientation.Vertical;
+        ConfigureGrid(FilterSelectionGrid, 3, 1);
+        FilterSelectionGrid.ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto");
+        Grid.SetColumnSpan(AccountFiltersComboBox, 1);
+        PositionGridChild(AccountFiltersComboBox, 0, 0);
+        PositionGridChild(ApplyAccountFilterButton, 1, 0);
+        PositionGridChild(FilterInstallIndicator, 2, 0);
+        var filterStrip = wide && !ladder;
+        ConfigureGrid(HeroFilterContent, filterStrip ? 2 : 1, filterStrip ? 1 : 2);
+        if (filterStrip) HeroFilterContent.ColumnDefinitions = new ColumnDefinitions("260,*");
+        PositionGridChild(HeroFilterContent.Children[0], 0, 0);
+        PositionGridChild(HeroFilterContent.Children[1], filterStrip ? 1 : 0, filterStrip ? 0 : 1);
+        FilterSelectionGrid.Width = Math.Min(620, Math.Max(0, (wide && ladder ? (available - 24) / 3 : filterStrip ? available - 290 : available) - 28));
+        FilterSelectionGrid.HorizontalAlignment = HorizontalAlignment.Left;
+        HeroFilterContent.InvalidateMeasure();
+        // Reset Avalonia's cached cell placement when the hidden policy panel changes columns.
+        LaunchSectionsGrid.Children.Remove(LadderPolicyPanel);
+        LaunchSectionsGrid.Children.Add(LadderPolicyPanel);
+        LaunchSectionsGrid.InvalidateMeasure();
+        LaunchSectionsGrid.InvalidateArrange();
     }
 
     private static void ConfigureTwoPanelGrid(Grid grid, Control first, Control second, bool isCompact)
@@ -254,10 +350,11 @@ public partial class LaunchView : UserControl
 
     public void RefreshInstallDirectoryState()
     {
+        if (!ReferenceEquals(_cardSettings, MainWindow.Settings)) RestoreCardExpansion();
         var settings = MainWindow.Settings;
         var profile = settings.CurrentProfile;
         LadderExperienceButton.IsVisible = true;
-        if (!_ladderStatusLoaded && !_isRefreshingLadders)
+        if (!_installationOnly && !_ladderStatusLoaded && !_isRefreshingLadders)
         {
             _ = RefreshLadderStateAsync();
         }
@@ -280,6 +377,7 @@ public partial class LaunchView : UserControl
         EnableLsfgCheckBox.IsEnabled = !_isLaunching && !SteamGameHandoff.IsLaunchPendingOrRunning;
         SteamSetupShortcutsPanel.IsVisible = profile.Type == InstallationType.Steam && OperatingSystem.IsLinux()
             && !GameLauncherService.IsSteamFlatpakInstall(profile.InstallDirectory);
+        SteamHowToSetupButton.IsVisible = SteamSetupShortcutsPanel.IsVisible;
         SteamSetupShortcutsButton.IsEnabled = !_isSteamSetupRunning && !_isLaunching && !MainWindow.IsInstallInProgress
             && !SteamGameHandoff.IsLaunchPendingOrRunning;
         if (SteamSetupShortcutsPanel.IsVisible)
@@ -371,13 +469,20 @@ public partial class LaunchView : UserControl
         }
 
         profile.IsInstallDirectoryValidated = isValidated;
+        UpdateInstallDirectoryAttention(profile, isValidated);
+        HeroPathStatus.Text = $"{profile.Type} Path {(isValidated ? "Verified ✓" : "Needs Setup")}";
+        HeroPathStatus.Foreground = isValidated ? new SolidColorBrush(Color.Parse("#A5C798")) : new SolidColorBrush(Color.Parse("#E8C37D"));
+
+        HeroModeSummary.Text = profile.LaunchExperience == LaunchExperience.Offline
+            ? "Single-player · Saves on your PC\nD2RLoader plugins are not loaded in Mod Only."
+            : "Single-player and TCP/IP multiplayer · Saves on your PC\nD2RLoader plugins supported · No cheat detection";
 
         NormalModRepairBanner.IsVisible = profile.Type != InstallationType.D2RMM
                                           && isValidated
                                           && NormalModInstallationService.RequiresRecovery(profile.InstallDirectory);
         RepairNormalModButton.IsEnabled = !_isLaunching && !_isRunningLadderAction && !MainWindow.IsInstallInProgress;
 
-        _loaderInventory = D2RLoaderService.Discover(profile.InstallDirectory, profile.LaunchExperience);
+        _loaderInventory = D2RLoaderService.Discover(profile.InstallDirectory, profile.LaunchExperience, includeManualDisabled: profile.LaunchExperience != LaunchExperience.Ladder);
         RefreshD2RLoaderState(profile, _loaderInventory);
         var loaderAvailable = D2RLoaderService.CanUseOnlineExperience(profile, out var loaderUnavailableReason);
 
@@ -388,8 +493,13 @@ public partial class LaunchView : UserControl
         var supportsD2RLoader = profile.Type is not InstallationType.D2RMM;
         OnlineExperienceButton.IsEnabled = supportsD2RLoader;
         LadderExperienceButton.IsEnabled = supportsD2RLoader;
-        OnlineExperiencePanel.IsVisible = isOnlineExperience && supportsD2RLoader;
+        OnlineExperiencePanel.IsVisible = supportsD2RLoader && profile.LaunchExperience != LaunchExperience.Offline;
+        LaunchSectionsGrid.IsVisible = supportsD2RLoader && profile.LaunchExperience != LaunchExperience.Offline;
+        LaunchDescriptionReserve.IsVisible = isLadderExperience;
         LadderPolicyPanel.IsVisible = isLadderExperience && supportsD2RLoader;
+        LadderInstalledExtensionsPanel.IsVisible = isLadderExperience && supportsD2RLoader;
+        LoaderExtensionsGrid.IsVisible = !isLadderExperience;
+        ShowLadderRegions();
         LadderAuthenticationWarningBanner.IsVisible = isLadderExperience && !isReimaginedSignedIn;
         RefreshLadderAuthenticationState();
 
@@ -405,11 +515,9 @@ public partial class LaunchView : UserControl
         }
         else
         {
-            StartGameButton.Content = isOnlineExperience
-                ? "Start Online"
-                : isLadderExperience
-                    ? LadderActionLabel(_ladderAction)
-                    : "Start Offline";
+            StartGameButton.Content = isLadderExperience
+                ? LadderActionLabel(_ladderAction)
+                : "Start Game";
             StartGameDescription.Text = isOnlineExperience
                 ? "Starts D2RLoader with Reimagined selected. Choose multiplayer in-game to host or join; this does not connect to Battle.net."
                 : isLadderExperience
@@ -422,6 +530,7 @@ public partial class LaunchView : UserControl
             // everything, because by then readiness has confirmed it.
             StartGameButton.IsEnabled = !_isLaunching && !SteamGameHandoff.IsLaunchPendingOrRunning
                                         && !_isRunningLadderAction
+                                        && (!isLadderExperience || !_isRefreshingLadders && !_isRefreshingLadderPolicy)
                                         && isValidated
                                         && (isModDetected || isLadderExperience)
                                         && (!isOnlineExperience || loaderAvailable)
@@ -445,13 +554,23 @@ public partial class LaunchView : UserControl
         // A ladder that only needs its Download or Update step run is not a
         // validation problem - the button already says what to do about it, and
         // a warning banner beside it just reads as something being wrong.
+        var showLadderPolicyHighlight = !_installationOnly
+                                        && profile.Type != InstallationType.D2RMM
+                                        && isLadderExperience
+                                        && isValidated
+                                        && isModDetected
+                                        && ladderAvailable
+                                        && loaderAvailable
+                                        && !_ladderPolicyVerified;
+        LadderPolicyInlineBadge.IsVisible = showLadderPolicyHighlight;
+        LadderPolicyInlineText.Text = showLadderPolicyHighlight ? GetLadderPolicyUnavailableMessage() : string.Empty;
+
         ValidationBanner.IsVisible = !isValidated
                                      || !isModDetected && !IsLadderSetupAction(isLadderExperience)
                                      || isOnlineExperience && !loaderAvailable
                                      || isOnlineSteamFlatpak
                                      || isLadderExperience && (!ladderAvailable
-                                         || !loaderAvailable
-                                         || _ladderAction == LadderAction.Blocked);
+                                         || !loaderAvailable);
         
         if (profile.Type == InstallationType.D2RMM)
         {
@@ -491,9 +610,18 @@ public partial class LaunchView : UserControl
                 : "D2R Reimagined mod not detected in this directory. Install the mod before launching.";
         }
         
+        if (_installationOnly)
+        {
+            // Settings validates the install path; live Ladder checks belong on Launch.
+            ValidationBanner.IsVisible = !isValidated;
+            LadderPolicyInlineBadge.IsVisible = false;
+        }
+
         LaunchCommandText.Text = LauncherService.BuildLaunchCommand();
 
-        BackupOnLaunchSummary.Text = $"Backup on Launch: {(profile.AutomaticBackupsEnabled ? "Yes" : "No")}";
+        if (!_installationOnly) RefreshLocalFeatures();
+
+        BackupOnLaunchSummary.Text = $"Backup on Launch: {(profile.AutomaticBackupsEnabled ? $"Yes ({profile.BackupIntervalMinutes}m)" : "No")}";
         BackupIntervalSummary.Text = profile.AutomaticBackupsEnabled
             ? $"Auto-Backup Interval: {profile.BackupIntervalMinutes} min"
             : "Auto-Backup Interval: N/A";
@@ -533,16 +661,17 @@ public partial class LaunchView : UserControl
 
     private void RefreshD2RLoaderState(InstallationProfile profile, D2RLoaderInventory inventory)
     {
+        foreach (var entry in inventory.Extensions)
+            entry.CanEditConfig = D2RLoaderConfigService.HasExistingConfig(profile, entry);
         LoaderPluginsItemsControl.ItemsSource = inventory.Plugins;
         LoaderPatchesItemsControl.ItemsSource = inventory.Patches;
-        LoaderPluginCountText.Text = inventory.Plugins.Count.ToString();
-        LoaderPatchCountText.Text = inventory.Patches.Count.ToString();
+        RefreshLoaderExtensionCounts(inventory);
         NoLoaderPluginsText.IsVisible = inventory.Plugins.Count == 0;
         NoLoaderPatchesText.IsVisible = inventory.Patches.Count == 0;
 
         LoaderStatusBadge.Background = new SolidColorBrush(Color.Parse(inventory.IsInstalled ? "#17351D" : "#3A1818"));
         LoaderStatusBadgeText.Foreground = new SolidColorBrush(Color.Parse(inventory.IsInstalled ? "#86D88F" : "#E98B91"));
-        LoaderStatusBadgeText.Text = inventory.IsInstalled ? "READY" : "NOT FOUND";
+        LoaderStatusBadgeText.Text = inventory.IsInstalled ? "D2RLoader detected" : "NOT FOUND";
         LoaderStatusText.Text = inventory.IsInstalled
             ? $"D2RLoader {inventory.Version ?? "unknown version"} detected beside D2R.exe. "
               + $"Found {inventory.Plugins.Count} plugin{(inventory.Plugins.Count == 1 ? string.Empty : "s")} and "
@@ -568,6 +697,12 @@ public partial class LaunchView : UserControl
                                                 || Directory.Exists(Path.GetDirectoryName(inventory.ModRoot));
     }
 
+    private void RefreshLoaderExtensionCounts(D2RLoaderInventory inventory)
+    {
+        LoaderPluginCountText.Text = $"{inventory.Plugins.Count(item => item.IsEnabled)} enabled / {inventory.Plugins.Count(item => !item.IsEnabled)} disabled";
+        LoaderPatchCountText.Text = $"{inventory.Patches.Count(item => item.IsEnabled)} enabled / {inventory.Patches.Count(item => !item.IsEnabled)} disabled";
+    }
+
     private async void OnRepairNormalModClick(object? sender, RoutedEventArgs e)
     {
         if (_isLaunching || _isRunningLadderAction || MainWindow.IsInstallInProgress) return;
@@ -580,17 +715,6 @@ public partial class LaunchView : UserControl
 
         if (MainWindow.Instance is { } mainWindow)
             await mainWindow.NavigateToUpdateViewAsync();
-    }
-
-    private async void OnConvertSaveDataClick(object? sender, RoutedEventArgs e)
-    {
-        if (_isLaunching || _isRunningLadderAction || MainWindow.IsInstallInProgress
-            || TopLevel.GetTopLevel(this) is not Window owner)
-        {
-            return;
-        }
-
-        await new SaveConversionWindow().ShowDialog(owner);
     }
 
     private async void OnOfflineExperienceClick(object? sender, RoutedEventArgs e)
@@ -680,7 +804,7 @@ public partial class LaunchView : UserControl
     private async Task PromptForMissingD2RLoaderAsync()
     {
         var profile = MainWindow.Settings.CurrentProfile;
-        if (_hasPromptedForMissingLoader || _isLoaderInstallPromptOpen || !IsLoaded
+        if (_installationOnly || !MainWindow.Settings.FirstTimeSetupShown || MainWindow.Instance?.IsSetupGuideOpen == true || _hasPromptedForMissingLoader || _isLoaderInstallPromptOpen || !IsLoaded
             || _isLaunching || _isRunningLadderAction || MainWindow.IsInstallInProgress
             || MainWindow.IsGameRunning()
             || profile.Type == InstallationType.D2RMM
@@ -712,6 +836,12 @@ public partial class LaunchView : UserControl
             D2RLoaderUpdateCheckResult? update = null;
             if (inventory.IsInstalled)
             {
+                // A pinned ladder installs its own build through the ladder Update action.
+                if (profile.LaunchExperience == LaunchExperience.Ladder && SelectedLadder?.RequiredD2RLoader is not null)
+                {
+                    return;
+                }
+
                 try
                 {
                     update = await _d2rLoaderInstallerService.CheckForUpdateAsync(profile.InstallDirectory);
@@ -917,9 +1047,12 @@ public partial class LaunchView : UserControl
         return await dialog.ShowDialog<bool>(owner);
     }
 
-    private void OnRefreshLoaderClick(object? sender, RoutedEventArgs e)
+    private async void OnRefreshLoaderClick(object? sender, RoutedEventArgs e)
     {
+        if (_pluginBusy || _isLaunching || _isRunningLadderAction || MainWindow.IsInstallInProgress) return;
         RefreshInstallDirectoryState();
+        if (MainWindow.Settings.CurrentProfile.LaunchExperience == LaunchExperience.Ladder)
+            await RefreshLadderExtensionPolicyAsync();
     }
 
     private bool HasAvailableLadder => _activeLadders.Any(ladder =>
@@ -943,31 +1076,44 @@ public partial class LaunchView : UserControl
         }
 
         _isRefreshingLadders = true;
-        _ladderStatusLoaded = false;
+        var hadLoadedStatus = _ladderStatusLoaded;
         _ladderLoadError = null;
-        LadderStatusText.Text = "Checking for active ladders...";
-        LadderExtensionPolicyStatusText.Text = "Checking installed D2RLoader extensions...";
-        _ladderPolicyVerified = false;
-        _ladderAction = LadderAction.Blocked;
         _ladderPolicyGeneration++;
-        ActiveLaddersItemsControl.ItemsSource = null;
+        if (!hadLoadedStatus)
+        {
+            LadderStatusText.IsVisible = true;
+            LadderStatusText.Text = "Checking for active ladders...";
+            LadderExtensionPolicyStatusText.Text = "Checking installed D2RLoader extensions...";
+            _ladderPolicyVerified = false;
+            _ladderAction = LadderAction.Blocked;
+            ActiveLaddersItemsControl.ItemsSource = null;
+        }
         RefreshInstallDirectoryState();
 
         try
         {
             _ladderSchedule = await _apiHttpClient.GetLadderLaunchScheduleAsync();
+            var laddersChanged = _activeLadders.Count != _ladderSchedule.Available.Count
+                || !_activeLadders.Select(l => (l.Id, l.Name, l.StartDateUtc, l.EndDateUtc))
+                    .SequenceEqual(_ladderSchedule.Available.Select(l => (l.Id, l.Name, l.StartDateUtc, l.EndDateUtc)));
             _activeLadders = _ladderSchedule.Available;
-            ActiveLaddersItemsControl.ItemsSource = _activeLadders;
             EnsureSelectedLadder();
-            _isRefreshingLadderControls = true;
-            ActiveLadderComboBox.ItemsSource = _activeLadders;
-            ActiveLadderComboBox.SelectedItem = SelectedLadder;
-            _isRefreshingLadderControls = false;
-            LadderStatusText.Text = _activeLadders.Count == 0
-                ? "No live ladders or ladders starting within 2 hours."
-                : _activeLadders.Count == 1
-                    ? "Live or upcoming ladder:"
-                    : "Live and upcoming ladders:";
+            if (laddersChanged || ActiveLaddersItemsControl.ItemsSource is null)
+            {
+                ActiveLaddersItemsControl.ItemsSource = _activeLadders;
+                _isRefreshingLadderControls = true;
+                ActiveLadderComboBox.ItemsSource = _activeLadders;
+                ActiveLadderComboBox.SelectedItem = SelectedLadder;
+                _isRefreshingLadderControls = false;
+            }
+            else if (!ReferenceEquals(ActiveLadderComboBox.SelectedItem, SelectedLadder))
+            {
+                _isRefreshingLadderControls = true;
+                ActiveLadderComboBox.SelectedItem = SelectedLadder;
+                _isRefreshingLadderControls = false;
+            }
+            LadderStatusText.IsVisible = _activeLadders.Count == 0;
+            LadderStatusText.Text = "No Live or Upcoming Ladder At This Time";
         }
         catch (Exception ex)
         {
@@ -975,8 +1121,10 @@ public partial class LaunchView : UserControl
             _activeLadders = [];
             _ladderExtensionChoices = [];
             _ladderLoadError = "Ladder status is temporarily unavailable.";
+            LadderStatusText.IsVisible = true;
             LadderStatusText.Text = _ladderLoadError;
             LadderExtensionPolicyStatusText.Text = _ladderLoadError;
+            ActiveLaddersItemsControl.ItemsSource = null;
             ActiveLadderComboBox.ItemsSource = null;
             AllowedLadderPluginsItemsControl.ItemsSource = null;
             AllowedLadderPatchesItemsControl.ItemsSource = null;
@@ -987,7 +1135,6 @@ public partial class LaunchView : UserControl
         finally
         {
             _ladderStatusLoaded = true;
-            RefreshInstallDirectoryState();
         }
 
         try
@@ -1082,7 +1229,8 @@ public partial class LaunchView : UserControl
 
             var adminServers = LoadLobbyAdminServersAsync(ladder.Id);
             RetestRegionsButton.IsEnabled = false;
-            RetestRegionsButton.Content = "Testing...";
+            RetestRegionsButton.Content = "…";
+            ToolTip.SetTip(RetestRegionsButton, "Testing server latency…");
             try
             {
                 var pings = await RegionPingService.Shared.MeasureAsync(regions, retest);
@@ -1093,7 +1241,8 @@ public partial class LaunchView : UserControl
             finally
             {
                 RetestRegionsButton.IsEnabled = true;
-                RetestRegionsButton.Content = "Re-test";
+                RetestRegionsButton.Content = "↻";
+                ToolTip.SetTip(RetestRegionsButton, "Re-test server latency");
             }
 
             var servers = await adminServers;
@@ -1129,7 +1278,8 @@ public partial class LaunchView : UserControl
 
     private void ShowLadderRegions()
     {
-        if (SelectedLadder is not { } ladder || _ladderRegionsLadderId != ladder.Id || _ladderRegions.Count == 0)
+        if (MainWindow.Settings.CurrentProfile.LaunchExperience != LaunchExperience.Ladder
+            || SelectedLadder is not { } ladder || _ladderRegionsLadderId != ladder.Id || _ladderRegions.Count == 0)
         {
             LadderRegionsItemsControl.ItemsSource = null;
             LadderRegionsPanel.IsVisible = false;
@@ -1138,8 +1288,12 @@ public partial class LaunchView : UserControl
         }
 
         var stored = GetStoredLadderRegions(ladder.Id);
+        var isCustom = LobbyRegionSelection.IsCustom(_ladderRegions, stored);
         var selected = LobbyRegionSelection.Effective(_ladderRegions, _ladderRegionPings, stored);
-        LadderRegionsItemsControl.ItemsSource = _ladderRegions
+        _isRefreshingRegionControls = true;
+        try { AutomaticRegionsCheckBox.IsChecked = !isCustom; }
+        finally { _isRefreshingRegionControls = false; }
+        var nextChoices = _ladderRegions
             .Select(region => new LobbyRegionChoice
             {
                 Id = region.Id,
@@ -1148,14 +1302,19 @@ public partial class LaunchView : UserControl
                 IsMeasured = _ladderRegionPings.ContainsKey(region.Id),
                 PingMs = _ladderRegionPings.GetValueOrDefault(region.Id),
                 IsSelected = selected.Contains(region.Id),
-                CanToggle = !(selected.Count == 1 && selected.Contains(region.Id))
+                CanToggle = isCustom && !(selected.Count == 1 && selected.Contains(region.Id))
             })
             .ToArray();
-        var isCustom = LobbyRegionSelection.IsCustom(_ladderRegions, stored);
+        if (LadderRegionsItemsControl.ItemsSource is not IReadOnlyList<LobbyRegionChoice> currentChoices
+            || !currentChoices.Select(c => (c.Id, c.Name, c.IsAvailable, c.Badge, c.IsSelected, c.CanToggle))
+                .SequenceEqual(nextChoices.Select(c => (c.Id, c.Name, c.IsAvailable, c.Badge, c.IsSelected, c.CanToggle))))
+        {
+            LadderRegionsItemsControl.ItemsSource = nextChoices;
+        }
         LadderRegionsModeText.Text = isCustom
             ? "Custom selection"
             : $"Automatic: the {LobbyRegionSelection.AutomaticRegionCount} fastest regions";
-        UseFastestRegionsButton.IsVisible = isCustom;
+        UseFastestRegionsButton.IsVisible = false;
         LadderRegionsPanel.IsVisible = true;
         ShowLadderServerPin();
     }
@@ -1220,10 +1379,32 @@ public partial class LaunchView : UserControl
         await SettingsManager.SaveAsync(MainWindow.Settings);
     }
 
+    private async void OnAutomaticRegionsChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_isRefreshingRegionControls || SelectedLadder is not { } ladder || _ladderRegionsLadderId != ladder.Id) return;
+        var profile = MainWindow.Settings.CurrentProfile;
+        profile.SelectedLadderRegions ??= [];
+        profile.PinnedLadderServers?.Remove(ladder.Id.ToString("N"));
+        if (AutomaticRegionsCheckBox.IsChecked == true)
+        {
+            profile.SelectedLadderRegions.Remove(ladder.Id.ToString("N"));
+        }
+        else
+        {
+            profile.SelectedLadderRegions[ladder.Id.ToString("N")] = LobbyRegionSelection
+                .Automatic(_ladderRegions, _ladderRegionPings)
+                .ToList();
+        }
+
+        ShowLadderRegions();
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+    }
+
     private async void OnUseFastestRegionsClick(object? sender, RoutedEventArgs e)
     {
         if (SelectedLadder is not { } ladder) return;
         MainWindow.Settings.CurrentProfile.SelectedLadderRegions?.Remove(ladder.Id.ToString("N"));
+        MainWindow.Settings.CurrentProfile.PinnedLadderServers?.Remove(ladder.Id.ToString("N"));
         ShowLadderRegions();
         await SettingsManager.SaveAsync(MainWindow.Settings);
     }
@@ -1264,11 +1445,7 @@ public partial class LaunchView : UserControl
         return selections.GetValueOrDefault(ladderId.ToString("N"));
     }
 
-    private static string? GetPinnedLadderServer(Guid ladderId)
-    {
-        var pins = MainWindow.Settings.CurrentProfile.PinnedLadderServers ??= [];
-        return pins.GetValueOrDefault(ladderId.ToString("N"));
-    }
+    private static string? GetPinnedLadderServer(Guid ladderId) => null;
 
     /// <summary>
     /// The lobby preference handed to the plugin. Bounded so it never holds the
@@ -1387,19 +1564,16 @@ public partial class LaunchView : UserControl
     private async Task RefreshLadderExtensionPolicyAsync()
     {
         var generation = ++_ladderPolicyGeneration;
-        _ladderPolicyVerified = false;
-        _ladderAction = LadderAction.Blocked;
-        _missingRequiredLadderExtensions = [];
-        _ladderBundleReadiness = null;
         var ladder = SelectedLadder;
-        LadderBundleProblemsPanel.Children.Clear();
-        LadderBundleProblemsPanel.IsVisible = false;
-        UnapprovedLadderExtensionsSummaryBanner.IsVisible = false;
-        UnapprovedLadderExtensionsBanner.IsVisible = false;
         if (ladder is null)
         {
+            _isRefreshingLadderPolicy = false;
+            _ladderPolicyVerified = false;
+            _ladderBundleReadiness = null;
             _ladderExtensionChoices = [];
             _missingRequiredLadderExtensions = [];
+            LadderBundleProblemsPanel.Children.Clear();
+            LadderBundleProblemsPanel.IsVisible = false;
             AllowedLadderPluginsItemsControl.ItemsSource = null;
             AllowedLadderPatchesItemsControl.ItemsSource = null;
             LadderExtensionPolicyStatusText.Text = "Not Yet Available";
@@ -1410,24 +1584,30 @@ public partial class LaunchView : UserControl
             return;
         }
 
-        LadderExtensionPolicyStatusText.Text = "Checking installed D2RLoader extensions...";
-        LadderBundleStatusText.Text = "Checking the signed ladder package...";
+        _isRefreshingLadderPolicy = true;
+        if (_ladderBundleReadiness is null)
+        {
+            LadderExtensionPolicyStatusText.Text = "Checking installed D2RLoader extensions...";
+            LadderBundleStatusText.Text = "Checking the signed ladder package...";
+        }
+        RefreshInstallDirectoryState();
         try
         {
             var readiness = await _ladderBundleService.GetReadinessAsync(
                 MainWindow.Settings.CurrentProfile.InstallDirectory,
                 ladder.ActiveBundle,
                 allowedExtensions: ladder.AllowedExtensions,
-                selectedExtensionIds: GetEffectiveSelectedLadderExtensionIds(ladder));
+                selectedExtensionIds: GetEffectiveSelectedLadderExtensionIds(ladder),
+                requiredLoader: ladder.RequiredD2RLoader);
             if (generation != _ladderPolicyGeneration) return;
-            _ladderBundleReadiness = readiness;
-            ShowLadderBundleReadiness(readiness);
 
             var approvals = MapApprovals(ladder);
             var preview = await D2RLoaderService.PreviewLadderPolicyAsync(
                 MainWindow.Settings.CurrentProfile.InstallDirectory,
                 approvals);
             if (generation != _ladderPolicyGeneration) return;
+            _ladderBundleReadiness = readiness;
+            ShowLadderBundleReadiness(readiness);
             var selectedIds = GetEffectiveSelectedLadderExtensionIds(ladder);
             _ladderExtensionChoices = preview.ApprovedExtensions
                 .Select(state =>
@@ -1494,7 +1674,7 @@ public partial class LaunchView : UserControl
             {
                 var extensionLabel = preview.UnapprovedExtensions.Count == 1 ? "extension is" : "extensions are";
                 policyWarnings.Add(
-                    $"{preview.UnapprovedExtensions.Count} installed {extensionLabel} not approved for this ladder and will be disabled for launch. Expand the policy details to review them.");
+                    $"{preview.UnapprovedExtensions.Count} installed {extensionLabel} not approved for this ladder and will be disabled for launch. Review Installed Plugins/Patches below.");
             }
             UnapprovedLadderExtensionsSummaryBanner.IsVisible = policyWarnings.Count > 0;
             UnapprovedLadderExtensionsSummaryText.Text = string.Join(Environment.NewLine + Environment.NewLine, policyWarnings);
@@ -1527,6 +1707,10 @@ public partial class LaunchView : UserControl
         catch (Exception ex)
         {
             if (generation != _ladderPolicyGeneration) return;
+            _ladderPolicyVerified = false;
+            _ladderBundleReadiness = null;
+            LadderBundleProblemsPanel.Children.Clear();
+            LadderBundleProblemsPanel.IsVisible = false;
             _ladderExtensionChoices = [];
             _missingRequiredLadderExtensions = [];
             AllowedLadderPluginsItemsControl.ItemsSource = null;
@@ -1541,6 +1725,11 @@ public partial class LaunchView : UserControl
             UnapprovedLadderExtensionsText.Text =
                 "Ladder launch will remain blocked until installed extensions can be verified.";
             LaunchDiagnostics.LogException("Failed to preview ladder extension policy", ex);
+        }
+        finally
+        {
+            if (generation == _ladderPolicyGeneration)
+                _isRefreshingLadderPolicy = false;
         }
 
         RefreshInstallDirectoryState();
@@ -1575,17 +1764,18 @@ public partial class LaunchView : UserControl
     private bool IsLadderSetupAction(bool isLadderExperience)
         => isLadderExperience && _ladderAction is LadderAction.Download or LadderAction.Update or LadderAction.Restore;
 
-    private string LadderActionLabel(LadderAction action) => action switch
-    {
-        LadderAction.Download => "Download",
-        LadderAction.Update => "Update",
-        LadderAction.Restore => "Restore Ladder",
-        LadderAction.Play => "Play",
-        LadderAction.Waiting => LadderLaunchSchedule.Countdown(
-            SelectedLadder?.StartDateUtc ?? DateTimeOffset.MinValue, _ladderSchedule?.Now ?? DateTimeOffset.UtcNow),
-        LadderAction.Blocked when _isRefreshingLadders => "Checking ladder...",
-        _ => "Start Ladder"
-    };
+    private string LadderActionLabel(LadderAction action) => (_isRefreshingLadders || _isRefreshingLadderPolicy)
+        ? "Checking ladder..."
+        : action switch
+        {
+            LadderAction.Download => "Download",
+            LadderAction.Update => "Update",
+            LadderAction.Restore => "Restore Ladder",
+            LadderAction.Play => "Start Game",
+            LadderAction.Waiting => LadderLaunchSchedule.Countdown(
+                SelectedLadder?.StartDateUtc ?? DateTimeOffset.MinValue, _ladderSchedule?.Now ?? DateTimeOffset.UtcNow),
+            _ => "Start Game"
+        };
 
     private string LadderActionDescription(LadderAction action) => action switch
     {
@@ -1627,14 +1817,17 @@ public partial class LaunchView : UserControl
             var installDirectory = MainWindow.Settings.CurrentProfile.InstallDirectory;
             var selectedIds = GetEffectiveSelectedLadderExtensionIds(ladder);
             var readiness = await _ladderBundleService.GetReadinessAsync(installDirectory, bundle,
-                allowedExtensions: ladder.AllowedExtensions, selectedExtensionIds: selectedIds);
+                allowedExtensions: ladder.AllowedExtensions, selectedExtensionIds: selectedIds,
+                requiredLoader: ladder.RequiredD2RLoader);
             if (readiness.RequiresBundleRepair)
-                await Task.Run(() => _ladderBundleService.InstallOrRepairAsync(installDirectory, bundle, progress));
+                await Task.Run(() => _ladderBundleService.InstallOrRepairAsync(installDirectory, bundle, progress,
+                    requiredLoader: ladder.RequiredD2RLoader));
             await LadderOptionalExtensionService.SynchronizeAsync(installDirectory!, bundle,
                 ladder.AllowedExtensions, selectedIds,
                 (extension, token) => _apiHttpClient.DownloadOptionalExtensionAsync(ladder.Id, extension, progress, token), progress);
             readiness = await _ladderBundleService.GetReadinessAsync(installDirectory, bundle,
-                allowedExtensions: ladder.AllowedExtensions, selectedExtensionIds: selectedIds);
+                allowedExtensions: ladder.AllowedExtensions, selectedExtensionIds: selectedIds,
+                requiredLoader: ladder.RequiredD2RLoader);
             if (!readiness.IsReady) throw new InvalidOperationException(readiness.Status);
             Notifications.SendNotification(
                 $"Signed ladder package r{bundle.Revision} is installed and verified. Play becomes available when the ladder is confirmed live.",
@@ -1662,6 +1855,8 @@ public partial class LaunchView : UserControl
         LadderBundleProgressPanel.IsVisible = true;
         LadderBundleProgressText.Text = details ?? message;
         LadderBundleStatusText.Text = message;
+        HeroPolicySummary.Text = message;
+        HeroPolicySummary.Foreground = new SolidColorBrush(Color.Parse("#F7F1E3"));
         if (percentage is { } value)
         {
             LadderBundleProgressBar.IsIndeterminate = false;
@@ -3185,7 +3380,8 @@ public partial class LaunchView : UserControl
                     profile.InstallDirectory,
                     activeBundle,
                     allowedExtensions: ladder.AllowedExtensions,
-                    selectedExtensionIds: GetEffectiveSelectedLadderExtensionIds(ladder));
+                    selectedExtensionIds: GetEffectiveSelectedLadderExtensionIds(ladder),
+                    requiredLoader: ladder.RequiredD2RLoader);
                 if (!readiness.IsReady)
                 {
                     LaunchDiagnostics.Log($"Ladder launch blocked: {readiness.Status}");
@@ -3342,6 +3538,14 @@ public partial class LaunchView : UserControl
             }
 
             Notifications.SendNotification(profile.Type == InstallationType.D2RMM ? "D2RMM mods folder selected" : "Install directory validated", "Success");
+        }
+    }
+
+    private void OnSteamHowToSetupClick(object? sender, RoutedEventArgs e)
+    {
+        if (TopLevel.GetTopLevel(this) is MainWindow window)
+        {
+            window.NavigateToSteamDeckSetupGuideView(returnToUpdateView: _installationOnly);
         }
     }
 }

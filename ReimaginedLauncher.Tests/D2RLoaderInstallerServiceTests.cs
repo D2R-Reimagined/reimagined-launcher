@@ -1,7 +1,9 @@
 using System.IO.Compression;
 using System.Net;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text;
+using ReimaginedLauncher.HttpClients.Models;
 using ReimaginedLauncher.Utilities;
 using Xunit;
 
@@ -90,6 +92,83 @@ public sealed class D2RLoaderInstallerServiceTests : IDisposable
         Assert.Equal("999.0.0-beta", result.LatestVersion);
         Assert.Equal(new Uri("https://d2rloader.net/api/v1/version"), handler.RequestUri);
     }
+
+    [Fact]
+    public async Task PinnedInstallReplacesANewerLoaderAndKeepsUserConfiguration()
+    {
+        var archivePath = CreateArchive(
+            ("D2RLoader.exe", "pinned-loader"),
+            ("D2RCore.dll", "pinned-core"),
+            ("d2rloader.mpq", "pinned-mpq"),
+            ("d2rloader/config/d2rloader.toml", "default-config"));
+        var installDirectory = CreateInstallDirectory();
+        File.WriteAllText(Path.Combine(installDirectory, "D2RLoader.exe"), "newer-loader");
+        File.WriteAllText(Path.Combine(installDirectory, "D2RCore.dll"), "newer-core");
+        File.WriteAllText(Path.Combine(installDirectory, "d2rloader.mpq"), "newer-mpq");
+        Directory.CreateDirectory(Path.Combine(installDirectory, "d2rloader", "config"));
+        File.WriteAllText(Path.Combine(installDirectory, "d2rloader", "config", "d2rloader.toml"), "custom-config");
+        var pin = Pin(archivePath, ("D2RLoader.exe", "pinned-loader"), ("D2RCore.dll", "pinned-core"), ("d2rloader.mpq", "pinned-mpq"));
+        Assert.Equal(3, (await D2RLoaderInstallerService.GetPinnedMismatchesAsync(installDirectory, pin)).Count);
+
+        await new D2RLoaderInstallerService(new HttpClient()).InstallPinnedAsync(
+            installDirectory, pin, (path, _) => { File.Copy(archivePath, path); return Task.CompletedTask; });
+
+        Assert.Empty(await D2RLoaderInstallerService.GetPinnedMismatchesAsync(installDirectory, pin));
+        Assert.Equal("pinned-loader", File.ReadAllText(Path.Combine(installDirectory, "D2RLoader.exe")));
+        Assert.Equal("custom-config", File.ReadAllText(Path.Combine(installDirectory, "d2rloader", "config", "d2rloader.toml")));
+    }
+
+    [Fact]
+    public async Task PinnedInstallRefusesAnArchiveWhoseFilesDifferFromThePin()
+    {
+        var archivePath = CreateArchive(
+            ("D2RLoader.exe", "other-loader"),
+            ("D2RCore.dll", "pinned-core"),
+            ("d2rloader.mpq", "pinned-mpq"));
+        var installDirectory = CreateInstallDirectory();
+        File.WriteAllText(Path.Combine(installDirectory, "D2RLoader.exe"), "current-loader");
+        var pin = Pin(archivePath, ("D2RLoader.exe", "pinned-loader"), ("D2RCore.dll", "pinned-core"), ("d2rloader.mpq", "pinned-mpq"));
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            new D2RLoaderInstallerService(new HttpClient()).InstallPinnedAsync(
+                installDirectory, pin, (path, _) => { File.Copy(archivePath, path); return Task.CompletedTask; }));
+
+        Assert.Contains("does not contain the files", exception.Message);
+        Assert.Equal("current-loader", File.ReadAllText(Path.Combine(installDirectory, "D2RLoader.exe")));
+    }
+
+    [Theory]
+    [InlineData("../D2RLoader.exe")]
+    [InlineData("d2rloader/D2RLoader.exe")]
+    [InlineData("D2RLoader2.exe")]
+    public void PinsMustNameExactlyTheThreeRootFiles(string loaderPath)
+    {
+        var valid = Pin(CreateArchive(("x", "x")), ("D2RLoader.exe", "a"), ("D2RCore.dll", "b"), ("d2rloader.mpq", "c"));
+        Assert.True(D2RLoaderInstallerService.IsValidPin(valid));
+        var renamed = valid with { Files = [valid.Files[0] with { Path = loaderPath }, valid.Files[1], valid.Files[2]] };
+        Assert.False(D2RLoaderInstallerService.IsValidPin(renamed));
+        Assert.False(D2RLoaderInstallerService.IsValidPin(valid with { Files = valid.Files.Take(2).ToArray() }));
+    }
+
+    private string CreateInstallDirectory()
+    {
+        var installDirectory = Path.Combine(_testDirectory, "install");
+        Directory.CreateDirectory(installDirectory);
+        File.WriteAllText(Path.Combine(installDirectory, "D2R.exe"), "game");
+        return installDirectory;
+    }
+
+    private static LadderD2RLoaderResponse Pin(string archivePath, params (string Path, string Content)[] files) => new(
+        "1.3.1-beta",
+        "D2RLoader-1.3.1-beta.zip",
+        Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(archivePath))),
+        new FileInfo(archivePath).Length,
+        files.Select(file => new LadderD2RLoaderFileResponse(
+            file.Path,
+            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(file.Content))),
+            Encoding.UTF8.GetByteCount(file.Content))).ToArray(),
+        DateTimeOffset.UtcNow,
+        "/ladders/id/d2rloader/download");
 
     private string CreateArchive(params (string Path, string Content)[] entries)
     {

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
@@ -20,8 +20,8 @@ public partial class OfficialPluginsView : UserControl
         OfficialPluginsItemsControl.ItemsSource = catalog;
         EmptyStatePanel.IsVisible = catalog.Count == 0;
         OfficialPluginsSummaryTextBlock.Text = catalog.Count == 0
-            ? "Bundled plugins appear here."
-            : $"{catalog.Count} official plugin(s) available.";
+            ? "Bundled add-ons appear here."
+            : $"{catalog.Count} official add-ons available.";
     }
 
     private async void OnRefreshClicked(object? sender, RoutedEventArgs e)
@@ -48,11 +48,11 @@ public partial class OfficialPluginsView : UserControl
         {
             await PluginsService.InstallOfficialPluginAsync(plugin.FolderName);
             await RefreshOfficialPluginsStateAsync();
-            Notifications.SendNotification($"Official plugin '{plugin.Name}' is enabled.", "Success");
+            Notifications.SendNotification($"Official add-on '{plugin.Name}' is enabled.", "Success");
         }
         catch (Exception ex)
         {
-            Notifications.SendNotification($"Official plugin update failed: {ex.Message}", "Warning");
+            Notifications.SendNotification($"Official add-on update failed: {ex.Message}", "Warning");
         }
     }
 }

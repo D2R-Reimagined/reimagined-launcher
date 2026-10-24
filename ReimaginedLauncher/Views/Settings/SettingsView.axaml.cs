@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -9,6 +9,7 @@ using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using ReimaginedLauncher.Utilities;
+using ReimaginedLauncher.Views.SaveConversion;
 
 namespace ReimaginedLauncher.Views.Settings;
 
@@ -53,7 +54,10 @@ public partial class SettingsView : UserControl
         {
             <= 0.85 => 0,
             <= 0.95 => 1,
-            _ => 2
+            <= 1.05 => 2,
+            <= 1.15 => 3,
+            <= 1.35 => 4,
+            _ => 5
         };
 
         var profile = MainWindow.Settings.CurrentProfile;
@@ -100,7 +104,10 @@ public partial class SettingsView : UserControl
 
         MinimizeToTrayCheckBox.IsChecked = MainWindow.Settings.MinimizeToTray;
         MinimizeToTrayOnCloseCheckBox.IsChecked = MainWindow.Settings.MinimizeToTrayOnClose;
-        DisableLauncherUpdatesCheckBox.IsChecked = MainWindow.Settings.DisableLauncherUpdates;
+        DisableLauncherUpdatesCheckBox.IsChecked = LauncherUpdateService.IsPreviewBuild || MainWindow.Settings.DisableLauncherUpdates;
+        DisableLauncherUpdatesCheckBox.IsEnabled = !LauncherUpdateService.IsPreviewBuild;
+        if (LauncherUpdateService.IsPreviewBuild)
+            DisableLauncherUpdatesCheckBox.Content = "Launcher updates disabled for this preview build";
 
         _isRefreshingSettings = false;
     }
@@ -275,6 +282,9 @@ public partial class SettingsView : UserControl
         {
             0 => 0.8,
             1 => 0.9,
+            3 => 1.1,
+            4 => 1.2,
+            5 => 1.5,
             _ => 1.0
         };
 
@@ -302,6 +312,16 @@ public partial class SettingsView : UserControl
 
     private async void OnLauncherFolderClicked(object? sender, RoutedEventArgs e)
         => await OpenOrPickFolderAsync(FolderTarget.LauncherInstall);
+
+    private async void OnConvertSaveDataClicked(object? sender, RoutedEventArgs e)
+    {
+        if (MainWindow.IsInstallInProgress || TopLevel.GetTopLevel(this) is not Window owner)
+        {
+            return;
+        }
+
+        await new SaveConversionWindow().ShowDialog(owner);
+    }
 
     private async Task OpenOrPickFolderAsync(FolderTarget target)
     {

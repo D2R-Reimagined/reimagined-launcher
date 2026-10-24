@@ -1,4 +1,4 @@
-<UserControl xmlns="https://github.com/avaloniaui"
+﻿<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -7,12 +7,12 @@
              x:Class="ReimaginedLauncher.Views.Plugins.UserPluginsView">
     <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                   VerticalScrollBarVisibility="Auto">
-        <StackPanel Spacing="18">
+        <StackPanel Spacing="18" Margin="0,0,8,0">
             <StackPanel Spacing="4">
                 <TextBlock Classes="view-title"
-                           Text="User Plugins" />
+                           Text="Community Add-ons" />
                 <TextBlock Classes="muted"
-                           Text="Browse community plugins shared on the GitHub discussions board. Install them directly from here." />
+                           Text="Browse community add-ons shared on the GitHub discussions board. Install them directly from here." />
             </StackPanel>
 
             <Border Classes="panel"
@@ -25,17 +25,17 @@
                                 Grid.Column="0"
                                 Spacing="4">
                         <TextBlock Classes="section-title"
-                                   Text="Available User Plugins" />
+                                   Text="Available Community Add-ons" />
                         <TextBlock x:Name="UserPluginsSummaryTextBlock"
                                    Classes="muted"
-                                   Text="Loading user plugins from GitHub discussions..." />
+                                   Text="Loading user add-ons from GitHub discussions..." />
                     </StackPanel>
 
                     <StackPanel Grid.Row="0"
                                 Grid.Column="1"
                                 Orientation="Horizontal"
                                 Spacing="8">
-                        <Button Content="Back to Installed Plugins"
+                        <Button Content="Back to Installed Add-ons"
                                 Click="OnBackClicked" />
                         <Button Content="Refresh"
                                 Click="OnRefreshClicked" />
@@ -43,7 +43,7 @@
 
                     <Button Grid.Row="0"
                             Grid.Column="2"
-                            Content="Submit a Plugin"
+                            Content="Submit an Add-on"
                             Click="OnSubmitPluginClicked"
                             HorizontalAlignment="Right" />
 
@@ -79,7 +79,7 @@
                             Padding="16"
                             IsVisible="False">
                         <StackPanel Spacing="10">
-                            <TextBlock Text="Loading user plugins..."
+                            <TextBlock Text="Loading community add-ons..."
                                        FontWeight="SemiBold" />
                             <ProgressBar IsIndeterminate="True"
                                          Height="8" />
@@ -91,7 +91,7 @@
                                 Grid.ColumnSpan="3"
                                 Spacing="4"
                                 IsVisible="False">
-                        <TextBlock Text="No user plugins were found."
+                        <TextBlock Text="No user add-ons were found."
                                    FontWeight="SemiBold" />
                         <TextBlock Classes="muted"
                                    Text="Discussion posts must include Title:, Desc:/Description:, Mod:/ModVer:/ModVersion: (#.#.#), and a .zip file link to appear here." />
@@ -119,7 +119,7 @@
                                                            Text="{Binding ModVersion, StringFormat=Mod: {0}}"
                                                            Opacity="0.6" />
                                                 <TextBlock FontWeight="SemiBold"
-                                                           Text="{Binding PluginVersion, StringFormat=Plug: {0}}"
+                                                           Text="{Binding PluginVersion, StringFormat=Version: {0}}"
                                                            IsVisible="{Binding PluginVersion, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                                                            Opacity="0.6" />
                                                 <TextBlock FontWeight="SemiBold"

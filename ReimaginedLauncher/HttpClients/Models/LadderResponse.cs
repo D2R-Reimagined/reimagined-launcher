@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using ReimaginedLauncher.Utilities;
 
@@ -10,11 +10,27 @@ public sealed record LadderResponse(
     DateTimeOffset StartDateUtc,
     DateTimeOffset EndDateUtc,
     IReadOnlyList<LadderAllowedExtensionResponse> AllowedExtensions,
-    LadderBundleResponse? ActiveBundle)
+    LadderBundleResponse? ActiveBundle,
+    LadderD2RLoaderResponse? RequiredD2RLoader = null)
 {
     public string DateRangeDisplay =>
-        $"{StartDateUtc.ToLocalTime():MMM d, yyyy h:mm tt} - {EndDateUtc.ToLocalTime():MMM d, yyyy h:mm tt} local";
+        $"{StartDateUtc.ToLocalTime():MMM d, yyyy h:mm tt} - {EndDateUtc.ToLocalTime():MMM d, yyyy h:mm tt}";
 }
+
+/// <summary>
+/// The exact D2RLoader build a ladder requires. Sha256/SizeBytes describe the
+/// archive; Files are the root files that must match byte-for-byte.
+/// </summary>
+public sealed record LadderD2RLoaderResponse(
+    string Version,
+    string FileName,
+    string Sha256,
+    long SizeBytes,
+    IReadOnlyList<LadderD2RLoaderFileResponse> Files,
+    DateTimeOffset UploadedAtUtc,
+    string DownloadPath);
+
+public sealed record LadderD2RLoaderFileResponse(string Path, string Sha256, long SizeBytes);
 
 public sealed record LadderAllowedExtensionResponse(
     Guid Id,

@@ -2,7 +2,19 @@
 
 ## Unreleased
 
-- Keep players' D2RLoader plugin configs and logs across Ladder bundle installs; configs the bundle ships (mod.toml and force-shipped rule configs) still come from the signed bundle. Every other file under d2rloader/config (including per-character folders like Controller QOL's) is the player's: it carries over and no longer blocks Ladder launches as "outside the signed package".
+- Redesign the Launch view to anchor Start Game and installation/backup status beside the Mod Only, Mod + D2RLoader, and Ladder play mode cards, keeping mode cards horizontal down to Steam Deck widths.
+- Make Loot Filter, Server Regions, Ladder Safeguards, Install Directory, and Installed Plugins/Patches collapsible section cards that remember their expanded/collapsed state across navigation and restarts, with verified installations defaulting to collapsed across all screens.
+- Remember the last opened navigation page across restarts instead of opening to News & Announcements on startup, and restore the existing launcher window from the system tray when a second instance is started.
+- Move the D2R Reimagined logo into the top version/account header, rename the JSON mod add-ons navigation and pages to Mod Add-ons, and add 110%, 120%, and 150% UI scaling options.
+- Add searchable, filterable D2RLoader plugin and patch management on Launch with in-place enable/disable toggles outside Ladder and local DLL/ZIP installation with previews, backups, and rollback.
+- Add a built-in plugin and patch config editor with line numbers, current-line highlighting, JSON validation, external-edit detection, and rolling backups.
+- Add website account loot-filter selection and installation (`Apply Filter`) with compact status indicators, three rolling filter backups, and preservation of custom `filter.json` files across Ladder bundle updates and repairs.
+- Simplify Ladder Server Regions with an `Automatic (balanced)` checkbox that selects the two fastest available regions by default and locks individual region checkboxes until unchecked.
+- Move the full installation editor from Settings to Install/Update and add a two-step first-run setup guide that is skipped automatically for existing signed-in installations.
+- Add a dedicated Patch Notes navigation page that renders release notes natively from the D2R Reimagined Wiki with version selection, installed-version badges, inline links, and offline caching.
+- Make native Steam shortcuts select AppImage extraction automatically when Steam's runtime lacks FUSE while preserving normal mounting where available.
+- Allow signed Ladder package installs while Explorer holds the mod folder open, retaining backups and rollback when a file is genuinely locked.
+- Keep players' D2RLoader plugin configs and logs across Ladder bundle installs; configs the bundle ships (mod.toml and force-shipped rule configs, except the player-owned filter.json) still come from the signed bundle. Every other file under d2rloader/config (including per-character folders like Controller QOL's) is the player's: it carries over and no longer blocks Ladder launches as "outside the signed package".
 - Keep only the three most recent Ladder bundle backups and optional-extension backups; older full mod copies are deleted after a successful install.
 - Integrate official v0.16.7 and its approved Ladder runtime config-name matching fix.
 - Add a dedicated native Linux Steam launcher session for Online, Offline and Ladder, preserving base-game authentication and vanilla D2R launching; keep the hidden game-session helper as an optional compatibility fallback.

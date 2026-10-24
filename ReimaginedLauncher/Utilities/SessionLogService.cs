@@ -12,13 +12,31 @@ public static class SessionLogService
 
     public static void AddEntry(string message, string type)
     {
-        Dispatcher.UIThread.Post(() =>
+        var entry = new SessionLogEntry(message, type, DateTime.Now);
+        try
         {
-            if (Entries.Count >= 200)
+            if (Avalonia.Application.Current is null)
             {
-                Entries.RemoveAt(0);
+                if (Entries.Count >= 200)
+                {
+                    Entries.RemoveAt(0);
+                }
+                Entries.Add(entry);
+                return;
             }
-            Entries.Add(new SessionLogEntry(message, type, DateTime.Now));
-        });
+
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (Entries.Count >= 200)
+                {
+                    Entries.RemoveAt(0);
+                }
+                Entries.Add(entry);
+            });
+        }
+        catch (InvalidOperationException)
+        {
+            // UI dispatcher is not initialized yet during pre-UI startup checks.
+        }
     }
 }
