@@ -1,13 +1,16 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
+using ReimaginedLauncher.HttpClients.Models;
 
 namespace ReimaginedLauncher.Utilities;
 
@@ -22,6 +25,8 @@ public sealed class D2RLoaderInstallerService
     private const string DownloadUrl = "https://d2rloader.net/downloads/latest";
     private const string VersionUrl = "https://d2rloader.net/api/v1/version";
     private const string LoaderExecutableName = "D2RLoader.exe";
+    private const long MaxPinnedArchiveBytes = 128L * 1024 * 1024;
+    private static readonly string[] PinnedFileNames = [LoaderExecutableName, "D2RCore.dll", "d2rloader.mpq"];
     private readonly HttpClient _httpClient;
 
     public D2RLoaderInstallerService(HttpClient httpClient)
@@ -131,6 +136,113 @@ public sealed class D2RLoaderInstallerService
             TryDeleteDirectory(tempDirectory);
         }
     }
+
+    /// <summary>
+    /// Installs the exact build a ladder pins, replacing a newer or older loader.
+    /// <paramref name="download"/> writes the archive to the given path and must
+    /// already have checked its size and SHA-256.
+    /// </summary>
+    public async Task InstallPinnedAsync(
+        string? installDirectory,
+        LadderD2RLoaderResponse loader,
+        Func<string, CancellationToken, Task> download,
+        IProgress<D2RLoaderInstallProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        var normalized = InstallDirectoryValidator.NormalizeInstallDirectory(installDirectory);
+        if (!InstallDirectoryValidator.IsValidInstallDirectory(normalized))
+        {
+            throw new InvalidOperationException(
+                "Select the Diablo II: Resurrected folder that contains D2R.exe before installing D2RLoader.");
+        }
+        if (!IsValidPin(loader))
+        {
+            throw new InvalidDataException("This ladder's D2RLoader build is not valid.");
+        }
+
+        var tempDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "d2r-reimagined-launcher",
+            "d2rloader-installs",
+            Guid.NewGuid().ToString("N"));
+        var archivePath = Path.Combine(tempDirectory, "D2RLoader.zip");
+        var stagingDirectory = Path.Combine(tempDirectory, "staging");
+        Directory.CreateDirectory(tempDirectory);
+
+        try
+        {
+            progress?.Report(new D2RLoaderInstallProgress($"Downloading D2RLoader {loader.Version}..."));
+            await download(archivePath, cancellationToken);
+
+            progress?.Report(new D2RLoaderInstallProgress("Extracting D2RLoader..."));
+            await Task.Run(
+                () => ExtractArchive(archivePath, stagingDirectory, cancellationToken),
+                cancellationToken);
+            if ((await GetPinnedMismatchesAsync(stagingDirectory, loader, cancellationToken)).Count > 0)
+            {
+                throw new InvalidDataException(
+                    $"The D2RLoader {loader.Version} archive does not contain the files this ladder requires.");
+            }
+
+            progress?.Report(new D2RLoaderInstallProgress($"Installing D2RLoader {loader.Version}..."));
+            await Task.Run(
+                () => InstallExtractedFiles(stagingDirectory, normalized!, cancellationToken),
+                cancellationToken);
+
+            var mismatches = await GetPinnedMismatchesAsync(normalized!, loader, cancellationToken);
+            if (mismatches.Count > 0)
+            {
+                throw new InvalidDataException(
+                    $"D2RLoader {loader.Version} did not install cleanly ({string.Join(", ", mismatches)} still differ). Close D2R and try again.");
+            }
+
+            progress?.Report(new D2RLoaderInstallProgress($"D2RLoader {loader.Version} installed.", 100));
+        }
+        finally
+        {
+            TryDeleteDirectory(tempDirectory);
+        }
+    }
+
+    /// <summary>The pinned root files that are missing or differ under <paramref name="directory"/>.</summary>
+    public static async Task<IReadOnlyList<string>> GetPinnedMismatchesAsync(
+        string directory,
+        LadderD2RLoaderResponse loader,
+        CancellationToken cancellationToken = default)
+    {
+        var mismatches = new List<string>();
+        foreach (var file in loader.Files)
+        {
+            var path = Path.Combine(directory, file.Path);
+            if (!File.Exists(path) || new FileInfo(path).Length != file.SizeBytes)
+            {
+                mismatches.Add(file.Path);
+                continue;
+            }
+
+            await using var stream = File.OpenRead(path);
+            var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken));
+            if (!string.Equals(hash, file.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                mismatches.Add(file.Path);
+            }
+        }
+
+        return mismatches;
+    }
+
+    /// <summary>A pin names exactly the loader's three root files, so nothing from the API can point outside the game folder.</summary>
+    internal static bool IsValidPin(LadderD2RLoaderResponse? loader) =>
+        loader is { SizeBytes: > 0 and <= MaxPinnedArchiveBytes }
+        && IsSha256(loader.Sha256)
+        && loader.Files.Count == PinnedFileNames.Length
+        && PinnedFileNames.All(name => loader.Files.Count(file =>
+            string.Equals(file.Path, name, StringComparison.OrdinalIgnoreCase)
+            && file.SizeBytes > 0
+            && IsSha256(file.Sha256)) == 1);
+
+    private static bool IsSha256(string? value) =>
+        value is { Length: 64 } && value.All(Uri.IsHexDigit);
 
     public async Task<D2RLoaderUpdateCheckResult> CheckForUpdateAsync(
         string? installDirectory,

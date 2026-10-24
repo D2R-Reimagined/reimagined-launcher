@@ -836,6 +836,12 @@ public partial class LaunchView : UserControl
             D2RLoaderUpdateCheckResult? update = null;
             if (inventory.IsInstalled)
             {
+                // A pinned ladder installs its own build through the ladder Update action.
+                if (profile.LaunchExperience == LaunchExperience.Ladder && SelectedLadder?.RequiredD2RLoader is not null)
+                {
+                    return;
+                }
+
                 try
                 {
                     update = await _d2rLoaderInstallerService.CheckForUpdateAsync(profile.InstallDirectory);
@@ -1591,7 +1597,8 @@ public partial class LaunchView : UserControl
                 MainWindow.Settings.CurrentProfile.InstallDirectory,
                 ladder.ActiveBundle,
                 allowedExtensions: ladder.AllowedExtensions,
-                selectedExtensionIds: GetEffectiveSelectedLadderExtensionIds(ladder));
+                selectedExtensionIds: GetEffectiveSelectedLadderExtensionIds(ladder),
+                requiredLoader: ladder.RequiredD2RLoader);
             if (generation != _ladderPolicyGeneration) return;
 
             var approvals = MapApprovals(ladder);
@@ -1810,14 +1817,17 @@ public partial class LaunchView : UserControl
             var installDirectory = MainWindow.Settings.CurrentProfile.InstallDirectory;
             var selectedIds = GetEffectiveSelectedLadderExtensionIds(ladder);
             var readiness = await _ladderBundleService.GetReadinessAsync(installDirectory, bundle,
-                allowedExtensions: ladder.AllowedExtensions, selectedExtensionIds: selectedIds);
+                allowedExtensions: ladder.AllowedExtensions, selectedExtensionIds: selectedIds,
+                requiredLoader: ladder.RequiredD2RLoader);
             if (readiness.RequiresBundleRepair)
-                await Task.Run(() => _ladderBundleService.InstallOrRepairAsync(installDirectory, bundle, progress));
+                await Task.Run(() => _ladderBundleService.InstallOrRepairAsync(installDirectory, bundle, progress,
+                    requiredLoader: ladder.RequiredD2RLoader));
             await LadderOptionalExtensionService.SynchronizeAsync(installDirectory!, bundle,
                 ladder.AllowedExtensions, selectedIds,
                 (extension, token) => _apiHttpClient.DownloadOptionalExtensionAsync(ladder.Id, extension, progress, token), progress);
             readiness = await _ladderBundleService.GetReadinessAsync(installDirectory, bundle,
-                allowedExtensions: ladder.AllowedExtensions, selectedExtensionIds: selectedIds);
+                allowedExtensions: ladder.AllowedExtensions, selectedExtensionIds: selectedIds,
+                requiredLoader: ladder.RequiredD2RLoader);
             if (!readiness.IsReady) throw new InvalidOperationException(readiness.Status);
             Notifications.SendNotification(
                 $"Signed ladder package r{bundle.Revision} is installed and verified. Play becomes available when the ladder is confirmed live.",
@@ -3370,7 +3380,8 @@ public partial class LaunchView : UserControl
                     profile.InstallDirectory,
                     activeBundle,
                     allowedExtensions: ladder.AllowedExtensions,
-                    selectedExtensionIds: GetEffectiveSelectedLadderExtensionIds(ladder));
+                    selectedExtensionIds: GetEffectiveSelectedLadderExtensionIds(ladder),
+                    requiredLoader: ladder.RequiredD2RLoader);
                 if (!readiness.IsReady)
                 {
                     LaunchDiagnostics.Log($"Ladder launch blocked: {readiness.Status}");

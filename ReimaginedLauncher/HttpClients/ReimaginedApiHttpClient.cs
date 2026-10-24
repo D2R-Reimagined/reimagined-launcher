@@ -225,6 +225,45 @@ public sealed partial class ReimaginedApiHttpClient
         return bytes;
     }
 
+    public async Task DownloadLadderD2RLoaderAsync(
+        Guid ladderId,
+        LadderD2RLoaderResponse loader,
+        string destinationPath,
+        IProgress<D2RLoaderInstallProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!D2RLoaderInstallerService.IsValidPin(loader))
+            throw new InvalidOperationException("This ladder's D2RLoader build is not available for download.");
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromMinutes(15));
+        var token = timeout.Token;
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"ladders/{ladderId}/d2rloader/download");
+        await AuthorizeAsync(request, token);
+        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
+        response.EnsureSuccessStatusCode();
+        if (response.Content.Headers.ContentLength is { } length && length != loader.SizeBytes)
+            throw new System.IO.InvalidDataException("The D2RLoader download changed on the server. Refresh the ladder and try again.");
+        await using var input = await response.Content.ReadAsStreamAsync(token);
+        await using var output = new System.IO.FileStream(destinationPath, System.IO.FileMode.Create,
+            System.IO.FileAccess.Write, System.IO.FileShare.None, 81920, useAsync: true);
+        using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
+        var buffer = new byte[81920];
+        long received = 0;
+        int read;
+        while ((read = await input.ReadAsync(buffer, token)) > 0)
+        {
+            received += read;
+            if (received > loader.SizeBytes)
+                throw new System.IO.InvalidDataException("The D2RLoader download exceeded its published size.");
+            hash.AppendData(buffer, 0, read);
+            await output.WriteAsync(buffer.AsMemory(0, read), token);
+            progress?.Report(new D2RLoaderInstallProgress($"Downloading D2RLoader {loader.Version}...", received * 100d / loader.SizeBytes));
+        }
+        if (received != loader.SizeBytes
+            || !string.Equals(Convert.ToHexString(hash.GetHashAndReset()), loader.Sha256, StringComparison.OrdinalIgnoreCase))
+            throw new System.IO.InvalidDataException("The D2RLoader download failed its SHA-256 check.");
+    }
+
     public async Task<LadderLaunchTicketResponse> CreateLadderLaunchTicketAsync(
         Guid ladderId,
         LadderBundleResponse bundle,

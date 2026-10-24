@@ -743,6 +743,64 @@ public sealed class LadderBundleServiceTests : IDisposable
         Assert.False(Directory.Exists(ModInstallationPaths.LadderModRoot(_installDirectory)));
     }
 
+    [Fact]
+    public async Task PinnedLoaderMismatchIsRepairedWithTheLaddersBuild()
+    {
+        var fixture = CreateBundle(("maps", "d2rl-maps.dll", "map-code"u8.ToArray()));
+        File.WriteAllText(Path.Combine(_installDirectory, "D2R.exe"), "game");
+        (string Path, byte[] Content)[] loaderFiles =
+        [
+            ("D2RLoader.exe", "MZpinned-loader"u8.ToArray()),
+            ("D2RCore.dll", "MZpinned-core"u8.ToArray()),
+            ("d2rloader.mpq", "pinned-mpq"u8.ToArray())
+        ];
+        byte[] loaderArchive;
+        using (var output = new MemoryStream())
+        {
+            using (var zip = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                foreach (var (path, content) in loaderFiles) WriteEntry(zip, path, content);
+                WriteEntry(zip, "d2rloader/config/d2rloader.toml", "default"u8.ToArray());
+            }
+            loaderArchive = output.ToArray();
+        }
+        var pin = new LadderD2RLoaderResponse("1.3.1-beta", "D2RLoader-1.3.1-beta.zip",
+            Convert.ToHexString(SHA256.HashData(loaderArchive)), loaderArchive.LongLength,
+            loaderFiles.Select(file => new LadderD2RLoaderFileResponse(file.Path,
+                Convert.ToHexString(SHA256.HashData(file.Content)), file.Content.LongLength)).ToArray(),
+            DateTimeOffset.UtcNow, $"/ladders/{fixture.Descriptor.LadderId}/d2rloader/download");
+        var handler = new RoutingResponseHandler(fixture.Archive, loaderArchive);
+        var service = new LadderBundleService(
+            new ReimaginedApiHttpClient(new HttpClient(handler)),
+            new D2RLoaderInstallerService(new HttpClient(handler)));
+
+        var before = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor, requiredLoader: pin);
+        Assert.True(before.CanRepair);
+        Assert.Contains(before.Problems, problem => problem.StartsWith("D2RLoader 1.3.1-beta is required for this ladder", StringComparison.Ordinal));
+
+        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor, requiredLoader: pin);
+
+        Assert.True((await service.GetReadinessAsync(_installDirectory, fixture.Descriptor, requiredLoader: pin)).IsReady);
+        Assert.Contains(handler.Requests, uri => uri.AbsolutePath.EndsWith($"/ladders/{fixture.Descriptor.LadderId}/d2rloader/download", StringComparison.Ordinal));
+        File.WriteAllText(Path.Combine(_installDirectory, "d2rloader.mpq"), "tampered");
+        var tampered = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor, requiredLoader: pin);
+        Assert.Contains(tampered.Problems, problem => problem.StartsWith("D2RLoader 1.3.1-beta", StringComparison.Ordinal));
+    }
+
+    private sealed class RoutingResponseHandler(byte[] bundle, byte[] loader) : HttpMessageHandler
+    {
+        public List<Uri> Requests { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Requests.Add(request.RequestUri!);
+            var body = request.RequestUri!.AbsolutePath.EndsWith("/d2rloader/download", StringComparison.Ordinal) ? loader : bundle;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(body) });
+        }
+    }
+
     private LadderBundleService CreateService(byte[] archive)
     {
         // These fixtures declare no compatibility requirements, so the
