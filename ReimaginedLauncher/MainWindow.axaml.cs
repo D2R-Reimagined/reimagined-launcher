@@ -1837,7 +1837,7 @@ public partial class MainWindow : Window
             // "D2R" lookup misses - and the startup cleanup would then delete a
             // live session's secrets file.
             var count = 0;
-            foreach (var name in OperatingSystem.IsWindows() ? new[] { "D2R" } : new[] { "D2R", "D2R.exe" })
+            foreach (var name in OperatingSystem.IsWindows() ? new[] { "D2R", "D2RLoader" } : new[] { "D2R", "D2R.exe", "D2RLoader", "D2RLoader.exe" })
             {
                 var running = Process.GetProcessesByName(name);
                 count += running.Length;
