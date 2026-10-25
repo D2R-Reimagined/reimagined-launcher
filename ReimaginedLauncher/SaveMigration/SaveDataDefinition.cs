@@ -18,7 +18,8 @@ public sealed class SaveDataDefinition
         IReadOnlyList<TableDefinition> stats,
         IReadOnlyList<TableDefinition> appendedStats,
         Func<uint, IExternalData> createExternalData,
-        bool usesNewerItemTables = false)
+        bool usesNewerItemTables = false,
+        IReadOnlyList<uint>? characterVersions = null)
     {
         Label = label;
         ItemTables = itemTables;
@@ -26,6 +27,7 @@ public sealed class SaveDataDefinition
         AppendedStats = appendedStats;
         _createExternalData = createExternalData;
         UsesNewerItemTables = usesNewerItemTables;
+        CharacterVersions = characterVersions ?? [];
     }
 
     public string Label { get; }
@@ -39,6 +41,12 @@ public sealed class SaveDataDefinition
 
     /// <summary>The item tables are not the stat encoding's own: they come from a newer snapshot.</summary>
     public bool UsesNewerItemTables { get; }
+
+    /// <summary>Binary versions characters of this layout are known to be saved with; empty when no version is known.</summary>
+    public IReadOnlyList<uint> CharacterVersions { get; }
+
+    public SaveDataDefinition WithCharacterVersions(IReadOnlyList<uint>? versions) => new(
+        Label, ItemTables, Stats, AppendedStats, _createExternalData, UsesNewerItemTables, versions);
 
     public IExternalData CreateExternalData(uint saveVersion) => _createExternalData(saveVersion);
 

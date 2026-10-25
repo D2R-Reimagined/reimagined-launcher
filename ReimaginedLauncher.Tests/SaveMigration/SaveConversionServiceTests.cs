@@ -847,6 +847,149 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.Empty(Directory.GetFiles(BackupRoot, "*", SearchOption.AllDirectories));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnInstalledReleasePromptsOnlyForOlderSavesAndLeavesCompatibleOnesAlone(bool modified)
+    {
+        var service = CreateService(LoadRelease3012(modified));
+        string[] fixtures =
+        [
+            "Popsicle.d2s", "basetolabpr.d2s", "ModernSharedStashSoftCoreV2.d2i", "BruhII.d2s", "WereSorc.d2s",
+            "BonesMcPimp.d2s", "FuckBenFuckingF.d2s", "SoManyBones.d2s"
+        ];
+        var originals = fixtures.Select(CopyFixture).ToDictionary(path => path, File.ReadAllBytes);
+
+        var found = service.FindSavesNeedingConversion(SaveDirectory, StagingDirectory);
+
+        Assert.Equal([Path.Combine(SaveDirectory, "BruhII.d2s"), Path.Combine(SaveDirectory, "WereSorc.d2s")], found);
+        foreach (var compatible in fixtures.Take(3))
+        {
+            var plan = service.Plan(Path.Combine(SaveDirectory, compatible), Path.Combine(StagingDirectory, compatible));
+            Assert.Equal(SaveConversionState.AlreadyCompatible, plan.State);
+        }
+
+        foreach (var older in fixtures.Skip(3).Take(2))
+        {
+            var plan = service.Plan(Path.Combine(SaveDirectory, older), Path.Combine(StagingDirectory, older));
+            Assert.Equal("2.1.2", plan.SourceLabel);
+            Assert.Contains(plan.State, new[] { SaveConversionState.Verified, SaveConversionState.VerifiedWithWarnings });
+        }
+
+        foreach (var (path, bytes) in originals)
+        {
+            Assert.Equal(bytes, File.ReadAllBytes(path));
+        }
+
+        Assert.False(Directory.Exists(BackupRoot));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DevelopmentSavesAreNeverConvertedDownToAnInstalledRelease(bool modified)
+    {
+        var installed = LoadRelease3012(modified);
+        var service = CreateService(installed);
+        var migrator = SaveMigrationFixtures.CreateMigrator(installed);
+        foreach (var fixture in new[] { "BonesMcPimp.d2s", "FuckBenFuckingF.d2s", "SoManyBones.d2s" })
+        {
+            var path = CopyFixture(fixture);
+            var original = File.ReadAllBytes(path);
+            MigrationOverrides[] attempts =
+            [
+                MigrationOverrides.None, new(Force: true),
+                .. migrator.SourceLayouts.Select(layout => new MigrationOverrides(Force: true, SourceLayout: layout))
+            ];
+            var plans = attempts
+                .Select((overrides, index) =>
+                    service.Plan(path, Path.Combine(StagingDirectory, $"{fixture}-{index}"), overrides))
+                .ToList();
+
+            foreach (var plan in plans)
+            {
+                Log(plan);
+                Assert.Equal(SaveConversionState.Blocked, plan.State);
+                Assert.Null(plan.ConvertedBytes);
+                Assert.Null(plan.RecoveryCandidatePath);
+                Assert.False(SaveConversionService.NeedsConversion(plan));
+                Assert.False(service.Apply(plan, null, service.CreateBackupBatchDirectory()).Succeeded);
+            }
+
+            Assert.Equal(original, File.ReadAllBytes(path));
+        }
+
+        // BonesMcPimp carries lab_boss_kill, which only the newer development layouts define: it is refused as a downgrade.
+        var bones = service.Plan(Path.Combine(SaveDirectory, "BonesMcPimp.d2s"), Path.Combine(StagingDirectory, "bones"),
+            new MigrationOverrides(Force: true));
+        Assert.Contains("newer game data (3.0.12 with 3.0.13 development pre-swap appended stats)", bones.BlockingReason);
+        Assert.Contains("only converted to newer game data", bones.BlockingReason);
+        Assert.Empty(Directory.GetFiles(BackupRoot, "*", SearchOption.AllDirectories));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void OlderSavesStillMigrateToDevelopmentDataWhoseModinfoVersionWasNotUpdated(bool modified)
+    {
+        var installed = modified
+            ? SaveMigrationFixtures.LoadModified(SaveMigrationFixtures.InstalledDirectory, "3.0.12")
+            : InstalledGameData.Load(SaveMigrationFixtures.InstalledDirectory, Path.Combine(_root, "outdated-copy"),
+                "3.0.12");
+        var service = CreateService(installed);
+
+        foreach (var (fixture, source) in new[]
+                 {
+                     ("Popsicle.d2s", "3.0.12"), ("BruhII.d2s", "2.1.2"),
+                     ("BonesMcPimp.d2s", "3.0.12 with installed appended stats")
+                 })
+        {
+            var path = CopyFixture(fixture);
+            var plan = service.Plan(path, Path.Combine(StagingDirectory, fixture));
+            Log(plan);
+            Assert.Equal(source, plan.SourceLabel);
+            Assert.True(SaveConversionService.NeedsConversion(plan));
+            Assert.NotNull(plan.ConvertedBytes);
+        }
+
+        var stash = CopyFixture("ModernSharedStashSoftCoreV2.d2i");
+        Assert.Contains(stash, service.FindSavesNeedingConversion(SaveDirectory, Path.Combine(StagingDirectory, "all")));
+    }
+
+    [Fact]
+    public void ASaveThatANewerLayoutDecodesAsWellIsNeitherVerifiedNorPrompted()
+    {
+        // Synthetic: the newer layout is the 3.0.12 snapshot under another label, so it explains Popsicle exactly as well.
+        var installed = InstalledTarget.Value;
+        var source = SaveDataDefinition.FromSnapshot(KnownSnapshots.Reimagined3012.Load(SaveMigrationFixtures.DataDirectory));
+        var newer = SaveDataDefinition.FromSnapshot(GameDataSnapshot.Load("Synthetic newer layout",
+            SaveMigrationFixtures.ReleaseDirectory("reimagined-3.0.12")));
+        var migrator = new SaveMigrator([source], SaveDataDefinition.FromSnapshot(installed.Snapshot),
+            [TableComparer.Compare(source.ItemTables, installed.Snapshot)], newerLayouts: [newer]);
+        var service = new SaveConversionService(() => migrator, BackupRoot, () => _gameRunning,
+            installedTarget: installed);
+        var path = CopyFixture("Popsicle.d2s");
+        var original = File.ReadAllBytes(path);
+
+        var plan = service.Plan(path, StagingDirectory);
+        Log(plan);
+
+        Assert.Equal((SaveConversionState.Unresolved, SaveForceKind.Force), (plan.State, plan.ForceOption?.Kind));
+        Assert.Null(plan.ConvertedBytes);
+        Assert.False(SaveConversionService.NeedsConversion(plan));
+        Assert.Contains(plan.ForceOption!.Risks, risk => risk.Contains("may downgrade a newer save"));
+        Assert.Empty(service.FindSavesNeedingConversion(SaveDirectory, Path.Combine(StagingDirectory, "all")));
+        Assert.Equal(original, File.ReadAllBytes(path));
+    }
+
+    private InstalledGameData LoadRelease3012(bool modified)
+    {
+        var directory = SaveMigrationFixtures.ReleaseDirectory("reimagined-3.0.12");
+        return modified
+            ? SaveMigrationFixtures.LoadModified(directory, "3.0.12")
+            : InstalledGameData.Load(directory, Path.Combine(_root, "release-copy"), "3.0.12");
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))

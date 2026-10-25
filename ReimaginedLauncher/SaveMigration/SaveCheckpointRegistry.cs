@@ -14,6 +14,7 @@ public enum SaveCheckpointType
 /// <summary>One registered save-sensitive game data layout, read from <c>checkpoints.json</c>.</summary>
 /// <param name="Order">Explicit chronological order. Folder names are never sorted.</param>
 /// <param name="InstalledVersions">modinfo.json <c>version</c> values that identify an installation using this layout.</param>
+/// <param name="CharacterVersions">Binary <c>.d2s</c> versions characters of this layout are saved with; empty when unknown.</param>
 public sealed record SaveCheckpoint(
     string Id,
     string Label,
@@ -22,12 +23,19 @@ public sealed record SaveCheckpoint(
     int Order,
     string Directory,
     IReadOnlyList<string> InstalledVersions,
-    string? Description)
+    string? Description,
+    IReadOnlyList<uint> CharacterVersions)
 {
     public string DisplayName => Build;
 }
 
-public sealed record SaveStatEncoding(string Id, string Label, int Order, string File, string? Description);
+public sealed record SaveStatEncoding(
+    string Id,
+    string Label,
+    int Order,
+    string File,
+    string? Description,
+    IReadOnlyList<uint> CharacterVersions);
 
 /// <summary>
 /// An explicit identity for a row that was renamed between checkpoints. A unique or set mapping applies only when the saved id
@@ -91,7 +99,8 @@ public sealed record SaveCheckpointRegistry(
                     .. (entry.InstalledVersions ?? []).Select(version => version.Trim())
                     .Where(version => version.Length > 0)
                 ],
-                entry.Description))
+                entry.Description,
+                entry.CharacterVersions ?? []))
             .OrderBy(checkpoint => checkpoint.Order)
             .ToList();
         var statEncodings = (file.StatEncodings ?? []).Select(entry => new SaveStatEncoding(
@@ -99,7 +108,8 @@ public sealed record SaveCheckpointRegistry(
                 Required(entry.Label, "label"),
                 entry.Order ?? throw new InvalidDataException($"Stat encoding '{entry.Id}' has no order."),
                 Required(entry.File, "file"),
-                entry.Description))
+                entry.Description,
+                entry.CharacterVersions ?? []))
             .OrderBy(encoding => encoding.Order)
             .ToList();
 
@@ -164,6 +174,38 @@ public sealed record SaveCheckpointRegistry(
 
     public IReadOnlyList<SaveStatEncoding> StatEncodingsBefore(int targetOrder) =>
         [.. StatEncodings.Where(encoding => encoding.Order < targetOrder)];
+
+    /// <summary>
+    /// The chronological position of game data that matches no checkpoint exactly: the order of the newest registered layout
+    /// whose newly introduced stats it all defines. A layout that introduced no stat cannot be established this way.
+    /// Null when no layout is established.
+    /// </summary>
+    public int? EstablishedOrderOf(IReadOnlyList<TableDefinition> stats)
+    {
+        var defined = stats.Where(stat => !stat.IsPlaceholder).Select(stat => stat.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var layouts = Checkpoints
+            .Select(checkpoint => (checkpoint.Order,
+                Path: Path.Combine(PathOf(checkpoint.Directory), TableSchema.FileName(TableKind.ItemStatCost))))
+            .Concat(StatEncodings.Select(encoding => (encoding.Order, Path: PathOf(encoding))))
+            .OrderBy(layout => layout.Order);
+        var earlier = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        int? established = null;
+        foreach (var (order, path) in layouts)
+        {
+            var keys = TableSchema.Extract(TableKind.ItemStatCost, TableSnapshot.Load(path))
+                .Where(stat => !stat.IsPlaceholder).Select(stat => stat.Key).ToList();
+            var introduced = keys.Where(key => !earlier.Contains(key)).ToList();
+            if (introduced.Count > 0 && introduced.All(defined.Contains))
+            {
+                established = order;
+            }
+
+            earlier.UnionWith(keys);
+        }
+
+        return established;
+    }
 
     public string PathOf(string directory) => Path.GetFullPath(Path.Combine(DataDirectory, directory));
 
@@ -302,6 +344,7 @@ public sealed record SaveCheckpointRegistry(
         public int? Order { get; set; }
         public string? File { get; set; }
         public string? Description { get; set; }
+        public List<uint>? CharacterVersions { get; set; }
     }
 
     private sealed class CheckpointEntry
@@ -314,6 +357,7 @@ public sealed record SaveCheckpointRegistry(
         public string? Directory { get; set; }
         public List<string>? InstalledVersions { get; set; }
         public string? Description { get; set; }
+        public List<uint>? CharacterVersions { get; set; }
     }
 
     private sealed class IdentityMappingEntry

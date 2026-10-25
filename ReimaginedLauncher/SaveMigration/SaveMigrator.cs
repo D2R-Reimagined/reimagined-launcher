@@ -39,15 +39,20 @@ public sealed class SaveMigrator
     private readonly SaveDataDefinition _target;
     private readonly IReadOnlyList<SnapshotComparison> _comparisons;
     private readonly IReadOnlyList<ResolvedIdentityMapping> _identityMappings;
+    private readonly IReadOnlyList<SaveDataDefinition> _newerLayouts;
 
+    /// <param name="newerLayouts">Registered layouts that postdate the target. They are never converted from; a file they explain
+    /// better than every source is refused as a downgrade, and one they explain as well is never verified.</param>
     public SaveMigrator(IReadOnlyList<SaveDataDefinition> sources, SaveDataDefinition target,
         IReadOnlyList<SnapshotComparison> comparisons,
-        IReadOnlyList<ResolvedIdentityMapping>? identityMappings = null)
+        IReadOnlyList<ResolvedIdentityMapping>? identityMappings = null,
+        IReadOnlyList<SaveDataDefinition>? newerLayouts = null)
     {
         _sources = sources;
         _target = target;
         _comparisons = comparisons;
         _identityMappings = identityMappings ?? [];
+        _newerLayouts = newerLayouts ?? [];
     }
 
     /// <summary>A migrator from earlier frozen releases and compatible development layouts to the installed game data.</summary>
@@ -55,29 +60,38 @@ public sealed class SaveMigrator
     {
         var snapshots = new Dictionary<(string Label, string Path), GameDataSnapshot>();
         var targetTables = installedTarget.Snapshot;
+        var targetStats = TableSchema.Extract(TableKind.ItemStatCost, targetTables[TableKind.ItemStatCost]);
         var matchingCheckpoint = registry.Checkpoints
             .Where(checkpoint => installedTarget.HasSameTables(registry.PathOf(checkpoint.Directory)))
             .MaxBy(checkpoint => checkpoint.Order);
-        var targetOrder = matchingCheckpoint?.Order ?? int.MaxValue;
-        var sources = registry.SourcesBefore(targetOrder)
-            .Select(checkpoint => SaveDataDefinition.FromSnapshot(Snapshot(checkpoint.Label, checkpoint.Directory)))
+        // Unrecognized data is only as new as the stats it defines prove; it may still take saves of the layout it is placed at.
+        var targetOrder = matchingCheckpoint?.Order ?? registry.EstablishedOrderOf(targetStats) ?? int.MinValue;
+        var sourceLimit = matchingCheckpoint is null ? targetOrder + 1 : targetOrder;
+        var sources = registry.SourcesBefore(sourceLimit)
+            .Select(checkpoint => Release(checkpoint))
             .ToList();
 
         if (matchingCheckpoint is null && registry.LatestCheckpoint is { } latest
                                        && targetOrder > latest.Order)
         {
             var release = Snapshot(latest.Label, latest.Directory);
-            if (TableSchema.Extract(TableKind.ItemStatCost, targetTables[TableKind.ItemStatCost]).Count
-                > TableSchema.Extract(TableKind.ItemStatCost, release[TableKind.ItemStatCost]).Count)
+            if (targetStats.Count > TableSchema.Extract(TableKind.ItemStatCost, release[TableKind.ItemStatCost]).Count)
             {
                 sources.Add(SaveDataDefinition.WithAppendedStats(
-                    $"{latest.Label} with installed appended stats", release, targetTables));
+                        $"{latest.Label} with installed appended stats", release, targetTables)
+                    .WithCharacterVersions(latest.CharacterVersions));
                 sources.Add(SaveDataDefinition.WithAppendedStats(
-                    $"Installed items with {latest.Label} stat encoding", release, targetTables, targetTables));
+                        $"Installed items with {latest.Label} stat encoding", release, targetTables, targetTables)
+                    .WithCharacterVersions(latest.CharacterVersions));
             }
         }
 
-        foreach (var encoding in registry.StatEncodingsBefore(targetOrder))
+        var newerLayouts = registry.Checkpoints.Where(checkpoint => checkpoint.Order > targetOrder)
+            .Select(checkpoint => Release(checkpoint))
+            .ToList();
+        var baseCheckpoint = registry.Checkpoints.Where(checkpoint => checkpoint.Order <= targetOrder)
+            .MaxBy(checkpoint => checkpoint.Order);
+        foreach (var encoding in registry.StatEncodings)
         {
             var statPath = registry.PathOf(encoding);
             if (File.ReadAllBytes(statPath).AsSpan()
@@ -88,8 +102,28 @@ public sealed class SaveMigrator
 
             var composedDirectory = Path.Combine(installedTarget.CopiedDirectory, "stat-encodings",
                 Guid.NewGuid().ToString("N"), encoding.Id);
-            sources.Add(SaveDataDefinition.WithFrozenStatEncoding(
-                $"Installed items with {encoding.Label} stat encoding", statPath, targetTables, composedDirectory));
+            var frozen = SaveDataDefinition.WithFrozenStatEncoding(
+                    $"Installed items with {encoding.Label} stat encoding", statPath, targetTables, composedDirectory)
+                .WithCharacterVersions(encoding.CharacterVersions);
+            if (encoding.Order < sourceLimit)
+            {
+                sources.Add(frozen);
+                continue;
+            }
+
+            newerLayouts.Add(frozen);
+            if (baseCheckpoint is not null)
+            {
+                var release = Snapshot(baseCheckpoint.Label, baseCheckpoint.Directory);
+                var encodingTables = GameDataSnapshot.Load(frozen.Label, composedDirectory);
+                if (TableSchema.Extract(TableKind.ItemStatCost, encodingTables[TableKind.ItemStatCost]).Count
+                    > TableSchema.Extract(TableKind.ItemStatCost, release[TableKind.ItemStatCost]).Count)
+                {
+                    newerLayouts.Add(SaveDataDefinition.WithAppendedStats(
+                            $"{baseCheckpoint.Label} with {encoding.Label} appended stats", release, encodingTables)
+                        .WithCharacterVersions(encoding.CharacterVersions));
+                }
+            }
         }
 
         var comparisons = sources
@@ -98,7 +132,11 @@ public sealed class SaveMigrator
             .Select(tables => TableComparer.Compare(tables, targetTables))
             .ToList();
         return new SaveMigrator(sources, SaveDataDefinition.FromSnapshot(targetTables), comparisons,
-            registry.IdentityMappingsUpTo(targetOrder));
+            registry.IdentityMappingsUpTo(targetOrder), newerLayouts);
+
+        SaveDataDefinition Release(SaveCheckpoint checkpoint) => SaveDataDefinition
+            .FromSnapshot(Snapshot(checkpoint.Label, checkpoint.Directory))
+            .WithCharacterVersions(checkpoint.CharacterVersions);
 
         GameDataSnapshot Snapshot(string label, string directory)
         {
@@ -116,6 +154,8 @@ public sealed class SaveMigrator
     public SaveDataDefinition Target => _target;
 
     internal IReadOnlyList<string> SourceLayouts => [.. _sources.Select(source => source.Label)];
+
+    internal IReadOnlyList<string> NewerLayouts => [.. _newerLayouts.Select(layout => layout.Label)];
 
     /// <summary>
     /// Writes <c>outputDirectory/&lt;file name&gt;</c> when no hard blocker or critical check failed and every reported uncertainty is
@@ -200,6 +240,7 @@ public sealed class SaveMigrator
         private readonly List<MigrationCheck> _checks = [];
         private List<CustomPageItem> _customPageItems = [];
         private List<string> _ambiguousLayouts = [];
+        private bool _chronologyUnknown;
 
         private SaveDataDefinition? _source;
         private SnapshotComparison _comparison = null!;
@@ -377,35 +418,20 @@ public sealed class SaveMigrator
                 _identification.Add(
                     $"{Target.Label}: parses with installed target definitions for an experimental rebuild, "
                     + $"{targetAttempt.AllItems.Count()} item(s)");
+                if (IsNewerThanTarget([(Target, targetAttempt, UndefinedStats(targetAttempt).Count)]))
+                {
+                    return null;
+                }
+
                 _identification.Add($"Selected source layout for experimental target rebuild: {Target.Label}");
                 return Target;
             }
 
             var inspection = SaveInspector.Inspect(input, owner._sources, owner._comparisons);
-            var decoded = new List<(SaveDataDefinition Definition, ParseAttempt Attempt, int Undefined)>();
-            foreach (var (definition, attempt) in owner._sources.Zip(inspection.Attempts))
+            var decoded = Decode(owner._sources, inspection.Attempts, "");
+            if (IsNewerThanTarget(decoded))
             {
-                if (!attempt.Succeeded)
-                {
-                    _identification.Add($"{definition.Label}: rejected, parse failed ({attempt.Error})");
-                    continue;
-                }
-
-                var undefined = attempt.CharacterStats.Concat(attempt.AllItems.SelectMany(item => item.Stats))
-                    .Where(stat => stat.Name.StartsWith('('))
-                    .Select(stat => stat.Id)
-                    .Distinct()
-                    .ToList();
-                var references = attempt.IdValidations.Sum(validation => validation.ReferenceCount);
-                _identification.Add($"{definition.Label}: parses, {attempt.AllItems.Count()} item(s), "
-                                    + $"{references - Disagreements(attempt)}/{references} saved ids fit their table rows"
-                                    + (attempt.TrailingBytes > 0
-                                        ? $", {attempt.TrailingBytes} trailing byte(s) after the standard sections"
-                                        : "")
-                                    + (undefined.Count > 0
-                                        ? $", stat id(s) [{string.Join(", ", undefined)}] undefined in this layout"
-                                        : ""));
-                decoded.Add((definition, attempt, undefined.Count));
+                return null;
             }
 
             if (decoded.Count == 0)
@@ -467,7 +493,8 @@ public sealed class SaveMigrator
             if (tied.Select(candidate => (Signature(candidate.Attempt), candidate.Definition.ItemTables.Label))
                     .Distinct().Count() > 1)
             {
-                _ambiguousLayouts = [.. tied.Select(candidate => candidate.Definition.Label)];
+                // A source choice is only offered between historical layouts, not when the file may postdate the target.
+                _ambiguousLayouts = _chronologyUnknown ? [] : [.. tied.Select(candidate => candidate.Definition.Label)];
                 _uncertain.Add(
                     $"Ambiguous source layout: {Labels(tied)} fit the saved ids equally well ({best} disagreement(s)) "
                     + $"but decode the file differently or use different item tables; converting as {chosen.Label} is a guess.");
@@ -494,6 +521,96 @@ public sealed class SaveMigrator
             static (int Undefined, int Trailing) Rank(
                 (SaveDataDefinition Definition, ParseAttempt Attempt, int Undefined) candidate) =>
                 (candidate.Undefined, candidate.Attempt.TrailingBytes);
+        }
+
+        private List<(SaveDataDefinition Definition, ParseAttempt Attempt, int Undefined)> Decode(
+            IReadOnlyList<SaveDataDefinition> definitions, IReadOnlyList<ParseAttempt> attempts, string role)
+        {
+            var decoded = new List<(SaveDataDefinition Definition, ParseAttempt Attempt, int Undefined)>();
+            foreach (var (definition, attempt) in definitions.Zip(attempts))
+            {
+                if (_kind == SaveFileKind.Character && definition.CharacterVersions.Count > 0
+                                                    && !definition.CharacterVersions.Contains(_sourceVersion))
+                {
+                    _identification.Add(
+                        $"{definition.Label}{role}: rejected, binary version {_sourceVersion} is not a character version of this layout "
+                        + $"({string.Join(", ", definition.CharacterVersions)})");
+                    continue;
+                }
+
+                if (!attempt.Succeeded)
+                {
+                    _identification.Add($"{definition.Label}{role}: rejected, parse failed ({attempt.Error})");
+                    continue;
+                }
+
+                var undefined = UndefinedStats(attempt);
+                var references = attempt.IdValidations.Sum(validation => validation.ReferenceCount);
+                _identification.Add($"{definition.Label}{role}: parses, {attempt.AllItems.Count()} item(s), "
+                                    + $"{references - Disagreements(attempt)}/{references} saved ids fit their table rows"
+                                    + (attempt.TrailingBytes > 0
+                                        ? $", {attempt.TrailingBytes} trailing byte(s) after the standard sections"
+                                        : "")
+                                    + (undefined.Count > 0
+                                        ? $", stat id(s) [{string.Join(", ", undefined)}] undefined in this layout"
+                                        : ""));
+                decoded.Add((definition, attempt, undefined.Count));
+            }
+
+            return decoded;
+        }
+
+        private static List<int> UndefinedStats(ParseAttempt attempt) =>
+            attempt.CharacterStats.Concat(attempt.AllItems.SelectMany(item => item.Stats))
+                .Where(stat => stat.Name.StartsWith('('))
+                .Select(stat => stat.Id)
+                .Distinct()
+                .ToList();
+
+        /// <summary>
+        /// Saves are only converted upwards. A file that a layout newer than the target explains better than every
+        /// <paramref name="older"/> candidate is refused, whatever the overrides; one it explains as well has an unknown chronology.
+        /// </summary>
+        private bool IsNewerThanTarget(
+            IReadOnlyList<(SaveDataDefinition Definition, ParseAttempt Attempt, int Undefined)> older)
+        {
+            if (owner._newerLayouts.Count == 0)
+            {
+                return false;
+            }
+
+            var newer = Decode(owner._newerLayouts, SaveInspector.Inspect(input, owner._newerLayouts, []).Attempts,
+                $" (newer than {Target.Label})");
+            if (newer.Count == 0)
+            {
+                return false;
+            }
+
+            var newerFit = newer.Min(Fit);
+            var newerLabels = string.Join(", ", newer.Where(candidate => Fit(candidate) == newerFit)
+                .Select(candidate => candidate.Definition.Label));
+            if (older.Count == 0 || newerFit.CompareTo(older.Min(Fit)) < 0)
+            {
+                _identification.Add($"{newerLabels} explain the file better than any layout up to {Target.Label}.");
+                _blockers.Add(
+                    $"This file was saved with newer game data ({newerLabels}) than the installed target {Target.Label}. "
+                    + "Saves are only converted to newer game data, so it is not converted, even with Force Conversion.");
+                return true;
+            }
+
+            if (newerFit.CompareTo(older.Min(Fit)) == 0)
+            {
+                _chronologyUnknown = true;
+                _uncertain.Add(
+                    $"Source version unknown: the file decodes as well with {newerLabels}, which is newer than the installed target "
+                    + $"{Target.Label}, as with an older layout; converting it may downgrade a newer save.");
+            }
+
+            return false;
+
+            static (int Undefined, int Trailing, int Disagreements) Fit(
+                (SaveDataDefinition Definition, ParseAttempt Attempt, int Undefined) candidate) =>
+                (candidate.Undefined, candidate.Attempt.TrailingBytes, Disagreements(candidate.Attempt));
         }
 
         private static int Disagreements(ParseAttempt attempt) =>

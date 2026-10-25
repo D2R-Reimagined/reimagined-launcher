@@ -61,4 +61,54 @@ public sealed class SaveCheckpointTests
 
         Assert.Equal(["2.1.2"], releaseMigrator.SourceLayouts);
     }
+
+    [Fact]
+    public void CheckpointsRecordTheCharacterVersionsTheirSavesUse()
+    {
+        var registry = SaveMigrationFixtures.LoadRegistry();
+
+        Assert.Equal([99u], registry.Get("reimagined-2.1.2").CharacterVersions);
+        Assert.Equal([105u], registry.Get("reimagined-3.0.12").CharacterVersions);
+        Assert.Equal([105u], Assert.Single(registry.StatEncodings).CharacterVersions);
+    }
+
+    [Fact]
+    public void UnrecognizedInstalledDataIsOnlyAsNewAsTheStatsItDefines()
+    {
+        var registry = SaveMigrationFixtures.LoadRegistry();
+        var releaseDirectory = SaveMigrationFixtures.ReleaseDirectory("reimagined-3.0.12");
+        string[] newer =
+        [
+            "Installed items with 3.0.13 development pre-swap stat encoding",
+            "3.0.12 with 3.0.13 development pre-swap appended stats"
+        ];
+
+        var release = SaveMigrator.ForInstalledTarget(registry,
+            InstalledGameData.Load(releaseDirectory, SaveMigrationFixtures.NewCopyDirectory(), "3.0.12"));
+        Assert.Equal(["2.1.2"], release.SourceLayouts);
+        Assert.Equal(newer, release.NewerLayouts);
+
+        // Modified 3.0.12 data defines no development stat, so it is not newer than 3.0.12 and gets no development source.
+        var modifiedRelease = SaveMigrator.ForInstalledTarget(registry,
+            SaveMigrationFixtures.LoadModified(releaseDirectory, "3.0.12"));
+        Assert.Equal(["2.1.2", "3.0.12"], modifiedRelease.SourceLayouts);
+        Assert.Equal(newer, modifiedRelease.NewerLayouts);
+
+        // Development data whose modinfo version still reads 3.0.12 defines the development stats and keeps every upward source.
+        var development = SaveMigrationFixtures.CreateMigrator();
+        var outdatedVersion = SaveMigrator.ForInstalledTarget(registry,
+            InstalledGameData.Load(SaveMigrationFixtures.InstalledDirectory, SaveMigrationFixtures.NewCopyDirectory(),
+                "3.0.12"));
+        var modifiedDevelopment = SaveMigrator.ForInstalledTarget(registry,
+            SaveMigrationFixtures.LoadModified(SaveMigrationFixtures.InstalledDirectory, "3.0.12"));
+        Assert.Equal(
+        [
+            "2.1.2", "3.0.12", "3.0.12 with installed appended stats", "Installed items with 3.0.12 stat encoding",
+            "Installed items with 3.0.13 development pre-swap stat encoding"
+        ], development.SourceLayouts);
+        Assert.Equal(development.SourceLayouts, outdatedVersion.SourceLayouts);
+        Assert.Equal(development.SourceLayouts, modifiedDevelopment.SourceLayouts);
+        Assert.All(new[] { development, outdatedVersion, modifiedDevelopment },
+            migrator => Assert.Empty(migrator.NewerLayouts));
+    }
 }

@@ -8,7 +8,8 @@
       "type": "release",
       "order": 10,
       "directory": "D2RR 2.1.2",
-      "installedVersions": [ "2.1.2" ]
+      "installedVersions": [ "2.1.2" ],
+      "characterVersions": [ 99 ]
     },
     {
       "id": "reimagined-3.0.12",
@@ -17,7 +18,8 @@
       "type": "release",
       "order": 20,
       "directory": "D2RR 3.0.12",
-      "installedVersions": [ "3.0.12" ]
+      "installedVersions": [ "3.0.12" ],
+      "characterVersions": [ 105 ]
     }
   ],
   "statEncodings": [
@@ -26,6 +28,7 @@
       "label": "3.0.13 development pre-swap",
       "order": 30,
       "file": "D2RR 3.0.13 dev pre-swap/itemstatcost.txt",
+      "characterVersions": [ 105 ],
       "description": "Pre-swap stat IDs with the development Save Bits and Save Add changes and appended lab stats 438-441."
     }
   ],
