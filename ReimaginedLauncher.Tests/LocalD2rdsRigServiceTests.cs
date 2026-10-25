@@ -36,11 +36,12 @@ public sealed class LocalD2rdsRigServiceTests : IDisposable
         Write("mods/ReimaginedLadder/d2rloader/plugins/d2rl-stale.dll", "not in the local mod");
         Write("mods/ReimaginedLadder/d2rloader/config/server-saves.toml", "launcher config");
         Write("mods/ReimaginedLadder/d2rloader/logs/d2rds.log", "log");
+        Write("mods/ReimaginedLadder/ReimaginedLadder.mpq/data/global/.DISABLE_DEBUG", "");
 
         var first = LocalD2rdsRigService.Mirror(_install);
 
         Assert.Equal(4, first.Copied);
-        Assert.Equal(1, first.Removed);
+        Assert.Equal(2, first.Removed);
         Assert.Equal("server", File.ReadAllText(Ladder("d2rloader/plugins/d2rl-d2rds.dll")));
         Assert.Equal("local-lobby", File.ReadAllText(Ladder("d2rloader/plugins/d2rl-lobby-bridge.dll")));
         Assert.True(File.Exists(Ladder("ReimaginedLadder.mpq/modinfo.json")));
@@ -51,14 +52,13 @@ public sealed class LocalD2rdsRigServiceTests : IDisposable
         Assert.False(File.Exists(Ladder("d2rloader/config/maps.toml")));
         Assert.Equal("launcher config", File.ReadAllText(Ladder("d2rloader/config/server-saves.toml")));
         Assert.True(File.Exists(Ladder("d2rloader/logs/d2rds.log")));
-        // Debug tools off, as in the ladder's packed .mpq.
-        Assert.True(File.Exists(Ladder("ReimaginedLadder.mpq/data/global/.DISABLE_DEBUG")));
+        // Debug tools and cheats on: the packed ladder's marker does not survive.
+        Assert.False(File.Exists(Ladder("ReimaginedLadder.mpq/data/global/.DISABLE_DEBUG")));
 
         var again = LocalD2rdsRigService.Mirror(_install);
         Assert.Equal(0, again.Copied);
         Assert.Equal(4, again.Unchanged);
         Assert.Equal(0, again.Removed);
-        Assert.True(File.Exists(Ladder("ReimaginedLadder.mpq/data/global/.DISABLE_DEBUG")));
     }
 
     [Fact]
@@ -104,6 +104,7 @@ public sealed class LocalD2rdsRigServiceTests : IDisposable
         var config = File.ReadAllText(Ladder("d2rloader/config/d2rds.toml"));
         Assert.Contains("lobby_api_base_url = \"http://localhost:5000\"", config);
         Assert.Contains("authoritative_saves = true", config);
+        Assert.Contains("cheat_operators = true", config);
         Assert.Contains("enabled = false", config);
         Assert.Contains("lobby_server_key = \"\"", config);
         var secrets = File.ReadAllLines(Path.Combine(_install, "reimagined-secrets", "server.toml"));

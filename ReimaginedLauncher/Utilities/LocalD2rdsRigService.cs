@@ -44,12 +44,6 @@ public static class LocalD2rdsRigService
     private static readonly string[] KeptPrefixes = ["d2rloader/config/", "d2rloader/logs/", "d2rloader/ladder-disabled/"];
     private static readonly string[] SkippedExtensions = [".pdb", ".ilk", ".exp", ".lib", ".bak", ".tmp"];
 
-    // D2RLoader's switch for its debug tools and cheat shortcuts. The ladder ships
-    // it inside its packed .mpq; a loose local mod has none, and with debug on a
-    // shortcut can leave a character casting without a cast reaching the server
-    // (2026-10-25: Teeth looped its animation for ~30 s until debug was turned off).
-    internal const string DisableDebugMarker = "ReimaginedLadder.mpq/data/global/.DISABLE_DEBUG";
-
     // Plugins that talk to the API but have no launcher config step: pointed at
     // this API for a rig session, then put back (see PointAtApiAsync).
     private static readonly string[] UnmanagedApiPlugins = ["supporter-mtx", "reimagined-online-count"];
@@ -78,6 +72,12 @@ public static class LocalD2rdsRigService
     /// Makes mods\ReimaginedLadder an exact copy of mods\Reimagined, but for the
     /// kept folders. Files already the same size and time are left alone.
     /// </summary>
+    /// <remarks>
+    /// The ladder's packed .mpq carries data/global/.DISABLE_DEBUG, D2RLoader's
+    /// switch for its debug tools and cheats. The rig wants both, so it removes
+    /// that marker like any other file the local mod lacks. (2026-10-25: with
+    /// debug on, Teeth once looped its cast animation for ~30 s with nothing cast.)
+    /// </remarks>
     public static LocalRigMirrorResult Mirror(string installDirectory, CancellationToken cancellationToken = default)
     {
         var source = SourceRoot(installDirectory);
@@ -104,14 +104,6 @@ public static class LocalD2rdsRigService
             File.Copy(file, destination, overwrite: true);
             File.SetLastWriteTimeUtc(destination, from.LastWriteTimeUtc);
             copied++;
-        }
-
-        wanted.Add(DisableDebugMarker);
-        var marker = Path.Combine(target, DisableDebugMarker.Replace('/', Path.DirectorySeparatorChar));
-        if (!File.Exists(marker))
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(marker)!);
-            File.WriteAllBytes(marker, []);
         }
 
         foreach (var file in Directory.EnumerateFiles(target, "*", SearchOption.AllDirectories).ToArray())
@@ -197,7 +189,8 @@ public static class LocalD2rdsRigService
     /// <summary>
     /// d2rds.toml in the ladder folder: dormant unless the process has -d2rds, then
     /// a server for this API with server-authoritative saves and no games of its
-    /// own (Host makes them).
+    /// own (Host makes them). Every player who joins is a cheat operator, as the
+    /// host's `op` would make them; a headless server has nobody to type it.
     /// </summary>
     public static void WriteServerConfig(string installDirectory, string apiBaseUrl)
     {
@@ -215,6 +208,7 @@ public static class LocalD2rdsRigService
             sentry = false
             authoritative_saves = true
             standing_games = false
+            cheat_operators = true
 
             [server]
             game_port = {ServerGamePort}
