@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Net.Http.Headers;
@@ -287,6 +288,39 @@ public sealed partial class ReimaginedApiHttpClient
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<LadderLaunchTicketResponse>(JsonOptions, timeout.Token)
                ?? throw new InvalidOperationException("The API returned an empty ladder launch ticket response.");
+    }
+
+    /// <summary>
+    /// A staff member's local d2rds test session. Throws with the API's own words
+    /// when it refuses: 404 means the API has staff testing off, 403 that the
+    /// account is not an Admin or Moderator.
+    /// </summary>
+    public async Task<StaffTestSessionResponse> StartStaffTestSessionAsync(
+        string launcherVersion,
+        string accessToken,
+        CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "staff-test/session")
+        {
+            Content = JsonContent.Create(new { launcherVersion }, options: JsonOptions)
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        using var timeout = CreateRequestTimeout(cancellationToken);
+        using var response = await _httpClient.SendAsync(request, timeout.Token);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(timeout.Token);
+            throw new InvalidOperationException(response.StatusCode switch
+            {
+                HttpStatusCode.NotFound => "This API has staff test sessions off (StaffTesting:Enabled). They are on in Development.",
+                HttpStatusCode.Forbidden => "Local d2rds tests are for Admin and Moderator accounts.",
+                HttpStatusCode.Unauthorized => "Sign in again to start a local d2rds test.",
+                _ => $"The API refused the staff test session ({(int)response.StatusCode}): {body}"
+            });
+        }
+
+        return await response.Content.ReadFromJsonAsync<StaffTestSessionResponse>(JsonOptions, timeout.Token)
+               ?? throw new InvalidOperationException("The API returned an empty staff test session.");
     }
 
     /// <summary>

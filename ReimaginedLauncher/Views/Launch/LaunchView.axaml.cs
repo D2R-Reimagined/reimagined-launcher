@@ -501,6 +501,7 @@ public partial class LaunchView : UserControl
         LoaderExtensionsGrid.IsVisible = !isLadderExperience;
         ShowLadderRegions();
         LadderAuthenticationWarningBanner.IsVisible = isLadderExperience && !isReimaginedSignedIn;
+        RefreshLocalRigPanel(profile);
         RefreshLadderAuthenticationState();
 
         var isOnlineSteamFlatpak = isOnlineExperience
