@@ -1004,7 +1004,12 @@ public class GameLauncherService
     }
 
     public string? GetExpectedGameExecutablePath()
-        => InstallDirectoryValidator.GetExecutablePath(MainWindow.Settings.CurrentProfile.InstallDirectory);
+    {
+        var profile = MainWindow.Settings.CurrentProfile;
+        return UsesD2RLoader(profile)
+            ? D2RLoaderService.GetLoaderPath(profile.InstallDirectory)
+            : InstallDirectoryValidator.GetExecutablePath(profile.InstallDirectory);
+    }
 
     private static string[] GetDefaultInstallPaths()
     {

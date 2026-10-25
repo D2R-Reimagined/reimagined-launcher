@@ -270,8 +270,15 @@
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
-              <StackPanel x:Name="LadderServerPinPanel" Orientation="Horizontal" Spacing="10" IsVisible="False">
-                <ComboBox x:Name="LadderServerPinComboBox" MinWidth="280" SelectionChanged="OnLadderServerPinSelectionChanged" IsVisible="False"/>
+              <StackPanel x:Name="LadderServerPinPanel" Spacing="4" Margin="0,4,0,0" IsVisible="False">
+                <TextBlock Text="Pin server" Classes="muted" FontSize="11"/>
+                <ComboBox x:Name="LadderServerPinComboBox" HorizontalAlignment="Stretch" FontSize="12" SelectionChanged="OnLadderServerPinSelectionChanged">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate x:DataType="httpModels:LobbyServerChoice">
+                      <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis"/>
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
               </StackPanel></StackPanel>
           </Border>
         </Expander></Border>

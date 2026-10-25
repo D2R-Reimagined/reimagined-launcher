@@ -1445,7 +1445,11 @@ public partial class LaunchView : UserControl
         return selections.GetValueOrDefault(ladderId.ToString("N"));
     }
 
-    private static string? GetPinnedLadderServer(Guid ladderId) => null;
+    private static string? GetPinnedLadderServer(Guid ladderId)
+    {
+        var pins = MainWindow.Settings.CurrentProfile.PinnedLadderServers ??= [];
+        return pins.GetValueOrDefault(ladderId.ToString("N"));
+    }
 
     /// <summary>
     /// The lobby preference handed to the plugin. Bounded so it never holds the
@@ -1509,10 +1513,11 @@ public partial class LaunchView : UserControl
         }
     }
 
+    private const int MaxDisplayedProblemsPerCategory = 5;
+
     private void ShowLadderBundleReadiness(LadderBundleReadiness readiness)
     {
         LadderBundleProblemsPanel.Children.Clear();
-        LadderBundleProblemsPanel.IsVisible = readiness.Problems.Count > 0;
         LadderBundleStatusText.Text = readiness.Problems.Count == 0
             ? readiness.Status
             : !readiness.IsInstalled && readiness.CanRepair
@@ -1521,6 +1526,13 @@ public partial class LaunchView : UserControl
                     ? "Ladder package needs attention. Update it before launching."
                     : "Ladder launch is blocked. Resolve the issues below.";
 
+        if (readiness.Problems.Count == 0 || (!readiness.IsInstalled && readiness.CanRepair))
+        {
+            LadderBundleProblemsPanel.IsVisible = false;
+            return;
+        }
+
+        LadderBundleProblemsPanel.IsVisible = true;
         var categories = new[]
         {
             (Suffix: " was modified after installation.", Title: "Modified files"),
@@ -1540,14 +1552,15 @@ public partial class LaunchView : UserControl
 
         foreach (var group in groups)
         {
+            var items = group.ToArray();
             var section = new StackPanel { Spacing = 4 };
             section.Children.Add(new TextBlock
             {
-                Text = $"{group.Key} ({group.Count()})",
+                Text = $"{group.Key} ({items.Length})",
                 FontWeight = FontWeight.SemiBold,
                 TextWrapping = TextWrapping.Wrap
             });
-            foreach (var problem in group)
+            foreach (var problem in items.Take(MaxDisplayedProblemsPerCategory))
             {
                 var row = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), ColumnSpacing = 8 };
                 row.Children.Add(new TextBlock { Text = "•", Classes = { "muted" } });
@@ -1556,6 +1569,16 @@ public partial class LaunchView : UserControl
                 Grid.SetColumn(label, 1);
                 row.Children.Add(label);
                 section.Children.Add(row);
+            }
+            if (items.Length > MaxDisplayedProblemsPerCategory)
+            {
+                section.Children.Add(new TextBlock
+                {
+                    Text = $"+ {items.Length - MaxDisplayedProblemsPerCategory} more…",
+                    Classes = { "muted" },
+                    FontSize = 12,
+                    Margin = new Avalonia.Thickness(14, 0, 0, 0)
+                });
             }
             LadderBundleProblemsPanel.Children.Add(section);
         }
@@ -3074,7 +3097,7 @@ public partial class LaunchView : UserControl
         {
             try
             {
-                if (serverSaves is not null)
+                if (serverSaves is not null && !gameExitConfirmed)
                 {
                     await ServerSaveSessionMonitor.WaitForInactiveAsync(
                         () => ServerSaveStatus.ReadAsync(serverSaves, CancellationToken.None),
