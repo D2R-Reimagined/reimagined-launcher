@@ -310,30 +310,42 @@ public sealed class SaveConversionService
         plan.State is SaveConversionState.Verified or SaveConversionState.VerifiedWithWarnings
         || plan is { State: SaveConversionState.Unresolved, ForceOption.Kind: SaveForceKind.ChooseSourceLayout };
 
-    internal static string AutomaticPromptKey(InstallationProfile profile, string targetFingerprint) =>
-        $"{AutomaticPromptDirectory(profile.InstallDirectory)}|{targetFingerprint}";
+    internal static string AutomaticPromptKey(InstallationProfile profile, string saveDirectory,
+        string targetFingerprint) =>
+        $"{AutomaticPromptDirectory(profile.InstallDirectory)}|{AutomaticPromptDirectory(saveDirectory)}|{targetFingerprint}";
 
-    private static string AutomaticPromptDirectory(string? installDirectory) =>
-        Path.TrimEndingDirectorySeparator(installDirectory?.Trim() ?? string.Empty);
+    private static string AutomaticPromptDirectory(string? directory) =>
+        Path.TrimEndingDirectorySeparator(directory?.Trim() ?? string.Empty);
 
-    /// <summary>True when the profile still points at the install directory captured before an automatic check began.</summary>
-    internal static bool IsAnalyzedInstallation(InstallationProfile profile, string? analyzedInstallDirectory) =>
-        AutomaticPromptDirectory(profile.InstallDirectory) == AutomaticPromptDirectory(analyzedInstallDirectory);
+    /// <summary>
+    /// True when the profile still points at the install directory and effective offline save folder captured before an automatic check began.
+    /// </summary>
+    internal static bool IsAnalyzedInstallation(InstallationProfile profile, string? analyzedInstallDirectory,
+        string analyzedSaveDirectory) =>
+        AutomaticPromptDirectory(profile.InstallDirectory) == AutomaticPromptDirectory(analyzedInstallDirectory)
+        && AutomaticPromptDirectory(ResolveOfflineSaveDirectory(profile)) == AutomaticPromptDirectory(analyzedSaveDirectory);
 
-    /// <summary>True when the automatic prompt already opened for this profile's installation and installed target data.</summary>
-    internal static bool WasAutomaticPromptShown(InstallationProfile profile, string targetFingerprint) =>
-        profile.SaveConversionPromptKey == AutomaticPromptKey(profile, targetFingerprint);
+    /// <summary>True when the automatic prompt already opened for this profile's installation, save folder and installed target data.</summary>
+    internal static bool WasAutomaticPromptShown(InstallationProfile profile, string saveDirectory,
+        string targetFingerprint) =>
+        profile.SaveConversionPromptKey == AutomaticPromptKey(profile, saveDirectory, targetFingerprint);
 
-    /// <summary>Records the prompt unless the profile has moved away from <paramref name="analyzedInstallDirectory"/>.</summary>
+    /// <summary>
+    /// Records the prompt only when the window analyzed the same installed target and still lists a save that needs conversion.
+    /// A failed initialization (no <paramref name="shownTargetFingerprint"/>) or a profile that moved away from the analyzed
+    /// installation or save folder records nothing.
+    /// </summary>
     internal static bool RecordAutomaticPromptShown(InstallationProfile profile, string? analyzedInstallDirectory,
-        string targetFingerprint)
+        string analyzedSaveDirectory, string targetFingerprint, string? shownTargetFingerprint,
+        IEnumerable<SaveConversionPlan> shownPlans)
     {
-        if (!IsAnalyzedInstallation(profile, analyzedInstallDirectory))
+        if (shownTargetFingerprint != targetFingerprint || !shownPlans.Any(NeedsConversion) ||
+            !IsAnalyzedInstallation(profile, analyzedInstallDirectory, analyzedSaveDirectory))
         {
             return false;
         }
 
-        profile.SaveConversionPromptKey = AutomaticPromptKey(profile, targetFingerprint);
+        profile.SaveConversionPromptKey = AutomaticPromptKey(profile, analyzedSaveDirectory, targetFingerprint);
         return true;
     }
 
@@ -346,25 +358,35 @@ public sealed class SaveConversionService
 
     /// <summary>
     /// Checks the offline saves of <paramref name="profile"/> against the installed normal Reimagined data.
-    /// Blocking; call it off the UI thread. Returns no files and no fingerprint when there is nothing to analyze.
+    /// Blocking; call it off the UI thread. Returns no files and no fingerprint when there is nothing to analyze, and skips
+    /// planning when the automatic prompt was already shown for this installation, save folder and installed target.
     /// </summary>
-    internal static (IReadOnlyList<string> Files, string? TargetFingerprint) FindOfflineSavesNeedingConversion(
-        InstallationProfile profile)
+    /// <param name="findSaves">Replaces <see cref="FindSavesNeedingConversion"/>; tests use it to observe planning.</param>
+    internal static (IReadOnlyList<string> Files, string? TargetFingerprint, string SaveDirectory, bool PromptAlreadyShown)
+        FindOfflineSavesNeedingConversion(InstallationProfile profile,
+            Func<SaveConversionService, string, string, IReadOnlyList<string>>? findSaves = null)
     {
         var saveDirectory = ResolveOfflineSaveDirectory(profile);
         if (DiscoverSaveFiles(saveDirectory).Count == 0 || FindNormalModInfo(profile) is null)
         {
-            return ([], null);
+            return ([], null, saveDirectory, false);
         }
 
-        var registry = SaveCheckpointRegistry.Load(DefaultDataDirectory);
         var staging = Path.Combine(Path.GetTempPath(), "ReimaginedSaveConversion", Guid.NewGuid().ToString("N"));
         try
         {
             var installedTarget = LoadInstalledTarget(profile, Path.Combine(staging, "installed-target"));
-            var files = CreateForInstalledTarget(registry, installedTarget)
-                .FindSavesNeedingConversion(saveDirectory, Path.Combine(staging, "plans"));
-            return (files, installedTarget.Fingerprint);
+            if (WasAutomaticPromptShown(profile, saveDirectory, installedTarget.Fingerprint))
+            {
+                return ([], installedTarget.Fingerprint, saveDirectory, true);
+            }
+
+            var service = CreateForInstalledTarget(SaveCheckpointRegistry.Load(DefaultDataDirectory), installedTarget);
+            var plans = Path.Combine(staging, "plans");
+            var files = findSaves is null
+                ? service.FindSavesNeedingConversion(saveDirectory, plans)
+                : findSaves(service, saveDirectory, plans);
+            return (files, installedTarget.Fingerprint, saveDirectory, false);
         }
         finally
         {

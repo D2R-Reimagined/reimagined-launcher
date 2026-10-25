@@ -27,7 +27,8 @@ public partial class SaveConversionWindow : Window
 
     private readonly string _saveDirectory;
     private readonly SaveCheckpointRegistry? _registry;
-    private readonly Func<bool>? _canStartPrompt;
+    private readonly Func<bool>? _isPromptCurrent;
+    private readonly Action<string?, IReadOnlyList<SaveConversionPlan>>? _promptShown;
     private SaveConversionService? _service;
     private bool _isBusy;
 
@@ -51,35 +52,48 @@ public partial class SaveConversionWindow : Window
         Opened += async (_, _) =>
         {
             // Dismiss a stale automatic prompt before initialization makes the window busy and uncloseable.
-            if (_canStartPrompt?.Invoke() == false)
+            if (_isPromptCurrent?.Invoke() == false)
             {
                 Close();
                 return;
             }
 
-            await InitializeConversionAsync();
+            var analyzedTarget = await InitializeConversionAsync();
+            if (_isPromptCurrent?.Invoke() == false)
+            {
+                Close();
+                return;
+            }
+
+            _promptShown?.Invoke(analyzedTarget, _rows.Select(row => row.BasePlan).ToList());
         };
         Closing += (_, args) => args.Cancel = _isBusy;
         Closed += (_, _) => DeleteStagingDirectory();
     }
 
     /// <param name="promptMessage">Why the launcher opened this window on its own, shown above the description.</param>
-    /// <param name="canStartPrompt">Checked once the window opens, before analysis starts; false closes it untouched.</param>
-    public SaveConversionWindow(string promptMessage, Func<bool>? canStartPrompt = null) : this()
+    /// <param name="isPromptCurrent">Checked before and after initialization; false closes the window without reporting it as shown.</param>
+    /// <param name="promptShown">
+    /// Called after initialization with the analyzed installed target fingerprint (null when initialization failed) and the analyzed plans.
+    /// </param>
+    public SaveConversionWindow(string promptMessage, Func<bool>? isPromptCurrent = null,
+        Action<string?, IReadOnlyList<SaveConversionPlan>>? promptShown = null) : this()
     {
         PromptText.Text = promptMessage;
         PromptBanner.IsVisible = true;
-        _canStartPrompt = canStartPrompt;
+        _isPromptCurrent = isPromptCurrent;
+        _promptShown = promptShown;
     }
 
-    private async Task InitializeConversionAsync()
+    /// <returns>The installed target fingerprint once the saves were analyzed; null when initialization failed.</returns>
+    private async Task<string?> InitializeConversionAsync()
     {
         if (_registry is null)
         {
             ForceCheckBox.IsEnabled = false;
             ShowBanner(
                 "The bundled save layout registry could not be read, so saves cannot be analyzed. Reinstall the launcher.");
-            return;
+            return null;
         }
 
         var profile = MainWindow.Settings.CurrentProfile;
@@ -88,7 +102,7 @@ public partial class SaveConversionWindow : Window
             ForceCheckBox.IsEnabled = false;
             ShowBanner(
                 "Select a Diablo II: Resurrected installation profile with the normal Reimagined mod before converting saves. No saves were changed.");
-            return;
+            return null;
         }
 
         SetBusy(true, "Loading the installed Reimagined TXT files...");
@@ -102,6 +116,7 @@ public partial class SaveConversionWindow : Window
             _service = SaveConversionService.CreateForInstalledTarget(_registry, installedTarget);
             StatusBanner.IsVisible = false;
             await AnalyzeAsync(_service);
+            return installedTarget.Fingerprint;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
                                               or InvalidDataException or InvalidOperationException)
@@ -110,6 +125,7 @@ public partial class SaveConversionWindow : Window
             ForceCheckBox.IsEnabled = false;
             ShowBanner(exception.Message);
             UpdateSummary();
+            return null;
         }
         finally
         {

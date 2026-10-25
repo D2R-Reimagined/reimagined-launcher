@@ -21,6 +21,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Guid.NewGuid().ToString("N"));
 
     private bool _gameRunning;
+    private int _automaticPlanningRuns;
 
     private string SaveDirectory => Path.Combine(_root, "saves");
     private string StagingDirectory => Path.Combine(_root, "staging");
@@ -124,22 +125,25 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
     public void AutomaticPromptIsSuppressedOnlyForTheSameProfileInstallationAndTarget()
     {
         var install = Path.Combine(_root, "install");
-        var profile = new InstallationProfile { Type = InstallationType.BattleNet, InstallDirectory = install };
-        Assert.False(SaveConversionService.WasAutomaticPromptShown(profile, "target-a"));
+        var profile = new InstallationProfile
+            { Type = InstallationType.BattleNet, InstallDirectory = install, SaveDirectory = SaveDirectory };
+        Assert.False(SaveConversionService.WasAutomaticPromptShown(profile, SaveDirectory, "target-a"));
 
-        Assert.True(SaveConversionService.RecordAutomaticPromptShown(profile, install, "target-a"));
+        Assert.True(RecordShownPrompt(profile, install, "target-a"));
         var settings = new AppSettings { Profiles = [profile, new InstallationProfile { Type = InstallationType.Steam }] };
         var restored = System.Text.Json.JsonSerializer.Deserialize<AppSettings>(
             System.Text.Json.JsonSerializer.Serialize(settings))!;
         var restoredProfile = restored.Profiles[0];
 
-        Assert.True(SaveConversionService.WasAutomaticPromptShown(restoredProfile, "target-a"));
-        Assert.False(SaveConversionService.WasAutomaticPromptShown(restoredProfile, "target-b"));
+        Assert.True(SaveConversionService.WasAutomaticPromptShown(restoredProfile, SaveDirectory, "target-a"));
+        Assert.False(SaveConversionService.WasAutomaticPromptShown(restoredProfile, SaveDirectory, "target-b"));
+        Assert.False(SaveConversionService.WasAutomaticPromptShown(restoredProfile, Path.Combine(_root, "other-saves"),
+            "target-a"));
         var otherProfile = restored.Profiles[1];
         otherProfile.InstallDirectory = install;
-        Assert.False(SaveConversionService.WasAutomaticPromptShown(otherProfile, "target-a"));
+        Assert.False(SaveConversionService.WasAutomaticPromptShown(otherProfile, SaveDirectory, "target-a"));
         restoredProfile.InstallDirectory = Path.Combine(_root, "other-install");
-        Assert.False(SaveConversionService.WasAutomaticPromptShown(restoredProfile, "target-a"));
+        Assert.False(SaveConversionService.WasAutomaticPromptShown(restoredProfile, SaveDirectory, "target-a"));
     }
 
     [Fact]
@@ -147,11 +151,14 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
     {
         var install = Path.Combine(_root, "install");
         var profile = new InstallationProfile
-            { Type = InstallationType.BattleNet, InstallDirectory = install + Path.DirectorySeparatorChar };
+        {
+            Type = InstallationType.BattleNet, InstallDirectory = install + Path.DirectorySeparatorChar,
+            SaveDirectory = SaveDirectory + Path.DirectorySeparatorChar
+        };
 
-        Assert.True(SaveConversionService.IsAnalyzedInstallation(profile, $" {install} "));
-        Assert.True(SaveConversionService.RecordAutomaticPromptShown(profile, install, "target-a"));
-        Assert.True(SaveConversionService.WasAutomaticPromptShown(profile, "target-a"));
+        Assert.True(SaveConversionService.IsAnalyzedInstallation(profile, $" {install} ", SaveDirectory));
+        Assert.True(RecordShownPrompt(profile, install, "target-a"));
+        Assert.True(SaveConversionService.WasAutomaticPromptShown(profile, SaveDirectory, "target-a"));
     }
 
     [Fact]
@@ -159,31 +166,187 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
     {
         var analyzedInstall = Path.Combine(_root, "install");
         var newInstall = Path.Combine(_root, "other-install");
-        var profile = new InstallationProfile { Type = InstallationType.BattleNet, InstallDirectory = analyzedInstall };
-        Assert.True(SaveConversionService.RecordAutomaticPromptShown(profile, analyzedInstall, "target-a"));
+        var profile = new InstallationProfile
+            { Type = InstallationType.BattleNet, InstallDirectory = analyzedInstall, SaveDirectory = SaveDirectory };
+        Assert.True(RecordShownPrompt(profile, analyzedInstall, "target-a"));
         var previousKey = profile.SaveConversionPromptKey;
 
         profile.InstallDirectory = newInstall;
 
-        Assert.False(SaveConversionService.IsAnalyzedInstallation(profile, analyzedInstall));
-        Assert.False(SaveConversionService.RecordAutomaticPromptShown(profile, analyzedInstall, "target-b"));
+        Assert.False(SaveConversionService.IsAnalyzedInstallation(profile, analyzedInstall, SaveDirectory));
+        Assert.False(RecordShownPrompt(profile, analyzedInstall, "target-b"));
         Assert.Equal(previousKey, profile.SaveConversionPromptKey);
-        Assert.False(SaveConversionService.WasAutomaticPromptShown(profile, "target-a"));
-        Assert.False(SaveConversionService.WasAutomaticPromptShown(profile, "target-b"));
+        Assert.False(SaveConversionService.WasAutomaticPromptShown(profile, SaveDirectory, "target-a"));
+        Assert.False(SaveConversionService.WasAutomaticPromptShown(profile, SaveDirectory, "target-b"));
+    }
+
+    [Fact]
+    public void StaleAutomaticPromptCannotRecordSuppressionForAChangedSaveDirectory()
+    {
+        var install = Path.Combine(_root, "install");
+        var profile = new InstallationProfile
+            { Type = InstallationType.BattleNet, InstallDirectory = install, SaveDirectory = SaveDirectory };
+
+        profile.SaveDirectory = Path.Combine(_root, "other-saves");
+
+        Assert.False(SaveConversionService.IsAnalyzedInstallation(profile, install, SaveDirectory));
+        Assert.False(RecordShownPrompt(profile, install, "target-a"));
+        Assert.Null(profile.SaveConversionPromptKey);
+    }
+
+    [Fact]
+    public void FailedOrEmptyAutomaticPromptInitializationRecordsNothing()
+    {
+        var install = Path.Combine(_root, "install");
+        var profile = new InstallationProfile
+            { Type = InstallationType.BattleNet, InstallDirectory = install, SaveDirectory = SaveDirectory };
+
+        Assert.False(SaveConversionService.RecordAutomaticPromptShown(profile, install, SaveDirectory, "target-a",
+            null, []));
+        Assert.False(SaveConversionService.RecordAutomaticPromptShown(profile, install, SaveDirectory, "target-a",
+            "target-b", [StubPlan(SaveConversionState.Verified)]));
+        Assert.False(SaveConversionService.RecordAutomaticPromptShown(profile, install, SaveDirectory, "target-a",
+            "target-a", []));
+        Assert.False(SaveConversionService.RecordAutomaticPromptShown(profile, install, SaveDirectory, "target-a",
+            "target-a", [StubPlan(SaveConversionState.AlreadyCompatible), StubPlan(SaveConversionState.Blocked)]));
+        Assert.Null(profile.SaveConversionPromptKey);
+        Assert.False(SaveConversionService.WasAutomaticPromptShown(profile, SaveDirectory, "target-a"));
+
+        Assert.True(RecordShownPrompt(profile, install, "target-a"));
+        Assert.True(SaveConversionService.WasAutomaticPromptShown(profile, SaveDirectory, "target-a"));
+    }
+
+    [Fact]
+    public void ShownAutomaticPromptSkipsReplanningAfterARestartWithUnchangedSettings()
+    {
+        var profile = CreateAutomaticCheckProfile(SaveMigrationFixtures.InstalledDirectory);
+        var outdated = CopyFixture("BruhII.d2s");
+        CopyFixture("FuckBenFuckingF.d2s");
+        var damaged = CopyFixture("Popsicle.d2s");
+        var damagedBytes = File.ReadAllBytes(damaged);
+        damagedBytes[12] ^= 0x5A;
+        File.WriteAllBytes(damaged, damagedBytes);
+        File.WriteAllBytes(Path.Combine(SaveDirectory, "LilSorcy.d2s"), new byte[9008]);
+        var originals = Directory.GetFiles(SaveDirectory).ToDictionary(path => path, File.ReadAllBytes);
+        var backupsBefore = CountFiles(SaveConversionService.DefaultBackupRoot);
+
+        var first = CheckAutomatically(profile);
+
+        Assert.Equal(1, _automaticPlanningRuns);
+        Assert.Equal(new[] { outdated }, first.Files);
+        Assert.False(first.PromptAlreadyShown);
+        Assert.Equal(SaveDirectory, first.SaveDirectory);
+        Assert.NotNull(first.TargetFingerprint);
+        Assert.False(SaveConversionService.RecordAutomaticPromptShown(profile, profile.InstallDirectory, SaveDirectory,
+            first.TargetFingerprint, null, []));
+        Assert.Equal(new[] { outdated }, CheckAutomatically(profile).Files);
+        Assert.Equal(2, _automaticPlanningRuns);
+
+        Assert.True(RecordShownPrompt(profile, profile.InstallDirectory, first.TargetFingerprint));
+        var restored = System.Text.Json.JsonSerializer.Deserialize<AppSettings>(
+            System.Text.Json.JsonSerializer.Serialize(new AppSettings { Profiles = [profile] }))!.Profiles[0];
+        var afterRestart = CheckAutomatically(restored);
+
+        Assert.Equal(2, _automaticPlanningRuns);
+        Assert.True(afterRestart.PromptAlreadyShown);
+        Assert.Empty(afterRestart.Files);
+        Assert.Equal(first.TargetFingerprint, afterRestart.TargetFingerprint);
+        Assert.Equal(originals.Keys.Order(), Directory.GetFiles(SaveDirectory).Order());
+        foreach (var (path, bytes) in originals)
+        {
+            Assert.Equal(bytes, File.ReadAllBytes(path));
+        }
+
+        Assert.Equal(backupsBefore, CountFiles(SaveConversionService.DefaultBackupRoot));
+        Assert.False(Directory.Exists(BackupRoot));
+    }
+
+    [Fact]
+    public void ChangedInstalledTargetPermitsANewAutomaticPrompt()
+    {
+        var profile = CreateAutomaticCheckProfile(SaveMigrationFixtures.InstalledDirectory);
+        var outdated = CopyFixture("BruhII.d2s");
+        var first = CheckAutomatically(profile);
+        Assert.True(RecordShownPrompt(profile, profile.InstallDirectory, first.TargetFingerprint!));
+
+        var excel = SaveConversionService.ResolveInstalledExcelDirectory(profile);
+        var uniqueItems = Path.Combine(excel, "uniqueitems.txt");
+        var lines = File.ReadAllLines(uniqueItems, System.Text.Encoding.Latin1);
+        var rarity = Array.IndexOf(lines[0].Split('\t'), "rarity");
+        var cells = lines[1].Split('\t');
+        cells[rarity] = cells[rarity] == "1" ? "2" : "1";
+        lines[1] = string.Join('\t', cells);
+        File.WriteAllLines(uniqueItems, lines, System.Text.Encoding.Latin1);
+        var changed = CheckAutomatically(profile);
+
+        Assert.Equal(2, _automaticPlanningRuns);
+        Assert.False(changed.PromptAlreadyShown);
+        Assert.NotEqual(first.TargetFingerprint, changed.TargetFingerprint);
+        Assert.Equal(new[] { outdated }, changed.Files);
+    }
+
+    [Fact]
+    public void ChangedOfflineSaveDirectoryPermitsANewAutomaticPrompt()
+    {
+        var profile = CreateAutomaticCheckProfile(SaveMigrationFixtures.InstalledDirectory);
+        CopyFixture("BruhII.d2s");
+        var first = CheckAutomatically(profile);
+        Assert.True(RecordShownPrompt(profile, profile.InstallDirectory, first.TargetFingerprint!));
+
+        var otherSaves = Path.Combine(_root, "other-saves");
+        Directory.CreateDirectory(otherSaves);
+        var otherOutdated = Path.Combine(otherSaves, "WereSorc.d2s");
+        File.Copy(FixturePath("WereSorc.d2s"), otherOutdated);
+        profile.SaveDirectory = otherSaves;
+        var moved = CheckAutomatically(profile);
+
+        Assert.Equal(2, _automaticPlanningRuns);
+        Assert.False(moved.PromptAlreadyShown);
+        Assert.Equal(first.TargetFingerprint, moved.TargetFingerprint);
+        Assert.Equal(otherSaves, moved.SaveDirectory);
+        Assert.Equal(new[] { otherOutdated }, moved.Files);
+        Assert.False(SaveConversionService.IsAnalyzedInstallation(profile, profile.InstallDirectory, SaveDirectory));
+        Assert.True(SaveConversionService.IsAnalyzedInstallation(profile, profile.InstallDirectory, otherSaves));
+    }
+
+    [Fact]
+    public void AutomaticCheckAgainstAnInstalledReleaseIgnoresCompatibleAndBlockedSaves()
+    {
+        var profile = CreateAutomaticCheckProfile(SaveMigrationFixtures.ReleaseDirectory("reimagined-3.0.12"));
+        string[] fixtures =
+        [
+            "Popsicle.d2s", "basetolabpr.d2s", "ModernSharedStashSoftCoreV2.d2i", "BonesMcPimp.d2s",
+            "FuckBenFuckingF.d2s", "SoManyBones.d2s"
+        ];
+        var originals = fixtures.Select(CopyFixture).ToDictionary(path => path, File.ReadAllBytes);
+
+        var result = CheckAutomatically(profile);
+
+        Assert.Equal(1, _automaticPlanningRuns);
+        Assert.False(result.PromptAlreadyShown);
+        Assert.NotNull(result.TargetFingerprint);
+        Assert.Empty(result.Files);
+        foreach (var (path, bytes) in originals)
+        {
+            Assert.Equal(bytes, File.ReadAllBytes(path));
+        }
     }
 
     [Fact]
     public void AutomaticPromptSuppressionDoesNotAffectManualConversion()
     {
         var profile = new InstallationProfile
-            { Type = InstallationType.BattleNet, InstallDirectory = Path.Combine(_root, "install") };
-        Assert.True(SaveConversionService.RecordAutomaticPromptShown(profile, profile.InstallDirectory,
-            InstalledTarget.Value.Fingerprint));
+        {
+            Type = InstallationType.BattleNet, InstallDirectory = Path.Combine(_root, "install"),
+            SaveDirectory = SaveDirectory
+        };
+        Assert.True(RecordShownPrompt(profile, profile.InstallDirectory, InstalledTarget.Value.Fingerprint));
         var service = CreateService();
         var path = CopyFixture("BruhII.d2s");
         var original = File.ReadAllBytes(path);
 
-        Assert.True(SaveConversionService.WasAutomaticPromptShown(profile, InstalledTarget.Value.Fingerprint));
+        Assert.True(SaveConversionService.WasAutomaticPromptShown(profile, SaveDirectory,
+            InstalledTarget.Value.Fingerprint));
         Assert.Equal(new[] { path }, service.FindSavesNeedingConversion(SaveDirectory, StagingDirectory));
         var plan = service.Plan(path, Path.Combine(StagingDirectory, "manual"));
         Assert.Contains(plan.State, new[] { SaveConversionState.Verified, SaveConversionState.VerifiedWithWarnings });
@@ -997,6 +1160,45 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
             Directory.Delete(_root, recursive: true);
         }
     }
+
+    private bool RecordShownPrompt(InstallationProfile profile, string? analyzedInstallDirectory,
+        string targetFingerprint) =>
+        SaveConversionService.RecordAutomaticPromptShown(profile, analyzedInstallDirectory, SaveDirectory,
+            targetFingerprint, targetFingerprint, [StubPlan(SaveConversionState.Verified)]);
+
+    private SaveConversionPlan StubPlan(SaveConversionState state) => new()
+    {
+        SourcePath = Path.Combine(SaveDirectory, "Hero.d2s"),
+        Kind = SaveFileKind.Character,
+        State = state,
+        Operation = "",
+        Issues = [],
+        Report = "",
+        SourceSha256 = ""
+    };
+
+    /// <summary>A normal mod installation whose installed TXT files are copied from <paramref name="tablesDirectory"/>.</summary>
+    private InstallationProfile CreateAutomaticCheckProfile(string tablesDirectory)
+    {
+        var install = Path.Combine(_root, "install");
+        WriteModInfo(Path.Combine(install, "mods", "Reimagined"), "ReimaginedThree/");
+        var profile = new InstallationProfile
+            { Type = InstallationType.BattleNet, InstallDirectory = install, SaveDirectory = SaveDirectory };
+        SaveMigrationFixtures.CopyTables(tablesDirectory, SaveConversionService.ResolveInstalledExcelDirectory(profile));
+        return profile;
+    }
+
+    private (IReadOnlyList<string> Files, string? TargetFingerprint, string SaveDirectory, bool PromptAlreadyShown)
+        CheckAutomatically(InstallationProfile profile) =>
+        SaveConversionService.FindOfflineSavesNeedingConversion(profile, (service, saveDirectory, staging) =>
+        {
+            _automaticPlanningRuns++;
+            return service.FindSavesNeedingConversion(saveDirectory, staging);
+        });
+
+    private static int CountFiles(string directory) => Directory.Exists(directory)
+        ? Directory.GetFiles(directory, "*", SearchOption.AllDirectories).Length
+        : 0;
 
     private SaveConversionService CreateService(InstalledGameData? installedTarget = null) => new(
         () => installedTarget is null
