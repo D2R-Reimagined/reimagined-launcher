@@ -8,10 +8,27 @@ namespace ReimaginedLauncher.Utilities;
 public static partial class D2RLoaderService
 {
     internal static void SetDefaultMod(string installDirectory, LaunchExperience experience)
+        => UpdateLoaderConfig(installDirectory, existing => UpdateDefaultMod(existing, experience));
+
+    /// <summary>
+    /// D2RLoader's developer log details, which a d2rds reads back from the log to
+    /// report its environment to the lobby (no listing, no Host, without them).
+    /// The local d2rds rig turns them on; client and server share this file.
+    /// </summary>
+    internal static void EnableExtensionDetailLogs(string installDirectory)
+        => UpdateLoaderConfig(installDirectory, UpdateExtensionDetailLogs);
+
+    internal static string UpdateExtensionDetailLogs(string toml)
+    {
+        const string section = "d2rloader.developer.logs";
+        return UpdateTomlSetting(UpdateTomlSetting(toml, section, "enabled", "true"), section, "extension_details", "true");
+    }
+
+    private static void UpdateLoaderConfig(string installDirectory, Func<string, string> update)
     {
         var path = Path.Combine(installDirectory, "d2rloader", "config", "d2rloader.toml");
         var existing = File.Exists(path) ? File.ReadAllText(path) : string.Empty;
-        var updated = UpdateDefaultMod(existing, experience);
+        var updated = update(existing);
         if (updated == existing) return;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temporary = path + "." + Guid.NewGuid().ToString("N") + ".partial";
@@ -35,13 +52,16 @@ public static partial class D2RLoaderService
     }
 
     private static string UpdateLoaderSetting(string toml, string key, string value)
+        => UpdateTomlSetting(toml, "d2rloader", key, value);
+
+    private static string UpdateTomlSetting(string toml, string sectionName, string key, string value)
     {
         var newline = toml.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
         var assignment = $"{key} = {value}";
-        var section = Regex.Match(toml, @"(?m)^[ \t]*\[d2rloader\][ \t]*(?:#[^\r\n]*)?\r?$", RegexOptions.CultureInvariant);
+        var section = Regex.Match(toml, $@"(?m)^[ \t]*\[{Regex.Escape(sectionName)}\][ \t]*(?:#[^\r\n]*)?\r?$", RegexOptions.CultureInvariant);
         if (!section.Success)
             return toml + (toml.Length > 0 && !toml.EndsWith('\n') ? newline : string.Empty)
-                   + "[d2rloader]" + newline + assignment + newline;
+                   + $"[{sectionName}]" + newline + assignment + newline;
 
         var start = section.Index + section.Length - (section.Value.EndsWith('\r') ? 1 : 0);
         var nextSection = Regex.Match(toml[start..], @"(?m)^[ \t]*\[", RegexOptions.CultureInvariant);
