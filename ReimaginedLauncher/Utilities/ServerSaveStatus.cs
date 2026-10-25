@@ -53,18 +53,27 @@ public sealed record ServerSaveStatus(
         catch (UnauthorizedAccessException) { return null; }
     }
 
+    public bool IsDedicatedServerAuthoritative =>
+        Message.Contains("dedicated servers", StringComparison.OrdinalIgnoreCase);
+
     public ServerSaveStatusDisplay Describe(DateTimeOffset now, bool sessionEnded)
     {
         var stale = !sessionEnded && now - UpdatedAtUtc > TimeSpan.FromSeconds(45);
+        var unconfirmedExit = sessionEnded
+                              && (State is "pending" or "checking"
+                                  || (Running && (!IsDedicatedServerAuthoritative || State != "ready")));
         var warning = stale || State is "retrying" or "stopped" || !string.IsNullOrEmpty(RecoveryNotice)
-                      || sessionEnded && (Running || State is "pending" or "checking");
+                      || unconfirmedExit;
         var message = stale ? "Save status has not updated recently. Recent progress is not confirmed saved."
-            : sessionEnded && (Running || State is "pending" or "checking") && State != "stopped"
+            : unconfirmedExit && State != "stopped"
                 ? "The game closed without confirming its final save. Recovery may be needed on the next launch."
                 : Message;
         var characters = ConfirmedSaves.Where(save => save.FileName.EndsWith(".d2s", StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(save => save.LastSavedAtUtc).ToArray();
-        var confirmed = characters.Length == 0 ? "No character save was confirmed during this session."
+        var confirmed = characters.Length == 0
+            ? (IsDedicatedServerAuthoritative
+                ? "Character saves are managed directly by the dedicated servers."
+                : "No character save was confirmed during this session.")
             : "Last confirmed server saves:\n" + string.Join("\n", characters.Select(save =>
                 $"{Path.GetFileNameWithoutExtension(save.FileName)} — {save.LastSavedAtUtc.ToLocalTime():g} (v{save.Version})"));
         if (!string.IsNullOrEmpty(RecoveryNotice)) message += "\n" + RecoveryNotice;

@@ -11,6 +11,8 @@ public sealed class LobbyRegionChoice
     public string CompactName => Name switch
     {
         "North America East" => "NA East",
+        "North America East 1" => "NA East 1",
+        "North America East 2" => "NA East 2",
         "North America West" => "NA West",
         "Europe Central" => "EU Central",
         "Frankfurt Germany eu-2" => "Frankfurt",

@@ -79,6 +79,21 @@ public sealed class ServerSaveStatusTests
     }
 
     [Fact]
+    public void Dedicated_server_ladder_does_not_warn_about_missing_final_upload_on_exit()
+    {
+        var display = (Status("ready") with
+        {
+            Message = "This ladder saves on its dedicated servers. Local changes are not uploaded; the server's copies are used.",
+            Running = true,
+            ConfirmedSaves = []
+        }).Describe(Now, true);
+
+        Assert.False(display.Warning);
+        Assert.Contains("dedicated servers", display.Message);
+        Assert.Contains("dedicated servers", display.Confirmed);
+    }
+
+    [Fact]
     public void Recovery_notice_survives_a_healthy_new_session()
     {
         var display = (Status() with { RecoveryNotice = "Previous progress was retained for recovery." }).Describe(Now, false);

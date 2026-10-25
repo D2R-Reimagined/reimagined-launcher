@@ -730,6 +730,26 @@ public sealed class LadderBundleServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ReadinessTreatsDeletedLadderModDirectoryAsNotInstalledInsteadOfListingEveryFileAsMissing()
+    {
+        var fixture = CreateBundle(
+            ("announcements", "d2rl-announcements.dll", "announcement-code"u8.ToArray()),
+            ("levels", "levels.txt", "level-data"u8.ToArray()),
+            ("armor", "armor.txt", "armor-data"u8.ToArray()));
+        var service = CreateService(fixture.Archive);
+        await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
+        Directory.Delete(ModInstallationPaths.LadderModRoot(_installDirectory), recursive: true);
+
+        var readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
+
+        Assert.False(readiness.IsReady);
+        Assert.False(readiness.IsInstalled);
+        Assert.True(readiness.CanRepair);
+        Assert.Equal("Ladder bundle is not downloaded.", readiness.Status);
+        Assert.DoesNotContain(readiness.Problems, problem => problem.EndsWith(" is missing.", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task LegacyPluginOnlyBundlesCannotUseLocalModFiles()
     {
         var files = new[] { ("announcements", "d2rl-announcements.dll", "announcement-code"u8.ToArray()) };

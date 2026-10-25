@@ -112,11 +112,21 @@ public sealed class LadderBundleService(
         }
 
         var state = await ReadStateAsync(normalized, cancellationToken);
-        if (state is null)
+        var bundleDeclaresRootModInfo = bundle.Files.Any(file =>
+            string.Equals(file.TargetPath, "mods/Reimagined/Reimagined.mpq/modinfo.json", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(file.TargetPath, "mods/Reimagined/modinfo.json", StringComparison.OrdinalIgnoreCase));
+        var hasMpqFiles = bundle.Files.Any(file =>
+            file.TargetPath.StartsWith("mods/Reimagined/Reimagined.mpq/", StringComparison.OrdinalIgnoreCase));
+        var isInstalled = state is not null
+                          && Directory.Exists(ModInstallationPaths.LadderModRoot(normalized))
+                          && (!hasMpqFiles || Directory.Exists(Path.Combine(ModInstallationPaths.LadderModRoot(normalized), ModInstallationPaths.LadderModName + ".mpq")))
+                          && (!bundleDeclaresRootModInfo || ModInstallationPaths.FindLadderModInfo(normalized) is not null)
+                          && bundle.Files.Any(file => File.Exists(ResolveTargetPath(normalized, file.TargetPath)));
+        if (!isInstalled)
         {
             problems.Add("Ladder bundle is not downloaded.");
         }
-        else if (state.BundleId != bundle.Id
+        else if (state!.BundleId != bundle.Id
                  || state.Revision != bundle.Revision
                  || !string.Equals(state.ArtifactSha256, bundle.ArtifactSha256, StringComparison.OrdinalIgnoreCase)
                  || !string.Equals(state.ManifestSha256, bundle.ManifestSha256, StringComparison.OrdinalIgnoreCase))
@@ -211,10 +221,10 @@ public sealed class LadderBundleService(
         var canRepair = problems.All(problem => !problem.StartsWith("Launcher ", StringComparison.Ordinal)
                                                && !problem.StartsWith("D2R game", StringComparison.Ordinal)
                                                && !problem.StartsWith("No trusted", StringComparison.Ordinal));
-        var status = state is null && canRepair
+        var status = !isInstalled && canRepair
             ? "Ladder bundle is not downloaded."
             : string.Join(" ", problems);
-        return new LadderBundleReadiness(false, canRepair, status, problems, state is not null, requiresBundleRepair);
+        return new LadderBundleReadiness(false, canRepair, status, problems, isInstalled, requiresBundleRepair);
     }
 
     public async Task InstallOrRepairAsync(
