@@ -29,6 +29,7 @@ public partial class SaveConversionWindow : Window
     private readonly SaveCheckpointRegistry? _registry;
     private readonly Func<bool>? _isPromptCurrent;
     private readonly Action<string?, IReadOnlyList<SaveConversionPlan>>? _promptShown;
+    private readonly bool _isAutomaticPrompt;
     private SaveConversionService? _service;
     private bool _isBusy;
 
@@ -59,7 +60,8 @@ public partial class SaveConversionWindow : Window
             }
 
             var analyzedTarget = await InitializeConversionAsync();
-            if (_isPromptCurrent?.Invoke() == false)
+            if (_isPromptCurrent?.Invoke() == false || (_isAutomaticPrompt && (analyzedTarget is null ||
+                    !_rows.Any(row => SaveConversionService.NeedsConversion(row.BasePlan)))))
             {
                 Close();
                 return;
@@ -74,13 +76,15 @@ public partial class SaveConversionWindow : Window
     /// <param name="promptMessage">Why the launcher opened this window on its own, shown above the description.</param>
     /// <param name="isPromptCurrent">Checked before and after initialization; false closes the window without reporting it as shown.</param>
     /// <param name="promptShown">
-    /// Called after initialization with the analyzed installed target fingerprint (null when initialization failed) and the analyzed plans.
+    /// Called after initialization with the analyzed installed target fingerprint and the analyzed plans. A failed initialization,
+    /// or one that leaves no save needing conversion, closes the window without calling it.
     /// </param>
     public SaveConversionWindow(string promptMessage, Func<bool>? isPromptCurrent = null,
         Action<string?, IReadOnlyList<SaveConversionPlan>>? promptShown = null) : this()
     {
         PromptText.Text = promptMessage;
         PromptBanner.IsVisible = true;
+        _isAutomaticPrompt = true;
         _isPromptCurrent = isPromptCurrent;
         _promptShown = promptShown;
     }

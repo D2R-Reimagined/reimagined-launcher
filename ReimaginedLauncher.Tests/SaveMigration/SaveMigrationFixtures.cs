@@ -12,8 +12,7 @@ internal static class SaveMigrationFixtures
     public static string DataDirectory =>
         Path.Combine(RepositoryRoot, "ReimaginedLauncher", "Assets", "SaveMigrationData");
 
-    public static string InstalledDirectory => Path.Combine(RepositoryRoot, "ReimaginedLauncher.Tests", "TestFixtures",
-        "SaveMigration", "Installed 3.0.13 development");
+    public static string InstalledDirectory => Path.Combine(DataDirectory, "D2RR 3.1.0");
 
     public static InstalledGameData InstalledTarget => InstalledTargetValue.Value;
 
@@ -21,7 +20,7 @@ internal static class SaveMigrationFixtures
         Path.Combine(Path.GetTempPath(), "ReimaginedSaveMigrationData", Guid.NewGuid().ToString("N"));
 
     public static InstalledGameData LoadInstalled(string copyDirectory) =>
-        InstalledGameData.Load(InstalledDirectory, copyDirectory, "3.0.13 development");
+        InstalledGameData.Load(InstalledDirectory, copyDirectory, "3.1.0");
 
     public static void CopyInstalledTables(string directory) => CopyTables(InstalledDirectory, directory);
 

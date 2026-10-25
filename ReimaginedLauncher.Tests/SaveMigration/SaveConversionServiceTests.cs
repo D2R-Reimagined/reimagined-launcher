@@ -414,7 +414,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.Null(plan.ConvertedBytes);
         Assert.Contains("no historical source layout decoded the save", plan.Operation);
         Assert.Contains("Historical source detection", plan.Report);
-        Assert.Contains("Installed items with 3.0.13 development pre-swap stat encoding: rejected", plan.Report);
+        Assert.Contains("Installed items with 3.1.0 development pre-swap stat encoding: rejected", plan.Report);
         Assert.Contains("wrong bit widths", plan.Report);
         Assert.Contains("No conversion was required or attempted", plan.Report);
         Assert.DoesNotContain("Status: FAILED", plan.Report);
@@ -838,6 +838,8 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
             testOutput.WriteLine($"{row.FileName}: {row.StatusLabel} - {row.Explanation}");
         }
 
+        Assert.Equal("3.0.12", SaveConversionService.CreateForInstalledTarget(SaveMigrationFixtures.LoadRegistry(),
+            InstalledTarget.Value, BackupRoot).DefaultSourceLayout);
         Assert.Equal(["2.1.2", "3.0.12 with installed appended stats"], plans.Take(2).Select(plan => plan.SourceLabel));
         Assert.All(rows, row => Assert.False(row.IsSourceUncertain));
         Assert.Equal([true, true, false], rows.Select(row => row.IsSelected));
@@ -950,7 +952,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         var original = File.ReadAllBytes(path);
 
         var error = Assert.Throws<InvalidDataException>(() =>
-            InstalledGameData.Load(sourceDirectory, Path.Combine(_root, "copy"), "3.0.13"));
+            InstalledGameData.Load(sourceDirectory, Path.Combine(_root, "copy"), "3.1.0"));
 
         Assert.Contains("misc.txt", error.Message);
         Assert.Contains("No saves were changed", error.Message);
@@ -965,7 +967,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         var baseline = CreateService().Plan(path, Path.Combine(StagingDirectory, "baseline"));
         var sourceDirectory = CopyInstalledFixtureToCustomDirectory();
         SetTableCell(Path.Combine(sourceDirectory, "itemstatcost.txt"), "Stat", "hpregen_perlevel", "Save Bits", "9");
-        var changedTarget = InstalledGameData.Load(sourceDirectory, Path.Combine(_root, "changed-copy"), "3.0.13");
+        var changedTarget = InstalledGameData.Load(sourceDirectory, Path.Combine(_root, "changed-copy"), "3.1.0");
         var changed = CreateService(changedTarget).Plan(path, Path.Combine(StagingDirectory, "changed"));
 
         Assert.NotNull(baseline.ConvertedBytes);
@@ -981,7 +983,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
     {
         var sourceDirectory = CopyInstalledFixtureToCustomDirectory();
         InsertUniqueBefore(Path.Combine(sourceDirectory, "uniqueitems.txt"), "Life and Death");
-        var changedTarget = InstalledGameData.Load(sourceDirectory, Path.Combine(_root, "changed-copy"), "3.0.13");
+        var changedTarget = InstalledGameData.Load(sourceDirectory, Path.Combine(_root, "changed-copy"), "3.1.0");
         var path = CopyFixture("BruhII.d2s");
         var result = SaveMigrationFixtures.CreateMigrator(changedTarget)
             .Migrate(path, Path.Combine(StagingDirectory, "shifted-unique"));
@@ -995,7 +997,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
     public void InstalledTargetChangeAfterAnalysisRequiresReanalysisBeforeBackupOrWrite()
     {
         var sourceDirectory = CopyInstalledFixtureToCustomDirectory();
-        var target = InstalledGameData.Load(sourceDirectory, Path.Combine(_root, "stale-copy"), "3.0.13");
+        var target = InstalledGameData.Load(sourceDirectory, Path.Combine(_root, "stale-copy"), "3.1.0");
         var service = CreateService(target);
         var path = CopyFixture("BruhII.d2s");
         var original = File.ReadAllBytes(path);
@@ -1085,7 +1087,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         // BonesMcPimp carries lab_boss_kill, which only the newer development layouts define: it is refused as a downgrade.
         var bones = service.Plan(Path.Combine(SaveDirectory, "BonesMcPimp.d2s"), Path.Combine(StagingDirectory, "bones"),
             new MigrationOverrides(Force: true));
-        Assert.Contains("newer game data (3.0.12 with 3.0.13 development pre-swap appended stats)", bones.BlockingReason);
+        Assert.Contains("newer game data (3.0.12 with 3.1.0 development pre-swap appended stats)", bones.BlockingReason);
         Assert.Contains("only converted to newer game data", bones.BlockingReason);
         Assert.Empty(Directory.GetFiles(BackupRoot, "*", SearchOption.AllDirectories));
     }
@@ -1117,6 +1119,43 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
 
         var stash = CopyFixture("ModernSharedStashSoftCoreV2.d2i");
         Assert.Contains(stash, service.FindSavesNeedingConversion(SaveDirectory, Path.Combine(StagingDirectory, "all")));
+    }
+
+    [Fact]
+    public void StatsAppendedAfterThe310CheckpointNeedNoNewCheckpoint()
+    {
+        var directory = CopyInstalledFixtureToCustomDirectory();
+        AppendStat(Path.Combine(directory, "itemstatcost.txt"), "appended_after_310");
+        var installed = InstalledGameData.Load(directory, Path.Combine(_root, "appended-copy"), "3.1.1");
+        var migrator = SaveMigrationFixtures.CreateMigrator(installed);
+        Assert.Contains("3.1.0", migrator.SourceLayouts);
+        Assert.Contains("3.0.12 with installed appended stats", migrator.SourceLayouts);
+        Assert.Empty(migrator.NewerLayouts);
+
+        var service = CreateService(installed);
+        var compatible = CopyFixture("FuckBenFuckingF.d2s");
+        var original = File.ReadAllBytes(compatible);
+        var plan = service.Plan(compatible, Path.Combine(StagingDirectory, "compatible"));
+        Log(plan);
+        Assert.Equal(SaveConversionState.AlreadyCompatible, plan.State);
+        Assert.False(SaveConversionService.NeedsConversion(plan));
+
+        foreach (var (fixture, source) in new[]
+                 {
+                     ("Popsicle.d2s", "3.0.12"), ("BruhII.d2s", "2.1.2"),
+                     ("BonesMcPimp.d2s", "3.0.12 with installed appended stats")
+                 })
+        {
+            var older = service.Plan(CopyFixture(fixture), Path.Combine(StagingDirectory, fixture));
+            Log(older);
+            Assert.Equal(source, older.SourceLabel);
+            Assert.True(SaveConversionService.NeedsConversion(older));
+        }
+
+        Assert.DoesNotContain(compatible,
+            service.FindSavesNeedingConversion(SaveDirectory, Path.Combine(StagingDirectory, "all")));
+        Assert.Equal(original, File.ReadAllBytes(compatible));
+        Assert.False(Directory.Exists(BackupRoot));
     }
 
     [Fact]
@@ -1233,6 +1272,20 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         cells[valueIndex] = value;
         lines[rowIndex] = string.Join('\t', cells);
         File.WriteAllLines(path, lines, System.Text.Encoding.Latin1);
+    }
+
+    private static void AppendStat(string path, string key)
+    {
+        var lines = File.ReadAllLines(path, System.Text.Encoding.Latin1);
+        var headers = lines[0].Split('\t');
+        var cells = lines[^1].Split('\t');
+        cells[Array.IndexOf(headers, "Stat")] = key;
+        if (Array.IndexOf(headers, "*ID") is var idIndex and >= 0)
+        {
+            cells[idIndex] = (lines.Length - 1).ToString();
+        }
+
+        File.WriteAllLines(path, lines.Append(string.Join('\t', cells)), System.Text.Encoding.Latin1);
     }
 
     private static void InsertUniqueBefore(string path, string key)

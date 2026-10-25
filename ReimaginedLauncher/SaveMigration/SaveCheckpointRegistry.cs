@@ -177,13 +177,16 @@ public sealed record SaveCheckpointRegistry(
 
     /// <summary>
     /// The chronological position of game data that matches no checkpoint exactly: the order of the newest registered layout
-    /// whose newly introduced stats it all defines. A layout that introduced no stat cannot be established this way.
+    /// whose newly introduced stats it all defines, or that it extends append-only by keeping every stat at its saved id.
     /// Null when no layout is established.
     /// </summary>
     public int? EstablishedOrderOf(IReadOnlyList<TableDefinition> stats)
     {
         var defined = stats.Where(stat => !stat.IsPlaceholder).Select(stat => stat.Key)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var keyBySaveId = stats.Where(stat => stat is { IsPlaceholder: false, SaveId: not null })
+            .GroupBy(stat => stat.SaveId!.Value)
+            .ToDictionary(group => group.Key, group => group.First().Key);
         var layouts = Checkpoints
             .Select(checkpoint => (checkpoint.Order,
                 Path: Path.Combine(PathOf(checkpoint.Directory), TableSchema.FileName(TableKind.ItemStatCost))))
@@ -193,10 +196,14 @@ public sealed record SaveCheckpointRegistry(
         int? established = null;
         foreach (var (order, path) in layouts)
         {
-            var keys = TableSchema.Extract(TableKind.ItemStatCost, TableSnapshot.Load(path))
-                .Where(stat => !stat.IsPlaceholder).Select(stat => stat.Key).ToList();
+            var layoutStats = TableSchema.Extract(TableKind.ItemStatCost, TableSnapshot.Load(path))
+                .Where(stat => !stat.IsPlaceholder).ToList();
+            var keys = layoutStats.Select(stat => stat.Key).ToList();
             var introduced = keys.Where(key => !earlier.Contains(key)).ToList();
-            if (introduced.Count > 0 && introduced.All(defined.Contains))
+            var keptAtSavedIds = layoutStats.All(stat => stat.SaveId is { } id
+                                                         && keyBySaveId.TryGetValue(id, out var key)
+                                                         && key.Equals(stat.Key, StringComparison.OrdinalIgnoreCase));
+            if ((introduced.Count > 0 && introduced.All(defined.Contains)) || keptAtSavedIds)
             {
                 established = order;
             }

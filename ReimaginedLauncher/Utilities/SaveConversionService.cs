@@ -195,7 +195,9 @@ public sealed class SaveConversionService
         () => SaveMigrator.ForInstalledTarget(registry, installedTarget),
         backupRoot ?? DefaultBackupRoot,
         isGameRunning ?? MainWindow.IsGameRunning,
-        registry.LatestCheckpoint?.Label,
+        registry.Checkpoints
+            .Where(checkpoint => !installedTarget.HasSameTables(registry.PathOf(checkpoint.Directory)))
+            .MaxBy(checkpoint => checkpoint.Order)?.Label,
         installedTarget);
 
     /// <summary>The modinfo.json version of the normal (offline) Reimagined mod, using the same folders as the save path.</summary>

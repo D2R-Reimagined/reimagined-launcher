@@ -44,7 +44,7 @@ public sealed class SaveMigrationTests(ITestOutputHelper testOutput)
         const string sourceLabel = "3.0.12 with installed appended stats";
         Assert.Equal(sourceLabel, result.SourceLayout);
         Assert.Contains(result.Identification, line =>
-            line.Contains("Installed items with 3.0.13 development pre-swap stat encoding: rejected",
+            line.Contains("Installed items with 3.1.0 development pre-swap stat encoding: rejected",
                 StringComparison.Ordinal));
         AssertLogicalValuesPreserved("BonesMcPimp.d2s", SaveDataDefinition.WithAppendedStats(sourceLabel,
             KnownSnapshots.Reimagined3012.Load(DataDirectory), SaveMigrationFixtures.InstalledTarget.Snapshot), save);

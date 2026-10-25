@@ -71,18 +71,20 @@ public sealed class SaveMigrator
             .Select(checkpoint => Release(checkpoint))
             .ToList();
 
-        if (matchingCheckpoint is null && registry.LatestCheckpoint is { } latest
-                                       && targetOrder > latest.Order)
+        // Development saves made before the newest release keep the previous release's stats with the target's appended ones.
+        var previous = registry.Checkpoints.Where(checkpoint => checkpoint.Order < targetOrder)
+            .MaxBy(checkpoint => checkpoint.Order);
+        if (previous is not null && targetOrder >= registry.LatestCheckpoint!.Order)
         {
-            var release = Snapshot(latest.Label, latest.Directory);
+            var release = Snapshot(previous.Label, previous.Directory);
             if (targetStats.Count > TableSchema.Extract(TableKind.ItemStatCost, release[TableKind.ItemStatCost]).Count)
             {
                 sources.Add(SaveDataDefinition.WithAppendedStats(
-                        $"{latest.Label} with installed appended stats", release, targetTables)
-                    .WithCharacterVersions(latest.CharacterVersions));
+                        $"{previous.Label} with installed appended stats", release, targetTables)
+                    .WithCharacterVersions(previous.CharacterVersions));
                 sources.Add(SaveDataDefinition.WithAppendedStats(
-                        $"Installed items with {latest.Label} stat encoding", release, targetTables, targetTables)
-                    .WithCharacterVersions(latest.CharacterVersions));
+                        $"Installed items with {previous.Label} stat encoding", release, targetTables, targetTables)
+                    .WithCharacterVersions(previous.CharacterVersions));
             }
         }
 
@@ -438,7 +440,7 @@ public sealed class SaveMigrator
             {
                 var available = string.Join(", ", owner._sources.Select(source => source.Label));
                 _blockers.Add($"No available source layout can decode this file (tried: {available}). "
-                              + "It may require definitions outside the frozen 2.1.2/3.0.12 data and the installed Reimagined mod; no mapping was guessed.");
+                              + "It may require definitions outside the frozen 2.1.2/3.0.12/3.1.0 data and the installed Reimagined mod; no mapping was guessed.");
                 return null;
             }
 

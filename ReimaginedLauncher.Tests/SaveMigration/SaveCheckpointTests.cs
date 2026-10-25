@@ -10,12 +10,14 @@ public sealed class SaveCheckpointTests
     {
         var registry = SaveMigrationFixtures.LoadRegistry();
 
-        Assert.Equal(["reimagined-2.1.2", "reimagined-3.0.12"],
+        Assert.Equal(["reimagined-2.1.2", "reimagined-3.0.12", "reimagined-3.1.0"],
             registry.Checkpoints.Select(checkpoint => checkpoint.Id));
         Assert.All(registry.Checkpoints, checkpoint => Assert.Equal(SaveCheckpointType.Release, checkpoint.Type));
-        Assert.Equal("3.0.12", registry.LatestCheckpoint?.Label);
+        var latest = registry.LatestCheckpoint!;
+        Assert.Equal(("3.1.0", 40, "D2RR 3.1.0"), (latest.Label, latest.Order, latest.Directory));
+        Assert.Equal(["3.1.0"], latest.InstalledVersions);
         var encoding = Assert.Single(registry.StatEncodings);
-        Assert.Equal(("reimagined-3.0.13-dev-pre-swap", "3.0.13 development pre-swap", 30),
+        Assert.Equal(("reimagined-3.1.0-dev-pre-swap", "3.1.0 development pre-swap", 30),
             (encoding.Id, encoding.Label, encoding.Order));
         Assert.Equal(4, registry.IdentityMappingsUpTo(int.MaxValue).Count);
         Assert.Empty(registry.ValidateIdentityMappings());
@@ -52,7 +54,7 @@ public sealed class SaveCheckpointTests
         Assert.Equal(installed.Snapshot.Label, migrator.Target.Label);
         Assert.Contains("3.0.12 with installed appended stats", migrator.SourceLayouts);
         Assert.Contains("Installed items with 3.0.12 stat encoding", migrator.SourceLayouts);
-        Assert.Contains("Installed items with 3.0.13 development pre-swap stat encoding", migrator.SourceLayouts);
+        Assert.Contains("Installed items with 3.1.0 development pre-swap stat encoding", migrator.SourceLayouts);
 
         var releaseDirectory = registry.PathOf(registry.Get("reimagined-3.0.12").Directory);
         var releaseTarget =
@@ -69,6 +71,7 @@ public sealed class SaveCheckpointTests
 
         Assert.Equal([99u], registry.Get("reimagined-2.1.2").CharacterVersions);
         Assert.Equal([105u], registry.Get("reimagined-3.0.12").CharacterVersions);
+        Assert.Equal([105u], registry.Get("reimagined-3.1.0").CharacterVersions);
         Assert.Equal([105u], Assert.Single(registry.StatEncodings).CharacterVersions);
     }
 
@@ -79,8 +82,9 @@ public sealed class SaveCheckpointTests
         var releaseDirectory = SaveMigrationFixtures.ReleaseDirectory("reimagined-3.0.12");
         string[] newer =
         [
-            "Installed items with 3.0.13 development pre-swap stat encoding",
-            "3.0.12 with 3.0.13 development pre-swap appended stats"
+            "3.1.0",
+            "Installed items with 3.1.0 development pre-swap stat encoding",
+            "3.0.12 with 3.1.0 development pre-swap appended stats"
         ];
 
         var release = SaveMigrator.ForInstalledTarget(registry,
@@ -94,7 +98,8 @@ public sealed class SaveCheckpointTests
         Assert.Equal(["2.1.2", "3.0.12"], modifiedRelease.SourceLayouts);
         Assert.Equal(newer, modifiedRelease.NewerLayouts);
 
-        // Development data whose modinfo version still reads 3.0.12 defines the development stats and keeps every upward source.
+        // 3.1.0 data is recognized by its tables even when its modinfo version still reads 3.0.12, and keeps every upward source.
+        // Modified 3.1.0 data keeps every 3.1.0 stat at its saved id, so it is placed at 3.1.0 and may also take 3.1.0 saves.
         var development = SaveMigrationFixtures.CreateMigrator();
         var outdatedVersion = SaveMigrator.ForInstalledTarget(registry,
             InstalledGameData.Load(SaveMigrationFixtures.InstalledDirectory, SaveMigrationFixtures.NewCopyDirectory(),
@@ -104,10 +109,14 @@ public sealed class SaveCheckpointTests
         Assert.Equal(
         [
             "2.1.2", "3.0.12", "3.0.12 with installed appended stats", "Installed items with 3.0.12 stat encoding",
-            "Installed items with 3.0.13 development pre-swap stat encoding"
+            "Installed items with 3.1.0 development pre-swap stat encoding"
         ], development.SourceLayouts);
         Assert.Equal(development.SourceLayouts, outdatedVersion.SourceLayouts);
-        Assert.Equal(development.SourceLayouts, modifiedDevelopment.SourceLayouts);
+        Assert.Equal(
+        [
+            "2.1.2", "3.0.12", "3.1.0", "3.0.12 with installed appended stats", "Installed items with 3.0.12 stat encoding",
+            "Installed items with 3.1.0 development pre-swap stat encoding"
+        ], modifiedDevelopment.SourceLayouts);
         Assert.All(new[] { development, outdatedVersion, modifiedDevelopment },
             migrator => Assert.Empty(migrator.NewerLayouts));
     }

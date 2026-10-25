@@ -64,7 +64,7 @@ public sealed class SaveInspectionTests
         var inspection = InspectAndReport(
             "ModernSharedStashSoftCoreV2.d2i",
             [
-                SaveDataDefinition.FromSnapshot(Load(KnownSnapshots.Reimagined3012)), Intermediate3013(),
+                SaveDataDefinition.FromSnapshot(Load(KnownSnapshots.Reimagined3012)), Intermediate310Development(),
                 NewItemsPreSwapStats(), SaveDataDefinition.FromSnapshot(InstalledSnapshot)
             ],
             [Compare(KnownSnapshots.Reimagined3012, InstalledSnapshot)]);
@@ -79,11 +79,11 @@ public sealed class SaveInspectionTests
         ]);
     }
 
-    private const string Intermediate3013Label = "3.0.12 with installed appended stats";
+    private const string Intermediate310DevelopmentLabel = "3.0.12 with installed appended stats";
     private const string NewItemsPreSwapStatsLabel = "Installed items with 3.0.12 stat encoding";
 
-    private static SaveDataDefinition Intermediate3013() => SaveDataDefinition.WithAppendedStats(
-        Intermediate3013Label, Load(KnownSnapshots.Reimagined3012), InstalledSnapshot);
+    private static SaveDataDefinition Intermediate310Development() => SaveDataDefinition.WithAppendedStats(
+        Intermediate310DevelopmentLabel, Load(KnownSnapshots.Reimagined3012), InstalledSnapshot);
 
     private static SaveDataDefinition NewItemsPreSwapStats() => SaveDataDefinition.WithAppendedStats(
         NewItemsPreSwapStatsLabel, Load(KnownSnapshots.Reimagined3012), InstalledSnapshot, InstalledSnapshot);
