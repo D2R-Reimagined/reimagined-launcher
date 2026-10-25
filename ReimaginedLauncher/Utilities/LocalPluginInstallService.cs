@@ -14,6 +14,7 @@ internal sealed record LocalInstallFile(string RelativePath, byte[] Contents, st
     public bool Exists => PreviousHash is not null;
 }
 internal sealed record LocalPluginPlan(string Root, IReadOnlyList<LocalInstallFile> Files, IReadOnlyList<string> Skipped);
+internal sealed record D2RLoaderModDataAsset(string PluginId, string PluginName, string SourceAbsolutePath, string TargetRelativePath);
 
 internal static class LocalPluginInstallService
 {
@@ -36,13 +37,14 @@ internal static class LocalPluginInstallService
     {
         RefuseLadder(profile.LaunchExperience);
         var root = ResolveRoot(profile);
+        var modMpq = ModMpqName(root);
         var files = new List<LocalInstallFile>();
         var skipped = new List<string>();
         var destinations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         long total = 0;
-        void Add(string name, byte[] bytes)
+        void Add(string name, byte[] bytes, string? pluginStem)
         {
-            var path = MapPath(name);
+            var path = MapPath(name, modMpq, pluginStem);
             if (path is null) { skipped.Add(name); return; }
             if (path.StartsWith("plugins/", StringComparison.Ordinal) && path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
             {
@@ -61,12 +63,16 @@ internal static class LocalPluginInstallService
         if (Path.GetExtension(file).Equals(".dll", StringComparison.OrdinalIgnoreCase))
         {
             if (new FileInfo(file).Length > MaximumPackageBytes) throw new InvalidDataException("The plugin is too large.");
-            Add(Path.GetFileName(file), File.ReadAllBytes(file));
+            Add(Path.GetFileName(file), File.ReadAllBytes(file), Path.GetFileNameWithoutExtension(file));
         }
         else if (Path.GetExtension(file).Equals(".zip", StringComparison.OrdinalIgnoreCase))
         {
             using var archive = ZipFile.OpenRead(file);
             if (archive.Entries.Count > 2048) throw new InvalidDataException("The package contains too many files.");
+            var primaryDllStem = archive.Entries
+                .Where(entry => !string.IsNullOrEmpty(entry.Name) && Path.GetExtension(entry.Name).Equals(".dll", StringComparison.OrdinalIgnoreCase))
+                .Select(entry => Path.GetFileNameWithoutExtension(entry.Name))
+                .FirstOrDefault(stem => !string.IsNullOrWhiteSpace(stem));
             foreach (var entry in archive.Entries)
             {
                 ValidateRelative(entry.FullName.TrimEnd('/', '\\'));
@@ -84,16 +90,22 @@ internal static class LocalPluginInstallService
                     if (output.Length + count > entry.Length) throw new InvalidDataException("Invalid archive entry size.");
                     output.Write(buffer, 0, count);
                 }
-                Add(entry.FullName, output.ToArray());
+                Add(entry.FullName, output.ToArray(), primaryDllStem);
             }
         }
         else throw new InvalidDataException("Choose a DLL or ZIP file.");
         if (!files.Any(item => item.RelativePath.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)))
             throw new InvalidDataException("The package contains no plugin DLLs.");
+        if (files.Any(item => item.RelativePath.StartsWith("plugin-assets/", StringComparison.Ordinal)))
+        {
+            var modDir = Path.GetDirectoryName(Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar))!;
+            if (!Directory.Exists(Path.Combine(modDir, modMpq, "data", "global", "excel")))
+                throw new DirectoryNotFoundException("Install the selected mod before installing a plugin with mod data files.");
+        }
         return new LocalPluginPlan(root, files, skipped);
     }
 
-    private static string? MapPath(string name)
+    private static string? MapPath(string name, string? modMpq = null, string? pluginStem = null)
     {
         name = name.Replace('\\', '/');
         ValidateRelative(name);
@@ -103,9 +115,79 @@ internal static class LocalPluginInstallService
         var configIndex = Array.FindIndex(parts, part => part.Equals("config", StringComparison.OrdinalIgnoreCase));
         if (configIndex >= 0 && configIndex < parts.Length - 1)
             return "config/" + string.Join('/', parts.Skip(configIndex + 1));
+        var dataIndex = Array.FindIndex(parts, part => part.Equals("data", StringComparison.OrdinalIgnoreCase));
+        if (dataIndex >= 0 && dataIndex < parts.Length - 1)
+        {
+            if (parts.Skip(dataIndex + 1).Any(IsLauncherCleanSegment))
+                return null;
+            if (dataIndex > 0 && parts[dataIndex - 1].EndsWith(".mpq", StringComparison.OrdinalIgnoreCase))
+            {
+                if (modMpq is not null && parts[dataIndex - 1].Equals(modMpq, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(pluginStem))
+                    return "plugin-assets/" + pluginStem + "/data/" + string.Join('/', parts.Skip(dataIndex + 1));
+            }
+            else if (!parts.Take(dataIndex).Any(part => part.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase)))
+                return "data/" + string.Join('/', parts.Skip(dataIndex + 1));
+        }
         if (ext is ".toml" or ".ini" or ".cfg") return "config/" + parts[^1];
         if (ext == ".json") throw new InvalidDataException($"Cannot determine whether {name} is a config or patch. Package configurations beneath config/; JSON patches are not supported by this installer.");
         return null;
+    }
+
+    private static bool IsLauncherCleanSegment(string part)
+    {
+        var stem = Path.GetFileNameWithoutExtension(part);
+        return part.EndsWith("_launcher_clean", StringComparison.OrdinalIgnoreCase)
+            || stem.EndsWith("_launcher_clean", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ModMpqName(string root)
+    {
+        var mod = Path.GetDirectoryName(Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar));
+        return string.IsNullOrEmpty(mod) ? "Reimagined.mpq" : Path.GetFileName(mod) + ".mpq";
+    }
+
+    internal static IReadOnlyList<D2RLoaderModDataAsset> GetEnabledModDataAssets(string modRoot)
+    {
+        if (string.IsNullOrWhiteSpace(modRoot)) return [];
+        var profile = MainWindow.Settings?.CurrentProfile;
+        if (profile?.LaunchExperience == LaunchExperience.Ladder) return [];
+
+        var modDir = Path.GetDirectoryName(Path.GetFullPath(modRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (string.IsNullOrEmpty(modDir)) return [];
+
+        var loaderRoot = Path.Combine(modDir, "d2rloader");
+        var assetsRoot = Path.Combine(loaderRoot, "plugin-assets");
+        var pluginsDir = Path.Combine(loaderRoot, "plugins");
+        if (!Directory.Exists(assetsRoot) || !Directory.Exists(pluginsDir)) return [];
+
+        var enabledStems = new HashSet<string>(
+            Directory.EnumerateFiles(pluginsDir, "*.dll")
+                .Select(path => Path.GetFileNameWithoutExtension(path))
+                .Where(stem => !string.IsNullOrWhiteSpace(stem))!,
+            StringComparer.OrdinalIgnoreCase);
+        if (enabledStems.Count == 0) return [];
+
+        var assets = new List<D2RLoaderModDataAsset>();
+        foreach (var pluginDir in Directory.GetDirectories(assetsRoot).OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        {
+            var stem = Path.GetFileName(pluginDir);
+            if (string.IsNullOrWhiteSpace(stem) || !enabledStems.Contains(stem)) continue;
+
+            var dataDir = Path.Combine(pluginDir, "data");
+            if (!Directory.Exists(dataDir)) continue;
+
+            foreach (var file in Directory.GetFiles(dataDir, "*", SearchOption.AllDirectories).OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+            {
+                var rel = Path.GetRelativePath(dataDir, file).Replace('\\', '/');
+                assets.Add(new D2RLoaderModDataAsset(
+                    "d2rloader:" + stem.ToLowerInvariant(),
+                    stem + ".dll",
+                    file,
+                    "data/" + rel));
+            }
+        }
+
+        return assets;
     }
 
     internal static void RefuseLadder(LaunchExperience experience)
@@ -158,6 +240,23 @@ internal static class LocalPluginInstallService
                     throw new IOException("A destination changed during installation.");
                 File.Move(item.Temp, item.Target, item.File.Exists);
                 committed.Add((item.File, item.Target));
+            }
+            var targetSet = new HashSet<string>(files.Select(f => f.RelativePath), StringComparer.OrdinalIgnoreCase);
+            foreach (var assetPrefix in files.Select(f => f.RelativePath)
+                         .Where(p => p.StartsWith("plugin-assets/", StringComparison.OrdinalIgnoreCase))
+                         .Select(p => string.Join('/', p.Split('/').Take(2)))
+                         .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                var assetDir = SafePath(root, assetPrefix);
+                if (!Directory.Exists(assetDir)) continue;
+                foreach (var existing in Directory.GetFiles(assetDir, "*", SearchOption.AllDirectories))
+                {
+                    var rel = Path.GetRelativePath(root, existing).Replace('\\', '/');
+                    if (targetSet.Contains(rel)) continue;
+                    var copy = SafePath(backup, rel);
+                    Directory.CreateDirectory(Path.GetDirectoryName(copy)!);
+                    File.Move(existing, copy, true);
+                }
             }
             return backup;
         }
