@@ -23,6 +23,24 @@ public partial class LaunchView
     private HashSet<int> _localRigServer = [];
     private HashSet<int> _localRigClient = [];
     private string? _localRigStatus;
+    private IReadOnlyDictionary<string, string?> _localRigConfigs = new Dictionary<string, string?>();
+
+    /// <summary>
+    /// The profile as a ladder launch of the staff ladder sees it: what the
+    /// launcher's own plugin config steps and launch arguments read.
+    /// </summary>
+    private static InstallationProfile LocalRigProfile(InstallationProfile profile, Guid ladderId) => new()
+    {
+        Type = profile.Type,
+        LaunchExperience = LaunchExperience.Ladder,
+        InstallDirectory = profile.InstallDirectory,
+        IsInstallDirectoryValidated = profile.IsInstallDirectoryValidated,
+        SelectedLadderId = ladderId,
+        NoRumble = profile.NoRumble,
+        ForceDesktop = profile.ForceDesktop,
+        WindowedMode = profile.WindowedMode,
+        NoSound = profile.NoSound
+    };
 
     private void RefreshLocalRigPanel(InstallationProfile profile)
     {
@@ -97,15 +115,24 @@ public partial class LaunchView
             SetLocalRigStatus("Starting a staff test session...");
             var session = await _apiHttpClient.StartStaffTestSessionAsync(LadderBundleService.LauncherVersion, accessToken);
             var apiBase = _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority);
+            SetLocalRigStatus("Sending your mod's tables to the API...");
+            var tables = await Task.Run(() => LocalD2rdsRigService.PackTables(install!));
+            await _apiHttpClient.UploadStaffTestTablesAsync(tables, accessToken);
 
             // No player session while the server starts: the server shares this
-            // install, and its plugins must not take the player's.
+            // install, and its plugins must not take the player's. server-saves
+            // goes back to disabled too - enabled with no session it refuses to
+            // load, and a shared plugin the server lacks turns every client away
+            // ("unexpected shared plugin mod:server-saves"). It is enabled for
+            // the client once the server is up.
             GameSessionSecretsService.Delete(install);
             await GameSessionSecretsService.ScrubPluginConfigsAsync(install);
 
             SetLocalRigStatus("Mirroring mods\\Reimagined into mods\\ReimaginedLadder...");
             var mirror = await Task.Run(() => LocalD2rdsRigService.Mirror(install!));
             LaunchDiagnostics.Log($"local d2rds rig: mirror copied {mirror.Copied}, kept {mirror.Unchanged}, removed {mirror.Removed} file(s).");
+            if (!await ServerSavesConfigService.DisableAsync(install))
+                throw new InvalidOperationException("server-saves.toml could not be reset before the server starts.");
             LocalD2rdsRigService.WriteServerConfig(install!, apiBase);
             LocalD2rdsRigService.WriteServerSecret(install!, session.ServerKey);
             D2RLoaderService.EnableExtensionDetailLogs(install!);
@@ -135,12 +162,25 @@ public partial class LaunchView
             if (!await ServerSavesConfigService.EnableAsync(install, new ServerSavesLaunchSettings(
                     apiBase, gameToken.AccessToken, session.LadderId, session.LaunchTicket, statusSessionId)))
                 throw new InvalidOperationException("The server-saves configuration could not be written.");
+            // Every plugin that talks to the API talks to this one, as on a ladder
+            // launch (2026-10-25: without this, chat, portals and cosmetics sent
+            // the local token to production and logged "login expired").
+            var rigProfile = LocalRigProfile(profile, session.LadderId);
+            await ConfigureGlobalChatAsync(rigProfile, gameToken.AccessToken);
+            await ConfigureHardcoreDeathsAsync(rigProfile, gameToken.AccessToken);
+            await ConfigureTradeNotificationsAsync(rigProfile, gameToken.AccessToken);
+            await ConfigureTradePriceCheckAsync(rigProfile, gameToken.AccessToken);
+            await ConfigureReimaginedFeedbackAsync(rigProfile, gameToken.AccessToken);
+            await ConfigureAnnouncementsAsync(rigProfile, gameToken.AccessToken);
+            await ConfigureSupporterPortalsAsync(rigProfile, gameToken.AccessToken);
+            _localRigConfigs = await LocalD2rdsRigService.PointAtApiAsync(install!, apiBase);
+
             if (!await GameSessionSecretsService.WriteAsync(install, new GameSessionSecrets(
                     gameToken.AccessToken, gameToken.ExpiresAtUtc, session.LaunchTicket, statusSessionId)))
                 throw new InvalidOperationException("The session file could not be written.");
 
             var beforeClient = LocalD2rdsRigService.GameProcessIds();
-            using (Process.Start(LocalD2rdsRigService.ClientStartInfo(install!, profile))) { }
+            using (Process.Start(LocalD2rdsRigService.ClientStartInfo(install!, rigProfile))) { }
             handedOff = true;
             SetLocalRigStatus($"Running on {session.LadderName}: Multiplayer > Host makes the game on your local server. Closing the game stops the server.");
             _ = WatchLocalRigAsync(install!, beforeClient, gameToken);
@@ -156,6 +196,8 @@ public partial class LaunchView
         {
             if (!handedOff)
             {
+                LocalD2rdsRigService.RestoreConfigs(_localRigConfigs);
+                _localRigConfigs = new Dictionary<string, string?>();
                 GameSessionSecretsService.Delete(install);
                 if (gameToken is not null) _ = _launcherAuthenticationService.RevokeGameTokenAsync(gameToken);
                 _localRigBusy = false;
@@ -189,6 +231,8 @@ public partial class LaunchView
         finally
         {
             LocalD2rdsRigService.Stop(_localRigServer);
+            LocalD2rdsRigService.RestoreConfigs(_localRigConfigs);
+            _localRigConfigs = new Dictionary<string, string?>();
             GameSessionSecretsService.Delete(install);
             _ = _launcherAuthenticationService.RevokeGameTokenAsync(gameToken);
             _localRigBusy = false;

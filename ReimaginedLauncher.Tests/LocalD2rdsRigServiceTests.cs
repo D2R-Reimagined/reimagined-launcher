@@ -51,11 +51,46 @@ public sealed class LocalD2rdsRigServiceTests : IDisposable
         Assert.False(File.Exists(Ladder("d2rloader/config/maps.toml")));
         Assert.Equal("launcher config", File.ReadAllText(Ladder("d2rloader/config/server-saves.toml")));
         Assert.True(File.Exists(Ladder("d2rloader/logs/d2rds.log")));
+        // Debug tools off, as in the ladder's packed .mpq.
+        Assert.True(File.Exists(Ladder("ReimaginedLadder.mpq/data/global/.DISABLE_DEBUG")));
 
         var again = LocalD2rdsRigService.Mirror(_install);
         Assert.Equal(0, again.Copied);
         Assert.Equal(4, again.Unchanged);
         Assert.Equal(0, again.Removed);
+        Assert.True(File.Exists(Ladder("ReimaginedLadder.mpq/data/global/.DISABLE_DEBUG")));
+    }
+
+    [Fact]
+    public void Tables_are_every_excel_txt_of_the_local_mod_zipped_flat()
+    {
+        Write("mods/Reimagined/Reimagined.mpq/data/global/excel/itemstatcost.txt", "stats");
+        Write("mods/Reimagined/Reimagined.mpq/data/global/excel/armor.txt", "armor");
+        Write("mods/Reimagined/Reimagined.mpq/data/global/excel/notes.bin", "not a table");
+
+        using var archive = new System.IO.Compression.ZipArchive(new MemoryStream(LocalD2rdsRigService.PackTables(_install)));
+
+        Assert.Equal(["armor.txt", "itemstatcost.txt"], archive.Entries.Select(e => e.FullName).Order());
+        Directory.Delete(Path.Combine(_install, "mods", "Reimagined", "Reimagined.mpq", "data", "global", "excel"), recursive: true);
+        Assert.Throws<DirectoryNotFoundException>(() => LocalD2rdsRigService.PackTables(_install));
+    }
+
+    [Fact]
+    public async Task Unmanaged_api_plugins_point_at_the_api_for_the_session_and_are_put_back()
+    {
+        Write("mods/ReimaginedLadder/d2rloader/plugins/d2rl-supporter-mtx.dll", "x");
+        var mtx = Write("mods/ReimaginedLadder/d2rloader/config/supporter-mtx.toml", "api_base_url = \"https://api.d2r-reimagined.com\"\nenabled = true\n");
+        Write("mods/ReimaginedLadder/d2rloader/plugins/d2rl-reimagined-online-count.dll", "x");
+        var count = Ladder("d2rloader/config/reimagined-online-count.toml");
+
+        var originals = await LocalD2rdsRigService.PointAtApiAsync(_install, "http://localhost:5000/");
+
+        Assert.Contains("api_base_url = \"http://localhost:5000\"", File.ReadAllText(mtx));
+        Assert.Contains("enabled = true", File.ReadAllText(mtx));
+        Assert.Contains("api_base_url = \"http://localhost:5000\"", File.ReadAllText(count));
+        LocalD2rdsRigService.RestoreConfigs(originals);
+        Assert.Equal("api_base_url = \"https://api.d2r-reimagined.com\"\nenabled = true\n", File.ReadAllText(mtx));
+        Assert.False(File.Exists(count));
     }
 
     [Fact]

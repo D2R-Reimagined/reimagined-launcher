@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
@@ -42,6 +43,16 @@ public static class LocalD2rdsRigService
     // tokens), logs are the game's, ladder-disabled is the extension policy's.
     private static readonly string[] KeptPrefixes = ["d2rloader/config/", "d2rloader/logs/", "d2rloader/ladder-disabled/"];
     private static readonly string[] SkippedExtensions = [".pdb", ".ilk", ".exp", ".lib", ".bak", ".tmp"];
+
+    // D2RLoader's switch for its debug tools and cheat shortcuts. The ladder ships
+    // it inside its packed .mpq; a loose local mod has none, and with debug on a
+    // shortcut can leave a character casting without a cast reaching the server
+    // (2026-10-25: Teeth looped its animation for ~30 s until debug was turned off).
+    internal const string DisableDebugMarker = "ReimaginedLadder.mpq/data/global/.DISABLE_DEBUG";
+
+    // Plugins that talk to the API but have no launcher config step: pointed at
+    // this API for a rig session, then put back (see PointAtApiAsync).
+    private static readonly string[] UnmanagedApiPlugins = ["supporter-mtx", "reimagined-online-count"];
     private static readonly string[] RequiredPlugins = ["d2rl-d2rds.dll", "d2rl-server-saves.dll", "d2rl-lobby-bridge.dll"];
 
     public static bool IsStaff(ReimaginedUserResponse? user)
@@ -95,18 +106,85 @@ public static class LocalD2rdsRigService
             copied++;
         }
 
-        if (Directory.Exists(target))
+        wanted.Add(DisableDebugMarker);
+        var marker = Path.Combine(target, DisableDebugMarker.Replace('/', Path.DirectorySeparatorChar));
+        if (!File.Exists(marker))
         {
-            foreach (var file in Directory.EnumerateFiles(target, "*", SearchOption.AllDirectories).ToArray())
-            {
-                var relative = Path.GetRelativePath(target, file).Replace('\\', '/');
-                if (IsKept(relative) || wanted.Contains(relative)) continue;
-                File.Delete(file);
-                removed++;
-            }
+            Directory.CreateDirectory(Path.GetDirectoryName(marker)!);
+            File.WriteAllBytes(marker, []);
+        }
+
+        foreach (var file in Directory.EnumerateFiles(target, "*", SearchOption.AllDirectories).ToArray())
+        {
+            var relative = Path.GetRelativePath(target, file).Replace('\\', '/');
+            if (IsKept(relative) || wanted.Contains(relative)) continue;
+            File.Delete(file);
+            removed++;
         }
 
         return new LocalRigMirrorResult(copied, unchanged, removed);
+    }
+
+    /// <summary>
+    /// Every excel table of the local mod, zipped flat. The API keeps the ones its
+    /// save parser reads and checks this ladder's saves against them; its own
+    /// built-in copy trails the mod (2026-10-25: "Stat ID 449 out of range"
+    /// refused every save the server wrote).
+    /// </summary>
+    public static byte[] PackTables(string installDirectory)
+    {
+        var excel = Path.Combine(SourceRoot(installDirectory), ModInstallationPaths.NormalModName + ".mpq", "data", "global", "excel");
+        if (!Directory.Exists(excel)) throw new DirectoryNotFoundException($"{excel} is missing; the local mod has no excel tables.");
+        using var stream = new MemoryStream();
+        using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var file in Directory.EnumerateFiles(excel, "*.txt", SearchOption.TopDirectoryOnly))
+            {
+                archive.CreateEntryFromFile(file, Path.GetFileName(file), CompressionLevel.Optimal);
+            }
+        }
+
+        return stream.ToArray();
+    }
+
+    /// <summary>
+    /// Points the plugins with no launcher config step at this API, in the ladder
+    /// folder. Returns their configs as they were, for <see cref="RestoreConfigs"/>
+    /// when the session ends - so a real ladder launch afterwards is not left
+    /// talking to a local API.
+    /// </summary>
+    public static async Task<IReadOnlyDictionary<string, string?>> PointAtApiAsync(string installDirectory, string apiBaseUrl)
+    {
+        var originals = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        var value = D2RLoaderPluginPackage.Quote(D2RLoaderPluginPackage.NormalizeBaseUrl(apiBaseUrl));
+        foreach (var id in UnmanagedApiPlugins)
+        {
+            var path = Path.Combine(ModInstallationPaths.LadderModRoot(installDirectory), "d2rloader", "config", id + ".toml");
+            if (!File.Exists(Path.Combine(ModInstallationPaths.LadderModRoot(installDirectory), "d2rloader", "plugins", $"d2rl-{id}.dll"))) continue;
+            originals[path] = File.Exists(path) ? await File.ReadAllTextAsync(path) : null;
+            var package = new D2RLoaderPluginPackage(id, $"d2rl-{id}.dll", $"# Written by the Reimagined launcher for a local d2rds test.{Environment.NewLine}",
+                modName: ModInstallationPaths.LadderModName);
+            await package.WriteAsync(installDirectory, new Dictionary<string, string> { ["api_base_url"] = value }, requireInstalled: true,
+                CancellationToken.None);
+        }
+
+        return originals;
+    }
+
+    public static void RestoreConfigs(IReadOnlyDictionary<string, string?> originals)
+    {
+        foreach (var (path, text) in originals)
+        {
+            try
+            {
+                if (text is null) File.Delete(path);
+                else File.WriteAllText(path, text, new UTF8Encoding(false));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                LaunchDiagnostics.Log($"local d2rds rig: could not restore {path}: {exception.Message}");
+            }
+        }
     }
 
     internal static bool IsKept(string relativePath)

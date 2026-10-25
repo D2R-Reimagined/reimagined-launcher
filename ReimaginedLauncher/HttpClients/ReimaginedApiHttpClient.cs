@@ -324,6 +324,30 @@ public sealed partial class ReimaginedApiHttpClient
     }
 
     /// <summary>
+    /// The local mod's excel tables (a zip) for the caller's staff test ladder, so
+    /// the API reads its saves with the tables they were made with.
+    /// </summary>
+    public async Task UploadStaffTestTablesAsync(
+        byte[] tablesZip,
+        string accessToken,
+        CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Put, "staff-test/tables")
+        {
+            Content = new ByteArrayContent(tablesZip)
+        };
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/zip");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        using var timeout = CreateRequestTimeout(cancellationToken);
+        using var response = await _httpClient.SendAsync(request, timeout.Token);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(timeout.Token);
+            throw new InvalidOperationException($"The API refused the local mod's tables ({(int)response.StatusCode}): {body}");
+        }
+    }
+
+    /// <summary>
     /// Mints a game-session token with the launcher's own user token. Returns
     /// null when the endpoint answers 404 - an API that predates game tokens -
     /// so the caller can fall back; every other failure throws.
