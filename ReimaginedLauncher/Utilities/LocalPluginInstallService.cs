@@ -150,7 +150,7 @@ internal static class LocalPluginInstallService
     {
         if (string.IsNullOrWhiteSpace(modRoot)) return [];
         var profile = MainWindow.Settings?.CurrentProfile;
-        if (profile?.LaunchExperience == LaunchExperience.Ladder) return [];
+        if (profile is not null && profile.LaunchExperience != LaunchExperience.Online) return [];
 
         var modDir = Path.GetDirectoryName(Path.GetFullPath(modRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         if (string.IsNullOrEmpty(modDir)) return [];
@@ -242,10 +242,16 @@ internal static class LocalPluginInstallService
                 committed.Add((item.File, item.Target));
             }
             var targetSet = new HashSet<string>(files.Select(f => f.RelativePath), StringComparer.OrdinalIgnoreCase);
-            foreach (var assetPrefix in files.Select(f => f.RelativePath)
-                         .Where(p => p.StartsWith("plugin-assets/", StringComparison.OrdinalIgnoreCase))
-                         .Select(p => string.Join('/', p.Split('/').Take(2)))
-                         .Distinct(StringComparer.OrdinalIgnoreCase))
+            var assetPrefixes = files.Select(f => f.RelativePath)
+                .Where(p => p.StartsWith("plugin-assets/", StringComparison.OrdinalIgnoreCase))
+                .Select(p => string.Join('/', p.Split('/').Take(2)))
+                .Concat(files.Select(f => f.RelativePath)
+                    .Where(p => (p.StartsWith("plugins/", StringComparison.OrdinalIgnoreCase)
+                                 || p.StartsWith("launcher-disabled/plugins/", StringComparison.OrdinalIgnoreCase))
+                                && p.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                    .Select(p => "plugin-assets/" + Path.GetFileNameWithoutExtension(p)))
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+            foreach (var assetPrefix in assetPrefixes)
             {
                 var assetDir = SafePath(root, assetPrefix);
                 if (!Directory.Exists(assetDir)) continue;
