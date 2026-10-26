@@ -421,6 +421,22 @@ public partial class MainWindow : Window
 
         if (!IsLocalModDetected)
         {
+            if (Settings.CurrentProfile.LaunchExperience == LaunchExperience.Ladder)
+            {
+                SetUpdateState(
+                    isUpdateAvailable: false,
+                    canInstallOrUpdate: false,
+                    title: "Ladder package not installed",
+                    message: "Ladder uses its own signed mod package. Open the Launch tab and use the Download button to set up Ladder.",
+                    currentVersion: "Not detected",
+                    latestVersion: "Managed by Ladder",
+                    downloadUrl: NexusUrl,
+                    isDirectDownload: false,
+                    fileId: null);
+                RefreshCurrentContent();
+                return;
+            }
+
             var latestVersionForInstall = "Latest available";
             var downloadUrlForInstall = NexusUrl;
 
@@ -584,7 +600,10 @@ public partial class MainWindow : Window
 
     public async Task PromptInstallForMissingModAsync()
     {
-        if (!Settings.CurrentProfile.IsInstallDirectoryValidated || string.IsNullOrWhiteSpace(Settings.CurrentProfile.InstallDirectory) || IsLocalModDetected)
+        if (!Settings.CurrentProfile.IsInstallDirectoryValidated ||
+            string.IsNullOrWhiteSpace(Settings.CurrentProfile.InstallDirectory) ||
+            IsLocalModDetected ||
+            Settings.CurrentProfile.LaunchExperience == LaunchExperience.Ladder)
             return;
 
         await NavigateToUpdateViewAsync();
@@ -681,7 +700,7 @@ public partial class MainWindow : Window
             RefreshUpdateAvailableBadge();
             if (UpdateNavWarningBadge != null)
             {
-                UpdateNavWarningBadge.IsVisible = !IsLocalModDetected;
+                UpdateNavWarningBadge.IsVisible = !IsLocalModDetected && profile.LaunchExperience != LaunchExperience.Ladder;
                 ToolTip.SetTip(
                     UpdateNavWarningBadge,
                     string.IsNullOrWhiteSpace(Settings.CurrentProfile.InstallDirectory) || !Settings.CurrentProfile.IsInstallDirectoryValidated

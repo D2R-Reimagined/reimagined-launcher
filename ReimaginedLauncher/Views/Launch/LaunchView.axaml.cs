@@ -3595,7 +3595,11 @@ public partial class LaunchView : UserControl
                     var detectedType = LauncherService.DetectInstallationType(path!);
                     if (detectedType != profile.Type)
                     {
-                        profile = MainWindow.Settings.SelectProfile(detectedType);
+                        var targetProfile = MainWindow.Settings.Profiles.FirstOrDefault(p => p.Type == detectedType);
+                        if (targetProfile is null || string.IsNullOrWhiteSpace(targetProfile.InstallDirectory) || !targetProfile.IsInstallDirectoryValidated)
+                        {
+                            profile = MainWindow.Settings.SelectProfile(detectedType);
+                        }
                     }
                 }
                 profile.InstallDirectory = path;
@@ -3652,6 +3656,14 @@ public partial class LaunchView : UserControl
 
             if (profile.Type != InstallationType.D2RMM && !MainWindow.IsLocalModDetected)
             {
+                if (profile.LaunchExperience == LaunchExperience.Ladder)
+                {
+                    Notifications.SendNotification(
+                        "Install directory validated. Use the Download button on the Launch tab to install the signed ladder package.",
+                        "Success");
+                    return;
+                }
+
                 Notifications.SendNotification(
                     "The D2R Reimagined mod is not installed in this directory. Go to the Install/Update tab to install it.",
                     "Warning");

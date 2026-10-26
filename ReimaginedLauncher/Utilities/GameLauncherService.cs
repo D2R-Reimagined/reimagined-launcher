@@ -60,10 +60,10 @@ public class GameLauncherService
                         targetProfile.IsInstallDirectoryValidated = true;
                         if (detectedType == InstallationType.Steam)
                             targetProfile.SteamDirectory = FindSteamExecutable(targetProfile.InstallDirectory);
+                        currentProfile.InstallDirectory = null;
+                        currentProfile.IsInstallDirectoryValidated = false;
+                        currentProfile = settings.SelectProfile(detectedType);
                     }
-                    currentProfile.InstallDirectory = null;
-                    currentProfile.IsInstallDirectoryValidated = false;
-                    currentProfile = settings.SelectProfile(detectedType);
                 }
             }
 
@@ -190,7 +190,7 @@ public class GameLauncherService
             if (!File.Exists(path)) continue;
 
             var dir = Path.GetDirectoryName(path);
-            if (IsSteamLibraryPath(path))
+            if (InstallDirectoryValidator.IsValidSteamInstallDirectory(dir))
                 steam = dir;
             else
                 bnet = dir;
@@ -254,7 +254,7 @@ public class GameLauncherService
 
     public InstallationType DetectInstallationType(string path)
     {
-        if (IsSteamLibraryPath(path))
+        if (InstallDirectoryValidator.IsValidSteamInstallDirectory(path))
         {
             return InstallationType.Steam;
         }

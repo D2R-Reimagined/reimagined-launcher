@@ -183,46 +183,90 @@ public class AppSettings
             : null;
         var selectedType = selected?.Type;
 
-        var battleNet = Profiles.Find(profile => profile.Type == InstallationType.BattleNet)
-                        ?? new InstallationProfile { Type = InstallationType.BattleNet };
-        var steam = Profiles.Find(profile => profile.Type == InstallationType.Steam)
-                    ?? new InstallationProfile { Type = InstallationType.Steam };
-        var d2rmm = Profiles.Find(profile => profile.Type == InstallationType.D2RMM)
-                    ?? new InstallationProfile { Type = InstallationType.D2RMM, AutomaticBackupsEnabled = false };
-        var lutris = Profiles.Find(profile => profile.Type == InstallationType.Lutris);
+        // First, repair profiles whose Type was mutated in place between Battle.Net
+        // and Steam by restoring their Type directly on the existing profile object
+        // so all of that profile's settings remain intact.
+        var hasValidBattleNet = Profiles.Exists(profile =>
+            profile.Type == InstallationType.BattleNet
+            && !string.IsNullOrWhiteSpace(profile.InstallDirectory)
+            && !InstallDirectoryValidator.IsValidSteamInstallDirectory(profile.InstallDirectory)
+            && InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory));
+        if (!hasValidBattleNet)
+        {
+            var mutatedBattleNet = Profiles.Find(profile =>
+                profile.Type == InstallationType.Steam
+                && !string.IsNullOrWhiteSpace(profile.InstallDirectory)
+                && !InstallDirectoryValidator.IsValidSteamInstallDirectory(profile.InstallDirectory)
+                && InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory));
+            if (mutatedBattleNet is not null)
+            {
+                mutatedBattleNet.Type = InstallationType.BattleNet;
+                mutatedBattleNet.InstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(mutatedBattleNet.InstallDirectory);
+                mutatedBattleNet.IsInstallDirectoryValidated = true;
+                if (ReferenceEquals(selected, mutatedBattleNet))
+                {
+                    selectedType = InstallationType.BattleNet;
+                }
+            }
+        }
 
-        if (!string.IsNullOrWhiteSpace(steam.InstallDirectory)
-            && string.IsNullOrWhiteSpace(battleNet.InstallDirectory)
-            && !InstallDirectoryValidator.IsValidSteamInstallDirectory(steam.InstallDirectory)
-            && InstallDirectoryValidator.IsValidInstallDirectory(steam.InstallDirectory))
+        var hasValidSteam = Profiles.Exists(profile =>
+            profile.Type == InstallationType.Steam
+            && !string.IsNullOrWhiteSpace(profile.InstallDirectory)
+            && InstallDirectoryValidator.IsValidSteamInstallDirectory(profile.InstallDirectory));
+        if (!hasValidSteam)
         {
-            battleNet.InstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(steam.InstallDirectory);
-            battleNet.IsInstallDirectoryValidated = true;
-            battleNet.LaunchExperience = steam.LaunchExperience;
-            battleNet.SelectedLadderId = steam.SelectedLadderId;
-            battleNet.SelectedLadderExtensions = new(steam.SelectedLadderExtensions ?? []);
-            battleNet.SelectedLadderRegions = new(steam.SelectedLadderRegions ?? []);
-            battleNet.PinnedLadderServers = new(steam.PinnedLadderServers ?? []);
-            steam.InstallDirectory = null;
-            steam.IsInstallDirectoryValidated = false;
-            if (selectedType == InstallationType.Steam)
+            var mutatedSteam = Profiles.Find(profile =>
+                profile.Type == InstallationType.BattleNet
+                && !string.IsNullOrWhiteSpace(profile.InstallDirectory)
+                && InstallDirectoryValidator.IsValidSteamInstallDirectory(profile.InstallDirectory));
+            if (mutatedSteam is not null)
             {
-                selectedType = InstallationType.BattleNet;
+                mutatedSteam.Type = InstallationType.Steam;
+                mutatedSteam.InstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(mutatedSteam.InstallDirectory);
+                mutatedSteam.IsInstallDirectoryValidated = true;
+                if (ReferenceEquals(selected, mutatedSteam))
+                {
+                    selectedType = InstallationType.Steam;
+                }
             }
         }
-        else if (!string.IsNullOrWhiteSpace(battleNet.InstallDirectory)
-                 && string.IsNullOrWhiteSpace(steam.InstallDirectory)
-                 && InstallDirectoryValidator.IsValidSteamInstallDirectory(battleNet.InstallDirectory))
+
+        InstallationProfile ResolveCanonicalProfile(InstallationType type, bool defaultAutoBackup = true)
         {
-            steam.InstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(battleNet.InstallDirectory);
-            steam.IsInstallDirectoryValidated = true;
-            battleNet.InstallDirectory = null;
-            battleNet.IsInstallDirectoryValidated = false;
-            if (selectedType == InstallationType.BattleNet)
+            var candidates = Profiles.FindAll(profile => profile.Type == type);
+            if (candidates.Count == 0)
             {
-                selectedType = InstallationType.Steam;
+                return new InstallationProfile { Type = type, AutomaticBackupsEnabled = defaultAutoBackup };
             }
+
+            var winner = (selected is not null && selected.Type == type ? selected : null)
+                         ?? candidates.Find(profile => !string.IsNullOrWhiteSpace(profile.InstallDirectory))
+                         ?? candidates[0];
+
+            if (string.IsNullOrWhiteSpace(winner.InstallDirectory))
+            {
+                var withDirectory = candidates.Find(profile => !string.IsNullOrWhiteSpace(profile.InstallDirectory));
+                if (withDirectory is not null)
+                {
+                    winner.InstallDirectory = withDirectory.InstallDirectory;
+                    winner.IsInstallDirectoryValidated = withDirectory.IsInstallDirectoryValidated;
+                    if (string.IsNullOrWhiteSpace(winner.SteamDirectory))
+                    {
+                        winner.SteamDirectory = withDirectory.SteamDirectory;
+                    }
+                }
+            }
+
+            return winner;
         }
+
+        var battleNet = ResolveCanonicalProfile(InstallationType.BattleNet);
+        var steam = ResolveCanonicalProfile(InstallationType.Steam);
+        var d2rmm = ResolveCanonicalProfile(InstallationType.D2RMM, defaultAutoBackup: false);
+        var lutris = Profiles.Exists(profile => profile.Type == InstallationType.Lutris)
+            ? ResolveCanonicalProfile(InstallationType.Lutris)
+            : null;
 
         Profiles.Clear();
         Profiles.Add(battleNet);
@@ -233,7 +277,11 @@ public class AppSettings
             Profiles.Add(lutris);
         }
 
-        if (selectedType is { } targetType)
+        if (selected is not null && Profiles.IndexOf(selected) is var selectedIndex && selectedIndex >= 0)
+        {
+            SelectedProfileIndex = selectedIndex;
+        }
+        else if (selectedType is { } targetType)
         {
             var index = Profiles.FindIndex(profile => profile.Type == targetType);
             SelectedProfileIndex = index >= 0 ? index : 0;
