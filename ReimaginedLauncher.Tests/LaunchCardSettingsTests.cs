@@ -55,4 +55,39 @@ public sealed class LaunchCardSettingsTests
         Assert.NotNull(settings.LaunchCardExpansion);
         Assert.NotNull(settings.InstalledLootFilters);
     }
+
+    [Fact]
+    public void SanitizeSettingsRestoresMissingProfileTypesSoBattleNetAndSteamCanSwitch()
+    {
+        var settings = new AppSettings
+        {
+            Profiles =
+            [
+                new InstallationProfile
+                {
+                    Type = InstallationType.Steam,
+                    InstallDirectory = @"C:\Games\Steam\steamapps\common\Diablo II Resurrected\"
+                }
+            ],
+            SelectedProfileIndex = 0
+        };
+
+        SettingsManager.SanitizeSettings(settings);
+
+        Assert.Equal(3, settings.Profiles.Count);
+        Assert.Equal(InstallationType.BattleNet, settings.Profiles[0].Type);
+        Assert.Equal(InstallationType.Steam, settings.Profiles[1].Type);
+        Assert.Equal(InstallationType.D2RMM, settings.Profiles[2].Type);
+        Assert.Equal(InstallationType.Steam, settings.CurrentProfile.Type);
+
+        var bnet = settings.SelectProfile(InstallationType.BattleNet);
+        Assert.Equal(InstallationType.BattleNet, bnet.Type);
+        Assert.Equal(InstallationType.BattleNet, settings.CurrentProfile.Type);
+        Assert.Equal(0, settings.SelectedProfileIndex);
+
+        var steam = settings.SelectProfile(InstallationType.Steam);
+        Assert.Equal(InstallationType.Steam, steam.Type);
+        Assert.Equal(InstallationType.Steam, settings.CurrentProfile.Type);
+        Assert.Equal(1, settings.SelectedProfileIndex);
+    }
 }

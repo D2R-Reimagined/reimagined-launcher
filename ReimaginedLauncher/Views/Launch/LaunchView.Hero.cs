@@ -85,8 +85,30 @@ public partial class LaunchView
 
     private void OnHeroChangePathClick(object? sender, RoutedEventArgs e)
     {
+        var profile = MainWindow.Settings.CurrentProfile;
+        var isLadderExperience = profile.LaunchExperience == LaunchExperience.Ladder;
+        if (profile.IsInstallDirectoryValidated && !MainWindow.IsLocalModDetected && !IsLadderSetupAction(isLadderExperience))
+        {
+            MainWindow.Instance?.NavigateToInstallationSettings();
+            return;
+        }
+
+        if (HeroInstallExpander.IsExpanded)
+        {
+            OnInstallDirectoryClick(sender, e);
+            return;
+        }
+
         HeroInstallExpander.IsExpanded = true;
-        HeroInstallExpander.BringIntoView();
+        InstallDirectoryPulse.IsVisible = true;
+        InstallDirectoryPulse.Classes.Set("install-attention-pulse", true);
+        Avalonia.Threading.Dispatcher.UIThread.Post(
+            () =>
+            {
+                InstallDirectoryPanel.BringIntoView();
+                BrowseInstallDirectoryButton.Focus();
+            },
+            Avalonia.Threading.DispatcherPriority.Loaded);
     }
 
     private void OnPluginsExpanded(object? sender, RoutedEventArgs e)

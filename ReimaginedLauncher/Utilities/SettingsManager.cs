@@ -120,8 +120,7 @@ public static class SettingsManager
 
     internal static void SanitizeSettings(AppSettings settings)
     {
-        settings.Profiles ??= [];
-        settings.Profiles.RemoveAll(profile => profile is null);
+        settings.EnsureDefaultProfiles();
         foreach (var profile in settings.Profiles)
         {
             profile.Plugins ??= [];

@@ -158,10 +158,7 @@ public class AppSettings
         {
             if (Profiles.Count == 0)
             {
-                // Default profiles
-                Profiles.Add(new InstallationProfile { Type = InstallationType.BattleNet });
-                Profiles.Add(new InstallationProfile { Type = InstallationType.Steam });
-                Profiles.Add(new InstallationProfile { Type = InstallationType.D2RMM, AutomaticBackupsEnabled = false });
+                EnsureDefaultProfiles();
             }
             if (SelectedProfileIndex < 0 || SelectedProfileIndex >= Profiles.Count)
             {
@@ -172,6 +169,109 @@ public class AppSettings
     }
 
     /// <summary>
+    /// Ensures Battle.Net, Steam, and D2RMM profiles all exist in canonical enum
+    /// order so the Installation Type dropdown index always maps to its matching
+    /// profile, and repairs settings where a profile's Type was mutated in place.
+    /// </summary>
+    public void EnsureDefaultProfiles()
+    {
+        Profiles ??= [];
+        Profiles.RemoveAll(profile => profile is null);
+
+        var selected = SelectedProfileIndex >= 0 && SelectedProfileIndex < Profiles.Count
+            ? Profiles[SelectedProfileIndex]
+            : null;
+        var selectedType = selected?.Type;
+
+        var battleNet = Profiles.Find(profile => profile.Type == InstallationType.BattleNet)
+                        ?? new InstallationProfile { Type = InstallationType.BattleNet };
+        var steam = Profiles.Find(profile => profile.Type == InstallationType.Steam)
+                    ?? new InstallationProfile { Type = InstallationType.Steam };
+        var d2rmm = Profiles.Find(profile => profile.Type == InstallationType.D2RMM)
+                    ?? new InstallationProfile { Type = InstallationType.D2RMM, AutomaticBackupsEnabled = false };
+        var lutris = Profiles.Find(profile => profile.Type == InstallationType.Lutris);
+
+        if (!string.IsNullOrWhiteSpace(steam.InstallDirectory)
+            && string.IsNullOrWhiteSpace(battleNet.InstallDirectory)
+            && !InstallDirectoryValidator.IsValidSteamInstallDirectory(steam.InstallDirectory)
+            && InstallDirectoryValidator.IsValidInstallDirectory(steam.InstallDirectory))
+        {
+            battleNet.InstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(steam.InstallDirectory);
+            battleNet.IsInstallDirectoryValidated = true;
+            battleNet.LaunchExperience = steam.LaunchExperience;
+            battleNet.SelectedLadderId = steam.SelectedLadderId;
+            battleNet.SelectedLadderExtensions = new(steam.SelectedLadderExtensions ?? []);
+            battleNet.SelectedLadderRegions = new(steam.SelectedLadderRegions ?? []);
+            battleNet.PinnedLadderServers = new(steam.PinnedLadderServers ?? []);
+            steam.InstallDirectory = null;
+            steam.IsInstallDirectoryValidated = false;
+            if (selectedType == InstallationType.Steam)
+            {
+                selectedType = InstallationType.BattleNet;
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(battleNet.InstallDirectory)
+                 && string.IsNullOrWhiteSpace(steam.InstallDirectory)
+                 && InstallDirectoryValidator.IsValidSteamInstallDirectory(battleNet.InstallDirectory))
+        {
+            steam.InstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(battleNet.InstallDirectory);
+            steam.IsInstallDirectoryValidated = true;
+            battleNet.InstallDirectory = null;
+            battleNet.IsInstallDirectoryValidated = false;
+            if (selectedType == InstallationType.BattleNet)
+            {
+                selectedType = InstallationType.Steam;
+            }
+        }
+
+        Profiles.Clear();
+        Profiles.Add(battleNet);
+        Profiles.Add(steam);
+        Profiles.Add(d2rmm);
+        if (lutris is not null)
+        {
+            Profiles.Add(lutris);
+        }
+
+        if (selectedType is { } targetType)
+        {
+            var index = Profiles.FindIndex(profile => profile.Type == targetType);
+            SelectedProfileIndex = index >= 0 ? index : 0;
+        }
+        else if (SelectedProfileIndex < 0 || SelectedProfileIndex >= Profiles.Count)
+        {
+            SelectedProfileIndex = 0;
+        }
+    }
+
+    public InstallationProfile SelectProfile(InstallationType type)
+    {
+        if (type == InstallationType.Lutris)
+        {
+            EnsureLutrisProfile();
+        }
+        else
+        {
+            EnsureDefaultProfiles();
+        }
+
+        var index = Profiles.FindIndex(profile => profile.Type == type);
+        if (index < 0)
+        {
+            var created = new InstallationProfile
+            {
+                Type = type,
+                AutomaticBackupsEnabled = type != InstallationType.D2RMM
+            };
+            Profiles.Add(created);
+            index = Profiles.Count - 1;
+        }
+
+        SelectedProfileIndex = index;
+        return Profiles[index];
+    }
+
+    /// <summary>
     /// Adds the Lutris profile to a settings file written before the type
     /// existed. It is appended, so existing profiles keep their position and
     /// <see cref="SelectedProfileIndex"/> still refers to the same installation.
@@ -179,8 +279,7 @@ public class AppSettings
     /// </summary>
     public void EnsureLutrisProfile()
     {
-        // Seeds the default profiles when the settings file is brand new.
-        _ = CurrentProfile;
+        EnsureDefaultProfiles();
 
         if (!InstallationTypes.IsAvailable(InstallationType.Lutris))
         {

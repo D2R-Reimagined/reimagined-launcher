@@ -48,14 +48,22 @@ public class GameLauncherService
                 InstallDirectoryValidator.NormalizeInstallDirectory(currentProfile.InstallDirectory);
             currentProfile.IsInstallDirectoryValidated = true;
 
-            if (currentProfile.Type == InstallationType.BattleNet)
+            if (currentProfile.Type is InstallationType.BattleNet or InstallationType.Steam)
             {
                 var detectedType = DetectInstallationType(currentProfile.InstallDirectory!);
-                if (detectedType != InstallationType.BattleNet)
+                if (detectedType != currentProfile.Type)
                 {
-                    currentProfile.Type = detectedType;
-                    if (detectedType == InstallationType.Steam)
-                        currentProfile.SteamDirectory = FindSteamExecutable(currentProfile.InstallDirectory);
+                    var targetProfile = GetProfileByType(settings, detectedType);
+                    if (string.IsNullOrWhiteSpace(targetProfile.InstallDirectory) || !targetProfile.IsInstallDirectoryValidated)
+                    {
+                        targetProfile.InstallDirectory = currentProfile.InstallDirectory;
+                        targetProfile.IsInstallDirectoryValidated = true;
+                        if (detectedType == InstallationType.Steam)
+                            targetProfile.SteamDirectory = FindSteamExecutable(targetProfile.InstallDirectory);
+                    }
+                    currentProfile.InstallDirectory = null;
+                    currentProfile.IsInstallDirectoryValidated = false;
+                    currentProfile = settings.SelectProfile(detectedType);
                 }
             }
 
@@ -195,7 +203,7 @@ public class GameLauncherService
     /// Ensures both B.Net and Steam profiles are populated from default paths when possible.
     /// Called when the current profile is already valid, to discover the other installation.
     /// </summary>
-    private void PopulateDefaultPaths(AppSettings settings)
+    public void PopulateDefaultPaths(AppSettings settings)
     {
         foreach (var path in DefaultInstallPaths)
         {
@@ -1015,11 +1023,35 @@ public class GameLauncherService
     {
         if (OperatingSystem.IsWindows())
         {
-            return
-            [
+            var windowsPaths = new List<string>
+            {
                 @"C:\Program Files (x86)\Diablo II Resurrected\D2R.exe",
                 @"C:\Program Files (x86)\Steam\steamapps\common\Diablo II Resurrected\D2R.exe"
-            ];
+            };
+            var winSteamRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                @"C:\Program Files (x86)\Steam"
+            };
+            AddConfiguredSteamLibraries(@"C:\Program Files (x86)\Steam", winSteamRoots);
+            foreach (var root in winSteamRoots)
+            {
+                windowsPaths.Add(Path.Combine(root, SteamAppsDirName, "common", "Diablo II Resurrected", GameExecutableName));
+            }
+            try
+            {
+                foreach (var drive in DriveInfo.GetDrives())
+                {
+                    if (drive.DriveType != DriveType.Fixed || !drive.IsReady) continue;
+                    windowsPaths.Add(Path.Combine(drive.RootDirectory.FullName, "Program Files (x86)", "Diablo II Resurrected", GameExecutableName));
+                    windowsPaths.Add(Path.Combine(drive.RootDirectory.FullName, "Diablo II Resurrected", GameExecutableName));
+                    windowsPaths.Add(Path.Combine(drive.RootDirectory.FullName, "SteamLibrary", SteamAppsDirName, "common", "Diablo II Resurrected", GameExecutableName));
+                }
+            }
+            catch
+            {
+                // Ignore drive enumeration failures.
+            }
+            return windowsPaths.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         }
 
         if (!OperatingSystem.IsLinux())

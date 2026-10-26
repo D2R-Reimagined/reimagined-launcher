@@ -364,7 +364,9 @@ public partial class LaunchView : UserControl
         var ladderAvailable = HasAvailableLadder;
         var isReimaginedSignedIn = _launcherAuthenticationService.IsSignedIn;
 
-        InstallationTypeComboBox.SelectedIndex = (int)profile.Type;
+        _isRefreshingInstallationType = true;
+        try { InstallationTypeComboBox.SelectedIndex = (int)profile.Type; }
+        finally { _isRefreshingInstallationType = false; }
         DirectoryTextBox.Text = profile.InstallDirectory ?? string.Empty;
         DetectionLoadingIndicator.IsVisible = LauncherService.IsDetecting;
 
@@ -423,7 +425,9 @@ public partial class LaunchView : UserControl
         // Auto-detect Steam path if not set or if it's currently Steam type
         if (profile.Type == InstallationType.Steam)
         {
-            var detectedSteam = LauncherService.FindSteamExecutable(profile.InstallDirectory);
+            var detectedSteam = !string.IsNullOrWhiteSpace(profile.SteamDirectory) && File.Exists(profile.SteamDirectory)
+                ? profile.SteamDirectory
+                : LauncherService.FindSteamExecutable(profile.InstallDirectory);
             if (!string.IsNullOrEmpty(detectedSteam) && File.Exists(detectedSteam))
             {
                 if (profile.SteamDirectory != detectedSteam)
@@ -440,6 +444,8 @@ public partial class LaunchView : UserControl
         }
 
 
+        MainWindow.Instance?.RefreshLocalModState();
+
         bool isValidated;
         bool isModDetected;
 
@@ -451,7 +457,7 @@ public partial class LaunchView : UserControl
             isValidated = InstallDirectoryValidator.IsValidD2RmmModsDirectory(profile.InstallDirectory) && Directory.Exists(profile.InstallDirectory);
             
             // For D2RMM, check if Reimagined or Reimagined.mpq exists in the mods folder
-            isModDetected = isValidated && InstallDirectoryValidator.ResolveD2RmmModFolder(profile.InstallDirectory) != null;
+            isModDetected = isValidated && MainWindow.IsLocalModDetected;
         }
         else
         {
@@ -470,8 +476,24 @@ public partial class LaunchView : UserControl
 
         profile.IsInstallDirectoryValidated = isValidated;
         UpdateInstallDirectoryAttention(profile, isValidated);
-        HeroPathStatus.Text = $"{profile.Type} Path {(isValidated ? "Verified ✓" : "Needs Setup")}";
-        HeroPathStatus.Foreground = isValidated ? new SolidColorBrush(Color.Parse("#A5C798")) : new SolidColorBrush(Color.Parse("#E8C37D"));
+        if (!isValidated)
+        {
+            HeroPathStatus.Text = $"{profile.Type} Path Needs Setup";
+            HeroPathStatus.Foreground = new SolidColorBrush(Color.Parse("#E8C37D"));
+            HeroChangePathButton.Content = "(Change)";
+        }
+        else if (!isModDetected && !IsLadderSetupAction(isLadderExperience))
+        {
+            HeroPathStatus.Text = "Reimagined Mod Not Installed";
+            HeroPathStatus.Foreground = new SolidColorBrush(Color.Parse("#E0575F"));
+            HeroChangePathButton.Content = "(Install)";
+        }
+        else
+        {
+            HeroPathStatus.Text = $"{profile.Type} Path Verified ✓";
+            HeroPathStatus.Foreground = new SolidColorBrush(Color.Parse("#A5C798"));
+            HeroChangePathButton.Content = "(Change)";
+        }
 
         HeroModeSummary.Text = profile.LaunchExperience == LaunchExperience.Offline
             ? "Single-player · Saves on your PC\nD2RLoader plugins are not loaded in Mod Only."
@@ -482,7 +504,11 @@ public partial class LaunchView : UserControl
                                           && NormalModInstallationService.RequiresRecovery(profile.InstallDirectory);
         RepairNormalModButton.IsEnabled = !_isLaunching && !_isRunningLadderAction && !MainWindow.IsInstallInProgress;
 
-        _loaderInventory = D2RLoaderService.Discover(profile.InstallDirectory, profile.LaunchExperience, includeManualDisabled: profile.LaunchExperience != LaunchExperience.Ladder);
+        var discoveredInventory = D2RLoaderService.Discover(profile.InstallDirectory, profile.LaunchExperience, includeManualDisabled: profile.LaunchExperience != LaunchExperience.Ladder);
+        if (_loaderInventory is null || !AreInventoriesEquivalent(_loaderInventory, discoveredInventory))
+        {
+            _loaderInventory = discoveredInventory;
+        }
         RefreshD2RLoaderState(profile, _loaderInventory);
         var loaderAvailable = D2RLoaderService.CanUseOnlineExperience(profile, out var loaderUnavailableReason);
 
@@ -660,12 +686,55 @@ public partial class LaunchView : UserControl
         }
     }
 
+    private static bool AreInventoriesEquivalent(D2RLoaderInventory current, D2RLoaderInventory next)
+    {
+        if (!string.Equals(current.InstallDirectory, next.InstallDirectory, StringComparison.Ordinal)
+            || !string.Equals(current.ModRoot, next.ModRoot, StringComparison.Ordinal)
+            || current.IsInstalled != next.IsInstalled
+            || !string.Equals(current.Version, next.Version, StringComparison.Ordinal)
+            || current.AllowGlobalExtensions != next.AllowGlobalExtensions
+            || current.AllowModExtensions != next.AllowModExtensions
+            || current.Extensions.Count != next.Extensions.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < current.Extensions.Count; i++)
+        {
+            var a = current.Extensions[i];
+            var b = next.Extensions[i];
+            if (!string.Equals(a.FilePath, b.FilePath, StringComparison.Ordinal)
+                || a.Kind != b.Kind
+                || a.Scope != b.Scope
+                || a.IsEnabled != b.IsEnabled
+                || a.HasToggleConflict != b.HasToggleConflict
+                || a.IsLadderDisabled != b.IsLadderDisabled
+                || !string.Equals(a.Name, b.Name, StringComparison.Ordinal)
+                || !string.Equals(a.Version, b.Version, StringComparison.Ordinal)
+                || !string.Equals(a.Author, b.Author, StringComparison.Ordinal)
+                || !string.Equals(a.Description, b.Description, StringComparison.Ordinal)
+                || a.PatchCount != b.PatchCount
+                || !string.Equals(a.Error, b.Error, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private void RefreshD2RLoaderState(InstallationProfile profile, D2RLoaderInventory inventory)
     {
         foreach (var entry in inventory.Extensions)
             entry.CanEditConfig = D2RLoaderConfigService.HasExistingConfig(profile, entry);
-        LoaderPluginsItemsControl.ItemsSource = inventory.Plugins;
-        LoaderPatchesItemsControl.ItemsSource = inventory.Patches;
+        if (!ReferenceEquals(LoaderPluginsItemsControl.ItemsSource, inventory.Plugins))
+        {
+            LoaderPluginsItemsControl.ItemsSource = inventory.Plugins;
+        }
+        if (!ReferenceEquals(LoaderPatchesItemsControl.ItemsSource, inventory.Patches))
+        {
+            LoaderPatchesItemsControl.ItemsSource = inventory.Patches;
+        }
         RefreshLoaderExtensionCounts(inventory);
         NoLoaderPluginsText.IsVisible = inventory.Plugins.Count == 0;
         NoLoaderPatchesText.IsVisible = inventory.Patches.Count == 0;
@@ -2008,9 +2077,11 @@ public partial class LaunchView : UserControl
         }
     }
 
+    private bool _isRefreshingInstallationType;
+
     private async void OnInstallationTypeChanged(object? sender, SelectionChangedEventArgs e)
     {
-        if (InstallationTypeComboBox == null) return;
+        if (_isRefreshingInstallationType || InstallationTypeComboBox == null) return;
         
         var selectedIndex = InstallationTypeComboBox.SelectedIndex;
         if (selectedIndex < 0) return;
@@ -2021,33 +2092,41 @@ public partial class LaunchView : UserControl
         if (!InstallationTypes.IsAvailable(newType))
         {
             // The item is disabled, but keyboard navigation can still reach it.
-            InstallationTypeComboBox.SelectedIndex = (int)MainWindow.Settings.CurrentProfile.Type;
+            _isRefreshingInstallationType = true;
+            try { InstallationTypeComboBox.SelectedIndex = (int)MainWindow.Settings.CurrentProfile.Type; }
+            finally { _isRefreshingInstallationType = false; }
             return;
         }
 
-        if (newType == InstallationType.Lutris)
+        // Switch profile via canonical type lookup so missing or previously
+        // mutated profile entries cannot snap the selector back.
+        var switchedProfile = MainWindow.Settings.SelectProfile(newType);
+        if (string.IsNullOrWhiteSpace(switchedProfile.InstallDirectory)
+            && newType is InstallationType.BattleNet or InstallationType.Steam)
         {
-            // Appends the profile the first time Lutris is picked, so a settings
-            // file written before the type existed keeps its other profiles put.
-            MainWindow.Settings.EnsureLutrisProfile();
+            LauncherService.PopulateDefaultPaths(MainWindow.Settings);
         }
-
-        // Switch profile
-        MainWindow.Settings.SelectedProfileIndex = selectedIndex;
-        if (MainWindow.Settings.CurrentProfile.Type is InstallationType.D2RMM or InstallationType.Lutris)
+        if (switchedProfile.Type is InstallationType.D2RMM or InstallationType.Lutris)
         {
-            MainWindow.Settings.CurrentProfile.LaunchExperience = LaunchExperience.Offline;
+            switchedProfile.LaunchExperience = LaunchExperience.Offline;
         }
         BackupService.ApplyDefaultSettings();
+
+        var mw = TopLevel.GetTopLevel(this) as MainWindow;
+        mw?.RefreshLocalModState();
+        RefreshInstallDirectoryState();
+
+        if (switchedProfile.LaunchExperience == LaunchExperience.Ladder)
+        {
+            _ = RefreshLadderExtensionPolicyAsync();
+        }
+
         await SettingsManager.SaveAsync(MainWindow.Settings);
 
-        if (TopLevel.GetTopLevel(this) is MainWindow mw)
+        if (mw is not null)
         {
-            mw.RefreshLocalModState();
             await mw.RefreshUpdateStateAsync();
         }
-        
-        RefreshInstallDirectoryState();
     }
 
     private void RefreshLutrisGameControls(InstallationProfile profile)
@@ -2288,6 +2367,34 @@ public partial class LaunchView : UserControl
         LaunchStatusPanel.IsVisible = isVisible;
     }
 
+    private void OnStartGameContainerPointerPressed(object? sender, Avalonia.Input.PointerPressedEventArgs e)
+    {
+        if (StartGameButton.IsEnabled || _isLaunching || _isRunningLadderAction || MainWindow.IsInstallInProgress)
+        {
+            return;
+        }
+
+        MainWindow.Instance?.RefreshLocalModState();
+
+        var profile = MainWindow.Settings.CurrentProfile;
+        if (!profile.IsInstallDirectoryValidated)
+        {
+            Notifications.SendNotification(
+                "Choose the Diablo II: Resurrected folder that contains D2R.exe before launching.",
+                "Error");
+            return;
+        }
+
+        if (profile.LaunchExperience != LaunchExperience.Ladder && !MainWindow.IsLocalModDetected)
+        {
+            RefreshInstallDirectoryState();
+            _ = MainWindow.Instance?.RefreshUpdateStateAsync();
+            Notifications.SendNotification(
+                "The D2R Reimagined mod is not installed. Go to the Install/Update tab to install it.",
+                "Error");
+        }
+    }
+
     private async void OnRunClick(object? sender, RoutedEventArgs e)
     {
         // Download and Update are setup, not launch. They share the button so
@@ -2373,23 +2480,20 @@ public partial class LaunchView : UserControl
             {
                 LaunchDiagnostics.Log("Action blocked because install directory is not validated.");
                 Notifications.SendNotification(
-                    "Install directory not validated",
-                    "Choose the Diablo II: Resurrected folder that contains D2R.exe.");
+                    "Choose the Diablo II: Resurrected folder that contains D2R.exe before launching.",
+                    "Error");
                 return;
             }
 
+            MainWindow.Instance?.RefreshLocalModState();
             if (profile.LaunchExperience != LaunchExperience.Ladder && !MainWindow.IsLocalModDetected)
             {
                 LaunchDiagnostics.Log("Action blocked because the local mod was not detected.");
+                RefreshInstallDirectoryState();
+                _ = MainWindow.Instance?.RefreshUpdateStateAsync();
                 Notifications.SendNotification(
-                    "D2R Reimagined mod not detected",
-                    "Install the mod in the selected directory before launching/installing.");
-
-                if (MainWindow.Instance is { } mainWindow)
-                {
-                    await mainWindow.PromptInstallForMissingModAsync();
-                }
-
+                    "The D2R Reimagined mod is not installed. Go to the Install/Update tab to install it.",
+                    "Error");
                 return;
             }
 
@@ -3484,8 +3588,17 @@ public partial class LaunchView : UserControl
 
                 if (folders.Count <= 0) return;
 
-                var path = folders[0].Path.LocalPath;
-                profile.InstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(path);
+                var path = InstallDirectoryValidator.NormalizeInstallDirectory(folders[0].Path.LocalPath);
+                if (profile.Type is InstallationType.BattleNet or InstallationType.Steam
+                    && InstallDirectoryValidator.IsValidInstallDirectory(path))
+                {
+                    var detectedType = LauncherService.DetectInstallationType(path!);
+                    if (detectedType != profile.Type)
+                    {
+                        profile = MainWindow.Settings.SelectProfile(detectedType);
+                    }
+                }
+                profile.InstallDirectory = path;
             }
 
             profile.IsInstallDirectoryValidated = profile.Type == InstallationType.D2RMM
@@ -3493,16 +3606,6 @@ public partial class LaunchView : UserControl
                 : profile.Type == InstallationType.Steam
                     ? InstallDirectoryValidator.IsValidSteamInstallDirectory(profile.InstallDirectory)
                     : InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory);
-
-            // Auto-detect type if it's currently BattleNet (default)
-            if (profile.Type == InstallationType.BattleNet && profile.IsInstallDirectoryValidated)
-            {
-                var detectedType = LauncherService.DetectInstallationType(profile.InstallDirectory!);
-                if (detectedType != InstallationType.BattleNet)
-                {
-                    profile.Type = detectedType;
-                }
-            }
 
             // Auto-detect Steam path if it's Steam
             if (profile.Type == InstallationType.Steam)
@@ -3528,21 +3631,21 @@ public partial class LaunchView : UserControl
                 if (profile.Type == InstallationType.D2RMM)
                 {
                     Notifications.SendNotification(
-                        "Invalid D2RMM location",
-                        InstallDirectoryValidator.GetD2RmmValidationMessage(profile.InstallDirectory));
+                        InstallDirectoryValidator.GetD2RmmValidationMessage(profile.InstallDirectory),
+                        "Error");
                 }
                 else if (profile.Type == InstallationType.Steam
                          && InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory))
                 {
                     Notifications.SendNotification(
-                        "Invalid Steam path",
-                        "The selected directory does not contain steam_*.dll. Please select a valid Steam installation or switch to Battle.Net.");
+                        "The selected directory does not contain steam_*.dll. Please select a valid Steam installation or switch to Battle.Net.",
+                        "Error");
                 }
                 else
                 {
                     Notifications.SendNotification(
-                        "D2R install not found",
-                        "Select the Diablo II: Resurrected folder that contains D2R.exe.");
+                        "Select the Diablo II: Resurrected folder that contains D2R.exe.",
+                        "Error");
                 }
                 return;
             }
@@ -3550,8 +3653,8 @@ public partial class LaunchView : UserControl
             if (profile.Type != InstallationType.D2RMM && !MainWindow.IsLocalModDetected)
             {
                 Notifications.SendNotification(
-                    "D2R Reimagined mod not detected",
-                    "Install the mod in this directory before launching.");
+                    "The D2R Reimagined mod is not installed in this directory. Go to the Install/Update tab to install it.",
+                    "Warning");
 
                 if (TopLevel.GetTopLevel(this) is MainWindow mainWindow)
                 {
