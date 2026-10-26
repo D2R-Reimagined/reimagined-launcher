@@ -130,8 +130,7 @@ public partial class LaunchView
         var busy = _filterBusy || _pluginBusy || MainWindow.IsInstallInProgress || _isLaunching || _isRunningLadderAction;
         var extensionControlsBusy = busy && !_extensionToggleInProgress;
         var canEdit = !extensionControlsBusy && profile.Type != InstallationType.D2RMM && profile.LaunchExperience == LaunchExperience.Online;
-        var canToggle = canEdit;
-        try { RequireGameClosed(); } catch (Exception) { canToggle = false; }
+        var canToggle = canEdit && !SteamGameHandoff.IsLaunchPendingOrRunning && !MainWindow.IsGameRunning();
         LadderExtensionsGrid.IsEnabled = !busy;
         SetExtensionControlAvailability(canEdit, canToggle);
         LoaderPluginsItemsControl.IsHitTestVisible = !_extensionToggleInProgress;
@@ -276,12 +275,6 @@ public partial class LaunchView
     {
         if (MainWindow.IsGameRunning() || SteamGameHandoff.IsLaunchPendingOrRunning)
             throw new InvalidOperationException("Close D2R and D2RLoader before installing plugins.");
-        foreach (var name in OperatingSystem.IsWindows() ? new[] { "D2RLoader" } : new[] { "D2RLoader", "D2RLoader.exe" })
-        {
-            var processes = Process.GetProcessesByName(name);
-            try { if (processes.Length != 0) throw new InvalidOperationException("Close D2RLoader before installing plugins."); }
-            finally { foreach (var process in processes) process.Dispose(); }
-        }
     }
 
     private async void OnInstallLocalPluginClick(object? sender, RoutedEventArgs e)

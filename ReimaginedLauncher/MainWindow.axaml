@@ -67,7 +67,28 @@
                                 </Button>
                             </Grid>
                         </ListBoxItem>
-                        <ListBoxItem x:Name="UpdateNavItem" Tag="Update" Content="Install/Update" />
+                        <ListBoxItem x:Name="UpdateNavItem" Tag="Update" HorizontalContentAlignment="Stretch">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <TextBlock Grid.Column="0"
+                                           Text="Install/Update"
+                                           VerticalAlignment="Center" />
+                                <Border Grid.Column="1"
+                                        x:Name="UpdateNavWarningBadge"
+                                        Width="32"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        ToolTip.Tip="D2R Reimagined is not detected in this install directory. Open Install/Update to install the mod."
+                                        IsVisible="False">
+                                    <materialIcons:MaterialIcon x:Name="UpdateNavWarningIcon"
+                                                                Kind="AlertCircle"
+                                                                Foreground="{StaticResource DangerTextBrush}"
+                                                                Width="18"
+                                                                Height="18"
+                                                                HorizontalAlignment="Center"
+                                                                VerticalAlignment="Center" />
+                                </Border>
+                            </Grid>
+                        </ListBoxItem>
                         <ListBoxItem x:Name="BackupsNavItem" Tag="Backups" Content="Backups" />
                         <ListBoxItem x:Name="SettingsNavItem" Tag="Settings" Content="Settings" />
                         <ListBoxItem x:Name="ModTweaksNavItem" Tag="ModTweaks" Content="Mod Tweaks" />
@@ -164,18 +185,26 @@
 
                                 <WrapPanel Orientation="Horizontal" ItemSpacing="10" LineSpacing="3" VerticalAlignment="Center">
                                     <Image x:Name="LogoImage" Width="36" Height="36" Stretch="Uniform" VerticalAlignment="Center" />
-                                    <TextBlock x:Name="VersionTextBlock" VerticalAlignment="Center"
-                                               FontFamily="Georgia"
-                                               FontSize="18"
-                                               FontWeight="Bold" />
-                                    <TextBlock x:Name="UpdateAvailableTextBlock"
-                                               FontFamily="Georgia"
-                                               FontSize="13"
-                                               FontWeight="SemiBold"
-                                               Foreground="{StaticResource GoldBrush}"
-                                               VerticalAlignment="Bottom"
-                                               Margin="0,0,0,2"
-                                               IsVisible="False" />
+                                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <TextBlock x:Name="VersionTextBlock" VerticalAlignment="Center"
+                                                   FontFamily="Georgia"
+                                                   FontSize="18"
+                                                   FontWeight="Bold" />
+                                        <TextBlock x:Name="VersionNotDetectedTextBlock" VerticalAlignment="Center"
+                                                   Text="Version Not Detected"
+                                                   FontFamily="Georgia"
+                                                   FontSize="18"
+                                                   FontWeight="Bold"
+                                                   Foreground="{StaticResource DangerTextBrush}"
+                                                   IsVisible="False" />
+                                        <TextBlock x:Name="UpdateAvailableTextBlock"
+                                                   FontFamily="Georgia"
+                                                   FontSize="13"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{StaticResource GoldBrush}"
+                                                   VerticalAlignment="Center"
+                                                   IsVisible="False" />
+                                    </StackPanel>
                                 </WrapPanel>
 
                             <StackPanel Grid.Column="1"

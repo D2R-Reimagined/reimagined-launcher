@@ -128,12 +128,12 @@
             </Grid>
             <Border x:Name="LaunchPanel" Classes="" Padding="0" Grid.Column="1" MinHeight="0" VerticalAlignment="Stretch" Grid.Row="1">
             <Grid RowDefinitions="*,Auto" RowSpacing="8">
-              <Grid><Button x:Name="StartGameButton" Classes="hero-start os-accent" Content="Start Game" Click="OnRunClick" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" MinHeight="44" IsEnabled="False" VerticalAlignment="Stretch" Padding="12,6"/>
+              <Grid Background="Transparent" PointerPressed="OnStartGameContainerPointerPressed"><Button x:Name="StartGameButton" Classes="hero-start os-accent" Content="Start Game" Click="OnRunClick" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" MinHeight="44" IsEnabled="False" VerticalAlignment="Stretch" Padding="12,6"/>
               <launch:StartButtonSheen IsHitTestVisible="False" Focusable="False" IsVisible="False" x:Name="StartGameSheen"/></Grid><Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="5" Padding="9" x:Name="HeroPathBackupPanel" Grid.Row="1">
                 <StackPanel Spacing="3" VerticalAlignment="Center">
                   <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6" HorizontalAlignment="Center">
                     <TextBlock Text="Check installation" TextWrapping="Wrap" VerticalAlignment="Center" x:Name="HeroPathStatus"/>
-                    <Button Content="(Change)" Click="OnHeroChangePathClick" Grid.Column="1" Padding="5,2" FontSize="11" Classes="hero-link" VerticalAlignment="Center"/>
+                    <Button x:Name="HeroChangePathButton" Content="(Change)" Click="OnHeroChangePathClick" Grid.Column="1" Padding="5,2" FontSize="11" Classes="hero-link" VerticalAlignment="Center"/>
                   </Grid>
                   <TextBlock x:Name="BackupOnLaunchSummary" Classes="muted" FontSize="11" HorizontalAlignment="Center"/>
                   <TextBlock x:Name="BackupIntervalSummary" Classes="muted" FontSize="11" IsVisible="False"/>

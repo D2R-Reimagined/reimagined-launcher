@@ -78,7 +78,9 @@ public partial class MainWindow : Window
     private TrayIcon? _trayIcon;
     private bool _isExiting;
     private readonly DispatcherTimer _saveWindowStateTimer;
+    private readonly DispatcherTimer _localModWatchTimer;
     private DispatcherTimer? _launcherUpdateCheckTimer;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime LastWriteUtc, long Length, string? Version)> ModInfoVersionCache = new(StringComparer.OrdinalIgnoreCase);
     private bool _isRestoringWindowState;
     private bool _isInitializingSettings = true;
     public static bool IsInitializingSettings => Instance?._isInitializingSettings ?? false;
@@ -124,6 +126,27 @@ public partial class MainWindow : Window
         };
         PositionChanged += OnWindowPositionOrSizeChanged;
         SizeChanged += OnWindowPositionOrSizeChanged;
+        Activated += OnWindowActivated;
+        _localModWatchTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _localModWatchTimer.Tick += (_, _) => CheckForLocalModStateChanges();
+        _localModWatchTimer.Start();
+    }
+
+    private void OnWindowActivated(object? sender, EventArgs e) => CheckForLocalModStateChanges();
+
+    private void CheckForLocalModStateChanges()
+    {
+        if (_isInitializingSettings || IsInstallInProgress || _isExiting || WindowState == WindowState.Minimized)
+            return;
+
+        var previousDetected = IsLocalModDetected;
+        var previousVersion = _localModVersion;
+        RefreshLocalModState();
+        if (previousDetected != IsLocalModDetected || !string.Equals(previousVersion, _localModVersion, StringComparison.Ordinal))
+        {
+            RefreshCurrentContent();
+            _ = RefreshUpdateStateAsync();
+        }
     }
 
     private static string ResolveLauncherVersion()
@@ -378,6 +401,8 @@ public partial class MainWindow : Window
 
     public async Task RefreshUpdateStateAsync()
     {
+        RefreshLocalModState();
+
         if (!Settings.CurrentProfile.IsInstallDirectoryValidated || string.IsNullOrWhiteSpace(Settings.CurrentProfile.InstallDirectory))
         {
             SetUpdateState(
@@ -394,8 +419,24 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!IsLocalModDetected && Settings.CurrentProfile.LaunchExperience != LaunchExperience.Ladder)
+        if (!IsLocalModDetected)
         {
+            if (Settings.CurrentProfile.LaunchExperience == LaunchExperience.Ladder)
+            {
+                SetUpdateState(
+                    isUpdateAvailable: false,
+                    canInstallOrUpdate: false,
+                    title: "Ladder package not installed",
+                    message: "Ladder uses its own signed mod package. Open the Launch tab and use the Download button to set up Ladder.",
+                    currentVersion: "Not detected",
+                    latestVersion: "Managed by Ladder",
+                    downloadUrl: NexusUrl,
+                    isDirectDownload: false,
+                    fileId: null);
+                RefreshCurrentContent();
+                return;
+            }
+
             var latestVersionForInstall = "Latest available";
             var downloadUrlForInstall = NexusUrl;
 
@@ -415,7 +456,7 @@ public partial class MainWindow : Window
                     }
 
                     SetUpdateState(
-                        isUpdateAvailable: true,
+                        isUpdateAvailable: false,
                         canInstallOrUpdate: true,
                         title: "Mod not detected",
                         message: "D2R Reimagined is not detected in this install directory. Install the mod to enable Play.",
@@ -430,7 +471,7 @@ public partial class MainWindow : Window
             }
 
             SetUpdateState(
-                isUpdateAvailable: true,
+                isUpdateAvailable: false,
                 canInstallOrUpdate: true,
                 title: "Mod not detected",
                 message: "D2R Reimagined is not detected in this install directory. Install the mod to enable Play.",
@@ -559,7 +600,10 @@ public partial class MainWindow : Window
 
     public async Task PromptInstallForMissingModAsync()
     {
-        if (!Settings.CurrentProfile.IsInstallDirectoryValidated || string.IsNullOrWhiteSpace(Settings.CurrentProfile.InstallDirectory) || IsLocalModDetected)
+        if (!Settings.CurrentProfile.IsInstallDirectoryValidated ||
+            string.IsNullOrWhiteSpace(Settings.CurrentProfile.InstallDirectory) ||
+            IsLocalModDetected ||
+            Settings.CurrentProfile.LaunchExperience == LaunchExperience.Ladder)
             return;
 
         await NavigateToUpdateViewAsync();
@@ -571,72 +615,107 @@ public partial class MainWindow : Window
         IsLocalModDetected = false;
 
         var profile = Settings.CurrentProfile;
+        var installDir = installDirectory ?? profile.InstallDirectory;
         if (profile.Type == InstallationType.D2RMM)
         {
-            if (!string.IsNullOrWhiteSpace(profile.InstallDirectory))
+            if (!string.IsNullOrWhiteSpace(installDir) &&
+                InstallDirectoryValidator.IsValidD2RmmModsDirectory(installDir) &&
+                Directory.Exists(installDir))
             {
-                var modPath = InstallDirectoryValidator.ResolveD2RmmModFolder(profile.InstallDirectory);
-                IsLocalModDetected = modPath != null;
+                var modPath = InstallDirectoryValidator.ResolveD2RmmModFolder(installDir);
+                var excelDir = modPath != null ? Path.Combine(modPath, "data", "global", "excel") : string.Empty;
+                IsLocalModDetected = modPath != null && Directory.Exists(excelDir);
 
-                var modInfoPath = modPath != null ? Path.Combine(modPath, "modinfo.json") : string.Empty;
-                var layoutsDir = modPath != null ? Path.Combine(modPath, "data", "global", "ui", "layouts") : string.Empty;
+                if (IsLocalModDetected && modPath != null)
+                {
+                    var modInfoPath = Path.Combine(modPath, "modinfo.json");
+                    var layoutsDir = Path.Combine(modPath, "data", "global", "ui", "layouts");
 
-                var panel = CharacterSelectPanelService.FromJson(layoutsDir);
-                var panelVersion = panel?.GetModVersion();
-                var modInfoVersion = TryGetVersionFromModInfo(modInfoPath);
-                _localModVersion = SelectInstalledModVersion(modInfoVersion, panelVersion);
+                    var modInfoVersion = TryGetVersionFromModInfo(modInfoPath);
+                    var panelVersion = !string.IsNullOrWhiteSpace(modInfoVersion) && !modInfoVersion.Trim().Equals("Unknown", StringComparison.OrdinalIgnoreCase)
+                        ? null
+                        : CharacterSelectPanelService.FromJson(layoutsDir)?.GetModVersion();
+                    _localModVersion = SelectInstalledModVersion(modInfoVersion, panelVersion);
+                }
             }
         }
         else
         {
-            var installDir = installDirectory ?? Settings.CurrentProfile.InstallDirectory;
-            if (!string.IsNullOrWhiteSpace(installDir))
+            var isValidInstallDir = !string.IsNullOrWhiteSpace(installDir) &&
+                (profile.Type == InstallationType.Steam
+                    ? InstallDirectoryValidator.IsValidSteamInstallDirectory(installDir)
+                    : InstallDirectoryValidator.IsValidInstallDirectory(installDir));
+            if (isValidInstallDir && !string.IsNullOrWhiteSpace(installDir))
             {
                 var modRootDirectory = Path.Combine(installDir, "mods", "Reimagined");
                 var modInfoPath = Path.Combine(modRootDirectory, "modinfo.json");
                 var modInfoPathInMpq = Path.Combine(modRootDirectory, "Reimagined.mpq", "modinfo.json");
+                var excelDirectory = Path.Combine(modRootDirectory, "Reimagined.mpq", "data", "global", "excel");
                 var layoutsDir = Path.Combine(
                     modRootDirectory,
                     "Reimagined.mpq", "data", "global", "ui", "layouts"
                 );
 
-                var panel = CharacterSelectPanelService.FromJson(layoutsDir);
-                var panelVersion = panel?.GetModVersion();
-                var modInfoVersion = TryGetVersionFromModInfo(modInfoPath) ?? TryGetVersionFromModInfo(modInfoPathInMpq);
-                _localModVersion = SelectInstalledModVersion(modInfoVersion, panelVersion);
+                IsLocalModDetected = (File.Exists(modInfoPath) || File.Exists(modInfoPathInMpq)) &&
+                                     Directory.Exists(excelDirectory);
+                if (IsLocalModDetected)
+                {
+                    var modInfoVersion = TryGetVersionFromModInfo(modInfoPath) ?? TryGetVersionFromModInfo(modInfoPathInMpq);
+                    var panelVersion = !string.IsNullOrWhiteSpace(modInfoVersion) && !modInfoVersion.Trim().Equals("Unknown", StringComparison.OrdinalIgnoreCase)
+                        ? null
+                        : CharacterSelectPanelService.FromJson(layoutsDir)?.GetModVersion();
+                    _localModVersion = SelectInstalledModVersion(modInfoVersion, panelVersion);
+                }
 
-                IsLocalModDetected = Directory.Exists(modRootDirectory) || File.Exists(modInfoPath) || File.Exists(modInfoPathInMpq);
-
-                // Ladder installs the mod under ReimaginedLadder, so the normal
-                // check above would miss it. Detect the ladder mod too.
-                if (!IsLocalModDetected)
+                // Ladder installs the mod under ReimaginedLadder, so when Ladder
+                // is the active experience detect the ladder package too.
+                if (!IsLocalModDetected && profile.LaunchExperience == LaunchExperience.Ladder)
                 {
                     var ladderModRoot = Path.Combine(installDir, "mods", "ReimaginedLadder");
                     var ladderModInfo = Path.Combine(ladderModRoot, "modinfo.json");
                     var ladderModInfoInMpq = Path.Combine(ladderModRoot, "ReimaginedLadder.mpq", "modinfo.json");
-                    IsLocalModDetected = Directory.Exists(ladderModRoot) || File.Exists(ladderModInfo) || File.Exists(ladderModInfoInMpq);
+                    var ladderExcelDirectory = Path.Combine(ladderModRoot, "ReimaginedLadder.mpq", "data", "global", "excel");
+                    IsLocalModDetected = (File.Exists(ladderModInfo) || File.Exists(ladderModInfoInMpq)) &&
+                                         Directory.Exists(ladderExcelDirectory);
+                    if (IsLocalModDetected)
+                    {
+                        var ladderVersion = TryGetVersionFromModInfo(ladderModInfo) ?? TryGetVersionFromModInfo(ladderModInfoInMpq);
+                        _localModVersion = SelectInstalledModVersion(ladderVersion, null);
+                    }
                 }
+            }
+        }
+
+        void ApplyLocalModUiState()
+        {
+            VersionTextBlock.Text = IsLocalModDetected
+                ? string.Equals(_localModVersion, "Unknown", StringComparison.OrdinalIgnoreCase)
+                    ? "D2R Reimagined Installed (version unknown)"
+                    : $"D2R Reimagined v{_localModVersion}"
+                : "D2R Reimagined";
+            if (VersionNotDetectedTextBlock != null)
+            {
+                VersionNotDetectedTextBlock.IsVisible = !IsLocalModDetected;
+            }
+            RefreshUpdateAvailableBadge();
+            if (UpdateNavWarningBadge != null)
+            {
+                UpdateNavWarningBadge.IsVisible = !IsLocalModDetected && profile.LaunchExperience != LaunchExperience.Ladder;
+                ToolTip.SetTip(
+                    UpdateNavWarningBadge,
+                    string.IsNullOrWhiteSpace(Settings.CurrentProfile.InstallDirectory) || !Settings.CurrentProfile.IsInstallDirectoryValidated
+                        ? "Select a valid Diablo II: Resurrected install directory."
+                        : "D2R Reimagined is not detected in this install directory. Open Install/Update to install the mod.");
             }
         }
 
         if (Dispatcher.UIThread.CheckAccess())
         {
-            VersionTextBlock.Text = IsLocalModDetected
-                ? string.Equals(_localModVersion, "Unknown", StringComparison.OrdinalIgnoreCase)
-                    ? "D2R Reimagined Installed (version unknown)"
-                    : $"D2R Reimagined v{_localModVersion}"
-                : "D2R Reimagined Version Not Detected";
+            ApplyLocalModUiState();
             return;
         }
 
-        Dispatcher.UIThread.Post(() =>
-        {
-            VersionTextBlock.Text = IsLocalModDetected
-                ? string.Equals(_localModVersion, "Unknown", StringComparison.OrdinalIgnoreCase)
-                    ? "D2R Reimagined Installed (version unknown)"
-                    : $"D2R Reimagined v{_localModVersion}"
-                : "D2R Reimagined Version Not Detected";
-        });
+        Dispatcher.UIThread.Post(ApplyLocalModUiState);
     }
 
     internal static string SelectInstalledModVersion(string? modInfoVersion, string? panelVersion)
@@ -652,22 +731,32 @@ public partial class MainWindow : Window
 
     private static string? TryGetVersionFromModInfo(string modInfoPath)
     {
-        if (!File.Exists(modInfoPath))
-            return null;
-
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(modInfoPath));
-            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            var fileInfo = new FileInfo(modInfoPath);
+            if (!fileInfo.Exists)
                 return null;
 
-            if (document.RootElement.TryGetProperty("version", out var versionElement) &&
-                versionElement.ValueKind == JsonValueKind.String)
+            var lastWriteUtc = fileInfo.LastWriteTimeUtc;
+            var length = fileInfo.Length;
+            if (ModInfoVersionCache.TryGetValue(modInfoPath, out var cached) &&
+                cached.LastWriteUtc == lastWriteUtc &&
+                cached.Length == length)
             {
-                return versionElement.GetString();
+                return cached.Version;
             }
 
-            return null;
+            string? parsedVersion = null;
+            using var document = JsonDocument.Parse(File.ReadAllText(modInfoPath));
+            if (document.RootElement.ValueKind == JsonValueKind.Object &&
+                document.RootElement.TryGetProperty("version", out var versionElement) &&
+                versionElement.ValueKind == JsonValueKind.String)
+            {
+                parsedVersion = versionElement.GetString();
+            }
+
+            ModInfoVersionCache[modInfoPath] = (lastWriteUtc, length, parsedVersion);
+            return parsedVersion;
         }
         catch
         {
@@ -941,7 +1030,8 @@ public partial class MainWindow : Window
     {
         void UpdateBadge()
         {
-            var show = IsUpdateAvailable &&
+            var show = IsLocalModDetected &&
+                       IsUpdateAvailable &&
                        !string.IsNullOrWhiteSpace(UpdateLatestVersion) &&
                        !UpdateLatestVersion.Equals("Unknown", StringComparison.OrdinalIgnoreCase) &&
                        !UpdateLatestVersion.Equals("Latest available", StringComparison.OrdinalIgnoreCase);
@@ -1819,8 +1909,19 @@ public partial class MainWindow : Window
     /// True while a D2R process this launcher can see is running. Used to hold
     /// off touching mod files that a live session has already read.
     /// </summary>
+    private static long _lastGameRunningCheckTimestamp;
+    private static bool _lastGameRunningResult;
+    private static readonly TimeSpan GameRunningCacheDuration = TimeSpan.FromMilliseconds(500);
+
     public static bool IsGameRunning()
     {
+        var now = Stopwatch.GetTimestamp();
+        if (_lastGameRunningCheckTimestamp != 0
+            && Stopwatch.GetElapsedTime(_lastGameRunningCheckTimestamp, now) < GameRunningCacheDuration)
+        {
+            return _lastGameRunningResult;
+        }
+
         try
         {
             if (OperatingSystem.IsLinux())
@@ -1830,7 +1931,11 @@ public partial class MainWindow : Window
                     if (string.IsNullOrWhiteSpace(profile.InstallDirectory)) continue;
                     if (SteamGameHandoff.FindGameProcesses(Path.Combine(profile.InstallDirectory, "D2R.exe")).Length != 0
                         || SteamGameHandoff.FindGameProcesses(Path.Combine(profile.InstallDirectory, "D2RLoader.exe")).Length != 0)
+                    {
+                        _lastGameRunningResult = true;
+                        _lastGameRunningCheckTimestamp = now;
                         return true;
+                    }
                 }
             }
             // Under Wine the game usually shows up as "D2R.exe", which a
@@ -1847,7 +1952,9 @@ public partial class MainWindow : Window
                 }
             }
 
-            return count > 0;
+            _lastGameRunningResult = count > 0;
+            _lastGameRunningCheckTimestamp = now;
+            return _lastGameRunningResult;
         }
         catch (InvalidOperationException)
         {

@@ -1,5 +1,6 @@
 using System;
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -114,11 +115,14 @@ public sealed class D2RLoaderInventory
     public bool AllowModExtensions { get; init; } = true;
     public IReadOnlyList<D2RLoaderExtensionInfo> Extensions { get; init; } = [];
 
-    public IReadOnlyList<D2RLoaderExtensionInfo> Plugins => Extensions
+    private IReadOnlyList<D2RLoaderExtensionInfo>? _plugins;
+    private IReadOnlyList<D2RLoaderExtensionInfo>? _patches;
+
+    public IReadOnlyList<D2RLoaderExtensionInfo> Plugins => _plugins ??= Extensions
         .Where(extension => extension.Kind == D2RLoaderExtensionKind.Plugin)
         .ToArray();
 
-    public IReadOnlyList<D2RLoaderExtensionInfo> Patches => Extensions
+    public IReadOnlyList<D2RLoaderExtensionInfo> Patches => _patches ??= Extensions
         .Where(extension => extension.Kind == D2RLoaderExtensionKind.Patch)
         .ToArray();
 }
@@ -237,6 +241,20 @@ public static partial class D2RLoaderService
         }
     }
 
+    private sealed record CachedPluginMetadata(
+        long LastWriteTicks,
+        long Length,
+        string Name,
+        string? Version,
+        string? Author,
+        string? Description);
+
+    private static readonly ConcurrentDictionary<string, CachedPluginMetadata> PluginMetadataCache =
+        new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
+    private static readonly ConcurrentDictionary<string, (long LastWriteTicks, long Length, string? Version)> FileVersionCache =
+        new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
     private static D2RLoaderExtensionInfo ReadPlugin(
         string path,
         D2RLoaderExtensionScope scope,
@@ -245,25 +263,47 @@ public static partial class D2RLoaderService
         var fileName = Path.GetFileName(path);
         try
         {
-            var versionInfo = FileVersionInfo.GetVersionInfo(path);
-            var name = versionInfo.ProductName;
-            if (string.IsNullOrWhiteSpace(name) || name.Equals("D2RLoader Plugin", StringComparison.OrdinalIgnoreCase))
+            var fileInfo = new FileInfo(path);
+            var writeTicks = fileInfo.Exists ? fileInfo.LastWriteTimeUtc.Ticks : 0;
+            var length = fileInfo.Exists ? fileInfo.Length : -1;
+            if (!fileInfo.Exists
+                || !PluginMetadataCache.TryGetValue(path, out var cached)
+                || cached.LastWriteTicks != writeTicks
+                || cached.Length != length)
             {
-                name = HumanizePluginName(Path.GetFileNameWithoutExtension(path));
+                var versionInfo = FileVersionInfo.GetVersionInfo(path);
+                var name = versionInfo.ProductName;
+                if (string.IsNullOrWhiteSpace(name) || name.Equals("D2RLoader Plugin", StringComparison.OrdinalIgnoreCase))
+                {
+                    name = HumanizePluginName(Path.GetFileNameWithoutExtension(path));
+                }
+
+                var (peVersion, peAuthor) = D2RLoaderPluginVersion.ReadMetadata(path);
+                cached = new CachedPluginMetadata(
+                    writeTicks,
+                    length,
+                    name,
+                    peVersion ?? NormalizeVersion(versionInfo.FileVersion),
+                    peAuthor,
+                    versionInfo.FileDescription);
+                if (fileInfo.Exists)
+                {
+                    PluginMetadataCache[path] = cached;
+                }
             }
 
             return new D2RLoaderExtensionInfo
             {
-                Name = name,
+                Name = cached.Name,
                 FileName = fileName,
                 FilePath = path,
                 Kind = D2RLoaderExtensionKind.Plugin,
                 Scope = scope,
                 IsLadderDisabled = isLadderDisabled,
                 IsEnabled = isEnabled,
-                Version = D2RLoaderPluginVersion.Read(path) ?? NormalizeVersion(versionInfo.FileVersion),
-                Author = D2RLoaderPluginVersion.ReadAuthor(path),
-                Description = versionInfo.FileDescription
+                Version = cached.Version,
+                Author = cached.Author,
+                Description = cached.Description
             };
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
@@ -364,9 +404,25 @@ public static partial class D2RLoaderService
     {
         try
         {
-            var version = NormalizeVersion(FileVersionInfo.GetVersionInfo(path).FileVersion);
-            if (!string.IsNullOrWhiteSpace(version))
+            var fileInfo = new FileInfo(path);
+            if (fileInfo.Exists)
             {
+                var writeTicks = fileInfo.LastWriteTimeUtc.Ticks;
+                var length = fileInfo.Length;
+                if (FileVersionCache.TryGetValue(path, out var cached)
+                    && cached.LastWriteTicks == writeTicks
+                    && cached.Length == length)
+                {
+                    return cached.Version;
+                }
+
+                var version = NormalizeVersion(FileVersionInfo.GetVersionInfo(path).FileVersion);
+                if (string.IsNullOrWhiteSpace(version) && OperatingSystem.IsLinux())
+                {
+                    version = ReadPeFileVersion(path);
+                }
+
+                FileVersionCache[path] = (writeTicks, length, version);
                 return version;
             }
         }

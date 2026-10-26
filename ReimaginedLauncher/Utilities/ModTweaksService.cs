@@ -577,7 +577,18 @@ public static class ModTweaksService
         LaunchDiagnostics.Log($"Resolved excel directory: {excelDirectory ?? "<null>"}");
         if (string.IsNullOrWhiteSpace(excelDirectory) || !Directory.Exists(excelDirectory))
         {
-            Notifications.SendNotification("Excel folder not found in the Reimagined mod directory.", "Warning");
+            MainWindow.Instance?.RefreshLocalModState();
+            if (!MainWindow.IsLocalModDetected)
+            {
+                _ = MainWindow.Instance?.RefreshUpdateStateAsync();
+                Notifications.SendNotification(
+                    "The D2R Reimagined mod is not installed. Go to the Install/Update tab to install it.",
+                    "Error");
+            }
+            else
+            {
+                Notifications.SendNotification("Excel folder not found in the Reimagined mod directory.", "Warning");
+            }
             return false;
         }
 
