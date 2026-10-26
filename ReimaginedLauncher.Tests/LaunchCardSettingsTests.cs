@@ -184,6 +184,29 @@ public sealed class LaunchCardSettingsTests
             Assert.Equal(6, duplicateSettings.CurrentProfile.PlayersCount);
             Assert.True(duplicateSettings.CurrentProfile.NoSound);
             Assert.Equal(steamDir, duplicateSettings.CurrentProfile.InstallDirectory);
+
+            // When both Battle.Net and Steam profiles are already configured, selecting a Battle.Net
+            // folder while on Steam switches to the Battle.Net profile and preserves both existing paths.
+            var otherBnetDir = Path.Combine(tempRoot, "OtherBattleNetD2R");
+            Directory.CreateDirectory(otherBnetDir);
+            File.WriteAllText(Path.Combine(otherBnetDir, "D2R.exe"), "bnet2");
+
+            settings.SelectProfile(InstallationType.Steam);
+            var expectedBnetPath = InstallDirectoryValidator.NormalizeInstallDirectory(bnetDir);
+            var expectedSteamPath = InstallDirectoryValidator.NormalizeInstallDirectory(steamDir);
+            settings.Profiles[0].InstallDirectory = expectedBnetPath;
+            settings.Profiles[0].IsInstallDirectoryValidated = true;
+            settings.Profiles[1].InstallDirectory = expectedSteamPath;
+            settings.Profiles[1].IsInstallDirectoryValidated = true;
+
+            var switched = launcherService.ApplySelectedInstallDirectory(settings, otherBnetDir);
+
+            Assert.Equal(InstallationType.BattleNet, switched.Type);
+            Assert.Equal(0, settings.SelectedProfileIndex);
+            Assert.Equal(expectedBnetPath, settings.Profiles[0].InstallDirectory);
+            Assert.True(settings.Profiles[0].IsInstallDirectoryValidated);
+            Assert.Equal(expectedSteamPath, settings.Profiles[1].InstallDirectory);
+            Assert.True(settings.Profiles[1].IsInstallDirectoryValidated);
         }
         finally
         {

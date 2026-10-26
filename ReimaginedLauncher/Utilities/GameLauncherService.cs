@@ -54,16 +54,16 @@ public class GameLauncherService
                 if (detectedType != currentProfile.Type)
                 {
                     var targetProfile = GetProfileByType(settings, detectedType);
-                    if (string.IsNullOrWhiteSpace(targetProfile.InstallDirectory) || !targetProfile.IsInstallDirectoryValidated)
+                    if (!IsProfileDirectoryValidForType(targetProfile))
                     {
                         targetProfile.InstallDirectory = currentProfile.InstallDirectory;
                         targetProfile.IsInstallDirectoryValidated = true;
                         if (detectedType == InstallationType.Steam)
                             targetProfile.SteamDirectory = FindSteamExecutable(targetProfile.InstallDirectory);
-                        currentProfile.InstallDirectory = null;
-                        currentProfile.IsInstallDirectoryValidated = false;
-                        currentProfile = settings.SelectProfile(detectedType);
                     }
+                    currentProfile.InstallDirectory = null;
+                    currentProfile.IsInstallDirectoryValidated = false;
+                    currentProfile = settings.SelectProfile(detectedType);
                 }
             }
 
@@ -131,10 +131,13 @@ public class GameLauncherService
                     var detectedType = DetectInstallationType(normalised!);
                     var targetProfile = GetProfileByType(settings, detectedType);
 
-                    targetProfile.InstallDirectory = normalised;
-                    targetProfile.IsInstallDirectoryValidated = true;
-                    if (detectedType == InstallationType.Steam)
-                        targetProfile.SteamDirectory = FindSteamExecutable(targetProfile.InstallDirectory);
+                    if (!IsProfileDirectoryValidForType(targetProfile))
+                    {
+                        targetProfile.InstallDirectory = normalised;
+                        targetProfile.IsInstallDirectoryValidated = true;
+                        if (detectedType == InstallationType.Steam)
+                            targetProfile.SteamDirectory = FindSteamExecutable(targetProfile.InstallDirectory);
+                    }
 
                     // Make sure the current profile points to the one we just found
                     settings.SelectedProfileIndex = settings.Profiles.IndexOf(targetProfile);
@@ -259,6 +262,59 @@ public class GameLauncherService
             return InstallationType.Steam;
         }
         return InstallationType.BattleNet;
+    }
+
+    internal static bool IsProfileDirectoryValidForType(InstallationProfile profile) => profile.Type switch
+    {
+        InstallationType.D2RMM => InstallDirectoryValidator.IsValidD2RmmModsDirectory(profile.InstallDirectory),
+        InstallationType.Steam => InstallDirectoryValidator.IsValidSteamInstallDirectory(profile.InstallDirectory),
+        _ => InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory)
+    };
+
+    public InstallationProfile ApplySelectedInstallDirectory(AppSettings settings, string? selectedPath)
+    {
+        var profile = settings.CurrentProfile;
+        if (profile.Type == InstallationType.D2RMM)
+        {
+            profile.InstallDirectory = selectedPath;
+            profile.IsInstallDirectoryValidated = InstallDirectoryValidator.IsValidD2RmmModsDirectory(profile.InstallDirectory);
+            return profile;
+        }
+
+        var path = InstallDirectoryValidator.NormalizeInstallDirectory(selectedPath);
+        if (profile.Type is InstallationType.BattleNet or InstallationType.Steam
+            && InstallDirectoryValidator.IsValidInstallDirectory(path))
+        {
+            var detectedType = DetectInstallationType(path!);
+            if (detectedType != profile.Type)
+            {
+                profile = settings.SelectProfile(detectedType);
+                if (!IsProfileDirectoryValidForType(profile))
+                {
+                    profile.InstallDirectory = path;
+                }
+            }
+            else
+            {
+                profile.InstallDirectory = path;
+            }
+        }
+        else
+        {
+            profile.InstallDirectory = path;
+        }
+
+        profile.IsInstallDirectoryValidated = IsProfileDirectoryValidForType(profile);
+        if (profile.Type == InstallationType.Steam)
+        {
+            var detectedSteam = FindSteamExecutable(profile.InstallDirectory);
+            if (!string.IsNullOrEmpty(detectedSteam))
+            {
+                profile.SteamDirectory = detectedSteam;
+            }
+        }
+
+        return profile;
     }
 
     public string? FindSteamExecutable(string? d2rDir = null)

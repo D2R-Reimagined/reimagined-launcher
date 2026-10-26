@@ -3564,62 +3564,15 @@ public partial class LaunchView : UserControl
         if (TopLevel.GetTopLevel(this) is Window window)
         {
             var profile = MainWindow.Settings.CurrentProfile;
-            if (profile.Type == InstallationType.D2RMM)
+            var folders = await window.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
             {
-                var folders = await window.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-                {
-                    Title = "Select D2RMM mods folder",
-                    AllowMultiple = false
-                });
+                Title = profile.Type == InstallationType.D2RMM ? "Select D2RMM mods folder" : "Select Install Folder",
+                AllowMultiple = false
+            });
 
-                if (folders.Count > 0)
-                {
-                    profile.InstallDirectory = folders[0].Path.LocalPath;
-                }
-                else return;
-            }
-            else
-            {
-                var folders = await window.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-                {
-                    Title = "Select Install Folder",
-                    AllowMultiple = false
-                });
+            if (folders.Count <= 0) return;
 
-                if (folders.Count <= 0) return;
-
-                var path = InstallDirectoryValidator.NormalizeInstallDirectory(folders[0].Path.LocalPath);
-                if (profile.Type is InstallationType.BattleNet or InstallationType.Steam
-                    && InstallDirectoryValidator.IsValidInstallDirectory(path))
-                {
-                    var detectedType = LauncherService.DetectInstallationType(path!);
-                    if (detectedType != profile.Type)
-                    {
-                        var targetProfile = MainWindow.Settings.Profiles.FirstOrDefault(p => p.Type == detectedType);
-                        if (targetProfile is null || string.IsNullOrWhiteSpace(targetProfile.InstallDirectory) || !targetProfile.IsInstallDirectoryValidated)
-                        {
-                            profile = MainWindow.Settings.SelectProfile(detectedType);
-                        }
-                    }
-                }
-                profile.InstallDirectory = path;
-            }
-
-            profile.IsInstallDirectoryValidated = profile.Type == InstallationType.D2RMM
-                ? InstallDirectoryValidator.IsValidD2RmmModsDirectory(profile.InstallDirectory)
-                : profile.Type == InstallationType.Steam
-                    ? InstallDirectoryValidator.IsValidSteamInstallDirectory(profile.InstallDirectory)
-                    : InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory);
-
-            // Auto-detect Steam path if it's Steam
-            if (profile.Type == InstallationType.Steam)
-            {
-                var detectedSteam = LauncherService.FindSteamExecutable(profile.InstallDirectory);
-                if (!string.IsNullOrEmpty(detectedSteam))
-                {
-                    profile.SteamDirectory = detectedSteam;
-                }
-            }
+            profile = LauncherService.ApplySelectedInstallDirectory(MainWindow.Settings, folders[0].Path.LocalPath);
 
             await SettingsManager.SaveAsync(MainWindow.Settings);
             BackupService.UpdateSchedule();
