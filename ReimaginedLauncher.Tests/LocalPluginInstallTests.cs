@@ -25,17 +25,73 @@ public sealed class LocalPluginInstallTests : IDisposable
     public void InstallsPackageAndPreservesConfigByDefault()
     {
         var root = LocalPluginInstallService.ResolveRoot(profile);
+        var mod = Path.GetDirectoryName(root)!;
         Directory.CreateDirectory(Path.Combine(root, "plugins")); Directory.CreateDirectory(Path.Combine(root, "config"));
+        Directory.CreateDirectory(Path.Combine(mod, "Reimagined.mpq", "data", "global", "excel"));
         File.WriteAllText(Path.Combine(root, "plugins", "example.dll"), "old DLL");
         File.WriteAllText(Path.Combine(root, "config", "example.toml"), "custom settings");
+        File.WriteAllText(Path.Combine(mod, "Reimagined.mpq", "data", "global", "excel", "sounds.txt"), "base sounds");
         var plan = LocalPluginInstallService.Preview(Zip(("release/example.dll", "new DLL"), ("release/example.mpq", "archive"),
-            ("release/config/example.toml", "defaults"), ("release/config/presets/a.json", "{}"), ("README.md", "docs")), profile);
+            ("release/config/example.toml", "defaults"), ("release/config/presets/a.json", "{}"),
+            ("d2rloader/data/hd/tc22sh/shader.bin", "shader"),
+            ("Reimagined.mpq/data/global/excel/sounds.txt", "new sounds"),
+            ("Reimagined.mpq/data/global/excel_launcher_clean/sounds.txt", "clean sounds"),
+            ("README.md", "docs")), profile);
         var backup = LocalPluginInstallService.Install(plan, false, () => { });
         Assert.Equal("new DLL", File.ReadAllText(Path.Combine(root, "plugins", "example.dll")));
         Assert.Equal("custom settings", File.ReadAllText(Path.Combine(root, "config", "example.toml")));
         Assert.Equal("old DLL", File.ReadAllText(Path.Combine(backup, "plugins", "example.dll")));
         Assert.Equal("{}", File.ReadAllText(Path.Combine(root, "config", "presets", "a.json")));
-        Assert.Single(plan.Skipped);
+        Assert.Equal("shader", File.ReadAllText(Path.Combine(root, "data", "hd", "tc22sh", "shader.bin")));
+        Assert.Equal("new sounds", File.ReadAllText(Path.Combine(root, "plugin-assets", "example", "data", "global", "excel", "sounds.txt")));
+        Assert.Equal("base sounds", File.ReadAllText(Path.Combine(mod, "Reimagined.mpq", "data", "global", "excel", "sounds.txt")));
+        Assert.False(Directory.Exists(Path.Combine(mod, "Reimagined.mpq", "data", "global", "excel_launcher_clean")));
+        Assert.Equal(2, plan.Skipped.Count);
+    }
+    [Fact]
+    public async Task StagedModDataAppliesOnLaunchAndRollsBackWhenPluginDisabled()
+    {
+        var root = LocalPluginInstallService.ResolveRoot(profile);
+        var modMpq = Path.Combine(Path.GetDirectoryName(root)!, "Reimagined.mpq");
+        var excelDir = Path.Combine(modMpq, "data", "global", "excel");
+        var layoutsDir = Path.Combine(modMpq, "data", "global", "ui", "layouts", "controller");
+        Directory.CreateDirectory(excelDir);
+        Directory.CreateDirectory(layoutsDir);
+        File.WriteAllText(Path.Combine(excelDir, "sounds.txt"), "base sounds");
+        File.WriteAllText(Path.Combine(layoutsDir, "hudpanelhd.json"), "base hud");
+
+        var plan = LocalPluginInstallService.Preview(Zip(
+            ("plugins/example.dll", "DLL"),
+            ("Reimagined.mpq/data/global/excel/sounds.txt", "plugin sounds"),
+            ("Reimagined.mpq/data/global/ui/layouts/controller/hudpanelhd.json", "plugin hud"),
+            ("Reimagined.mpq/data/hd/global/sfx/custom.flac", "plugin audio")), profile);
+        LocalPluginInstallService.Install(plan, false, () => { });
+
+        // Installing before first launch must not create excel_launcher_clean prematurely.
+        var cleanExcelDir = Path.Combine(modMpq, "data", "global", "excel_launcher_clean");
+        Assert.False(Directory.Exists(cleanExcelDir));
+
+        // Simulate launch: clean excel baseline is seeded from untouched base excel, then enabled plugin assets apply.
+        Directory.CreateDirectory(cleanExcelDir);
+        File.Copy(Path.Combine(excelDir, "sounds.txt"), Path.Combine(cleanExcelDir, "sounds.txt"), overwrite: true);
+        await PluginsService.ApplyEnabledPluginsExcelAssetsAsync(modMpq, excelDir);
+        await PluginsService.ApplyEnabledPluginsModRootAsync(modMpq);
+
+        Assert.Equal("base sounds", File.ReadAllText(Path.Combine(cleanExcelDir, "sounds.txt")));
+        Assert.Equal("plugin sounds", File.ReadAllText(Path.Combine(excelDir, "sounds.txt")));
+        Assert.Equal("plugin hud", File.ReadAllText(Path.Combine(layoutsDir, "hudpanelhd.json")));
+        Assert.Equal("plugin audio", File.ReadAllText(Path.Combine(modMpq, "data", "hd", "global", "sfx", "custom.flac")));
+
+        // Disable the plugin and verify non-excel files roll back and excel restores from clean baseline.
+        Directory.CreateDirectory(Path.Combine(root, "launcher-disabled", "plugins"));
+        File.Move(Path.Combine(root, "plugins", "example.dll"), Path.Combine(root, "launcher-disabled", "plugins", "example.dll"));
+        await PluginAssetBackupService.RestoreForPluginAsync("d2rloader:example");
+        File.Copy(Path.Combine(cleanExcelDir, "sounds.txt"), Path.Combine(excelDir, "sounds.txt"), overwrite: true);
+        await PluginsService.ApplyEnabledPluginsExcelAssetsAsync(modMpq, excelDir);
+
+        Assert.Equal("base sounds", File.ReadAllText(Path.Combine(excelDir, "sounds.txt")));
+        Assert.Equal("base hud", File.ReadAllText(Path.Combine(layoutsDir, "hudpanelhd.json")));
+        Assert.False(File.Exists(Path.Combine(modMpq, "data", "hd", "global", "sfx", "custom.flac")));
     }
     [Fact]
     public void ExplicitConfigReplacementIsBackedUp()

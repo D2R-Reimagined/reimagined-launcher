@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -721,6 +721,27 @@ public static class PluginsService
             }
         }
 
+        foreach (var loaderAsset in LocalPluginInstallService.GetEnabledModDataAssets(modRoot))
+        {
+            string destinationFull;
+            try
+            {
+                destinationFull = Path.GetFullPath(Path.Combine(modRootFull, loaderAsset.TargetRelativePath));
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (!claimants.TryGetValue(destinationFull, out var list))
+            {
+                list = new List<AssetClaim>();
+                claimants[destinationFull] = list;
+            }
+
+            list.Add(new AssetClaim(loaderAsset.PluginName, loaderAsset.SourceAbsolutePath, loaderAsset.TargetRelativePath));
+        }
+
         foreach (var (destinationFull, list) in claimants)
         {
             if (list.Count < 2)
@@ -929,6 +950,43 @@ public static class PluginsService
                 Notifications.SendNotification($"Plugin '{pluginState.Name}' failed: {ex.Message}", "Warning");
             }
         }
+
+        if (!string.IsNullOrWhiteSpace(modRoot))
+        {
+            var modRootFull = Path.GetFullPath(modRoot);
+            foreach (var loaderAsset in LocalPluginInstallService.GetEnabledModDataAssets(modRoot))
+            {
+                try
+                {
+                    var destinationPath = Path.GetFullPath(Path.Combine(modRootFull, loaderAsset.TargetRelativePath));
+                    var relative = Path.GetRelativePath(modRootFull, destinationPath);
+                    if (string.IsNullOrEmpty(relative) ||
+                        relative.StartsWith("..", StringComparison.Ordinal) ||
+                        Path.IsPathRooted(relative))
+                    {
+                        throw new InvalidDataException(
+                            $"Asset target '{loaderAsset.TargetRelativePath}' resolves outside the mod folder.");
+                    }
+
+                    if (IsAssetTargetCleanCovered(modRootFull, destinationPath))
+                    {
+                        continue;
+                    }
+
+                    await PluginAssetBackupService.RegisterReplacementAsync(loaderAsset.PluginId, destinationPath);
+                    await FileCopyHelper.CopyFileAsync(loaderAsset.SourceAbsolutePath, destinationPath);
+                    ReportProgress(progress, $"Copied asset to {loaderAsset.TargetRelativePath}.");
+                }
+                catch (Exception ex)
+                {
+                    LaunchDiagnostics.LogException(
+                        $"Failed to apply asset '{loaderAsset.TargetRelativePath}' for D2RLoader plugin '{loaderAsset.PluginName}'", ex);
+                    Notifications.SendNotification(
+                        $"Plugin '{loaderAsset.PluginName}': failed to apply asset '{loaderAsset.TargetRelativePath}': {ex.Message}",
+                        "Warning");
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -1116,6 +1174,49 @@ public static class PluginsService
                         $"Plugin '{pluginState.Name}': failed to pre-stage asset '{asset.TargetRelativePath}': {ex.Message}",
                         "Warning");
                 }
+            }
+        }
+
+        foreach (var loaderAsset in LocalPluginInstallService.GetEnabledModDataAssets(modRoot))
+        {
+            string destinationFull;
+            try
+            {
+                destinationFull = Path.GetFullPath(Path.Combine(modRootFull, loaderAsset.TargetRelativePath));
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (!destinationIsInScope(destinationFull))
+            {
+                continue;
+            }
+
+            try
+            {
+                var relative = Path.GetRelativePath(modRootFull, destinationFull);
+                if (string.IsNullOrEmpty(relative) ||
+                    relative.StartsWith("..", StringComparison.Ordinal) ||
+                    Path.IsPathRooted(relative))
+                {
+                    throw new InvalidDataException(
+                        $"Asset target '{loaderAsset.TargetRelativePath}' resolves outside the mod folder.");
+                }
+
+                await FileCopyHelper.CopyFileAsync(loaderAsset.SourceAbsolutePath, destinationFull);
+                LaunchDiagnostics.Log(
+                    $"D2RLoader plugin '{loaderAsset.PluginName}': pre-staged {scopeLabel} asset '{loaderAsset.TargetRelativePath}'.");
+                ReportProgress(progress, $"Copied asset to {loaderAsset.TargetRelativePath}.");
+            }
+            catch (Exception ex)
+            {
+                LaunchDiagnostics.LogException(
+                    $"Failed to pre-stage {scopeLabel} asset '{loaderAsset.TargetRelativePath}' for D2RLoader plugin '{loaderAsset.PluginName}'", ex);
+                Notifications.SendNotification(
+                    $"Plugin '{loaderAsset.PluginName}': failed to pre-stage asset '{loaderAsset.TargetRelativePath}': {ex.Message}",
+                    "Warning");
             }
         }
     }

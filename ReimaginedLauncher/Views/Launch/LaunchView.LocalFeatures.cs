@@ -141,7 +141,8 @@ public partial class LaunchView
             ? "Required Ladder entries are package-managed. Select approved optional entries below. Manual installation and config editing are unavailable."
             : "Checked means this file is enabled for the next D2RLoader launch; loader scope settings still apply. Close D2R and D2RLoader to change it. Global changes affect other mods, and another copy may remain enabled.";
         InstallLocalPluginButton.IsEnabled = !extensionControlsBusy && profile.Type != InstallationType.D2RMM
-            && profile.LaunchExperience != LaunchExperience.Ladder && !string.IsNullOrWhiteSpace(profile.InstallDirectory);
+            && profile.LaunchExperience != LaunchExperience.Ladder && !string.IsNullOrWhiteSpace(profile.InstallDirectory)
+            && profile.IsInstallDirectoryValidated && MainWindow.IsLocalModDetected;
         LocalPluginPolicyText.Text = profile.LaunchExperience == LaunchExperience.Ladder
             ? "Manual plugin installation is unavailable for Ladder. Changing package contents can require a fresh package download."
             : "Manual installations target the normal Reimagined mod only (Offline / D2RLoader); global plugins are unchanged.";
@@ -403,6 +404,11 @@ public partial class LaunchView
             UpdateLocalFeatureButtons();
             var destination = await Task.Run(() => D2RLoaderExtensionToggleService.SetEnabled(profile, extension, enabled, Check));
             extension.ApplyToggleState(destination, enabled);
+            if (!enabled)
+            {
+                var pluginId = "d2rloader:" + Path.GetFileNameWithoutExtension(extension.FileName).ToLowerInvariant();
+                await PluginAssetBackupService.RestoreForPluginAsync(pluginId);
+            }
             extension.CanEditConfig = D2RLoaderConfigService.HasExistingConfig(profile, extension);
             if (context == ContextKey() && ReferenceEquals(inventory, _loaderInventory) && inventory is not null)
                 RefreshLoaderExtensionCounts(inventory);
@@ -435,24 +441,38 @@ public partial class LaunchView
         panel.Children.Add(Text("Applies to the normal Reimagined mod (Offline / D2RLoader). Ladder is unchanged.", "muted"));
         panel.Children.Add(Text("Package: " + package));
         panel.Children.Add(Text("Destination: " + plan.Root, "muted"));
-        var rows = new StackPanel { Spacing = 0 };
+        var rows = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions
+            {
+                new ColumnDefinition(GridLength.Auto) { MinWidth = 140 },
+                new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Auto) { MinWidth = 120 },
+            },
+            ColumnSpacing = 28,
+            RowSpacing = 14,
+        };
         var configurations = new CheckBox { Content = "Replace existing configuration files", IsChecked = false };
         void DrawRows()
         {
             rows.Children.Clear();
-            var header = new Grid { ColumnDefinitions = new ColumnDefinitions("2*,*,1.2*"), ColumnSpacing = 12, Margin = new Thickness(0, 0, 0, 8) };
+            rows.RowDefinitions.Clear();
+            rows.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
             var headingFile = Text("File"); var headingDestination = Text("Destination"); var headingAction = Text("Action");
             headingFile.FontWeight = headingDestination.FontWeight = headingAction.FontWeight = FontWeight.SemiBold;
             Grid.SetColumn(headingDestination, 1); Grid.SetColumn(headingAction, 2);
-            header.Children.Add(headingFile); header.Children.Add(headingDestination); header.Children.Add(headingAction); rows.Children.Add(header);
-            foreach (var file in plan.Files)
+            rows.Children.Add(headingFile); rows.Children.Add(headingDestination); rows.Children.Add(headingAction);
+            for (var i = 0; i < plan.Files.Count; i++)
             {
-                var row = new Grid { ColumnDefinitions = new ColumnDefinitions("2*,*,1.2*"), ColumnSpacing = 12, Margin = new Thickness(0, 7) };
+                var file = plan.Files[i];
+                rows.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
                 var name = Text(Path.GetFileName(file.RelativePath));
                 var target = Text(Path.GetDirectoryName(file.RelativePath) ?? "", "muted");
                 var action = Text(file.Exists ? file.IsConfig && configurations.IsChecked != true ? "Keep existing" : "Replace + backup" : "Add");
+                name.TextWrapping = action.TextWrapping = TextWrapping.NoWrap;
+                Grid.SetRow(name, i + 1); Grid.SetRow(target, i + 1); Grid.SetRow(action, i + 1);
                 Grid.SetColumn(target, 1); Grid.SetColumn(action, 2);
-                row.Children.Add(name); row.Children.Add(target); row.Children.Add(action); rows.Children.Add(row);
+                rows.Children.Add(name); rows.Children.Add(target); rows.Children.Add(action);
             }
         }
         DrawRows(); configurations.IsCheckedChanged += (_, _) => DrawRows();
