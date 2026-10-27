@@ -42,6 +42,7 @@
             <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
         </PackageReference>
         <PackageReference Include="D2RReimaginedTools.FileExtensions" Version="0.6.1" />
+        <PackageReference Include="D2SSharp" Version="0.0.22" />
         <PackageReference Include="HtmlAgilityPack" Version="1.13.1" />
         <PackageReference Include="Material.Icons.Avalonia" Version="3.0.2" />
         <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.10" />
@@ -68,6 +69,9 @@
          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
        </None>
        <None Include="Assets\Vignette\**\*">
+         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+       </None>
+       <None Include="Assets\SaveMigrationData\**\*">
          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
        </None>
      </ItemGroup>

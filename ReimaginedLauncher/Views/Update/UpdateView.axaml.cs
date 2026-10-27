@@ -17,6 +17,7 @@ namespace ReimaginedLauncher.Views.Update;
 public partial class UpdateView : UserControl
 {
     private bool _isLoading;
+    private bool _modFilesInstalled;
     private readonly LaunchView _installationEditor;
 
     public UpdateView()
@@ -124,6 +125,7 @@ public partial class UpdateView : UserControl
 
         try
         {
+            _modFilesInstalled = false;
             MainWindow.IsInstallInProgress = true;
             RefreshUpdateState();
 
@@ -157,6 +159,7 @@ public partial class UpdateView : UserControl
             MainWindow.InstallProgressTitle = null;
             MainWindow.InstallProgressMessage = null;
             RefreshVisibleUpdateView();
+            CheckSavesAfterInstall();
         }
     }
 
@@ -230,6 +233,7 @@ public partial class UpdateView : UserControl
 
         try
         {
+            _modFilesInstalled = false;
             MainWindow.IsInstallInProgress = true;
             RefreshUpdateState();
             SetInstallProgress("Installing...", "Extracting and installing mod files from selected zip.");
@@ -245,6 +249,17 @@ public partial class UpdateView : UserControl
             MainWindow.InstallProgressTitle = null;
             MainWindow.InstallProgressMessage = null;
             RefreshVisibleUpdateView();
+            CheckSavesAfterInstall();
+        }
+    }
+
+    /// <summary>Runs after the install flag is cleared so the conversion prompt is not suppressed by it.</summary>
+    private void CheckSavesAfterInstall()
+    {
+        if (_modFilesInstalled && MainWindow.Instance is { } mainWindow)
+        {
+            _modFilesInstalled = false;
+            _ = mainWindow.CheckSavesForConversionAsync("after mod install");
         }
     }
 
@@ -456,6 +471,8 @@ public partial class UpdateView : UserControl
 
             Notifications.SendNotification("Mod installed successfully.", "Success");
         }
+
+        _modFilesInstalled = true;
 
         var mainWindow = MainWindow.Instance;
         if (mainWindow != null)

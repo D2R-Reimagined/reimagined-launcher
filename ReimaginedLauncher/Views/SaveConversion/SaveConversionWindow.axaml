@@ -1,0 +1,113 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:viewModels="clr-namespace:ReimaginedLauncher.Utilities.ViewModels"
+        mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="700"
+        x:Class="ReimaginedLauncher.Views.SaveConversion.SaveConversionWindow"
+        Title="Convert Save Data"
+        Width="920" Height="760" MinWidth="640" MinHeight="480"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource AppBackgroundBrush}">
+    <Window.Styles>
+        <Style Selector="TextBlock.status">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Foreground" Value="{StaticResource GoldTextBrush}" />
+        </Style>
+        <Style Selector="TextBlock.status.problem">
+            <Setter Property="Foreground" Value="#E98B91" />
+        </Style>
+    </Window.Styles>
+    <Grid RowDefinitions="Auto,*,Auto" RowSpacing="12" Margin="18">
+        <StackPanel Spacing="6">
+            <TextBlock Classes="section-title" Text="Convert Save Data" />
+            <Border x:Name="PromptBanner" Classes="warning-banner" Padding="12" IsVisible="False">
+                <TextBlock x:Name="PromptText" Foreground="{StaticResource GoldTextBrush}" TextWrapping="Wrap" />
+            </Border>
+            <TextBlock Classes="muted" TextWrapping="Wrap"
+                       Text="Converts offline characters (.d2s) and shared stashes (.d2i) to the target Reimagined game data. Every changed file is first copied to a permanent backup. Ladder characters are not touched." />
+            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                <TextBlock Text="Convert to" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <TextBlock x:Name="TargetText" Grid.Column="1" FontWeight="SemiBold" VerticalAlignment="Center" />
+            </Grid>
+            <TextBlock x:Name="TargetExplanationText" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+            <StackPanel Spacing="2">
+                <CheckBox x:Name="ForceCheckBox" Content="Force conversion (experimental)"
+                          IsCheckedChanged="OnForceChanged" />
+                <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Margin="28,0,0,0"
+                           Text="Attempt conversion of unverified saves, or a best-effort target-definition rebuild for saves that already parse with the installed data. Every change or loss is reported and originals are backed up. Files that cannot be decoded or structurally verified remain blocked." />
+            </StackPanel>
+            <TextBlock x:Name="SaveDirectoryText" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+            <Button x:Name="BackupDirectoryButton" Classes="link-button" HorizontalAlignment="Left"
+                    HorizontalContentAlignment="Left" Padding="8,4" MinHeight="0"
+                    ToolTip.Tip="Open the backup folder" Click="OnBackupDirectoryClick">
+                <TextBlock x:Name="BackupDirectoryText" FontSize="12" TextWrapping="Wrap" />
+            </Button>
+        </StackPanel>
+
+        <!-- Focus changes must not scroll the list; Tab and arrow navigation are brought into view in code. -->
+        <ScrollViewer x:Name="FilesScrollViewer" Grid.Row="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
+                      BringIntoViewOnFocusChange="False">
+            <ItemsControl x:Name="FilesItemsControl">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="viewModels:SaveConversionRowViewModel">
+                        <Border Classes="panel" Padding="12,8" Margin="0,0,0,6">
+                            <StackPanel Spacing="4">
+                                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                                    <CheckBox IsChecked="{Binding IsSelected}" IsEnabled="{Binding CanSelect}"
+                                              VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding FileName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding Explanation}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="2" Text="{Binding StatusLabel}" Classes="status"
+                                               Classes.problem="{Binding IsProblem}" VerticalAlignment="Center" />
+                                </Grid>
+                                <StackPanel Orientation="Horizontal" Spacing="8" Margin="32,0,0,0" IsVisible="{Binding IsSourceUncertain}">
+                                    <TextBlock Text="Made with (uncertain)" FontSize="12" VerticalAlignment="Center" />
+                                    <ComboBox ItemsSource="{Binding SourceChoices}" SelectedItem="{Binding SelectedSourceChoice}"
+                                              IsEnabled="{Binding CanChangeSource}" MinWidth="220" FontSize="12" />
+                                </StackPanel>
+                                <StackPanel Spacing="4" Margin="32,0,0,0" IsVisible="{Binding HasNameMismatch}">
+                                    <TextBlock Text="{Binding NameMismatchText}" FontSize="12" TextWrapping="Wrap" />
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <CheckBox IsChecked="{Binding RenameApproved}" IsEnabled="{Binding CanSelect}"
+                                                  Content="Set the character name to" FontSize="12" />
+                                        <TextBox Text="{Binding ProposedName}" MaxLength="15" Width="180" FontSize="12"
+                                                 IsEnabled="{Binding CanSelect}" />
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding NameProblem}" IsVisible="{Binding HasNameProblem}"
+                                               Foreground="#E98B91" FontSize="12" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <Expander Header="Full Report" Margin="32,0,0,0" FontSize="12"
+                                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                    <ScrollViewer MaxHeight="360" HorizontalScrollBarVisibility="Disabled" BringIntoViewOnFocusChange="False">
+                                        <SelectableTextBlock Text="{Binding FullReport}" TextWrapping="Wrap" FontSize="11"
+                                                             FontFamily="Cascadia Code,Consolas,Monaco,monospace" />
+                                    </ScrollViewer>
+                                </Expander>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+
+        <StackPanel Grid.Row="2" Spacing="8">
+            <Border x:Name="StatusBanner" Classes="warning-banner" Padding="12" IsVisible="False">
+                <TextBlock x:Name="StatusBannerText" Foreground="{StaticResource GoldTextBrush}" TextWrapping="Wrap" />
+            </Border>
+            <StackPanel x:Name="BusyPanel" Spacing="4" IsVisible="False">
+                <ProgressBar IsIndeterminate="True" Height="6" />
+                <TextBlock x:Name="BusyText" Classes="muted" FontSize="12" />
+            </StackPanel>
+            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                <TextBlock x:Name="SummaryText" Classes="muted" TextWrapping="Wrap" VerticalAlignment="Center" />
+                <Button x:Name="CloseButton" Grid.Column="1" Content="Close" MinWidth="96" Click="OnCloseClick" />
+                <Button x:Name="ConvertButton" Grid.Column="2" Classes="accent" Content="Convert Selected" MinWidth="156"
+                        IsEnabled="False" Click="OnConvertClick" />
+            </Grid>
+        </StackPanel>
+    </Grid>
+</Window>

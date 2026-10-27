@@ -97,6 +97,9 @@ public class InstallationProfile
     public StackDropOption OrbStackDrops { get; set; }
     public StackDropOption RuneStackDrops { get; set; }
     public bool RemoveVignette { get; set; }
+
+    // Install directory, offline save folder and installed TXT fingerprint the automatic Convert Save Data prompt was last shown for.
+    public string? SaveConversionPromptKey { get; set; }
 }
 
 public class AppSettings

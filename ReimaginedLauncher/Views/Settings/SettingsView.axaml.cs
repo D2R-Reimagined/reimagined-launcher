@@ -9,6 +9,7 @@ using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using ReimaginedLauncher.Utilities;
+using ReimaginedLauncher.Views.SaveConversion;
 
 namespace ReimaginedLauncher.Views.Settings;
 
@@ -311,6 +312,16 @@ public partial class SettingsView : UserControl
 
     private async void OnLauncherFolderClicked(object? sender, RoutedEventArgs e)
         => await OpenOrPickFolderAsync(FolderTarget.LauncherInstall);
+
+    private async void OnConvertSaveDataClicked(object? sender, RoutedEventArgs e)
+    {
+        if (MainWindow.IsInstallInProgress || TopLevel.GetTopLevel(this) is not Window owner)
+        {
+            return;
+        }
+
+        await new SaveConversionWindow().ShowDialog(owner);
+    }
 
     private async Task OpenOrPickFolderAsync(FolderTarget target)
     {

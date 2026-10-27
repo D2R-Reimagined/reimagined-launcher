@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add Convert Save Data to convert offline 2.1.2 and 3.0.12 characters and shared stashes, and saves from 3.1.0 development builds, to the installed Reimagined 3.1.0 data with verified output and permanent backups; saves are only converted upwards, and saves that already match the installed data, including after append-only stat updates, are left alone.
+- Check offline saves on a background thread at launcher start and after Install/Update installs the mod, opening Convert Save Data once per installation and installed mod data when any save may need conversion or a source-version choice, and closing it again without recording the prompt when its analysis fails or finds nothing left to convert; make the backup folder path in that window open the folder.
 - Redesign the Launch view to anchor Start Game and installation/backup status beside the Mod Only, Mod + D2RLoader, and Ladder play mode cards, keeping mode cards horizontal down to Steam Deck widths.
 - Make Loot Filter, Server Regions, Ladder Safeguards, Install Directory, and Installed Plugins/Patches collapsible section cards that remember their expanded/collapsed state across navigation and restarts, with verified installations defaulting to collapsed across all screens.
 - Remember the last opened navigation page across restarts instead of opening to News & Announcements on startup, and restore the existing launcher window from the system tray when a second instance is started.
