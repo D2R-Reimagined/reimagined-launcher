@@ -12,6 +12,9 @@ namespace ReimaginedLauncher.Utilities;
 
 public static class ModTweaksService
 {
+    private static readonly object SkippedTweaksNotificationLock = new();
+    private static string? _lastSkippedTweaksNotificationKey;
+
     internal sealed class OptionalTweakReport
     {
         private readonly HashSet<string> _enabledSkippedTweaks = new(StringComparer.OrdinalIgnoreCase);
@@ -44,6 +47,30 @@ public static class ModTweaksService
             }
 
             return false;
+        }
+    }
+
+    internal static bool ShouldNotifySkippedTweaks(string? modRoot, OptionalTweakReport report)
+    {
+        if (!report.HasEnabledSkippedTweaks)
+        {
+            return false;
+        }
+
+        var skippedTweaks = string.Join(
+            ",",
+            report.EnabledSkippedTweaks.OrderBy(tweakName => tweakName, StringComparer.OrdinalIgnoreCase));
+        var notificationKey = $"{modRoot ?? "<unresolved>"}|{skippedTweaks}";
+
+        lock (SkippedTweaksNotificationLock)
+        {
+            if (string.Equals(_lastSkippedTweaksNotificationKey, notificationKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            _lastSkippedTweaksNotificationKey = notificationKey;
+            return true;
         }
     }
 
@@ -1013,12 +1040,18 @@ public static class ModTweaksService
             if (desecratedZonesAvailable)
             {
                 await TryRunOptionalTweakStepAsync(
-                    "Terror zone configuration",
-                    terrorZoneTweaksEnabled,
-                    () => ApplyDesecratedZonesTweaksAsync(
+                    "Zone duration",
+                    profile.ZoneDurationMinutes != 60,
+                    () => ApplyZoneDurationTweakAsync(
                         desecratedZonesFilePath,
-                        profile.TerrorizeAllZones,
                         profile.ZoneDurationMinutes),
+                    optionalTweakReport);
+                await TryRunOptionalTweakStepAsync(
+                    "Terrorize all zones",
+                    profile.TerrorizeAllZones,
+                    () => ApplyTerrorizeAllZonesTweakAsync(
+                        desecratedZonesFilePath,
+                        profile.TerrorizeAllZones),
                     optionalTweakReport);
             }
             ReportProgress(progress, "Restoring desecrated vis files...");
@@ -1038,7 +1071,7 @@ public static class ModTweaksService
             LaunchDiagnostics.Log("Applying terror zone fanfare tweaks.");
             await TryRunOptionalTweakStepAsync(
                 "Terror zone fanfare removal",
-                !profile.RestoreTerrorZoneFanfare,
+                tweakEnabled: false,
                 () => ApplyTerrorZoneFanfareTweakAsync(profile.RestoreTerrorZoneFanfare),
                 optionalTweakReport);
             ReportProgress(progress, "Applying vignette tweaks...");
@@ -1112,9 +1145,12 @@ public static class ModTweaksService
             {
                 LaunchDiagnostics.Log(
                     $"Enabled tweaks skipped for unavailable mod assets: {string.Join(", ", optionalTweakReport.EnabledSkippedTweaks)}.");
-                Notifications.SendNotification(
-                    "Some launcher tweaks were skipped because this mod version does not contain the required files. The game will launch normally.",
-                    "Info");
+                if (ShouldNotifySkippedTweaks(modRoot, optionalTweakReport))
+                {
+                    Notifications.SendNotification(
+                        "Some launcher tweaks were skipped because this mod version does not contain the required files. The game will launch normally.",
+                        "Info");
+                }
             }
 
             LaunchDiagnostics.Log("Mod tweak preparation succeeded.");
@@ -1530,34 +1566,15 @@ public static class ModTweaksService
         await CopyFileAsync(cleanDesecratedZonesFilePath, desecratedZonesFilePath, overwrite: true);
     }
 
-    private static async Task ApplyDesecratedZonesTweaksAsync(
+    internal static async Task ApplyZoneDurationTweakAsync(
         string? desecratedZonesFilePath,
-        bool terrorizeAllZones,
         int zoneDurationMinutes)
     {
-        if (string.IsNullOrWhiteSpace(desecratedZonesFilePath) || !File.Exists(desecratedZonesFilePath))
+        if (string.IsNullOrWhiteSpace(desecratedZonesFilePath) || !AssetFileExists(desecratedZonesFilePath))
         {
             throw new TweakAssetUnavailableException(
                 desecratedZonesFilePath ?? DesecratedZonesFileName,
                 "desecratedzones.json was not found in the Reimagined hd global excel folder.");
-        }
-
-        if (!await DesecratedZonesJsonService.SupportsTerrorZoneTweaksAsync(desecratedZonesFilePath))
-        {
-            throw new TweakAssetUnavailableException(
-                desecratedZonesFilePath,
-                "desecratedzones.json did not contain a supported zone duration field.");
-        }
-
-        if (terrorizeAllZones)
-        {
-            var updatedEntries = await DesecratedZonesJsonService.MergeActAutoZonesAsync(desecratedZonesFilePath);
-            if (updatedEntries == 0)
-            {
-                throw new TweakAssetUnavailableException(
-                    desecratedZonesFilePath,
-                    "desecratedzones.json did not contain Act Auto zone boundaries to update.");
-            }
         }
 
         var durationUpdated = await DesecratedZonesJsonService.ApplyTerrorZoneTweaksAsync(
@@ -1568,6 +1585,31 @@ public static class ModTweaksService
             throw new TweakAssetUnavailableException(
                 desecratedZonesFilePath,
                 "desecratedzones.json did not contain a supported zone duration field.");
+        }
+    }
+
+    internal static async Task ApplyTerrorizeAllZonesTweakAsync(
+        string? desecratedZonesFilePath,
+        bool terrorizeAllZones)
+    {
+        if (!terrorizeAllZones)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(desecratedZonesFilePath) || !AssetFileExists(desecratedZonesFilePath))
+        {
+            throw new TweakAssetUnavailableException(
+                desecratedZonesFilePath ?? DesecratedZonesFileName,
+                "desecratedzones.json was not found in the Reimagined hd global excel folder.");
+        }
+
+        var updatedEntries = await DesecratedZonesJsonService.MergeActAutoZonesAsync(desecratedZonesFilePath);
+        if (updatedEntries == 0)
+        {
+            throw new TweakAssetUnavailableException(
+                desecratedZonesFilePath,
+                "desecratedzones.json did not contain Act Auto zone boundaries to update.");
         }
     }
 
@@ -1647,7 +1689,7 @@ public static class ModTweaksService
         LaunchDiagnostics.Log($"Applying charstats tweaks in {excelDirectory}.");
         await TryRunOptionalTweakStepAsync(
             "Character stats",
-            tweakEnabled: true,
+            profile.SkillPointsPerLevel != 1 || profile.AttributesPerLevel != 5,
             () => ApplyCharStatsTweaksAsync(
                 GetExcelFilePath(excelDirectory, CharStatsFileName),
                 profile.SkillPointsPerLevel,
@@ -1657,7 +1699,7 @@ public static class ModTweaksService
         LaunchDiagnostics.Log($"Applying skills tweaks in {excelDirectory}.");
         await TryRunOptionalTweakStepAsync(
             "Skills",
-            tweakEnabled: true,
+            profile.MaxSkillLevel != 25 || profile.RemoveFadeEffect,
             () => ApplySkillsTweaksAsync(
                 GetExcelFilePath(excelDirectory, SkillsFileName),
                 profile.MaxSkillLevel,
@@ -1667,7 +1709,9 @@ public static class ModTweaksService
         LaunchDiagnostics.Log($"Applying difficulty tweaks in {excelDirectory}.");
         await TryRunOptionalTweakStepAsync(
             "Difficulty levels",
-            tweakEnabled: true,
+            profile.NormalResistPenalty != 0
+            || profile.NightmareResistPenalty != -60
+            || profile.HellResistPenalty != -120,
             () => ApplyDifficultyLevelsTweaksAsync(
                 GetExcelFilePath(excelDirectory, DifficultyLevelsFileName),
                 profile.NormalResistPenalty,
@@ -1707,7 +1751,7 @@ public static class ModTweaksService
         LaunchDiagnostics.Log($"Applying sounds tweaks in {excelDirectory}.");
         await TryRunOptionalTweakStepAsync(
             "Terror zone sound",
-            tweakEnabled: true,
+            profile.RestoreTerrorZoneFanfare,
             () => ApplySoundsTweaksAsync(
                 GetExcelFilePath(excelDirectory, SoundsFileName),
                 profile.RestoreTerrorZoneFanfare),

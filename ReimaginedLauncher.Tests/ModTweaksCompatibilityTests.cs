@@ -162,6 +162,118 @@ public sealed class ModTweaksCompatibilityTests
     }
 
     [Fact]
+    public async Task AlreadyCorrectTerrorZoneDurationIsSuccessfulNoOp()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var zonesFile = Path.Combine(root, "desecratedzones.json");
+            const string content = "{\"zone_duration_minutes\": 90}";
+            await File.WriteAllTextAsync(zonesFile, content);
+            var oldWriteTime = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(zonesFile, oldWriteTime);
+            var report = new ModTweaksService.OptionalTweakReport();
+
+            var completed = await ModTweaksService.TryRunOptionalTweakStepAsync(
+                "Zone duration",
+                tweakEnabled: true,
+                () => ModTweaksService.ApplyZoneDurationTweakAsync(zonesFile, 90),
+                report);
+
+            Assert.True(completed);
+            Assert.False(report.HasEnabledSkippedTweaks);
+            Assert.Equal(content, await File.ReadAllTextAsync(zonesFile));
+            Assert.Equal(oldWriteTime, File.GetLastWriteTimeUtc(zonesFile));
+        }
+        finally
+        {
+            DeleteTempDirectory(root);
+        }
+    }
+
+    [Fact]
+    public async Task TerrorZoneDurationIsUpdatedWhenRequestedValueDiffers()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var zonesFile = Path.Combine(root, "desecratedzones.json");
+            await File.WriteAllTextAsync(zonesFile, "{\"zone_duration_minutes\": 60}");
+
+            await ModTweaksService.ApplyZoneDurationTweakAsync(zonesFile, 120);
+
+            Assert.Equal("{\"zone_duration_minutes\": 120}", await File.ReadAllTextAsync(zonesFile));
+        }
+        finally
+        {
+            DeleteTempDirectory(root);
+        }
+    }
+
+    [Fact]
+    public async Task UnsupportedTerrorZoneOperationsDoNotPreventTheOtherSupportedOperation()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var zonesWithoutDuration = Path.Combine(root, "zones-without-duration.json");
+            const string actAutoContent = "[{\"outer\":[{}]}, {\"type\":\"DesecratedZone\",\"name\":\"desecratedzones_desecrated_zones_0_zones_1\",\"id\":\"Act2-Auto\",\"levels\":[]}]";
+            await File.WriteAllTextAsync(zonesWithoutDuration, actAutoContent);
+            var durationReport = new ModTweaksService.OptionalTweakReport();
+
+            Assert.False(await ModTweaksService.TryRunOptionalTweakStepAsync(
+                "Zone duration",
+                tweakEnabled: true,
+                () => ModTweaksService.ApplyZoneDurationTweakAsync(zonesWithoutDuration, 90),
+                durationReport));
+            Assert.True(await ModTweaksService.TryRunOptionalTweakStepAsync(
+                "Terrorize all zones",
+                tweakEnabled: true,
+                () => ModTweaksService.ApplyTerrorizeAllZonesTweakAsync(zonesWithoutDuration, terrorizeAllZones: true),
+                durationReport));
+            Assert.Single(durationReport.EnabledSkippedTweaks);
+            Assert.NotEqual(actAutoContent, await File.ReadAllTextAsync(zonesWithoutDuration));
+
+            var zonesWithoutActAuto = Path.Combine(root, "zones-without-act-auto.json");
+            await File.WriteAllTextAsync(zonesWithoutActAuto, "{\"zone_duration_minutes\": 60}");
+            var actAutoReport = new ModTweaksService.OptionalTweakReport();
+
+            Assert.False(await ModTweaksService.TryRunOptionalTweakStepAsync(
+                "Terrorize all zones",
+                tweakEnabled: true,
+                () => ModTweaksService.ApplyTerrorizeAllZonesTweakAsync(zonesWithoutActAuto, terrorizeAllZones: true),
+                actAutoReport));
+            Assert.True(await ModTweaksService.TryRunOptionalTweakStepAsync(
+                "Zone duration",
+                tweakEnabled: true,
+                () => ModTweaksService.ApplyZoneDurationTweakAsync(zonesWithoutActAuto, 90),
+                actAutoReport));
+            Assert.Single(actAutoReport.EnabledSkippedTweaks);
+            Assert.Equal("{\"zone_duration_minutes\": 90}", await File.ReadAllTextAsync(zonesWithoutActAuto));
+        }
+        finally
+        {
+            DeleteTempDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void SkippedTweakNotificationIsDeduplicatedPerModAndSkipSet()
+    {
+        var report = new ModTweaksService.OptionalTweakReport();
+        report.RecordEnabledSkip("Terror zone sound");
+
+        Assert.True(ModTweaksService.ShouldNotifySkippedTweaks("mod-root-a", report));
+        Assert.False(ModTweaksService.ShouldNotifySkippedTweaks("mod-root-a", report));
+        Assert.True(ModTweaksService.ShouldNotifySkippedTweaks("mod-root-b", report));
+
+        var differentSkipSet = new ModTweaksService.OptionalTweakReport();
+        differentSkipSet.RecordEnabledSkip("Zone duration");
+        Assert.True(ModTweaksService.ShouldNotifySkippedTweaks("mod-root-a", differentSkipSet));
+        Assert.False(ModTweaksService.ShouldNotifySkippedTweaks("mod-root-a", new ModTweaksService.OptionalTweakReport()));
+    }
+
+    [Fact]
     public async Task DefaultedSettingsDoNotTurnDisabledMissingTweaksIntoLaunchBlockers()
     {
         var root = CreateTempDirectory();
