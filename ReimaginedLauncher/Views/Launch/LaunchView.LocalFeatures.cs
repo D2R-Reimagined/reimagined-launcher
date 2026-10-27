@@ -148,16 +148,13 @@ public partial class LaunchView
         ToolTip.SetTip(InstallLocalPluginButton, profile.LaunchExperience == LaunchExperience.Ladder
             ? "Manual installation is unavailable for Ladder. Changing package contents can require a fresh package download."
             : "Install a DLL or ZIP into this mod only. Existing configs are preserved by default.");
-        var available = _loaderInventory is { IsInstalled: true, AllowModExtensions: true } inventory
-            && inventory.Plugins.Any(plugin => plugin.IsEnabled && plugin.FileName.Equals("unhoarder.dll", StringComparison.OrdinalIgnoreCase)
-                && (plugin.Scope == D2RLoaderExtensionScope.Reimagined
-                    || profile.LaunchExperience != LaunchExperience.Ladder && inventory.AllowGlobalExtensions));
+        var available = AccountLootFilterService.IsFilterPluginAvailable(_loaderInventory, profile.LaunchExperience);
         ApplyAccountFilterButton.IsEnabled = !busy && user is not null && _accountFilters.ServerWait(user.Id) <= TimeSpan.Zero
             && AccountFiltersComboBox.SelectedItem is AccountLootFilter && available;
         ToolTip.SetTip(ApplyAccountFilterButton, available ? "Download, back up, and install the selected filter."
-            : "UnHoarder and mod extensions must be installed and enabled for this mode. This action does not install or enable plugins.");
+            : "Pyre-LootFilter or UnHoarder and mod extensions must be installed and enabled for this mode. This action does not install or enable plugins.");
         LootFilterAvailabilityText.IsVisible = !available && user is not null;
-        LootFilterAvailabilityText.Text = "UnHoarder must be installed and enabled for this mode before applying a filter. You can still browse your account filters.";
+        LootFilterAvailabilityText.Text = "Pyre-LootFilter or UnHoarder must be installed and enabled for this mode before applying a filter. You can still browse your account filters.";
     }
 
     private async Task LoadAccountFiltersAsync(bool force)

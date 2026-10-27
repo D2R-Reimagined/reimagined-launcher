@@ -48,6 +48,17 @@ internal sealed class AccountLootFilterService(ReimaginedApiHttpClient api, Time
     internal TimeSpan ServerWait(Guid user) => blocked.GetValueOrDefault(user) > time.GetUtcNow()
         ? blocked[user] - time.GetUtcNow() : TimeSpan.Zero;
     internal void Block(Guid user, DateTimeOffset until) => blocked[user] = until;
+    internal static bool IsSupportedFilterPlugin(string? fileName)
+        => fileName is not null
+           && (fileName.Equals("pyre-lootfilter.dll", StringComparison.OrdinalIgnoreCase)
+               || fileName.Equals("d2rl-pyre-lootfilter.dll", StringComparison.OrdinalIgnoreCase)
+               || fileName.Equals("unhoarder.dll", StringComparison.OrdinalIgnoreCase));
+    internal static bool IsFilterPluginAvailable(D2RLoaderInventory? inventory, LaunchExperience experience)
+        => inventory is { IsInstalled: true, AllowModExtensions: true }
+           && inventory.Plugins.Any(plugin => plugin.IsEnabled
+               && IsSupportedFilterPlugin(plugin.FileName)
+               && (plugin.Scope == D2RLoaderExtensionScope.Reimagined
+                   || experience != LaunchExperience.Ladder && inventory.AllowGlobalExtensions));
     internal static string Install(string root, JsonElement document, Action checkContext)
     {
         var json = LootFilterValidation.Validate(document);
