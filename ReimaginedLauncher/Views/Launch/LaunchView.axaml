@@ -178,14 +178,14 @@
         <Border x:Name="LootFilterPanel" Classes="" Padding="0" Grid.Column="0" Grid.Row="0" MinHeight="0">
           <Expander Classes="section-card" IsExpanded="True" x:Name="LootFilterExpander"><Expander.Header><Grid ColumnDefinitions="*,Auto" ColumnSpacing="8"><Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="7" HorizontalAlignment="Left" MinHeight="28">
                 <TextBlock Classes="section-title" Text="Loot Filter" VerticalAlignment="Center"/>
-                <Button Classes="hero-help" ToolTip.Tip="Choose an account filter, then Apply Filter to download, back up and install it. Editing stays on the website. Normal modes require UnHoarder through D2RLoader." Grid.Column="1"><TextBlock Text="?" FontFamily="Segoe UI" FontSize="12" LineHeight="16" HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"/></Button>
+                <Button Classes="hero-help" ToolTip.Tip="Choose an account filter, then Apply Filter to download, back up and install it. Editing stays on the website. Normal modes require Pyre-LootFilter or UnHoarder through D2RLoader." Grid.Column="1"><TextBlock Text="?" FontFamily="Segoe UI" FontSize="12" LineHeight="16" HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"/></Button>
               </Grid>
               <Button x:Name="RefreshAccountFiltersButton" Grid.Column="1" Content="↻" Width="30" Height="30" VerticalAlignment="Center" Margin="0,0,-8,0" Click="OnRefreshAccountFiltersClick" Grid.Row="0" Classes="hero-compact" ToolTip.Tip="Refresh account filters (up to five requests per minute)."/>
                 </Grid></Expander.Header><Border>
             <Grid x:Name="HeroFilterContent" RowSpacing="6" ColumnSpacing="18">
               <StackPanel Spacing="5"><TextBlock x:Name="LootFilterScopeText" Classes="muted" TextWrapping="Wrap"/>
               <Border IsVisible="False">
-                <TextBlock x:Name="LootFilterRequirementText" Classes="muted" TextWrapping="Wrap" Text="Offline/Online filtering requires the UnHoarder D2RLoader plugin. Launch through D2RLoader for single-player or multiplayer; the standard Offline launch does not load plugins."/>
+                <TextBlock x:Name="LootFilterRequirementText" Classes="muted" TextWrapping="Wrap" Text="Offline/Online filtering requires the Pyre-LootFilter or UnHoarder D2RLoader plugin. Launch through D2RLoader for single-player or multiplayer; the standard Offline launch does not load plugins."/>
               </Border>
               </StackPanel><StackPanel Spacing="5" HorizontalAlignment="Stretch"><Grid x:Name="FilterSelectionGrid" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" MaxWidth="620" HorizontalAlignment="Left">
                 <ComboBox x:Name="AccountFiltersComboBox" PlaceholderText="Select a filter" HorizontalAlignment="Stretch" SelectionChanged="OnAccountFilterSelectionChanged" Classes="hero-compact"/>

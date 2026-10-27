@@ -104,4 +104,56 @@ public sealed class AccountLootFilterTests
         }
         finally { if (Directory.Exists(root)) Directory.Delete(Path.GetFullPath(Path.Combine(root, "..", "..", "..")), true); }
     }
+    [Theory]
+    [InlineData("pyre-lootfilter.dll", true)]
+    [InlineData("PYRE-LOOTFILTER.DLL", true)]
+    [InlineData("d2rl-pyre-lootfilter.dll", true)]
+    [InlineData("unhoarder.dll", true)]
+    [InlineData("UnHoarder.dll", true)]
+    [InlineData("other-plugin.dll", false)]
+    public void SupportedFilterPluginsIncludePyreLootFilterAndUnhoarder(string fileName, bool expected)
+        => Assert.Equal(expected, AccountLootFilterService.IsSupportedFilterPlugin(fileName));
+    [Theory]
+    [InlineData("pyre-lootfilter.dll", D2RLoaderExtensionScope.Reimagined, LaunchExperience.Online, true, true, true)]
+    [InlineData("unhoarder.dll", D2RLoaderExtensionScope.Reimagined, LaunchExperience.Online, true, true, true)]
+    [InlineData("pyre-lootfilter.dll", D2RLoaderExtensionScope.Reimagined, LaunchExperience.Ladder, true, false, true)]
+    [InlineData("unhoarder.dll", D2RLoaderExtensionScope.Reimagined, LaunchExperience.Ladder, true, false, true)]
+    [InlineData("pyre-lootfilter.dll", D2RLoaderExtensionScope.Global, LaunchExperience.Online, true, true, true)]
+    [InlineData("unhoarder.dll", D2RLoaderExtensionScope.Global, LaunchExperience.Online, true, true, true)]
+    [InlineData("pyre-lootfilter.dll", D2RLoaderExtensionScope.Global, LaunchExperience.Online, true, false, false)]
+    [InlineData("pyre-lootfilter.dll", D2RLoaderExtensionScope.Global, LaunchExperience.Ladder, true, true, false)]
+    [InlineData("pyre-lootfilter.dll", D2RLoaderExtensionScope.Reimagined, LaunchExperience.Online, false, true, false)]
+    [InlineData("other-plugin.dll", D2RLoaderExtensionScope.Reimagined, LaunchExperience.Online, true, true, false)]
+    public void FilterPluginAvailabilityAcceptsPyreLootFilterOrUnhoarderPerModeScope(
+        string fileName,
+        D2RLoaderExtensionScope scope,
+        LaunchExperience experience,
+        bool isEnabled,
+        bool allowGlobal,
+        bool expected)
+    {
+        var inventory = new D2RLoaderInventory
+        {
+            InstallDirectory = "C:/D2R",
+            LoaderPath = "C:/D2R/D2RLoader.exe",
+            GlobalRoot = "C:/D2R/d2rloader",
+            ModRoot = "C:/D2R/mods/Reimagined/d2rloader",
+            IsInstalled = true,
+            AllowGlobalExtensions = allowGlobal,
+            AllowModExtensions = true,
+            Extensions =
+            [
+                new D2RLoaderExtensionInfo
+                {
+                    Name = fileName,
+                    FileName = fileName,
+                    FilePath = "C:/D2R/mods/Reimagined/d2rloader/plugins/" + fileName,
+                    Kind = D2RLoaderExtensionKind.Plugin,
+                    Scope = scope,
+                    IsEnabled = isEnabled
+                }
+            ]
+        };
+        Assert.Equal(expected, AccountLootFilterService.IsFilterPluginAvailable(inventory, experience));
+    }
 }
