@@ -1,3 +1,5 @@
+using ReimaginedLauncher.HttpClients;
+using ReimaginedLauncher.HttpClients.Models;
 using ReimaginedLauncher.Utilities;
 using Xunit;
 
@@ -58,7 +60,7 @@ public sealed class D2RLoaderConfigTests : IDisposable
         Assert.Equal(path, D2RLoaderConfigService.Resolve(profile, Entry()).File);
     }
     [Fact]
-    public void LadderRefusesBothResolutionAndPostPickerSelection()
+    public void LadderRefusesGlobalScopeResolutionAndPostPickerSelection()
     {
         Write("d2rloader/plugins/example.dll");
         var config = Write("d2rloader/config/example.toml");
@@ -67,6 +69,91 @@ public sealed class D2RLoaderConfigTests : IDisposable
         profile.LaunchExperience = LaunchExperience.Ladder;
         Assert.Throws<InvalidOperationException>(() => D2RLoaderConfigService.Resolve(profile, entry));
         Assert.Throws<InvalidOperationException>(() => D2RLoaderConfigService.ValidateSelection(profile, target, config));
+    }
+    [Fact]
+    public void LadderAllowsEditingUnlockedModPluginConfigsAndLocksRuleConfigs()
+    {
+        profile.LaunchExperience = LaunchExperience.Ladder;
+        Write("mods/ReimaginedLadder/d2rloader/plugins/Controller QOL Updates.dll");
+        var qolConfig = Write("mods/ReimaginedLadder/d2rloader/config/controller-qol.toml", "auto_verify = true");
+        var qolEntry = D2RLoaderConfigService.CreateLadderExtensionInfo(
+            profile, "Controller QOL Updates", "Controller QOL Updates.dll", D2RLoaderExtensionKind.Plugin, isLadderDisabled: false);
+        Assert.False(D2RLoaderConfigService.IsLockedLadderExtension("Controller QOL Updates.dll", D2RLoaderExtensionKind.Plugin));
+        Assert.True(D2RLoaderConfigService.HasExistingConfig(profile, qolEntry));
+        var resolved = D2RLoaderConfigService.Resolve(profile, qolEntry);
+        Assert.Equal(qolConfig, resolved.File);
+        Assert.Equal(qolConfig, D2RLoaderConfigService.ValidateSelection(profile, resolved, qolConfig));
+
+        // Optional Ladder plugin in ladder-disabled can still have its config edited before being enabled.
+        Write("mods/ReimaginedLadder/d2rloader/ladder-disabled/plugins/d2rl-death-tracker.dll");
+        var deathTrackerConfig = Write("mods/ReimaginedLadder/d2rloader/config/death-tracker.toml", "enabled = true");
+        var deathTrackerEntry = D2RLoaderConfigService.CreateLadderExtensionInfo(
+            profile, "Death Tracker", "d2rl-death-tracker.dll", D2RLoaderExtensionKind.Plugin, isLadderDisabled: true);
+        Assert.True(D2RLoaderConfigService.HasExistingConfig(profile, deathTrackerEntry));
+        Assert.Equal(deathTrackerConfig, D2RLoaderConfigService.Resolve(profile, deathTrackerEntry).File);
+
+        // Rule-enforced and server-managed Ladder plugins are locked.
+        string[] lockedPlugins =
+        [
+            "d2rl-server-saves.dll",
+            "d2rl-lobby-bridge.dll",
+            "d2rl-chat-relay.dll",
+            "d2rds.dll",
+            "d2rl-maps.dll",
+            "auto-waypoint.dll",
+            "identify-on-click.dll",
+            "bindandsummon.dll",
+            "charm-inventory.dll",
+            "celestialrayone.left-click-auras.dll"
+        ];
+        foreach (var fileName in lockedPlugins)
+        {
+            Assert.True(D2RLoaderConfigService.IsLockedLadderExtension(fileName, D2RLoaderExtensionKind.Plugin));
+            Write($"mods/ReimaginedLadder/d2rloader/plugins/{fileName}");
+            var lockedEntry = D2RLoaderConfigService.CreateLadderExtensionInfo(
+                profile, fileName, fileName, D2RLoaderExtensionKind.Plugin, isLadderDisabled: false);
+            Assert.False(D2RLoaderConfigService.HasExistingConfig(profile, lockedEntry));
+            Assert.Throws<InvalidOperationException>(() => D2RLoaderConfigService.Resolve(profile, lockedEntry));
+        }
+
+        // Patches and signed bundle config files (except filter.json) are locked on Ladder.
+        Assert.True(D2RLoaderConfigService.IsLockedLadderExtension("level-cap-105.json", D2RLoaderExtensionKind.Patch));
+        var lockedMapsConfig = Write("mods/ReimaginedLadder/d2rloader/config/maps.toml");
+        Assert.Throws<InvalidOperationException>(() => D2RLoaderConfigService.ValidateSelection(profile, resolved, lockedMapsConfig));
+
+        var bundle = new LadderBundleResponse(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            1,
+            1,
+            "published",
+            new string('0', 64),
+            new string('0', 64),
+            "sig",
+            "key",
+            100,
+            new LadderBundleCompatibility("0.19.0", "1.5.0", "", "", "2.1.0", "1.6"),
+            [
+                new LadderBundleManifestFile(
+                    "mods/Reimagined/d2rloader/config/custom-rule.toml",
+                    "mods/Reimagined/d2rloader/config/custom-rule.toml",
+                    "custom-rule.toml",
+                    10,
+                    new string('a', 64)),
+                new LadderBundleManifestFile(
+                    "mods/Reimagined/d2rloader/config/filter.json",
+                    "mods/Reimagined/d2rloader/config/filter.json",
+                    "filter.json",
+                    10,
+                    new string('b', 64))
+            ],
+            [],
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            null,
+            "/download");
+        Assert.True(D2RLoaderConfigService.IsLockedLadderExtension("custom-rule.dll", D2RLoaderExtensionKind.Plugin, bundle));
+        Assert.False(D2RLoaderConfigService.IsLockedLadderExtension("unhoarder.dll", D2RLoaderExtensionKind.Plugin, bundle));
     }
     [Fact]
     public void PickerCannotEscapeScopeOrOpenExecutable()
@@ -91,7 +178,7 @@ public sealed class D2RLoaderConfigTests : IDisposable
         Assert.False(Directory.Exists(Path.Combine(game, "mods", "Reimagined", "d2rloader", "config")));
     }
     [Fact]
-    public void EditAvailabilityRequiresAnExistingUniqueConfigAndDisallowsLadder()
+    public void EditAvailabilityRequiresAnExistingUniqueConfig()
     {
         Write("mods/Reimagined/d2rloader/plugins/example.dll");
         var entry = Entry();
@@ -107,7 +194,7 @@ public sealed class D2RLoaderConfigTests : IDisposable
         File.Delete(config);
         Assert.False(D2RLoaderConfigService.HasExistingConfig(profile, entry));
         Write("mods/Reimagined/d2rloader/config/example.toml");
-        profile.LaunchExperience = LaunchExperience.Ladder;
+        profile.LaunchExperience = LaunchExperience.Offline;
         Assert.False(D2RLoaderConfigService.HasExistingConfig(profile, entry));
     }
 

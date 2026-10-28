@@ -153,7 +153,7 @@ public sealed class D2RLoaderServiceTests : IDisposable
     public async Task LadderPolicyKeepsSelectedApprovedExtensionsAndRestoresMovedFiles()
     {
         File.WriteAllBytes(CreatePath("D2RLoader.exe"), [0]);
-        var approvedPluginPath = CreatePath("d2rloader", "plugins", "approved.dll");
+        var approvedPluginPath = CreatePath("mods", "ReimaginedLadder", "d2rloader", "plugins", "approved.dll");
         var unapprovedPluginPath = CreatePath("d2rloader", "plugins", "unapproved.dll");
         var approvedPatchPath = CreatePath("mods", "ReimaginedLadder", "d2rloader", "patches", "approved.json");
         File.WriteAllBytes(approvedPluginPath, [1, 2, 3]);
@@ -201,7 +201,6 @@ public sealed class D2RLoaderServiceTests : IDisposable
         var preview = await D2RLoaderService.PreviewLadderPolicyAsync(_installDirectory, approvals);
         Assert.Contains(preview.ApprovedExtensions, state =>
             state.Approval.Id == patchApprovalId && state.IsInstalled && state.IsLadderDisabled);
-        Assert.Contains(preview.UnapprovedExtensions, extension => extension.FileName == "unapproved.dll");
 
         var restored = D2RLoaderService.RestoreLadderDisabledExtensions(_installDirectory, LaunchExperience.Ladder);
 
@@ -211,10 +210,52 @@ public sealed class D2RLoaderServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GlobalExtensionsAreNeverApprovedForLadderAndRestoreWhenSwitchingToNonLadder()
+    {
+        File.WriteAllBytes(CreatePath("D2RLoader.exe"), [0]);
+        var globalPluginPath = CreatePath("d2rloader", "plugins", "approved.dll");
+        var globalPatchPath = CreatePath("d2rloader", "patches", "global-patch.json");
+        var modPluginPath = CreatePath("mods", "Reimagined", "d2rloader", "plugins", "approved.dll");
+        File.WriteAllBytes(globalPluginPath, [1, 2, 3]);
+        File.WriteAllText(globalPatchPath, "{\"name\":\"Global Patch\",\"patches\":[]}");
+        File.WriteAllBytes(modPluginPath, [1, 2, 3]);
+
+        var disabledCount = D2RLoaderService.DisableGlobalExtensionsForLadder(_installDirectory);
+        Assert.Equal(2, disabledCount);
+        Assert.False(File.Exists(globalPluginPath));
+        Assert.False(File.Exists(globalPatchPath));
+        Assert.True(File.Exists(CreatePath("d2rloader", "ladder-disabled", "plugins", "approved.dll")));
+        Assert.True(File.Exists(CreatePath("d2rloader", "ladder-disabled", "patches", "global-patch.json")));
+
+        var restoredCount = D2RLoaderService.RestoreLadderDisabledExtensions(_installDirectory, LaunchExperience.Online);
+        Assert.Equal(2, restoredCount);
+        Assert.True(File.Exists(globalPluginPath));
+        Assert.True(File.Exists(globalPatchPath));
+
+        var inventory = D2RLoaderService.Discover(_installDirectory, LaunchExperience.Online, includeManualDisabled: true);
+        Assert.Contains(inventory.Plugins, p => p.Scope == D2RLoaderExtensionScope.Global && p.FileName == "approved.dll" && p.IsEnabled);
+        Assert.Contains(inventory.Patches, p => p.Scope == D2RLoaderExtensionScope.Global && p.FileName == "global-patch.json" && p.IsEnabled);
+
+        // Even if a global plugin has the exact SHA-256 of a Ladder approval, Ladder policy moves it to ladder-disabled.
+        var approval = new LadderExtensionApproval(
+            Guid.NewGuid(),
+            "Approved Plugin",
+            "approved.dll",
+            ComputeSha256(globalPluginPath),
+            D2RLoaderExtensionKind.Plugin);
+        var result = await D2RLoaderService.ApplyLadderPolicyAsync(
+            _installDirectory,
+            [approval],
+            new HashSet<Guid> { approval.Id });
+        Assert.False(File.Exists(globalPluginPath));
+        Assert.Equal(2, result.UnapprovedMoved.Count);
+    }
+
+    [Fact]
     public async Task LadderPolicyKeepsARequiredExtensionWhenItIsNotSelected()
     {
         File.WriteAllBytes(CreatePath("D2RLoader.exe"), [0]);
-        var requiredPluginPath = CreatePath("d2rloader", "plugins", "required.dll");
+        var requiredPluginPath = CreatePath("mods", "ReimaginedLadder", "d2rloader", "plugins", "required.dll");
         File.WriteAllBytes(requiredPluginPath, [1, 2, 3]);
         var approval = new LadderExtensionApproval(
             Guid.NewGuid(),
@@ -255,22 +296,22 @@ public sealed class D2RLoaderServiceTests : IDisposable
     }
 
     [Fact]
-    public void LadderPolicyDoesNotRestoreADisabledExtensionWhenItIsActiveInTheOtherScope()
+    public void LadderPolicyRestoresDisabledGlobalExtensionEvenWhenActiveInModScope()
     {
         File.WriteAllBytes(CreatePath("D2RLoader.exe"), [0]);
         var disabledPluginPath = CreatePath(
-            "d2rloader", "ladder-disabled", "plugins", "d2rl-server-saves.dll");
+            "d2rloader", "ladder-disabled", "plugins", "Controller QOL Updates.dll");
         var activeModPluginPath = CreatePath(
-            "mods", "Reimagined", "d2rloader", "plugins", "d2rl-server-saves.dll");
+            "mods", "Reimagined", "d2rloader", "plugins", "Controller QOL Updates.dll");
         File.WriteAllBytes(disabledPluginPath, [1, 2, 3]);
         File.WriteAllBytes(activeModPluginPath, [1, 2, 3]);
 
         var restored = D2RLoaderService.RestoreLadderDisabledExtensions(_installDirectory);
 
-        Assert.Equal(0, restored);
-        Assert.True(File.Exists(disabledPluginPath));
+        Assert.Equal(1, restored);
+        Assert.False(File.Exists(disabledPluginPath));
         Assert.True(File.Exists(activeModPluginPath));
-        Assert.False(File.Exists(CreatePath("d2rloader", "plugins", "d2rl-server-saves.dll")));
+        Assert.True(File.Exists(CreatePath("d2rloader", "plugins", "Controller QOL Updates.dll")));
     }
 
     [Fact]

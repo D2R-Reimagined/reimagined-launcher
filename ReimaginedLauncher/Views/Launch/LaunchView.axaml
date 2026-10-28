@@ -457,7 +457,7 @@
                               <Border Background="#39352B" CornerRadius="9" Padding="6,2" VerticalAlignment="Center" Grid.Column="3">
                                 <TextBlock Text="MOD" FontSize="10"/>
                               </Border>
-                              <Button Content="Edit Config" IsEnabled="False" Padding="7,1" MinHeight="24" FontSize="11" VerticalAlignment="Center" Grid.Column="4" ToolTip.Tip="Configuration editing is unavailable for Ladder packages."/>
+                              <Button Content="Edit Config" IsEnabled="{Binding CanEditConfig}" Padding="7,1" MinHeight="24" FontSize="11" VerticalAlignment="Center" Grid.Column="4" ToolTip.Tip="{Binding ConfigEditHint}" Click="OnEditExtensionConfigClick"/>
                             </Grid>
                           </Border>
                         </DataTemplate>
@@ -482,7 +482,7 @@
                               <Border Background="#39352B" CornerRadius="9" Padding="6,2" VerticalAlignment="Center" Grid.Column="3">
                                 <TextBlock Text="MOD" FontSize="10"/>
                               </Border>
-                              <Button Content="Edit Config" IsEnabled="False" Padding="7,1" MinHeight="24" FontSize="11" VerticalAlignment="Center" Grid.Column="4" ToolTip.Tip="Configuration editing is unavailable for Ladder packages."/>
+                              <Button Content="Edit Config" IsEnabled="{Binding CanEditConfig}" Padding="7,1" MinHeight="24" FontSize="11" VerticalAlignment="Center" Grid.Column="4" ToolTip.Tip="{Binding ConfigEditHint}" Click="OnEditExtensionConfigClick"/>
                             </Grid>
                           </Border>
                         </DataTemplate>
