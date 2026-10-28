@@ -13,6 +13,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using ReimaginedLauncher.HttpClients;
+using ReimaginedLauncher.HttpClients.Models;
 using ReimaginedLauncher.Utilities;
 
 namespace ReimaginedLauncher.Views.Launch;
@@ -137,7 +138,7 @@ public partial class LaunchView
         LoaderPatchesItemsControl.IsHitTestVisible = !_extensionToggleInProgress;
         InstallLocalPluginButton.IsHitTestVisible = !_extensionToggleInProgress;
         ExtensionToggleHelpText.Text = profile.LaunchExperience == LaunchExperience.Ladder
-            ? "Required Ladder entries are package-managed. Select approved optional entries below. Manual installation and config editing are unavailable."
+            ? "Required Ladder entries are package-managed. Select approved optional entries below. Manual installation is unavailable, and Ladder rule configs are locked."
             : "Checked means this file is enabled for the next D2RLoader launch; loader scope settings still apply. Close D2R and D2RLoader to change it. Global changes affect other mods, and another copy may remain enabled.";
         InstallLocalPluginButton.IsEnabled = !extensionControlsBusy && profile.Type != InstallationType.D2RMM
             && profile.LaunchExperience != LaunchExperience.Ladder && !string.IsNullOrWhiteSpace(profile.InstallDirectory)
@@ -321,31 +322,38 @@ public partial class LaunchView
 
     private async void OnEditExtensionConfigClick(object? sender, RoutedEventArgs e)
     {
-        if (sender is not Button { DataContext: D2RLoaderExtensionInfo entry } || TopLevel.GetTopLevel(this) is not { } top) return;
         var profile = MainWindow.Settings.CurrentProfile;
+        var entry = (sender as Button)?.DataContext switch
+        {
+            D2RLoaderExtensionInfo extension => extension,
+            LadderExtensionChoice choice => D2RLoaderConfigService.CreateLadderExtensionInfo(
+                profile, choice.Name, choice.FileName, choice.Kind, choice.IsLadderDisabled),
+            _ => null
+        };
+        if (entry is null || TopLevel.GetTopLevel(this) is not { } top) return;
+        var activeBundle = SelectedLadder?.ActiveBundle;
         var context = ContextKey();
         try
         {
             void Check()
             {
-                LocalPluginInstallService.RefuseLadder(profile.LaunchExperience);
                 if (context != ContextKey() || MainWindow.IsInstallInProgress || _pluginBusy || _isLaunching || _isRunningLadderAction)
                     throw new InvalidOperationException("The play mode or installation state changed. Refresh and retry.");
-                if (profile.LaunchExperience != LaunchExperience.Online)
-                    throw new InvalidOperationException("Config editing is available in Mod + D2RLoader mode.");
+                if (profile.LaunchExperience is not (LaunchExperience.Online or LaunchExperience.Ladder))
+                    throw new InvalidOperationException("Config editing is available in Mod + D2RLoader and Ladder modes.");
             }
             Check();
-            var target = D2RLoaderConfigService.Resolve(profile, entry);
+            var target = D2RLoaderConfigService.Resolve(profile, entry, activeBundle);
             var path = target.File ?? throw new FileNotFoundException("No unique matching config exists. Refresh after the plugin creates its config.");
             Check();
-            path = D2RLoaderConfigService.ValidateSelection(profile, target, path);
+            path = D2RLoaderConfigService.ValidateSelection(profile, target, path, activeBundle);
             if (top is not Window owner) return;
             void ValidateSave()
             {
                 Check();
-                var current = D2RLoaderConfigService.Resolve(profile, entry);
+                var current = D2RLoaderConfigService.Resolve(profile, entry, SelectedLadder?.ActiveBundle);
                 if (current.File != path) throw new IOException("The matching config changed. Cancel and reopen the editor.");
-                D2RLoaderConfigService.ValidateSelection(profile, current, path);
+                D2RLoaderConfigService.ValidateSelection(profile, current, path, SelectedLadder?.ActiveBundle);
             }
             var editor = new ConfigEditorWindow(entry.Name, new ConfigEditSession(path), ValidateSave);
             await editor.ShowDialog(owner);
@@ -382,9 +390,11 @@ public partial class LaunchView
         {
             void Check()
             {
+                LocalPluginInstallService.RefuseLadder(profile.LaunchExperience);
                 if (context != ContextKey() || _isLaunching || _isRunningLadderAction)
                     throw new InvalidOperationException("The play mode or launch state changed. Refresh and retry.");
-                LocalPluginInstallService.RefuseLadder(profile.LaunchExperience);
+                if (profile.LaunchExperience != LaunchExperience.Online)
+                    throw new InvalidOperationException("Extension toggling is available in Mod + D2RLoader mode.");
                 RequireGameClosed();
             }
             Check();

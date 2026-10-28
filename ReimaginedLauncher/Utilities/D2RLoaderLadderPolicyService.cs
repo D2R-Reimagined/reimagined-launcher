@@ -71,7 +71,8 @@ public static partial class D2RLoaderService
         IReadOnlySet<Guid> selectedApprovalIds,
         CancellationToken cancellationToken = default)
     {
-        var restoredCount = RestoreLadderDisabledExtensions(installDirectory, LaunchExperience.Ladder);
+        var initialInventory = Discover(installDirectory, LaunchExperience.Ladder);
+        var restoredCount = RestoreDisabledRoot(initialInventory.ModRoot);
         var inventory = Discover(installDirectory, LaunchExperience.Ladder);
         var matches = await MatchApprovalsAsync(inventory.Extensions, approvals, cancellationToken);
         var approvalByPath = matches.ToDictionary(
@@ -113,11 +114,29 @@ public static partial class D2RLoaderService
         return new LadderD2RLoaderPolicyResult(unapprovedMoved, unselectedMoved, restoredCount);
     }
 
+    /// <summary>
+    /// Parks all active global D2RLoader plugins and patches in
+    /// <c>d2rloader/ladder-disabled</c> when entering Ladder mode so Ladder never
+    /// launches with global extensions.
+    /// </summary>
+    public static int DisableGlobalExtensionsForLadder(string? installDirectory)
+    {
+        var inventory = Discover(installDirectory, LaunchExperience.Ladder);
+        var moved = 0;
+        foreach (var extension in inventory.Extensions.Where(item => item.Scope == D2RLoaderExtensionScope.Global))
+        {
+            MoveToLadderDisabledFolder(inventory, extension);
+            moved++;
+        }
+
+        return moved;
+    }
+
     public static int RestoreLadderDisabledExtensions(string? installDirectory, LaunchExperience experience = LaunchExperience.Online)
     {
         var inventory = Discover(installDirectory, experience);
-        return RestoreDisabledRoot(inventory.GlobalRoot, inventory.ModRoot)
-               + RestoreDisabledRoot(inventory.ModRoot, inventory.GlobalRoot);
+        return RestoreDisabledRoot(inventory.GlobalRoot)
+               + RestoreDisabledRoot(inventory.ModRoot);
     }
 
     private static D2RLoaderInventory DiscoverForLadderPolicy(string? installDirectory)
@@ -158,6 +177,11 @@ public static partial class D2RLoaderService
         foreach (var extension in extensions)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (extension.Scope != D2RLoaderExtensionScope.Reimagined)
+            {
+                continue;
+            }
+
             var candidates = approvals.Where(approval =>
                 approval.Kind == extension.Kind
                 && string.Equals(approval.FileName, extension.FileName, StringComparison.OrdinalIgnoreCase));
@@ -202,17 +226,16 @@ public static partial class D2RLoaderService
         File.Move(extension.FilePath, destination, overwrite: true);
     }
 
-    private static int RestoreDisabledRoot(string root, string alternateActiveRoot)
+    private static int RestoreDisabledRoot(string root)
     {
         var disabledRoot = Path.Combine(root, LadderDisabledFolderName);
-        return RestoreDisabledKind(disabledRoot, root, alternateActiveRoot, "plugins", "*.dll")
-               + RestoreDisabledKind(disabledRoot, root, alternateActiveRoot, "patches", "*.json");
+        return RestoreDisabledKind(disabledRoot, root, "plugins", "*.dll")
+               + RestoreDisabledKind(disabledRoot, root, "patches", "*.json");
     }
 
     private static int RestoreDisabledKind(
         string disabledRoot,
         string activeRoot,
-        string alternateActiveRoot,
         string kindFolder,
         string pattern)
     {
@@ -229,15 +252,6 @@ public static partial class D2RLoaderService
             var fileName = Path.GetFileName(source);
             var destination = Path.Combine(destinationDirectory, fileName);
             if (File.Exists(destination))
-            {
-                continue;
-            }
-
-            // D2RLoader loads extensions from both its global folder and the Reimagined
-            // mod folder. If the same extension is already active in the other scope,
-            // it is already available and must not be restored as a duplicate.
-            var alternateDestination = Path.Combine(alternateActiveRoot, kindFolder, fileName);
-            if (File.Exists(alternateDestination))
             {
                 continue;
             }

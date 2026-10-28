@@ -24,6 +24,15 @@ public sealed class LadderExtensionChoice
     public bool IsSelected { get; set; }
     public bool IsAvailable => IsInstalled || IsProvidedByLauncher;
     public bool CanToggle => IsAvailable && !IsRequired;
+    public bool IsConfigLocked { get; init; }
+    public bool CanEditConfig { get; init; }
+    public string ConfigEditHint => IsConfigLocked
+        ? Kind == D2RLoaderExtensionKind.Patch
+            ? "Patch files are locked by the signed Ladder package."
+            : "This plugin's configuration is locked on Ladder so every player plays by the same rules."
+        : CanEditConfig
+            ? "Edit this plugin's Ladder configuration file."
+            : "No matching config file exists in d2rloader/config yet. Run the plugin once to generate its settings.";
     public string Detail => IsProvidedByLauncher
         ? IsRequired
             ? $"{FileName} (required, supplied by signed ladder package)"

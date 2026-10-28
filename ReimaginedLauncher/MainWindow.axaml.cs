@@ -215,10 +215,22 @@ public partial class MainWindow : Window
                     try
                     {
                         NormalModInstallationService.Restore(profile.InstallDirectory);
+                        D2RLoaderService.RestoreLadderDisabledExtensions(profile.InstallDirectory, profile.LaunchExperience);
                     }
                     catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
                     {
                         LaunchDiagnostics.LogException("Could not restore the normal mod installation during startup", exception);
+                    }
+                }
+                else if (profile.LaunchExperience == LaunchExperience.Ladder && profile.InstallDirectory is not null)
+                {
+                    try
+                    {
+                        D2RLoaderService.DisableGlobalExtensionsForLadder(profile.InstallDirectory);
+                    }
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                    {
+                        LaunchDiagnostics.LogException("Could not disable global extensions for ladder during startup", exception);
                     }
                 }
                 await LadderSaveDirectoryService.RestoreIfRedirectedAsync(profile.InstallDirectory);

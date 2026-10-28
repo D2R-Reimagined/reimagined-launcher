@@ -850,6 +850,13 @@ public partial class LaunchView : UserControl
             {
                 if (isLadderTransition && D2RLoaderService.IsInstalled(profile.InstallDirectory))
                     D2RLoaderService.SetDefaultMod(profile.InstallDirectory!, experience);
+                if (profile.InstallDirectory is { } extInstallDir)
+                {
+                    if (experience == LaunchExperience.Ladder)
+                        await Task.Run(() => D2RLoaderService.DisableGlobalExtensionsForLadder(extInstallDir));
+                    else
+                        await Task.Run(() => D2RLoaderService.RestoreLadderDisabledExtensions(extInstallDir, experience));
+                }
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
@@ -1730,6 +1737,20 @@ public partial class LaunchView : UserControl
                         IsInstalled = state.IsInstalled,
                         IsProvidedByLauncher = isProvidedByLauncher,
                         IsLadderDisabled = state.IsLadderDisabled,
+                        IsConfigLocked = D2RLoaderConfigService.IsLockedLadderExtension(
+                            state.Approval.FileName,
+                            state.Approval.Kind,
+                            ladder.ActiveBundle),
+                        CanEditConfig = state.IsInstalled
+                                        && D2RLoaderConfigService.HasExistingConfig(
+                                            MainWindow.Settings.CurrentProfile,
+                                            D2RLoaderConfigService.CreateLadderExtensionInfo(
+                                                MainWindow.Settings.CurrentProfile,
+                                                state.Approval.Name,
+                                                state.Approval.FileName,
+                                                state.Approval.Kind,
+                                                state.IsLadderDisabled),
+                                            ladder.ActiveBundle),
                         IsSelected = (state.IsInstalled || isProvidedByLauncher)
                                      && selectedIds.Contains(state.Approval.Id)
                     };
