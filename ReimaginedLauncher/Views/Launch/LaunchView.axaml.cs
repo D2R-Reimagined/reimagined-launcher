@@ -2583,7 +2583,6 @@ public partial class LaunchView : UserControl
             {
                 LaunchDiagnostics.Log("Mod tweak preparation returned false.");
                 SetLaunchStatus($"{actionName} preparation failed.");
-                Notifications.SendNotification($"{actionName} preparation failed. See previous warning for details.", "Warning");
                 return;
             }
 

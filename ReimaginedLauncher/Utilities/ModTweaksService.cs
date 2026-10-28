@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using D2RReimaginedTools.TextFileParsers;
@@ -11,6 +12,181 @@ namespace ReimaginedLauncher.Utilities;
 
 public static class ModTweaksService
 {
+    private static readonly object SkippedTweaksNotificationLock = new();
+    private static string? _lastSkippedTweaksNotificationKey;
+
+    internal sealed class OptionalTweakReport
+    {
+        private readonly HashSet<string> _enabledSkippedTweaks = new(StringComparer.OrdinalIgnoreCase);
+
+        internal IReadOnlyCollection<string> EnabledSkippedTweaks => _enabledSkippedTweaks;
+        internal bool HasEnabledSkippedTweaks => _enabledSkippedTweaks.Count > 0;
+
+        internal void RecordEnabledSkip(string tweakName) => _enabledSkippedTweaks.Add(tweakName);
+    }
+
+    internal static async Task<bool> TryRunOptionalTweakStepAsync(
+        string tweakName,
+        bool tweakEnabled,
+        Func<Task> action,
+        OptionalTweakReport report)
+    {
+        try
+        {
+            await action();
+            LaunchDiagnostics.Log($"Optional tweak step completed. Tweak={tweakName}, Enabled={tweakEnabled}.");
+            return true;
+        }
+        catch (TweakAssetUnavailableException exception)
+        {
+            LaunchDiagnostics.Log(
+                $"Optional tweak step skipped. Tweak={tweakName}, Enabled={tweakEnabled}, Asset={exception.AssetPath}, Reason={exception.Message}");
+            if (tweakEnabled)
+            {
+                report.RecordEnabledSkip(tweakName);
+            }
+
+            return false;
+        }
+    }
+
+    internal static bool ShouldNotifySkippedTweaks(string? modRoot, OptionalTweakReport report)
+    {
+        if (!report.HasEnabledSkippedTweaks)
+        {
+            return false;
+        }
+
+        var skippedTweaks = string.Join(
+            ",",
+            report.EnabledSkippedTweaks.OrderBy(tweakName => tweakName, StringComparer.OrdinalIgnoreCase));
+        var notificationKey = $"{modRoot ?? "<unresolved>"}|{skippedTweaks}";
+
+        lock (SkippedTweaksNotificationLock)
+        {
+            if (string.Equals(_lastSkippedTweaksNotificationKey, notificationKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            _lastSkippedTweaksNotificationKey = notificationKey;
+            return true;
+        }
+    }
+
+    internal static string DescribePreparationFailure(Exception exception)
+    {
+        return exception switch
+        {
+            UnauthorizedAccessException => "The launcher could not safely access a required game or mod file. Check the folder permissions and try again.",
+            IOException => "The launcher could not safely read or write a required game or mod file. Close other programs using the files and try again.",
+            _ => $"Mod preparation stopped because of a critical error: {exception.Message}"
+        };
+    }
+
+    private static bool AssetFileExists(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        try
+        {
+            return (File.GetAttributes(path) & FileAttributes.Directory) == 0;
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return false;
+        }
+    }
+
+    private static bool AssetDirectoryExists(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        try
+        {
+            return (File.GetAttributes(path) & FileAttributes.Directory) != 0;
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return false;
+        }
+    }
+
+    private static void LogLaunchContext(
+        InstallationProfile profile,
+        string? normalizedInstallDirectory,
+        bool installDirectoryIsValid,
+        string? modRoot)
+    {
+        LaunchDiagnostics.Log(
+            $"Launch context. InstallationType={profile.Type}, LaunchExperience={profile.LaunchExperience}, " +
+            $"SelectedDirectory={profile.InstallDirectory ?? "<null>"}, NormalizedDirectory={normalizedInstallDirectory ?? "<null>"}, " +
+            $"ValidatedSetting={profile.IsInstallDirectoryValidated}, DirectoryValid={installDirectoryIsValid}.");
+        LaunchDiagnostics.Log(
+            $"Resolved mod root: {modRoot ?? "<null>"}; Exists={modRoot is not null && Directory.Exists(modRoot)}.");
+        LaunchDiagnostics.Log($"Detected mod version: {TryGetModVersion(modRoot) ?? "<unavailable>"}.");
+
+        var settingsState = SettingsManager.SettingsFileWasMissing
+            ? "missing"
+            : SettingsManager.RecoveredFromCorruptSettings
+                ? "recovered"
+                : SettingsManager.SettingsFileWasLoaded
+                    ? "loaded"
+                    : "not loaded";
+        LaunchDiagnostics.Log(
+            $"Settings state={settingsState}; QuarantinedSettingsFile={SettingsManager.QuarantinedSettingsFilePath ?? "<none>"}.");
+    }
+
+    private static string? TryGetModVersion(string? modRoot)
+    {
+        if (string.IsNullOrWhiteSpace(modRoot))
+        {
+            return null;
+        }
+
+        var modInfoPaths = new List<string> { Path.Combine(modRoot, "modinfo.json") };
+        var parentDirectory = Directory.GetParent(modRoot)?.FullName;
+        if (!string.IsNullOrWhiteSpace(parentDirectory))
+        {
+            modInfoPaths.Add(Path.Combine(parentDirectory, "modinfo.json"));
+        }
+
+        foreach (var modInfoPath in modInfoPaths.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!AssetFileExists(modInfoPath))
+            {
+                continue;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(File.ReadAllText(modInfoPath));
+                if (document.RootElement.ValueKind == JsonValueKind.Object
+                    && document.RootElement.TryGetProperty("version", out var version)
+                    && version.ValueKind == JsonValueKind.String)
+                {
+                    return version.GetString();
+                }
+            }
+            catch (JsonException exception)
+            {
+                LaunchDiagnostics.LogException($"Mod version metadata is unsupported: {modInfoPath}", exception);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                LaunchDiagnostics.LogException($"Mod version metadata could not be read: {modInfoPath}", exception);
+            }
+        }
+
+        return null;
+    }
+
     private const string ModDirectoryName = "Reimagined";
     private const string DataDirectoryName = "data";
     private const string ExcelDirectoryName = "excel";
@@ -572,43 +748,66 @@ public static class ModTweaksService
         IProgress<string>? progress = null,
         LadderDisplayInfo? ladderDisplay = null)
     {
+        var profile = MainWindow.Settings.CurrentProfile;
+        var normalizedInstallDirectory = profile.Type == InstallationType.D2RMM
+            ? profile.InstallDirectory
+            : InstallDirectoryValidator.NormalizeInstallDirectory(profile.InstallDirectory);
+        var installDirectoryIsValid = profile.Type switch
+        {
+            InstallationType.D2RMM => InstallDirectoryValidator.IsValidD2RmmModsDirectory(profile.InstallDirectory),
+            InstallationType.Steam => InstallDirectoryValidator.IsValidSteamInstallDirectory(profile.InstallDirectory),
+            _ => InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory)
+        };
+        var modRoot = GetMpqBaseDirectory();
+        LogLaunchContext(profile, normalizedInstallDirectory, installDirectoryIsValid, modRoot);
+
         ReportProgress(progress, "Resolving mod directories...");
         var excelDirectory = GetExcelDirectory();
         LaunchDiagnostics.Log($"Resolved excel directory: {excelDirectory ?? "<null>"}");
-        if (string.IsNullOrWhiteSpace(excelDirectory) || !Directory.Exists(excelDirectory))
+        bool excelDirectoryExists;
+        try
         {
-            MainWindow.Instance?.RefreshLocalModState();
-            if (!MainWindow.IsLocalModDetected)
-            {
-                _ = MainWindow.Instance?.RefreshUpdateStateAsync();
-                Notifications.SendNotification(
-                    "The D2R Reimagined mod is not installed. Go to the Install/Update tab to install it.",
-                    "Error");
-            }
-            else
-            {
-                Notifications.SendNotification("Excel folder not found in the Reimagined mod directory.", "Warning");
-            }
+            excelDirectoryExists = AssetDirectoryExists(excelDirectory);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            LaunchDiagnostics.LogException("Required Reimagined Excel directory could not be accessed", exception);
+            Notifications.SendNotification(DescribePreparationFailure(exception), "Error");
             return false;
         }
 
-        var modRoot = GetMpqBaseDirectory();
+        if (!excelDirectoryExists)
+        {
+            MainWindow.Instance?.RefreshLocalModState();
+            var explanation = !installDirectoryIsValid
+                ? "The selected game directory is invalid. Select the correct Diablo II: Resurrected installation folder and try again."
+                : $"The required Reimagined mod Excel directory was not found at '{excelDirectory ?? "<unresolved>"}'. Verify the selected installation and mod paths.";
+            LaunchDiagnostics.Log($"Critical launch path unavailable: {explanation}");
+            if (!MainWindow.IsLocalModDetected && !installDirectoryIsValid)
+            {
+                _ = MainWindow.Instance?.RefreshUpdateStateAsync();
+            }
+            Notifications.SendNotification(explanation, "Error");
+            return false;
+        }
+
         var missilesFilePath = GetMissilesFilePath();
         var monstersFilePath = GetMonstersFilePath();
         var stringsDirectory = GetStringsDirectory();
         var layoutsProfileHdFilePath = GetLayoutsProfileHdFilePath();
         var armorDirectory = GetArmorDirectory();
         var desecratedZonesFilePath = GetDesecratedZonesFilePath();
-        var cleanExcelDirectory = GetCleanExcelDirectory(excelDirectory);
+        var cleanExcelDirectory = GetCleanExcelDirectory(excelDirectory!);
         var cleanMissilesFilePath = GetCleanMissilesFilePath(missilesFilePath);
         var cleanMonstersFilePath = GetCleanMonstersFilePath(monstersFilePath);
         var cleanStringsDirectory = GetCleanStringsDirectory(stringsDirectory);
         var cleanLayoutsProfileHdFilePath = GetCleanLayoutsProfileHdFilePath(layoutsProfileHdFilePath);
         var cleanArmorTweaksDirectory = GetCleanArmorTweaksDirectory(armorDirectory);
         var cleanDesecratedZonesFilePath = GetCleanDesecratedZonesFilePath(desecratedZonesFilePath);
-        var excelDirectories = GetExcelDirectories(excelDirectory).ToList();
+        var excelDirectories = GetExcelDirectories(excelDirectory!).ToList();
         var characterSelectLayoutPaths = GetCharacterSelectLayoutPaths().ToArray();
-        var isLadderLaunch = MainWindow.Settings.CurrentProfile.LaunchExperience == LaunchExperience.Ladder;
+        var isLadderLaunch = profile.LaunchExperience == LaunchExperience.Ladder;
+        var terrorZoneTweaksEnabled = profile.TerrorizeAllZones || profile.ZoneDurationMinutes != 60;
         LaunchDiagnostics.Log($"Resolved missiles file path: {missilesFilePath ?? "<null>"}");
         LaunchDiagnostics.Log($"Resolved monsters file path: {monstersFilePath ?? "<null>"}");
         LaunchDiagnostics.Log($"Resolved strings directory path: {stringsDirectory ?? "<null>"}");
@@ -616,6 +815,14 @@ public static class ModTweaksService
         LaunchDiagnostics.Log($"Resolved armor directory path: {armorDirectory ?? "<null>"}");
         LaunchDiagnostics.Log($"Resolved desecratedzones.json path: {desecratedZonesFilePath ?? "<null>"}");
         LaunchDiagnostics.Log($"Excel directories to process: {string.Join(", ", excelDirectories)}");
+
+        var optionalTweakReport = new OptionalTweakReport();
+        var missilesAvailable = false;
+        var monstersAvailable = false;
+        var stringsAvailable = false;
+        var layoutsAvailable = false;
+        var armorAvailable = false;
+        var desecratedZonesAvailable = false;
 
         try
         {
@@ -669,32 +876,60 @@ public static class ModTweaksService
 
             ReportProgress(progress, "Preparing clean excel copy...");
             LaunchDiagnostics.Log("Ensuring clean excel copy.");
-            await EnsureCleanExcelCopyAsync(excelDirectory, cleanExcelDirectory);
+            await EnsureCleanExcelCopyAsync(excelDirectory!, cleanExcelDirectory);
             ReportProgress(progress, "Preparing clean missiles copy...");
             LaunchDiagnostics.Log("Ensuring clean missiles copy.");
-            await EnsureCleanMissilesCopyAsync(missilesFilePath, cleanMissilesFilePath);
+            missilesAvailable = await TryRunOptionalTweakStepAsync(
+                "Remove Splash VFX",
+                profile.RemoveSplashVfx,
+                () => EnsureCleanMissilesCopyAsync(missilesFilePath, cleanMissilesFilePath),
+                optionalTweakReport);
             ReportProgress(progress, "Preparing clean monsters copy...");
             LaunchDiagnostics.Log("Ensuring clean monsters.json copy.");
-            await EnsureCleanMonstersCopyAsync(monstersFilePath, cleanMonstersFilePath);
+            monstersAvailable = await TryRunOptionalTweakStepAsync(
+                "Plugin monster assets",
+                tweakEnabled: false,
+                () => EnsureCleanMonstersCopyAsync(monstersFilePath, cleanMonstersFilePath),
+                optionalTweakReport);
             ReportProgress(progress, "Preparing clean strings copy...");
             LaunchDiagnostics.Log("Ensuring clean strings directory copy.");
-            await EnsureCleanStringsCopyAsync(stringsDirectory, cleanStringsDirectory);
+            stringsAvailable = await TryRunOptionalTweakStepAsync(
+                "Plugin string assets",
+                tweakEnabled: false,
+                () => EnsureCleanStringsCopyAsync(stringsDirectory, cleanStringsDirectory),
+                optionalTweakReport);
             ReportProgress(progress, "Preparing clean tooltip layout copy...");
             LaunchDiagnostics.Log("Ensuring clean layouts_profilehd.json copy.");
-            await EnsureCleanLayoutsProfileHdCopyAsync(layoutsProfileHdFilePath, cleanLayoutsProfileHdFilePath);
+            layoutsAvailable = await TryRunOptionalTweakStepAsync(
+                "Tooltip background",
+                profile.MakeTooltipBackgroundOpaque,
+                () => EnsureCleanLayoutsProfileHdCopyAsync(layoutsProfileHdFilePath, cleanLayoutsProfileHdFilePath),
+                optionalTweakReport);
             ReportProgress(progress, "Preparing clean helmet visual copy...");
             LaunchDiagnostics.Log("Ensuring clean helmet and circlet JSON copy.");
-            await EnsureCleanArmorTweaksCopyAsync(armorDirectory, cleanArmorTweaksDirectory);
+            armorAvailable = await TryRunOptionalTweakStepAsync(
+                "Remove Helmet Visual",
+                profile.RemoveHelmetVisual,
+                () => EnsureCleanArmorTweaksCopyAsync(armorDirectory, cleanArmorTweaksDirectory),
+                optionalTweakReport);
             ReportProgress(progress, "Preparing clean desecrated zones copy...");
             LaunchDiagnostics.Log("Ensuring clean desecratedzones.json copy.");
-            await EnsureCleanDesecratedZonesCopyAsync(desecratedZonesFilePath, cleanDesecratedZonesFilePath);
+            desecratedZonesAvailable = await TryRunOptionalTweakStepAsync(
+                "Terror zone configuration",
+                terrorZoneTweaksEnabled,
+                () => EnsureCleanDesecratedZonesCopyAsync(desecratedZonesFilePath, cleanDesecratedZonesFilePath),
+                optionalTweakReport);
             ReportProgress(progress, "Preparing clean vis copy...");
             LaunchDiagnostics.Log("Ensuring clean vis directory copy.");
-            await EnsureCleanVisCopyAsync();
+            var visAvailable = await TryRunOptionalTweakStepAsync(
+                "Terror zone purple overlay",
+                profile.TerrorZonePurpleOverlay,
+                async () => await EnsureCleanVisCopyAsync(),
+                optionalTweakReport);
 
             foreach (var targetExcelDirectory in excelDirectories)
             {
-                var sourceExcelDirectory = GetCleanVariantDirectory(targetExcelDirectory, excelDirectory, cleanExcelDirectory);
+                var sourceExcelDirectory = GetCleanVariantDirectory(targetExcelDirectory, excelDirectory!, cleanExcelDirectory);
                 var targetLabel = Path.GetFileName(targetExcelDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
                 ReportProgress(progress, $"Applying tweaks in {targetLabel}...");
                 LaunchDiagnostics.Log($"Processing excel directory. Source={sourceExcelDirectory}, Target={targetExcelDirectory}");
@@ -712,7 +947,7 @@ public static class ModTweaksService
                     await PluginsService.ApplyEnabledPluginsExcelAssetsAsync(modRoot, targetExcelDirectory, progress);
                 }
 
-                await ApplyTweaksAsync(targetExcelDirectory, progress);
+                await ApplyTweaksAsync(targetExcelDirectory, progress, optionalTweakReport);
 
                 // Plugin operations targeting excel .txt files (via ParserRegistry)
                 // genuinely differ between excel and excel/base because those
@@ -723,7 +958,14 @@ public static class ModTweaksService
 
             ReportProgress(progress, "Restoring missiles.json...");
             LaunchDiagnostics.Log("Restoring missiles file from clean copy.");
-            await RestoreMissilesFileAsync(cleanMissilesFilePath, missilesFilePath);
+            if (missilesAvailable)
+            {
+                missilesAvailable = await TryRunOptionalTweakStepAsync(
+                    "Remove Splash VFX",
+                    profile.RemoveSplashVfx,
+                    () => RestoreMissilesFileAsync(cleanMissilesFilePath, missilesFilePath),
+                    optionalTweakReport);
+            }
 
             // Pre-stage plugin asset copies targeting missiles.json before
             // launcher tweaks and plugin parser ops run, so launcher tweaks
@@ -735,43 +977,116 @@ public static class ModTweaksService
 
             ReportProgress(progress, "Applying missiles tweaks...");
             LaunchDiagnostics.Log("Applying missiles tweaks.");
-            var profile = MainWindow.Settings.CurrentProfile;
-            await ApplyMissilesTweaksAsync(missilesFilePath, profile.RemoveSplashVfx);
+            if (missilesAvailable)
+            {
+                await TryRunOptionalTweakStepAsync(
+                    "Remove Splash VFX",
+                    profile.RemoveSplashVfx,
+                    () => ApplyMissilesTweaksAsync(missilesFilePath, profile.RemoveSplashVfx),
+                    optionalTweakReport);
+            }
             ReportProgress(progress, "Restoring layouts_profilehd.json...");
             LaunchDiagnostics.Log("Restoring tooltip layout file from clean copy.");
-            await RestoreLayoutsProfileHdFileAsync(cleanLayoutsProfileHdFilePath, layoutsProfileHdFilePath);
+            if (layoutsAvailable)
+            {
+                layoutsAvailable = await TryRunOptionalTweakStepAsync(
+                    "Tooltip background",
+                    profile.MakeTooltipBackgroundOpaque,
+                    () => RestoreLayoutsProfileHdFileAsync(cleanLayoutsProfileHdFilePath, layoutsProfileHdFilePath),
+                    optionalTweakReport);
+            }
             ReportProgress(progress, "Applying tooltip layout tweaks...");
             LaunchDiagnostics.Log("Applying tooltip layout tweaks.");
-            await ApplyTooltipLayoutTweaksAsync(layoutsProfileHdFilePath, profile.MakeTooltipBackgroundOpaque);
+            if (layoutsAvailable)
+            {
+                await TryRunOptionalTweakStepAsync(
+                    "Tooltip background",
+                    profile.MakeTooltipBackgroundOpaque,
+                    () => ApplyTooltipLayoutTweaksAsync(layoutsProfileHdFilePath, profile.MakeTooltipBackgroundOpaque),
+                    optionalTweakReport);
+            }
             ReportProgress(progress, "Restoring helmet visual files...");
             LaunchDiagnostics.Log("Restoring helmet and circlet visual files from clean copy.");
-            await RestoreArmorTweaksAsync(armorDirectory, cleanArmorTweaksDirectory);
+            if (armorAvailable)
+            {
+                armorAvailable = await TryRunOptionalTweakStepAsync(
+                    "Remove Helmet Visual",
+                    profile.RemoveHelmetVisual,
+                    () => RestoreArmorTweaksAsync(armorDirectory, cleanArmorTweaksDirectory),
+                    optionalTweakReport);
+            }
             ReportProgress(progress, "Applying helmet visual tweaks...");
             LaunchDiagnostics.Log("Applying helmet visual tweaks.");
-            await ApplyHelmetVisualTweaksAsync(armorDirectory, profile.RemoveHelmetVisual);
+            if (armorAvailable)
+            {
+                await TryRunOptionalTweakStepAsync(
+                    "Remove Helmet Visual",
+                    profile.RemoveHelmetVisual,
+                    () => ApplyHelmetVisualTweaksAsync(armorDirectory, profile.RemoveHelmetVisual),
+                    optionalTweakReport);
+            }
             ReportProgress(progress, "Restoring desecratedzones.json...");
             LaunchDiagnostics.Log("Restoring desecrated zones file from clean copy.");
-            await RestoreDesecratedZonesFileAsync(cleanDesecratedZonesFilePath, desecratedZonesFilePath);
+            if (desecratedZonesAvailable)
+            {
+                desecratedZonesAvailable = await TryRunOptionalTweakStepAsync(
+                    "Terror zone configuration",
+                    terrorZoneTweaksEnabled,
+                    () => RestoreDesecratedZonesFileAsync(cleanDesecratedZonesFilePath, desecratedZonesFilePath),
+                    optionalTweakReport);
+            }
             ReportProgress(progress, "Applying desecrated zones tweaks...");
             LaunchDiagnostics.Log("Applying desecrated zones tweaks.");
-            await ApplyDesecratedZonesTweaksAsync(
-                desecratedZonesFilePath,
-                profile.TerrorizeAllZones,
-                profile.ZoneDurationMinutes);
+            if (desecratedZonesAvailable)
+            {
+                await TryRunOptionalTweakStepAsync(
+                    "Zone duration",
+                    profile.ZoneDurationMinutes != 60,
+                    () => ApplyZoneDurationTweakAsync(
+                        desecratedZonesFilePath,
+                        profile.ZoneDurationMinutes),
+                    optionalTweakReport);
+                await TryRunOptionalTweakStepAsync(
+                    "Terrorize all zones",
+                    profile.TerrorizeAllZones,
+                    () => ApplyTerrorizeAllZonesTweakAsync(
+                        desecratedZonesFilePath,
+                        profile.TerrorizeAllZones),
+                    optionalTweakReport);
+            }
             ReportProgress(progress, "Restoring desecrated vis files...");
             LaunchDiagnostics.Log("Restoring desecrated vis files from clean copy.");
-            await RestoreVisFilesAsync();
+            if (visAvailable)
+            {
+                await RestoreVisFilesAsync();
+            }
             ReportProgress(progress, "Applying terror zone purple overlay tweaks...");
             LaunchDiagnostics.Log("Applying terror zone purple overlay tweaks.");
-            ApplyTerrorZonePurpleOverlayTweak(profile.TerrorZonePurpleOverlay);
+            await TryRunOptionalTweakStepAsync(
+                "Terror zone purple overlay",
+                profile.TerrorZonePurpleOverlay,
+                () => ApplyTerrorZonePurpleOverlayTweakAsync(profile.TerrorZonePurpleOverlay, visAvailable),
+                optionalTweakReport);
             ReportProgress(progress, "Applying terror zone fanfare tweaks...");
             LaunchDiagnostics.Log("Applying terror zone fanfare tweaks.");
-            await ApplyTerrorZoneFanfareTweakAsync(profile.RestoreTerrorZoneFanfare);
+            await TryRunOptionalTweakStepAsync(
+                "Terror zone fanfare removal",
+                tweakEnabled: false,
+                () => ApplyTerrorZoneFanfareTweakAsync(profile.RestoreTerrorZoneFanfare),
+                optionalTweakReport);
             ReportProgress(progress, "Applying vignette tweaks...");
             LaunchDiagnostics.Log("Applying vignette tweaks.");
-            await ApplyVignetteTweakAsync(profile.RemoveVignette);
+            await TryRunOptionalTweakStepAsync(
+                "Vignette",
+                profile.RemoveVignette,
+                () => ApplyVignetteTweakAsync(profile.RemoveVignette),
+                optionalTweakReport);
             ReportProgress(progress, "Applying extra blood effects tweak...");
-            await ApplyDisableExtraBloodTweakAsync(modRoot, profile.DisableExtraBlood);
+            await TryRunOptionalTweakStepAsync(
+                "Disable extra blood",
+                profile.DisableExtraBlood,
+                () => ApplyDisableExtraBloodTweakAsync(modRoot, profile.DisableExtraBlood),
+                optionalTweakReport);
 
             // Restore monsters.json from the launcher's clean copy and pre-stage
             // any plugin asset copies targeting it. monsters.json has no launcher
@@ -779,7 +1094,14 @@ public static class ModTweaksService
             // ApplyEnabledPluginsModRootAsync below so parser ops layer on top.
             ReportProgress(progress, "Restoring monsters.json...");
             LaunchDiagnostics.Log("Restoring monsters file from clean copy.");
-            await RestoreMonstersFileAsync(cleanMonstersFilePath, monstersFilePath);
+            if (monstersAvailable)
+            {
+                await TryRunOptionalTweakStepAsync(
+                    "Plugin monster assets",
+                    tweakEnabled: false,
+                    () => RestoreMonstersFileAsync(cleanMonstersFilePath, monstersFilePath),
+                    optionalTweakReport);
+            }
             if (!string.IsNullOrWhiteSpace(modRoot))
             {
                 await PluginsService.ApplyEnabledPluginsMonstersAssetsAsync(modRoot, progress);
@@ -790,7 +1112,14 @@ public static class ModTweaksService
             // ApplyEnabledPluginsModRootAsync below layer on top.
             ReportProgress(progress, "Restoring strings directory...");
             LaunchDiagnostics.Log("Restoring strings directory from clean copy.");
-            await RestoreStringsFromCleanCopyAsync(stringsDirectory, cleanStringsDirectory);
+            if (stringsAvailable)
+            {
+                await TryRunOptionalTweakStepAsync(
+                    "Plugin string assets",
+                    tweakEnabled: false,
+                    () => RestoreStringsFromCleanCopyAsync(stringsDirectory, cleanStringsDirectory),
+                    optionalTweakReport);
+            }
             if (!string.IsNullOrWhiteSpace(modRoot))
             {
                 await PluginsService.ApplyEnabledPluginsStringsAssetsAsync(modRoot, progress);
@@ -812,6 +1141,18 @@ public static class ModTweaksService
                 LaunchDiagnostics.Log("Skipping mod-root plugin pass: mod root could not be resolved.");
             }
 
+            if (optionalTweakReport.HasEnabledSkippedTweaks)
+            {
+                LaunchDiagnostics.Log(
+                    $"Enabled tweaks skipped for unavailable mod assets: {string.Join(", ", optionalTweakReport.EnabledSkippedTweaks)}.");
+                if (ShouldNotifySkippedTweaks(modRoot, optionalTweakReport))
+                {
+                    Notifications.SendNotification(
+                        "Some launcher tweaks were skipped because this mod version does not contain the required files. The game will launch normally.",
+                        "Info");
+                }
+            }
+
             LaunchDiagnostics.Log("Mod tweak preparation succeeded.");
 
             return true;
@@ -819,7 +1160,7 @@ public static class ModTweaksService
         catch (Exception ex)
         {
             LaunchDiagnostics.LogException("Failed to prepare mod tweaks", ex);
-            Notifications.SendNotification($"Failed to prepare mod tweaks: {ex.Message}", "Warning");
+            Notifications.SendNotification(DescribePreparationFailure(ex), "Error");
             return false;
         }
     }
@@ -989,7 +1330,7 @@ public static class ModTweaksService
 
     private static async Task EnsureCleanExcelCopyAsync(string excelDirectory, string cleanExcelDirectory)
     {
-        if (Directory.Exists(cleanExcelDirectory))
+        if (AssetDirectoryExists(cleanExcelDirectory))
         {
             return;
         }
@@ -1013,16 +1354,18 @@ public static class ModTweaksService
         return Path.Combine(missilesDirectory, CleanMissilesFileName);
     }
 
-    private static async Task EnsureCleanMissilesCopyAsync(string? missilesFilePath, string cleanMissilesFilePath)
+    internal static async Task EnsureCleanMissilesCopyAsync(string? missilesFilePath, string cleanMissilesFilePath)
     {
-        if (File.Exists(cleanMissilesFilePath))
+        if (string.IsNullOrWhiteSpace(missilesFilePath) || !AssetFileExists(missilesFilePath))
         {
-            return;
+            throw new TweakAssetUnavailableException(
+                missilesFilePath ?? MissilesFileName,
+                "missiles.json was not found in the Reimagined hd missiles folder.");
         }
 
-        if (string.IsNullOrWhiteSpace(missilesFilePath) || !File.Exists(missilesFilePath))
+        if (AssetFileExists(cleanMissilesFilePath))
         {
-            throw new FileNotFoundException("missiles.json was not found in the Reimagined hd missiles folder.");
+            return;
         }
 
         await CopyFileAsync(missilesFilePath, cleanMissilesFilePath, overwrite: true);
@@ -1044,16 +1387,18 @@ public static class ModTweaksService
         return Path.Combine(monstersDirectory, CleanMonstersFileName);
     }
 
-    private static async Task EnsureCleanMonstersCopyAsync(string? monstersFilePath, string cleanMonstersFilePath)
+    internal static async Task EnsureCleanMonstersCopyAsync(string? monstersFilePath, string cleanMonstersFilePath)
     {
-        if (File.Exists(cleanMonstersFilePath))
+        if (string.IsNullOrWhiteSpace(monstersFilePath) || !AssetFileExists(monstersFilePath))
         {
-            return;
+            throw new TweakAssetUnavailableException(
+                monstersFilePath ?? MonstersFileName,
+                "monsters.json was not found in the Reimagined hd character folder.");
         }
 
-        if (string.IsNullOrWhiteSpace(monstersFilePath) || !File.Exists(monstersFilePath))
+        if (AssetFileExists(cleanMonstersFilePath))
         {
-            throw new FileNotFoundException("monsters.json was not found in the Reimagined hd character folder.");
+            return;
         }
 
         await CopyFileAsync(monstersFilePath, cleanMonstersFilePath, overwrite: true);
@@ -1075,16 +1420,18 @@ public static class ModTweaksService
         return Path.Combine(parentDirectory, CleanStringsDirectoryName);
     }
 
-    private static async Task EnsureCleanStringsCopyAsync(string? stringsDirectory, string cleanStringsDirectory)
+    internal static async Task EnsureCleanStringsCopyAsync(string? stringsDirectory, string cleanStringsDirectory)
     {
-        if (Directory.Exists(cleanStringsDirectory))
+        if (string.IsNullOrWhiteSpace(stringsDirectory) || !AssetDirectoryExists(stringsDirectory))
         {
-            return;
+            throw new TweakAssetUnavailableException(
+                stringsDirectory ?? StringsDirectoryName,
+                "Strings folder was not found in the Reimagined local lng folder.");
         }
 
-        if (string.IsNullOrWhiteSpace(stringsDirectory) || !Directory.Exists(stringsDirectory))
+        if (AssetDirectoryExists(cleanStringsDirectory))
         {
-            throw new DirectoryNotFoundException("Strings folder was not found in the Reimagined local lng folder.");
+            return;
         }
 
         await CopyDirectoryAsync(stringsDirectory, cleanStringsDirectory, overwrite: true);
@@ -1106,16 +1453,18 @@ public static class ModTweaksService
         return Path.Combine(layoutsDirectory, CleanLayoutsProfileHdFileName);
     }
 
-    private static async Task EnsureCleanLayoutsProfileHdCopyAsync(string? layoutsProfileHdFilePath, string cleanLayoutsProfileHdFilePath)
+    internal static async Task EnsureCleanLayoutsProfileHdCopyAsync(string? layoutsProfileHdFilePath, string cleanLayoutsProfileHdFilePath)
     {
-        if (File.Exists(cleanLayoutsProfileHdFilePath))
+        if (string.IsNullOrWhiteSpace(layoutsProfileHdFilePath) || !AssetFileExists(layoutsProfileHdFilePath))
         {
-            return;
+            throw new TweakAssetUnavailableException(
+                layoutsProfileHdFilePath ?? LayoutsProfileHdFileName,
+                "layouts_profilehd.json was not found in the Reimagined global ui folder.");
         }
 
-        if (string.IsNullOrWhiteSpace(layoutsProfileHdFilePath) || !File.Exists(layoutsProfileHdFilePath))
+        if (AssetFileExists(cleanLayoutsProfileHdFilePath))
         {
-            throw new FileNotFoundException("layouts_profilehd.json was not found in the Reimagined global ui folder.");
+            return;
         }
 
         await CopyFileAsync(layoutsProfileHdFilePath, cleanLayoutsProfileHdFilePath, overwrite: true);
@@ -1131,14 +1480,16 @@ public static class ModTweaksService
         return Path.Combine(armorDirectory, CleanArmorTweaksDirectoryName);
     }
 
-    private static async Task EnsureCleanArmorTweaksCopyAsync(string? armorDirectory, string cleanArmorTweaksDirectory)
+    internal static async Task EnsureCleanArmorTweaksCopyAsync(string? armorDirectory, string cleanArmorTweaksDirectory)
     {
-        if (string.IsNullOrWhiteSpace(armorDirectory) || !Directory.Exists(armorDirectory))
+        if (string.IsNullOrWhiteSpace(armorDirectory) || !AssetDirectoryExists(armorDirectory))
         {
-            throw new DirectoryNotFoundException("Armor folder was not found in the Reimagined hd items folder.");
+            throw new TweakAssetUnavailableException(
+                armorDirectory ?? ArmorDirectoryName,
+                "Armor folder was not found in the Reimagined hd items folder.");
         }
 
-        if (Directory.Exists(cleanArmorTweaksDirectory))
+        if (AssetDirectoryExists(cleanArmorTweaksDirectory))
         {
             return;
         }
@@ -1153,7 +1504,7 @@ public static class ModTweaksService
                 Directory.CreateDirectory(cleanDirectory);
             }
 
-            if (File.Exists(sourceFilePath))
+            if (AssetFileExists(sourceFilePath))
             {
                 await CopyFileAsync(sourceFilePath, cleanFilePath, overwrite: true);
                 continue;
@@ -1179,16 +1530,18 @@ public static class ModTweaksService
         return Path.Combine(desecratedZonesDirectory, CleanDesecratedZonesFileName);
     }
 
-    private static async Task EnsureCleanDesecratedZonesCopyAsync(string? desecratedZonesFilePath, string cleanDesecratedZonesFilePath)
+    internal static async Task EnsureCleanDesecratedZonesCopyAsync(string? desecratedZonesFilePath, string cleanDesecratedZonesFilePath)
     {
-        if (File.Exists(cleanDesecratedZonesFilePath))
+        if (string.IsNullOrWhiteSpace(desecratedZonesFilePath) || !AssetFileExists(desecratedZonesFilePath))
         {
-            return;
+            throw new TweakAssetUnavailableException(
+                desecratedZonesFilePath ?? DesecratedZonesFileName,
+                "desecratedzones.json was not found in the Reimagined hd global excel folder.");
         }
 
-        if (string.IsNullOrWhiteSpace(desecratedZonesFilePath) || !File.Exists(desecratedZonesFilePath))
+        if (AssetFileExists(cleanDesecratedZonesFilePath))
         {
-            throw new FileNotFoundException("desecratedzones.json was not found in the Reimagined hd global excel folder.");
+            return;
         }
 
         await CopyFileAsync(desecratedZonesFilePath, cleanDesecratedZonesFilePath, overwrite: true);
@@ -1196,42 +1549,67 @@ public static class ModTweaksService
 
     private static async Task RestoreDesecratedZonesFileAsync(string cleanDesecratedZonesFilePath, string? desecratedZonesFilePath)
     {
-        if (string.IsNullOrWhiteSpace(desecratedZonesFilePath))
+        if (string.IsNullOrWhiteSpace(desecratedZonesFilePath) || !AssetFileExists(desecratedZonesFilePath))
         {
-            throw new FileNotFoundException("desecratedzones.json path could not be resolved.");
+            throw new TweakAssetUnavailableException(
+                desecratedZonesFilePath ?? DesecratedZonesFileName,
+                "desecratedzones.json is unavailable for restoration.");
         }
 
-        if (!File.Exists(cleanDesecratedZonesFilePath))
+        if (!AssetFileExists(cleanDesecratedZonesFilePath))
         {
-            throw new FileNotFoundException("Clean desecratedzones.json copy was not found.");
+            throw new TweakAssetUnavailableException(
+                cleanDesecratedZonesFilePath,
+                "Clean desecratedzones.json copy was not found.");
         }
 
         await CopyFileAsync(cleanDesecratedZonesFilePath, desecratedZonesFilePath, overwrite: true);
     }
 
-    private static async Task ApplyDesecratedZonesTweaksAsync(
+    internal static async Task ApplyZoneDurationTweakAsync(
         string? desecratedZonesFilePath,
-        bool terrorizeAllZones,
         int zoneDurationMinutes)
     {
-        if (string.IsNullOrWhiteSpace(desecratedZonesFilePath) || !File.Exists(desecratedZonesFilePath))
+        if (string.IsNullOrWhiteSpace(desecratedZonesFilePath) || !AssetFileExists(desecratedZonesFilePath))
         {
-            throw new FileNotFoundException("desecratedzones.json was not found in the Reimagined hd global excel folder.");
+            throw new TweakAssetUnavailableException(
+                desecratedZonesFilePath ?? DesecratedZonesFileName,
+                "desecratedzones.json was not found in the Reimagined hd global excel folder.");
         }
 
-        await DesecratedZonesJsonService.ApplyTerrorZoneTweaksAsync(
+        var durationUpdated = await DesecratedZonesJsonService.ApplyTerrorZoneTweaksAsync(
             desecratedZonesFilePath,
             zoneDurationMinutes);
+        if (!durationUpdated)
+        {
+            throw new TweakAssetUnavailableException(
+                desecratedZonesFilePath,
+                "desecratedzones.json did not contain a supported zone duration field.");
+        }
+    }
 
+    internal static async Task ApplyTerrorizeAllZonesTweakAsync(
+        string? desecratedZonesFilePath,
+        bool terrorizeAllZones)
+    {
         if (!terrorizeAllZones)
         {
             return;
         }
 
+        if (string.IsNullOrWhiteSpace(desecratedZonesFilePath) || !AssetFileExists(desecratedZonesFilePath))
+        {
+            throw new TweakAssetUnavailableException(
+                desecratedZonesFilePath ?? DesecratedZonesFileName,
+                "desecratedzones.json was not found in the Reimagined hd global excel folder.");
+        }
+
         var updatedEntries = await DesecratedZonesJsonService.MergeActAutoZonesAsync(desecratedZonesFilePath);
         if (updatedEntries == 0)
         {
-            throw new InvalidDataException("desecratedzones.json did not contain Act Auto zone boundaries to update.");
+            throw new TweakAssetUnavailableException(
+                desecratedZonesFilePath,
+                "desecratedzones.json did not contain Act Auto zone boundaries to update.");
         }
     }
 
@@ -1256,8 +1634,40 @@ public static class ModTweaksService
 
     private static string GetExcelFilePath(string excelDirectory, string fileName)
     {
+        return TryGetExcelFilePath(excelDirectory, fileName)
+               ?? throw new TweakAssetUnavailableException(
+                   Path.Combine(excelDirectory, fileName),
+                   $"{fileName} was not found in the Reimagined excel folder.");
+    }
+
+    private static Task ValidateExcelFilesAsync(string excelDirectory)
+    {
+        foreach (var fileName in new[]
+                 {
+                     CharStatsFileName,
+                     DifficultyLevelsFileName,
+                     SkillsFileName,
+                     StatesFileName,
+                     PropertiesFileName,
+                     TreasureClassExFileName,
+                     SoundsFileName
+                 })
+        {
+            var filePath = TryGetExcelFilePath(excelDirectory, fileName);
+            if (filePath is null)
+            {
+                LaunchDiagnostics.Log(
+                    $"Optional Excel tweak asset is unavailable. Asset={Path.Combine(excelDirectory, fileName)}.");
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private static string? TryGetExcelFilePath(string excelDirectory, string fileName)
+    {
         var exactPath = Path.Combine(excelDirectory, fileName);
-        if (File.Exists(exactPath))
+        if (AssetFileExists(exactPath))
         {
             return exactPath;
         }
@@ -1266,80 +1676,96 @@ public static class ModTweaksService
             .EnumerateFiles(excelDirectory)
             .Select(Path.GetFileName)
             .FirstOrDefault(f => f is not null && f.Equals(fileName, StringComparison.OrdinalIgnoreCase));
-
-        if (actualFileName == null)
-        {
-            throw new FileNotFoundException($"{fileName} was not found in the Reimagined excel folder: {excelDirectory}");
-        }
-
-        return Path.Combine(excelDirectory, actualFileName);
+        return actualFileName is null ? null : Path.Combine(excelDirectory, actualFileName);
     }
 
-    private static Task ValidateExcelFilesAsync(string excelDirectory)
-    {
-        _ = GetExcelFilePath(excelDirectory, CharStatsFileName);
-        _ = GetExcelFilePath(excelDirectory, DifficultyLevelsFileName);
-        _ = GetExcelFilePath(excelDirectory, SkillsFileName);
-        _ = GetExcelFilePath(excelDirectory, StatesFileName);
-        _ = GetExcelFilePath(excelDirectory, PropertiesFileName);
-
-        return Task.CompletedTask;
-    }
-
-    private static async Task ApplyTweaksAsync(string excelDirectory, IProgress<string>? progress)
+    private static async Task ApplyTweaksAsync(
+        string excelDirectory,
+        IProgress<string>? progress,
+        OptionalTweakReport optionalTweakReport)
     {
         var profile = MainWindow.Settings.CurrentProfile;
         ReportProgress(progress, "Updating charstats.txt...");
         LaunchDiagnostics.Log($"Applying charstats tweaks in {excelDirectory}.");
-        await ApplyCharStatsTweaksAsync(
-            GetExcelFilePath(excelDirectory, CharStatsFileName),
-            profile.SkillPointsPerLevel,
-            profile.AttributesPerLevel);
+        await TryRunOptionalTweakStepAsync(
+            "Character stats",
+            profile.SkillPointsPerLevel != 1 || profile.AttributesPerLevel != 5,
+            () => ApplyCharStatsTweaksAsync(
+                GetExcelFilePath(excelDirectory, CharStatsFileName),
+                profile.SkillPointsPerLevel,
+                profile.AttributesPerLevel),
+            optionalTweakReport);
         ReportProgress(progress, "Updating skills.txt...");
         LaunchDiagnostics.Log($"Applying skills tweaks in {excelDirectory}.");
-        await ApplySkillsTweaksAsync(
-            GetExcelFilePath(excelDirectory, SkillsFileName),
-            profile.MaxSkillLevel,
-            profile.RemoveFadeEffect);
+        await TryRunOptionalTweakStepAsync(
+            "Skills",
+            profile.MaxSkillLevel != 25 || profile.RemoveFadeEffect,
+            () => ApplySkillsTweaksAsync(
+                GetExcelFilePath(excelDirectory, SkillsFileName),
+                profile.MaxSkillLevel,
+                profile.RemoveFadeEffect),
+            optionalTweakReport);
         ReportProgress(progress, "Updating DifficultyLevels.txt...");
         LaunchDiagnostics.Log($"Applying difficulty tweaks in {excelDirectory}.");
-        await ApplyDifficultyLevelsTweaksAsync(
-            GetExcelFilePath(excelDirectory, DifficultyLevelsFileName),
-            profile.NormalResistPenalty,
-            profile.NightmareResistPenalty,
-            profile.HellResistPenalty);
+        await TryRunOptionalTweakStepAsync(
+            "Difficulty levels",
+            profile.NormalResistPenalty != 0
+            || profile.NightmareResistPenalty != -60
+            || profile.HellResistPenalty != -120,
+            () => ApplyDifficultyLevelsTweaksAsync(
+                GetExcelFilePath(excelDirectory, DifficultyLevelsFileName),
+                profile.NormalResistPenalty,
+                profile.NightmareResistPenalty,
+                profile.HellResistPenalty),
+            optionalTweakReport);
         ReportProgress(progress, "Updating states.txt...");
         LaunchDiagnostics.Log($"Applying states tweaks in {excelDirectory}.");
-        await ApplyStatesTweaksAsync(
-            GetExcelFilePath(excelDirectory, StatesFileName),
-            profile.RemovePaladinAuraSound,
-            profile.RemoveFadeEffect);
+        await TryRunOptionalTweakStepAsync(
+            "State effects",
+            profile.RemovePaladinAuraSound || profile.RemoveFadeEffect,
+            () => ApplyStatesTweaksAsync(
+                GetExcelFilePath(excelDirectory, StatesFileName),
+                profile.RemovePaladinAuraSound,
+                profile.RemoveFadeEffect),
+            optionalTweakReport);
         ReportProgress(progress, "Updating Properties.txt...");
         LaunchDiagnostics.Log($"Applying properties tweaks in {excelDirectory}.");
-        await ApplyPropertiesTweaksAsync(
-            GetExcelFilePath(excelDirectory, PropertiesFileName),
-            profile.RemoveFadeEffect);
+        await TryRunOptionalTweakStepAsync(
+            "Fade effect properties",
+            profile.RemoveFadeEffect,
+            () => ApplyPropertiesTweaksAsync(
+                GetExcelFilePath(excelDirectory, PropertiesFileName),
+                profile.RemoveFadeEffect),
+            optionalTweakReport);
         ReportProgress(progress, "Updating treasureclassex.txt...");
         LaunchDiagnostics.Log($"Applying treasure class tweaks in {excelDirectory}.");
-        await ApplyTreasureClassExTweaksAsync(
-            GetExcelFilePath(excelDirectory, TreasureClassExFileName),
-            profile.OrbStackDrops,
-            profile.RuneStackDrops);
-        var soundsFilePath = GetExcelFilePath(excelDirectory, SoundsFileName);
-        if (File.Exists(soundsFilePath))
-        {
-            ReportProgress(progress, "Updating sounds.txt...");
-            LaunchDiagnostics.Log($"Applying sounds tweaks in {excelDirectory}.");
-            await ApplySoundsTweaksAsync(soundsFilePath, profile.RestoreTerrorZoneFanfare);
-        }
+        await TryRunOptionalTweakStepAsync(
+            "Stack drops",
+            profile.OrbStackDrops != StackDropOption.Default || profile.RuneStackDrops != StackDropOption.Default,
+            () => ApplyTreasureClassExTweaksAsync(
+                GetExcelFilePath(excelDirectory, TreasureClassExFileName),
+                profile.OrbStackDrops,
+                profile.RuneStackDrops),
+            optionalTweakReport);
+        ReportProgress(progress, "Updating sounds.txt...");
+        LaunchDiagnostics.Log($"Applying sounds tweaks in {excelDirectory}.");
+        await TryRunOptionalTweakStepAsync(
+            "Terror zone sound",
+            profile.RestoreTerrorZoneFanfare,
+            () => ApplySoundsTweaksAsync(
+                GetExcelFilePath(excelDirectory, SoundsFileName),
+                profile.RestoreTerrorZoneFanfare),
+            optionalTweakReport);
     }
 
     private static async Task ApplySoundsTweaksAsync(string soundsFilePath, bool restoreTerrorZoneFanfare)
     {
-        var entries = (await SoundsParser.GetEntries(soundsFilePath)).ToList();
+        var entries = (await ReadTweakAssetAsync(
+            soundsFilePath,
+            () => SoundsParser.GetEntries(soundsFilePath))).ToList();
         if (entries.Count == 0)
         {
-            throw new InvalidDataException("sounds.txt did not contain any editable rows.");
+            throw new TweakAssetUnavailableException(soundsFilePath, "sounds.txt did not contain any editable rows.");
         }
 
         var volume = restoreTerrorZoneFanfare ? 255 : 0;
@@ -1369,7 +1795,8 @@ public static class ModTweaksService
 
         if (updatedRows == 0)
         {
-            throw new InvalidDataException(
+            throw new TweakAssetUnavailableException(
+                soundsFilePath,
                 $"sounds.txt did not contain a '{DesecratedEnterHdSoundKey}' row to update.");
         }
 
@@ -1386,16 +1813,31 @@ public static class ModTweaksService
         LaunchDiagnostics.Log($"STATUS: {message}");
     }
 
-    private static async Task RestoreMissilesFileAsync(string cleanMissilesFilePath, string? missilesFilePath)
+    private static async Task<T> ReadTweakAssetAsync<T>(string assetPath, Func<Task<T>> readAsync)
     {
-        if (string.IsNullOrWhiteSpace(missilesFilePath))
+        try
         {
-            throw new FileNotFoundException("missiles.json path could not be resolved.");
+            return await readAsync();
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidDataException or FormatException
+                                           or ArgumentException or IndexOutOfRangeException or OverflowException)
+        {
+            throw new TweakAssetUnavailableException(assetPath, "The optional tweak asset uses an unsupported format.", exception);
+        }
+    }
+
+    internal static async Task RestoreMissilesFileAsync(string cleanMissilesFilePath, string? missilesFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(missilesFilePath) || !AssetFileExists(missilesFilePath))
+        {
+            throw new TweakAssetUnavailableException(
+                missilesFilePath ?? MissilesFileName,
+                "missiles.json is unavailable for restoration.");
         }
 
-        if (!File.Exists(cleanMissilesFilePath))
+        if (!AssetFileExists(cleanMissilesFilePath))
         {
-            throw new FileNotFoundException("Clean missiles.json copy was not found.");
+            throw new TweakAssetUnavailableException(cleanMissilesFilePath, "Clean missiles.json copy was not found.");
         }
 
         await CopyFileAsync(cleanMissilesFilePath, missilesFilePath, overwrite: true);
@@ -1403,14 +1845,16 @@ public static class ModTweaksService
 
     private static async Task RestoreMonstersFileAsync(string cleanMonstersFilePath, string? monstersFilePath)
     {
-        if (string.IsNullOrWhiteSpace(monstersFilePath))
+        if (string.IsNullOrWhiteSpace(monstersFilePath) || !AssetFileExists(monstersFilePath))
         {
-            throw new FileNotFoundException("monsters.json path could not be resolved.");
+            throw new TweakAssetUnavailableException(
+                monstersFilePath ?? MonstersFileName,
+                "monsters.json is unavailable for restoration.");
         }
 
-        if (!File.Exists(cleanMonstersFilePath))
+        if (!AssetFileExists(cleanMonstersFilePath))
         {
-            throw new FileNotFoundException("Clean monsters.json copy was not found.");
+            throw new TweakAssetUnavailableException(cleanMonstersFilePath, "Clean monsters.json copy was not found.");
         }
 
         await CopyFileAsync(cleanMonstersFilePath, monstersFilePath, overwrite: true);
@@ -1418,82 +1862,102 @@ public static class ModTweaksService
 
     private static async Task RestoreStringsFromCleanCopyAsync(string? stringsDirectory, string cleanStringsDirectory)
     {
-        if (string.IsNullOrWhiteSpace(stringsDirectory))
+        if (string.IsNullOrWhiteSpace(stringsDirectory) || !AssetDirectoryExists(stringsDirectory))
         {
-            throw new DirectoryNotFoundException("Strings folder could not be resolved.");
+            throw new TweakAssetUnavailableException(
+                stringsDirectory ?? StringsDirectoryName,
+                "Strings folder is unavailable for restoration.");
         }
 
-        if (!Directory.Exists(cleanStringsDirectory))
+        if (!AssetDirectoryExists(cleanStringsDirectory))
         {
-            throw new DirectoryNotFoundException("Clean strings copy was not found.");
+            throw new TweakAssetUnavailableException(cleanStringsDirectory, "Clean strings copy was not found.");
         }
 
         await CopyDirectoryAsync(cleanStringsDirectory, stringsDirectory, overwrite: true);
     }
 
-    private static async Task ApplyMissilesTweaksAsync(string? missilesFilePath, bool removeSplashVfx)
+    internal static async Task ApplyMissilesTweaksAsync(string? missilesFilePath, bool removeSplashVfx)
     {
-        if (string.IsNullOrWhiteSpace(missilesFilePath) || !File.Exists(missilesFilePath))
-        {
-            throw new FileNotFoundException("missiles.json was not found in the Reimagined hd missiles folder.");
-        }
-
         if (!removeSplashVfx)
         {
             return;
         }
 
-        var updatedEntries = await MissilesJsonService.ClearProcSplashExplodeAsync(missilesFilePath);
+        if (string.IsNullOrWhiteSpace(missilesFilePath) || !AssetFileExists(missilesFilePath))
+        {
+            throw new TweakAssetUnavailableException(
+                missilesFilePath ?? MissilesFileName,
+                "missiles.json was not found in the Reimagined hd missiles folder.");
+        }
+
+        var updatedEntries = await ReadTweakAssetAsync(
+            missilesFilePath,
+            () => MissilesJsonService.ClearProcSplashExplodeAsync(missilesFilePath));
         if (updatedEntries == 0)
         {
-            throw new InvalidDataException("missiles.json did not contain a proc_splash_explode entry to update.");
+            throw new TweakAssetUnavailableException(
+                missilesFilePath,
+                "missiles.json did not contain a proc_splash_explode entry to update.");
         }
     }
 
-    private static async Task RestoreLayoutsProfileHdFileAsync(string cleanLayoutsProfileHdFilePath, string? layoutsProfileHdFilePath)
+    internal static async Task RestoreLayoutsProfileHdFileAsync(string cleanLayoutsProfileHdFilePath, string? layoutsProfileHdFilePath)
     {
-        if (string.IsNullOrWhiteSpace(layoutsProfileHdFilePath))
+        if (string.IsNullOrWhiteSpace(layoutsProfileHdFilePath) || !AssetFileExists(layoutsProfileHdFilePath))
         {
-            throw new FileNotFoundException("layouts_profilehd.json path could not be resolved.");
+            throw new TweakAssetUnavailableException(
+                layoutsProfileHdFilePath ?? LayoutsProfileHdFileName,
+                "layouts_profilehd.json is unavailable for restoration.");
         }
 
-        if (!File.Exists(cleanLayoutsProfileHdFilePath))
+        if (!AssetFileExists(cleanLayoutsProfileHdFilePath))
         {
-            throw new FileNotFoundException("Clean layouts_profilehd.json copy was not found.");
+            throw new TweakAssetUnavailableException(
+                cleanLayoutsProfileHdFilePath,
+                "Clean layouts_profilehd.json copy was not found.");
         }
 
         await CopyFileAsync(cleanLayoutsProfileHdFilePath, layoutsProfileHdFilePath, overwrite: true);
     }
 
-    private static async Task ApplyTooltipLayoutTweaksAsync(string? layoutsProfileHdFilePath, bool makeTooltipBackgroundOpaque)
+    internal static async Task ApplyTooltipLayoutTweaksAsync(string? layoutsProfileHdFilePath, bool makeTooltipBackgroundOpaque)
     {
-        if (string.IsNullOrWhiteSpace(layoutsProfileHdFilePath) || !File.Exists(layoutsProfileHdFilePath))
-        {
-            throw new FileNotFoundException("layouts_profilehd.json was not found in the Reimagined global ui folder.");
-        }
-
         if (!makeTooltipBackgroundOpaque)
         {
             return;
         }
 
+        if (string.IsNullOrWhiteSpace(layoutsProfileHdFilePath) || !AssetFileExists(layoutsProfileHdFilePath))
+        {
+            throw new TweakAssetUnavailableException(
+                layoutsProfileHdFilePath ?? LayoutsProfileHdFileName,
+                "layouts_profilehd.json was not found in the Reimagined global ui folder.");
+        }
+
         var updatedValues = await TooltipStyleJsonService.MakeTooltipBackgroundOpaqueAsync(layoutsProfileHdFilePath);
         if (updatedValues == 0)
         {
-            throw new InvalidDataException("layouts_profilehd.json did not contain TooltipStyle background colors to update.");
+            throw new TweakAssetUnavailableException(
+                layoutsProfileHdFilePath,
+                "layouts_profilehd.json did not contain TooltipStyle background colors to update.");
         }
     }
 
-    private static async Task RestoreArmorTweaksAsync(string? armorDirectory, string cleanArmorTweaksDirectory)
+    internal static async Task RestoreArmorTweaksAsync(string? armorDirectory, string cleanArmorTweaksDirectory)
     {
-        if (string.IsNullOrWhiteSpace(armorDirectory) || !Directory.Exists(armorDirectory))
+        if (string.IsNullOrWhiteSpace(armorDirectory) || !AssetDirectoryExists(armorDirectory))
         {
-            throw new DirectoryNotFoundException("Armor folder was not found in the Reimagined hd items folder.");
+            throw new TweakAssetUnavailableException(
+                armorDirectory ?? ArmorDirectoryName,
+                "Armor folder was not found in the Reimagined hd items folder.");
         }
 
-        if (!Directory.Exists(cleanArmorTweaksDirectory))
+        if (!AssetDirectoryExists(cleanArmorTweaksDirectory))
         {
-            throw new DirectoryNotFoundException("Clean helmet and circlet JSON copy was not found.");
+            throw new TweakAssetUnavailableException(
+                cleanArmorTweaksDirectory,
+                "Clean helmet and circlet JSON copy was not found.");
         }
 
         foreach (var relativePath in HelmetVisualRelativePaths)
@@ -1502,15 +1966,19 @@ public static class ModTweaksService
             var cleanFilePath = Path.Combine(cleanArmorTweaksDirectory, relativePath);
             var missingMarkerPath = $"{cleanFilePath}.missing";
 
-            if (File.Exists(cleanFilePath))
+            if (AssetFileExists(cleanFilePath))
             {
-                await CopyFileAsync(cleanFilePath, targetFilePath, overwrite: true);
+                if (AssetFileExists(targetFilePath))
+                {
+                    await CopyFileAsync(cleanFilePath, targetFilePath, overwrite: true);
+                }
+
                 continue;
             }
 
-            if (File.Exists(missingMarkerPath))
+            if (AssetFileExists(missingMarkerPath))
             {
-                if (File.Exists(targetFilePath))
+                if (AssetFileExists(targetFilePath))
                 {
                     File.Delete(targetFilePath);
                 }
@@ -1543,23 +2011,25 @@ public static class ModTweaksService
 
             await File.WriteAllTextAsync(missingMarkerPath, string.Empty);
 
-            if (File.Exists(targetFilePath))
+            if (AssetFileExists(targetFilePath))
             {
                 File.Delete(targetFilePath);
             }
         }
     }
 
-    private static async Task ApplyHelmetVisualTweaksAsync(string? armorDirectory, bool removeHelmetVisual)
+    internal static async Task ApplyHelmetVisualTweaksAsync(string? armorDirectory, bool removeHelmetVisual)
     {
-        if (string.IsNullOrWhiteSpace(armorDirectory) || !Directory.Exists(armorDirectory))
-        {
-            throw new DirectoryNotFoundException("Armor folder was not found in the Reimagined hd items folder.");
-        }
-
         if (!removeHelmetVisual)
         {
             return;
+        }
+
+        if (string.IsNullOrWhiteSpace(armorDirectory) || !AssetDirectoryExists(armorDirectory))
+        {
+            throw new TweakAssetUnavailableException(
+                armorDirectory ?? ArmorDirectoryName,
+                "Armor folder was not found in the Reimagined hd items folder.");
         }
 
         foreach (var relativePath in HelmetVisualRelativePaths)
@@ -1580,6 +2050,13 @@ public static class ModTweaksService
         var mpqBase = GetMpqBaseDirectory();
         if (string.IsNullOrWhiteSpace(mpqBase))
         {
+            if (removeVignette)
+            {
+                throw new TweakAssetUnavailableException(
+                    ModDirectoryName,
+                    "The mod root required for the vignette tweak could not be resolved.");
+            }
+
             return;
         }
 
@@ -1594,7 +2071,7 @@ public static class ModTweaksService
 
         if (!removeVignette)
         {
-            if (File.Exists(vignetteFilePath))
+            if (AssetFileExists(vignetteFilePath))
             {
                 File.Delete(vignetteFilePath);
             }
@@ -1603,9 +2080,11 @@ public static class ModTweaksService
         }
 
         var bundledVignetteFile = Path.Combine(AppContext.BaseDirectory, BundledVignetteAssetPath);
-        if (!File.Exists(bundledVignetteFile))
+        if (!AssetFileExists(bundledVignetteFile))
         {
-            throw new FileNotFoundException("Bundled vignette.texture asset was not found.");
+            throw new TweakAssetUnavailableException(
+                bundledVignetteFile,
+                "Bundled vignette.texture asset was not found.");
         }
 
         Directory.CreateDirectory(vignetteDirectory);
@@ -1614,17 +2093,28 @@ public static class ModTweaksService
 
     private static async Task ApplyDisableExtraBloodTweakAsync(string? modRoot, bool disableExtraBlood)
     {
-        if (!disableExtraBlood || string.IsNullOrWhiteSpace(modRoot))
+        if (!disableExtraBlood)
         {
             return;
         }
 
+        if (string.IsNullOrWhiteSpace(modRoot))
+        {
+            throw new TweakAssetUnavailableException(
+                ModDirectoryName,
+                "The mod root required for extra blood asset tweaks could not be resolved.");
+        }
+
         var removedFileCount = 0;
+        var missingFileCount = 0;
+        string? firstMissingFilePath = null;
         foreach (var relativePath in DisableExtraBloodRelativePaths)
         {
             var targetFilePath = ResolveModRelativePath(modRoot, relativePath);
-            if (!File.Exists(targetFilePath))
+            if (!AssetFileExists(targetFilePath))
             {
+                missingFileCount++;
+                firstMissingFilePath ??= targetFilePath;
                 continue;
             }
 
@@ -1635,7 +2125,15 @@ public static class ModTweaksService
             removedFileCount++;
         }
 
-        LaunchDiagnostics.Log($"Disabled extra blood effects by removing {removedFileCount} mod assets.");
+        if (removedFileCount == 0)
+        {
+            throw new TweakAssetUnavailableException(
+                firstMissingFilePath ?? modRoot,
+                "No extra blood effect assets were available to disable.");
+        }
+
+        LaunchDiagnostics.Log(
+            $"Disabled extra blood effects. Removed={removedFileCount}, Missing={missingFileCount}, FirstMissing={firstMissingFilePath ?? "<none>"}.");
     }
 
     private static string ResolveModRelativePath(string modRoot, string relativePath)
@@ -1664,10 +2162,12 @@ public static class ModTweaksService
         int skillPointsPerLevel,
         int attributesPerLevel)
     {
-        var entries = (await CharStatsParser.GetEntries(charStatsFilePath)).ToList();
+        var entries = (await ReadTweakAssetAsync(
+            charStatsFilePath,
+            () => CharStatsParser.GetEntries(charStatsFilePath))).ToList();
         if (entries.Count == 0)
         {
-            throw new InvalidDataException("charstats.txt did not contain any editable rows.");
+            throw new TweakAssetUnavailableException(charStatsFilePath, "charstats.txt did not contain any editable rows.");
         }
 
         foreach (var entry in entries)
@@ -1691,10 +2191,14 @@ public static class ModTweaksService
         int nightmareResistPenalty,
         int hellResistPenalty)
     {
-        var entries = (await DifficultyLevelParser.GetEntries(difficultyLevelsFilePath)).ToList();
+        var entries = (await ReadTweakAssetAsync(
+            difficultyLevelsFilePath,
+            () => DifficultyLevelParser.GetEntries(difficultyLevelsFilePath))).ToList();
         if (entries.Count == 0)
         {
-            throw new InvalidDataException("DifficultyLevels.txt did not contain any editable rows.");
+            throw new TweakAssetUnavailableException(
+                difficultyLevelsFilePath,
+                "DifficultyLevels.txt did not contain any editable rows.");
         }
 
         var normalFound = false;
@@ -1724,7 +2228,9 @@ public static class ModTweaksService
 
         if (!normalFound || !nightmareFound || !hellFound)
         {
-            throw new InvalidDataException("DifficultyLevels.txt did not contain Normal, Nightmare, and Hell rows.");
+            throw new TweakAssetUnavailableException(
+                difficultyLevelsFilePath,
+                "DifficultyLevels.txt did not contain Normal, Nightmare, and Hell rows.");
         }
 
         await SaveGeneratedEntriesAsync(
@@ -1736,10 +2242,12 @@ public static class ModTweaksService
 
     private static async Task ApplySkillsTweaksAsync(string skillsFilePath, int maxSkillLevel, bool removeFadeEffect)
     {
-        var entries = (await SkillsParser.GetEntries(skillsFilePath)).ToList();
+        var entries = (await ReadTweakAssetAsync(
+            skillsFilePath,
+            () => SkillsParser.GetEntries(skillsFilePath))).ToList();
         if (entries.Count == 0)
         {
-            throw new InvalidDataException("skills.txt did not contain any editable rows.");
+            throw new TweakAssetUnavailableException(skillsFilePath, "skills.txt did not contain any editable rows.");
         }
 
         var updatedRows = 0;
@@ -1769,7 +2277,7 @@ public static class ModTweaksService
 
         if (updatedRows == 0)
         {
-            throw new InvalidDataException("skills.txt did not contain any matching rows to update.");
+            throw new TweakAssetUnavailableException(skillsFilePath, "skills.txt did not contain any matching rows to update.");
         }
 
         await SaveGeneratedEntriesAsync(
@@ -1786,10 +2294,12 @@ public static class ModTweaksService
             return;
         }
 
-        var entries = (await StatesParser.GetEntries(statesFilePath)).ToList();
+        var entries = (await ReadTweakAssetAsync(
+            statesFilePath,
+            () => StatesParser.GetEntries(statesFilePath))).ToList();
         if (entries.Count == 0)
         {
-            throw new InvalidDataException("states.txt did not contain any editable rows.");
+            throw new TweakAssetUnavailableException(statesFilePath, "states.txt did not contain any editable rows.");
         }
 
         var updatedRows = 0;
@@ -1820,7 +2330,7 @@ public static class ModTweaksService
 
         if (updatedRows == 0)
         {
-            throw new InvalidDataException("states.txt did not contain any matching rows to update.");
+            throw new TweakAssetUnavailableException(statesFilePath, "states.txt did not contain any matching rows to update.");
         }
 
         await SaveGeneratedEntriesAsync(
@@ -1837,10 +2347,12 @@ public static class ModTweaksService
             return;
         }
 
-        var entries = (await PropertiesParser.GetEntries(propertiesFilePath)).ToList();
+        var entries = (await ReadTweakAssetAsync(
+            propertiesFilePath,
+            () => PropertiesParser.GetEntries(propertiesFilePath))).ToList();
         if (entries.Count == 0)
         {
-            throw new InvalidDataException("Properties.txt did not contain any editable rows.");
+            throw new TweakAssetUnavailableException(propertiesFilePath, "Properties.txt did not contain any editable rows.");
         }
 
         var updatedRows = 0;
@@ -1861,7 +2373,7 @@ public static class ModTweaksService
 
         if (updatedRows == 0)
         {
-            throw new InvalidDataException("Properties.txt did not contain a fade row to update.");
+            throw new TweakAssetUnavailableException(propertiesFilePath, "Properties.txt did not contain a fade row to update.");
         }
 
         await SaveGeneratedEntriesAsync(
@@ -1894,18 +2406,18 @@ public static class ModTweaksService
             return;
         }
 
-        if (!File.Exists(treasureClassExFilePath))
-        {
-            return;
-        }
-
-        var entries = (await TreasureClassParser.GetEntries(treasureClassExFilePath)).ToList();
+        var entries = (await ReadTweakAssetAsync(
+            treasureClassExFilePath,
+            () => TreasureClassParser.GetEntries(treasureClassExFilePath))).ToList();
         if (entries.Count == 0)
         {
-            return;
+            throw new TweakAssetUnavailableException(
+                treasureClassExFilePath,
+                "treasureclassex.txt did not contain any editable rows.");
         }
 
         var updatedEntries = new List<D2RReimaginedTools.Models.TreasureClass>(entries.Count);
+        var updatedRows = 0;
 
         foreach (var entry in entries)
         {
@@ -1922,7 +2434,19 @@ public static class ModTweaksService
                 Item9 = ReplaceDropCode(entry.Item9, orbStackDrops, runeStackDrops),
                 Item10 = ReplaceDropCode(entry.Item10, orbStackDrops, runeStackDrops)
             };
+            if (updated != entry)
+            {
+                updatedRows++;
+            }
+
             updatedEntries.Add(updated);
+        }
+
+        if (updatedRows == 0)
+        {
+            throw new TweakAssetUnavailableException(
+                treasureClassExFilePath,
+                "treasureclassex.txt did not contain supported orb or rune drop codes.");
         }
 
         await SaveGeneratedEntriesAsync(
@@ -2072,8 +2596,9 @@ public static class ModTweaksService
         var visDirectory = GetVisDirectory();
         if (string.IsNullOrWhiteSpace(visDirectory) || !Directory.Exists(visDirectory))
         {
-            LaunchDiagnostics.Log($"Vis directory not found, skipping clean copy: {visDirectory ?? "<null>"}");
-            return;
+            throw new TweakAssetUnavailableException(
+                visDirectory ?? VisDirectoryName,
+                "The vis folder was not found in the Reimagined environment data.");
         }
 
         var cleanVisDirectory = GetCleanVisDirectory(visDirectory);
@@ -2088,8 +2613,9 @@ public static class ModTweaksService
 
         if (desecratedFiles.Count == 0)
         {
-            LaunchDiagnostics.Log("No desecrated vis files found to back up.");
-            return;
+            throw new TweakAssetUnavailableException(
+                visDirectory,
+                "No desecrated vis files were found in the Reimagined environment data.");
         }
 
         Directory.CreateDirectory(cleanVisDirectory);
@@ -2101,6 +2627,7 @@ public static class ModTweaksService
             await CopyFileAsync(file, cleanFilePath, overwrite: true);
             LaunchDiagnostics.Log($"Backed up desecrated vis file: {fileName}");
         }
+
     }
 
     private static async Task RestoreVisFilesAsync()
@@ -2145,38 +2672,49 @@ public static class ModTweaksService
             VisEventMapFileName);
     }
 
-    private static void ApplyTerrorZonePurpleOverlayTweak(bool terrorZonePurpleOverlay)
+    private static Task ApplyTerrorZonePurpleOverlayTweakAsync(bool terrorZonePurpleOverlay, bool visAvailable)
     {
         if (!terrorZonePurpleOverlay)
         {
-            return;
+            return Task.CompletedTask;
         }
 
         var visEventMapFilePath = GetVisEventMapFilePath();
-        if (!string.IsNullOrWhiteSpace(visEventMapFilePath) && File.Exists(visEventMapFilePath))
-        {
-            File.Delete(visEventMapFilePath);
-            LaunchDiagnostics.Log($"Deleted vis event map file: {visEventMapFilePath}");
-        }
-
         var visDirectory = GetVisDirectory();
-        if (string.IsNullOrWhiteSpace(visDirectory) || !Directory.Exists(visDirectory))
+        if (!visAvailable || string.IsNullOrWhiteSpace(visDirectory) || !Directory.Exists(visDirectory))
         {
-            LaunchDiagnostics.Log($"Vis directory not found: {visDirectory ?? "<null>"}");
-            return;
+            throw new TweakAssetUnavailableException(
+                visDirectory ?? VisDirectoryName,
+                "The terror zone overlay files are unavailable.");
         }
 
         var files = Directory.GetFiles(visDirectory, "*.json")
             .Where(f => Path.GetFileName(f).Contains(DesecratedFilePattern, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
+        var eventMapExists = !string.IsNullOrWhiteSpace(visEventMapFilePath) && File.Exists(visEventMapFilePath);
+        if (files.Count == 0 && !eventMapExists)
+        {
+            throw new TweakAssetUnavailableException(
+                visDirectory,
+                "No supported terror zone overlay files were found.");
+        }
+
         LaunchDiagnostics.Log($"Found {files.Count} desecrated vis file(s) to delete.");
+
+        if (eventMapExists)
+        {
+            File.Delete(visEventMapFilePath!);
+            LaunchDiagnostics.Log($"Deleted vis event map file: {visEventMapFilePath}");
+        }
 
         foreach (var file in files)
         {
             File.Delete(file);
             LaunchDiagnostics.Log($"Deleted desecrated vis file: {file}");
         }
+
+        return Task.CompletedTask;
     }
 
     private static string? GetTerrorZoneFanfareFilePath()
@@ -2207,8 +2745,9 @@ public static class ModTweaksService
         var fanfareFilePath = GetTerrorZoneFanfareFilePath();
         if (string.IsNullOrWhiteSpace(fanfareFilePath) || !File.Exists(fanfareFilePath))
         {
-            LaunchDiagnostics.Log($"Terror zone fanfare file not found: {fanfareFilePath ?? "<null>"}");
-            return;
+            throw new TweakAssetUnavailableException(
+                fanfareFilePath ?? DesecratedEnterHdFileName,
+                "Terror zone fanfare file was not found.");
         }
 
         await PluginAssetBackupService.RegisterReplacementAsync(

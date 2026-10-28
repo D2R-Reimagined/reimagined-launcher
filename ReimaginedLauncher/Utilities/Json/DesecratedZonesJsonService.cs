@@ -34,12 +34,16 @@ public static partial class DesecratedZonesJsonService
         return replacements;
     }
 
-    public static async Task ApplyTerrorZoneTweaksAsync(
+    public static async Task<bool> ApplyTerrorZoneTweaksAsync(
         string desecratedZonesFilePath,
         int zoneDurationMinutes)
     {
         var json = await File.ReadAllTextAsync(desecratedZonesFilePath);
         var original = json;
+        if (!ZoneDurationMinutesRegex().IsMatch(json))
+        {
+            return false;
+        }
 
         json = ZoneDurationMinutesRegex().Replace(
             json,
@@ -49,5 +53,7 @@ public static partial class DesecratedZonesJsonService
         {
             await File.WriteAllTextAsync(desecratedZonesFilePath, json);
         }
+
+        return true;
     }
 }

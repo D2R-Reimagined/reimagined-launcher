@@ -20,10 +20,16 @@ public static class SettingsManager
     // Set when settings.json was unreadable this session and defaults were used instead.
     public static bool RecoveredFromCorruptSettings { get; private set; }
     public static string? QuarantinedSettingsFilePath { get; private set; }
+    public static bool SettingsFileWasMissing { get; private set; }
+    public static bool SettingsFileWasLoaded { get; private set; }
 
     public static async Task<AppSettings> LoadAsync()
     {
-        if (!File.Exists(SettingsFilePath))
+        RecoveredFromCorruptSettings = false;
+        QuarantinedSettingsFilePath = null;
+        SettingsFileWasLoaded = false;
+        SettingsFileWasMissing = !File.Exists(SettingsFilePath);
+        if (SettingsFileWasMissing)
             return new AppSettings();
 
         AppSettings settings;
@@ -92,6 +98,7 @@ public static class SettingsManager
             return new AppSettings();
         }
 
+        SettingsFileWasLoaded = true;
         return settings;
     }
 
