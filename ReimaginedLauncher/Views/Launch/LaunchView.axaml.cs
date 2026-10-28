@@ -1946,7 +1946,9 @@ public partial class LaunchView : UserControl
     private void SetLadderSetupProgress(string message, double? percentage, string? details = null)
     {
         LadderBundleProgressPanel.IsVisible = true;
-        LadderBundleProgressText.Text = details ?? message;
+        LadderBundleProgressMessage.Text = message;
+        LadderBundleProgressText.Text = details;
+        LadderBundleProgressText.IsVisible = !string.IsNullOrWhiteSpace(details);
         LadderBundleStatusText.Text = message;
         HeroPolicySummary.Text = message;
         HeroPolicySummary.Foreground = new SolidColorBrush(Color.Parse("#F7F1E3"));
