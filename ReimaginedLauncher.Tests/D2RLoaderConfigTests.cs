@@ -85,12 +85,12 @@ public sealed class D2RLoaderConfigTests : IDisposable
         Assert.Equal(qolConfig, D2RLoaderConfigService.ValidateSelection(profile, resolved, qolConfig));
 
         // Optional Ladder plugin in ladder-disabled can still have its config edited before being enabled.
-        Write("mods/ReimaginedLadder/d2rloader/ladder-disabled/plugins/d2rl-death-tracker.dll");
-        var deathTrackerConfig = Write("mods/ReimaginedLadder/d2rloader/config/death-tracker.toml", "enabled = true");
-        var deathTrackerEntry = D2RLoaderConfigService.CreateLadderExtensionInfo(
-            profile, "Death Tracker", "d2rl-death-tracker.dll", D2RLoaderExtensionKind.Plugin, isLadderDisabled: true);
-        Assert.True(D2RLoaderConfigService.HasExistingConfig(profile, deathTrackerEntry));
-        Assert.Equal(deathTrackerConfig, D2RLoaderConfigService.Resolve(profile, deathTrackerEntry).File);
+        Write("mods/ReimaginedLadder/d2rloader/ladder-disabled/plugins/d2rl-kill-tracker.dll");
+        var killTrackerConfig = Write("mods/ReimaginedLadder/d2rloader/config/kill-tracker.toml", "enabled = true");
+        var killTrackerEntry = D2RLoaderConfigService.CreateLadderExtensionInfo(
+            profile, "Kill Tracker", "d2rl-kill-tracker.dll", D2RLoaderExtensionKind.Plugin, isLadderDisabled: true);
+        Assert.True(D2RLoaderConfigService.HasExistingConfig(profile, killTrackerEntry));
+        Assert.Equal(killTrackerConfig, D2RLoaderConfigService.Resolve(profile, killTrackerEntry).File);
 
         // Rule-enforced and server-managed Ladder plugins are locked.
         string[] lockedPlugins =
@@ -104,7 +104,20 @@ public sealed class D2RLoaderConfigTests : IDisposable
             "identify-on-click.dll",
             "bindandsummon.dll",
             "charm-inventory.dll",
-            "celestialrayone.left-click-auras.dll"
+            "celestialrayone.left-click-auras.dll",
+            "d2rl-announcements.dll",
+            "d2rl-area-level-display.dll",
+            "d2rl-corruption-marker.dll",
+            "d2rl-death-tracker.dll",
+            "d2rl-global-chat.dll",
+            "d2rl-hardcore-deaths.dll",
+            "d2rl-monster-ai.dll",
+            "d2rl-reimagined-feedback.dll",
+            "d2rl-reimagined-online-count.dll",
+            "d2rl-supporter-mtx.dll",
+            "d2rl-supporter-portals.dll",
+            "d2rl-trade-notifications.dll",
+            "d2rl-trade-price-check.dll"
         ];
         foreach (var fileName in lockedPlugins)
         {
@@ -196,6 +209,32 @@ public sealed class D2RLoaderConfigTests : IDisposable
         Write("mods/Reimagined/d2rloader/config/example.toml");
         profile.LaunchExperience = LaunchExperience.Offline;
         Assert.False(D2RLoaderConfigService.HasExistingConfig(profile, entry));
+    }
+
+    [Theory]
+    [InlineData("d2rl-announcements.dll", "announcements.toml")]
+    [InlineData("d2rl-area-level-display.dll", "area-level-display.toml")]
+    [InlineData("d2rl-corruption-marker.dll", "corruption-marker.toml")]
+    [InlineData("d2rl-death-tracker.dll", "death-tracker.toml")]
+    [InlineData("d2rl-global-chat.dll", "global-chat.toml")]
+    [InlineData("d2rl-hardcore-deaths.dll", "hardcore-deaths.toml")]
+    [InlineData("d2rl-monster-ai.dll", "monster-ai.toml")]
+    [InlineData("d2rl-reimagined-feedback.dll", "reimagined-feedback.toml")]
+    [InlineData("d2rl-reimagined-online-count.dll", "reimagined-online-count.toml")]
+    [InlineData("d2rl-supporter-mtx.dll", "supporter-mtx.toml")]
+    [InlineData("d2rl-supporter-portals.dll", "supporter-portals.toml")]
+    [InlineData("d2rl-trade-notifications.dll", "trade-notifications.toml")]
+    [InlineData("d2rl-trade-price-check.dll", "trade-price-check.toml")]
+    public void OnlineModeBlocksNonEditablePluginConfigs(string pluginFile, string configFile)
+    {
+        Write($"mods/Reimagined/d2rloader/plugins/{pluginFile}");
+        var configPath = Write($"mods/Reimagined/d2rloader/config/{configFile}", "enabled = true");
+        var entry = Entry();
+        Assert.True(D2RLoaderConfigService.IsNonEditableExtension(pluginFile));
+        Assert.False(D2RLoaderConfigService.HasExistingConfig(profile, entry));
+        Assert.Throws<InvalidOperationException>(() => D2RLoaderConfigService.Resolve(profile, entry));
+        var target = new ExtensionConfigTarget(Path.Combine(game, "mods", "Reimagined", "d2rloader", "config"), null);
+        Assert.Throws<InvalidOperationException>(() => D2RLoaderConfigService.ValidateSelection(profile, target, configPath));
     }
 
     public void Dispose() { if (Directory.Exists(game)) Directory.Delete(game, true); }

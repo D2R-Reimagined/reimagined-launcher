@@ -578,6 +578,9 @@ public sealed class LadderBundleServiceTests : IDisposable
         Assert.Equal("ladder rule = true", await File.ReadAllTextAsync(LadderConfigPath("maps.toml")));
         readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
         Assert.True(readiness.IsReady, readiness.Status);
+        File.Delete(filter);
+        readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
+        Assert.True(readiness.IsReady, readiness.Status);
     }
 
     [Fact]

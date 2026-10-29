@@ -94,6 +94,13 @@ public partial class MainWindow : Window
         _gitHubAnnouncementsHttpClient = Program.ServiceProvider.GetRequiredService<GitHubAnnouncementsHttpClient>();
         _nexusModsHttpClient = Program.ServiceProvider.GetRequiredService<NexusModsHttpClient>();;
         _launcherAuthenticationService = Program.ServiceProvider.GetRequiredService<LauncherAuthenticationService>();
+        _launcherAuthenticationService.SessionChanged += (_, _) =>
+        {
+            if (Dispatcher.UIThread.CheckAccess())
+                RefreshReimaginedAccountUI();
+            else
+                Dispatcher.UIThread.Post(RefreshReimaginedAccountUI);
+        };
         Opacity = 0;
         InitializeComponent();
         NotificationManager = new WindowNotificationManager(this)
@@ -185,6 +192,7 @@ public partial class MainWindow : Window
     private async Task LoadSettingsCoreAsync()
     {
         Settings = await SettingsManager.LoadAsync();
+        _launcherAuthenticationService.BindSettings(Settings);
         RestoreWindowState();
         Opacity = 1;
         if (SettingsManager.RecoveredFromCorruptSettings)
@@ -1875,6 +1883,8 @@ public partial class MainWindow : Window
         return exited;
     }
 
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, byte> ObservedWindowPids = new();
+
     /// <summary>
     /// Waits for the game to close, taking ownership of <paramref name="gameProcess"/>.
     /// Returns true only when the game process was identified and its exit observed.
@@ -1895,16 +1905,23 @@ public partial class MainWindow : Window
                 processToWatch = gameProcess;
                 if (!string.IsNullOrEmpty(expectedExePath))
                 {
-                    var found = WaitForProcessByPath(expectedExePath, timeout: TimeSpan.FromSeconds(60));
-                    if (found != null)
+                    if (MatchesExpectedProcess(gameProcess, expectedExePath))
                     {
-                        gameProcess.Dispose();
-                        processToWatch = found;
                         watchingGame = true;
+                    }
+                    else
+                    {
+                        var found = WaitForProcessByPath(expectedExePath, timeout: TimeSpan.FromSeconds(60));
+                        if (found != null)
+                        {
+                            gameProcess.Dispose();
+                            processToWatch = found;
+                            watchingGame = true;
+                        }
                     }
                 }
 
-                processToWatch.WaitForExit();
+                WaitForProcessOrPostWindowTeardown(processToWatch);
                 return watchingGame;
             }
             catch (InvalidOperationException)
@@ -1914,8 +1931,227 @@ public partial class MainWindow : Window
             }
             finally
             {
+                InvalidateGameRunningCache();
                 processToWatch?.Dispose();
             }
+        });
+    }
+
+    private static bool MatchesExpectedProcess(Process process, string expectedExePath)
+    {
+        try
+        {
+            if (process.HasExited) return false;
+            var expectedName = Path.GetFileNameWithoutExtension(expectedExePath);
+            if (!string.Equals(process.ProcessName, expectedName, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(process.ProcessName, Path.GetFileName(expectedExePath), StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var mainModule = process.MainModule;
+            return mainModule == null
+                   || string.Equals(
+                       Path.GetFullPath(mainModule.FileName),
+                       Path.GetFullPath(expectedExePath),
+                       OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void WaitForProcessOrPostWindowTeardown(Process processToWatch)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            processToWatch.WaitForExit();
+            return;
+        }
+
+        var hadWindow = false;
+        DateTime? windowClosedSinceUtc = null;
+        var pid = 0;
+        try { pid = processToWatch.Id; } catch { }
+
+        while (!processToWatch.WaitForExit(250))
+        {
+            try
+            {
+                processToWatch.Refresh();
+                if (processToWatch.MainWindowHandle != IntPtr.Zero)
+                {
+                    hadWindow = true;
+                    if (pid != 0) ObservedWindowPids[pid] = 1;
+                    windowClosedSinceUtc = null;
+                }
+                else if (hadWindow || (pid != 0 && ObservedWindowPids.ContainsKey(pid)))
+                {
+                    windowClosedSinceUtc ??= DateTime.UtcNow;
+                    if (DateTime.UtcNow - windowClosedSinceUtc.Value >= TimeSpan.FromSeconds(3))
+                    {
+                        LaunchDiagnostics.Log(
+                            $"Game window closed over 3s ago; terminating headless process {pid} stuck in plugin unload.");
+                        try { processToWatch.Kill(); } catch { }
+                        processToWatch.WaitForExit(2000);
+                        break;
+                    }
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                break;
+            }
+        }
+
+        if (pid != 0)
+        {
+            ObservedWindowPids.TryRemove(pid, out _);
+        }
+    }
+
+    public static void InvalidateGameRunningCache()
+    {
+        _lastGameRunningCheckTimestamp = 0;
+        _lastGameRunningResult = false;
+    }
+
+    /// <summary>
+    /// Returns true if no game is running, or if a game whose main window has already
+    /// closed finishes its post-window shutdown (terminating it if stuck in plugin unload).
+    /// Returns false if a game with an active window (or still starting up) is running.
+    /// </summary>
+    public static Task<bool> WaitForClosingGameToExitAsync()
+    {
+        InvalidateGameRunningCache();
+        if (!IsGameRunning())
+        {
+            return Task.FromResult(true);
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            return Task.FromResult(false);
+        }
+
+        return Task.Run(() =>
+        {
+            // Give a window that just received Close/Exit a brief moment to destroy its HWND.
+            var windowCheckDeadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(350);
+            while (true)
+            {
+                var activeOrStarting = false;
+                var anyRunning = false;
+                foreach (var name in new[] { "D2R", "D2RLoader" })
+                {
+                    foreach (var proc in Process.GetProcessesByName(name))
+                    {
+                        using (proc)
+                        {
+                            try
+                            {
+                                if (proc.HasExited) continue;
+                                anyRunning = true;
+                                proc.Refresh();
+                                if (proc.MainWindowHandle != IntPtr.Zero)
+                                {
+                                    ObservedWindowPids[proc.Id] = 1;
+                                    activeOrStarting = true;
+                                    continue;
+                                }
+
+                                var observedWindow = ObservedWindowPids.ContainsKey(proc.Id);
+                                var uptime = DateTime.UtcNow - proc.StartTime.ToUniversalTime();
+                                if (!observedWindow && uptime < TimeSpan.FromSeconds(15))
+                                {
+                                    activeOrStarting = true;
+                                }
+                            }
+                            catch
+                            {
+                                // Process exited or inaccessible while inspecting.
+                            }
+                        }
+                    }
+                }
+
+                if (!anyRunning)
+                {
+                    InvalidateGameRunningCache();
+                    return true;
+                }
+
+                if (!activeOrStarting)
+                {
+                    break;
+                }
+
+                if (DateTime.UtcNow >= windowCheckDeadline)
+                {
+                    return false;
+                }
+
+                Thread.Sleep(100);
+            }
+
+            // All remaining D2R/D2RLoader processes have closed their main window and are in
+            // post-window teardown. Wait up to 2s for normal exit, then terminate any process
+            // still hung in plugin unload (e.g. synchronous WinHTTP timeouts).
+            var teardownDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+            while (DateTime.UtcNow < teardownDeadline)
+            {
+                var stillRunning = false;
+                foreach (var name in new[] { "D2R", "D2RLoader" })
+                {
+                    foreach (var proc in Process.GetProcessesByName(name))
+                    {
+                        using (proc)
+                        {
+                            try
+                            {
+                                if (!proc.HasExited) stillRunning = true;
+                            }
+                            catch { }
+                        }
+                    }
+                }
+
+                if (!stillRunning)
+                {
+                    InvalidateGameRunningCache();
+                    return true;
+                }
+
+                Thread.Sleep(100);
+            }
+
+            foreach (var name in new[] { "D2R", "D2RLoader" })
+            {
+                foreach (var proc in Process.GetProcessesByName(name))
+                {
+                    using (proc)
+                    {
+                        try
+                        {
+                            if (proc.HasExited) continue;
+                            proc.Refresh();
+                            if (proc.MainWindowHandle == IntPtr.Zero)
+                            {
+                                LaunchDiagnostics.Log(
+                                    $"Terminating headless {proc.ProcessName} process ({proc.Id}) stuck in plugin unload.");
+                                proc.Kill();
+                                proc.WaitForExit(2000);
+                                ObservedWindowPids.TryRemove(proc.Id, out _);
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+
+            InvalidateGameRunningCache();
+            return !IsGameRunning();
         });
     }
 
@@ -1959,10 +2195,27 @@ public partial class MainWindow : Window
             foreach (var name in OperatingSystem.IsWindows() ? new[] { "D2R", "D2RLoader" } : new[] { "D2R", "D2R.exe", "D2RLoader", "D2RLoader.exe" })
             {
                 var running = Process.GetProcessesByName(name);
-                count += running.Length;
                 foreach (var process in running)
                 {
-                    process.Dispose();
+                    try
+                    {
+                        if (!process.HasExited)
+                        {
+                            count++;
+                            if (OperatingSystem.IsWindows() && process.MainWindowHandle != IntPtr.Zero)
+                            {
+                                ObservedWindowPids[process.Id] = 1;
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        count++;
+                    }
+                    finally
+                    {
+                        process.Dispose();
+                    }
                 }
             }
 

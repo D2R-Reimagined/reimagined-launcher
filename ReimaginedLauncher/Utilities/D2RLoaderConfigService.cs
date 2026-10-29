@@ -10,19 +10,38 @@ internal sealed record ExtensionConfigTarget(string Root, string? File);
 
 internal static class D2RLoaderConfigService
 {
-    // Plugins and configs whose settings are locked on Ladder launches so every
-    // player plays by the same rules:
-    // - Ladder Servers and Lobby (server-saves, lobby-bridge, chat-relay, d2rds)
-    // - Reimagined Maps (maps)
-    // - Auto Waypoint (auto-waypoint)
-    // - Identify On Click, Bind And Summon, Charm Inventory, Left Click Auras
-    // - Mod game settings (mod.toml)
-    private static readonly HashSet<string> LockedLadderStems = new(StringComparer.OrdinalIgnoreCase)
+    // Plugins and configs that are launcher-managed, server-only, or have no
+    // user-facing settings and cannot be edited through the launcher in any mode:
+    private static readonly HashSet<string> NonEditableConfigStems = new(StringComparer.OrdinalIgnoreCase)
     {
+        "ANNOUNCEMENTS",
+        "AREALEVELDISPLAY",
+        "CORRUPTIONMARKER",
+        "DEATHTRACKER",
+        "GLOBALCHAT",
+        "HARDCOREDEATHS",
+        "MONSTERAI",
+        "REIMAGINEDFEEDBACK",
+        "REIMAGINEDONLINECOUNT",
+        "ONLINECOUNT",
+        "SUPPORTERMTX",
+        "SUPPORTERPORTALS",
+        "TRADENOTIFICATIONS",
+        "TRADEPRICECHECK",
         "SERVERSAVES",
         "LOBBYBRIDGE",
         "CHATRELAY",
         "D2RDS",
+        "MOD"
+    };
+
+    // Additional gameplay-rule plugins whose settings are locked on Ladder launches
+    // so every player plays by the same rules:
+    // - Reimagined Maps (maps)
+    // - Auto Waypoint (auto-waypoint)
+    // - Identify On Click, Bind And Summon, Charm Inventory, Left Click Auras
+    private static readonly HashSet<string> LockedLadderStems = new(StringComparer.OrdinalIgnoreCase)
+    {
         "MAPS",
         "AUTOWAYPOINT",
         "IDENTIFYONCLICK",
@@ -31,8 +50,7 @@ internal static class D2RLoaderConfigService
         "CHARMINVENTORY",
         "CELESTIALRAYONELEFTCLICKAURAS",
         "LEFTCLICKAURAS",
-        "AURALEFTSKILL",
-        "MOD"
+        "AURALEFTSKILL"
     };
 
     private static readonly IReadOnlyDictionary<string, string> ConfigStemAliases =
@@ -42,6 +60,18 @@ internal static class D2RLoaderConfigService
             ["PROJECTILEPERFORMANCEOPTIMIZER"] = "PROJECTILEPERF",
             ["UNHOARDER"] = "FILTER"
         };
+
+    internal static bool IsNonEditableExtension(string fileName)
+    {
+        var stem = Normalize(Path.GetFileNameWithoutExtension(fileName));
+        return NonEditableConfigStems.Contains(stem);
+    }
+
+    internal static bool IsNonEditableConfigPath(string path)
+    {
+        var stem = Normalize(Path.GetFileNameWithoutExtension(path));
+        return NonEditableConfigStems.Contains(stem);
+    }
 
     internal static bool IsLockedLadderExtension(
         string fileName,
@@ -54,7 +84,7 @@ internal static class D2RLoaderConfigService
         }
 
         var stem = Normalize(Path.GetFileNameWithoutExtension(fileName));
-        if (LockedLadderStems.Contains(stem))
+        if (NonEditableConfigStems.Contains(stem) || LockedLadderStems.Contains(stem))
         {
             return true;
         }
@@ -74,7 +104,7 @@ internal static class D2RLoaderConfigService
     internal static bool IsLockedLadderConfigPath(string path, LadderBundleResponse? activeBundle = null)
     {
         var stem = Normalize(Path.GetFileNameWithoutExtension(path));
-        if (LockedLadderStems.Contains(stem))
+        if (NonEditableConfigStems.Contains(stem) || LockedLadderStems.Contains(stem))
         {
             return true;
         }
@@ -154,6 +184,10 @@ internal static class D2RLoaderConfigService
                 throw new InvalidOperationException("This configuration is locked in Ladder mode.");
             }
         }
+        else if (entry.Kind == D2RLoaderExtensionKind.Plugin && IsNonEditableExtension(entry.FileName))
+        {
+            throw new InvalidOperationException("This configuration cannot be edited in the launcher.");
+        }
 
         var modRoot = LocalPluginInstallService.ResolveRoot(profile);
         var game = Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(modRoot)))!;
@@ -223,6 +257,10 @@ internal static class D2RLoaderConfigService
             {
                 throw new InvalidOperationException("This configuration is locked in Ladder mode.");
             }
+        }
+        else if (IsNonEditableConfigPath(path))
+        {
+            throw new InvalidOperationException("This configuration cannot be edited in the launcher.");
         }
 
         if (!IsTextConfig(path)) throw new InvalidDataException("Choose a text configuration file.");

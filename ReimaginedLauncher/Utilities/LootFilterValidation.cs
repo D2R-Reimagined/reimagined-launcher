@@ -12,8 +12,10 @@ namespace ReimaginedLauncher.Utilities;
 internal static class LootFilterValidation
 {
     public const int MaxBytes = 4 * 1024 * 1024;
-    private static readonly string[] Rarities = ["inferior", "normal", "superior", "magic", "set", "rare", "unique"];
+    private static readonly string[] Rarities = ["inferior", "normal", "superior", "magic", "set", "rare", "unique", "crafted"];
+    private static readonly string[] Tiers = ["normal", "exceptional", "elite"];
     private static readonly Regex Rgba = new(@"^RGBA\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d*\.?\d+)\s*\)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
+    private static readonly Regex HexColor = new(@"^#(?:[0-9a-f]{6}|[0-9a-f]{8})$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
     public static string Validate(JsonElement document)
     {
         Object(document, "Filter", ["version", "rules"]);
@@ -41,7 +43,7 @@ internal static class LootFilterValidation
                         Require(name.Length is >= 1 and <= 79 && name.All(c => c is >= ' ' and <= '~' or '\n') && lines.Length <= 3 && lines.All(line => line.Length is >= 1 and <= 55), $"{field} requires 1–79 ASCII characters, at most 3 non-empty lines of at most 55 characters.");
                         break;
                     case "tooltip":
-                        Object(value, field, ["backgroundColor", "textColor"], true);
+                        Object(value, field, ["backgroundColor", "borderColor", "textColor"], true);
                         foreach (var color in value.EnumerateObject()) Color(color.Value, field);
                         break;
                     case "dropSound":
@@ -49,7 +51,7 @@ internal static class LootFilterValidation
                         break;
                     case "minimapIcon":
                         Object(value, field, ["shape", "borderColor", "fillColor", "size"]);
-                        Require(value.TryGetProperty("shape", out var shape) && new[] { "circle", "diamond", "triangle", "star" }.Contains(Text(shape, field)), $"{field} requires a supported shape.");
+                        Require(value.TryGetProperty("shape", out var shape) && new[] { "circle", "square", "diamond", "triangle", "triangleDown", "star", "spark", "kite", "hexagon", "cross", "chevron", "bullseye" }.Contains(Text(shape, field)), $"{field} requires a supported shape.");
                         Require(value.TryGetProperty("borderColor", out var border) && value.TryGetProperty("fillColor", out _), $"{field} requires border and fill colors.");
                         Color(border, field); Color(value.GetProperty("fillColor"), field);
                         if (value.TryGetProperty("size", out var size)) Require(size.ValueKind == JsonValueKind.Number && size.TryGetInt32(out _), $"{field}.size must be an integer.");
@@ -64,7 +66,7 @@ internal static class LootFilterValidation
     }
     private static void Conditions(JsonElement value, string path)
     {
-        Object(value, path, ["code", "baseName", "itemType", "rarity", "quantity", "itemLevel", "sockets", "ethereal", "identified"], true);
+        Object(value, path, ["code", "baseName", "itemType", "tier", "rarity", "quantity", "itemLevel", "sockets", "ethereal", "identified"], true);
         foreach (var property in value.EnumerateObject())
         {
             var field = $"{path}.{property.Name}"; var item = property.Value;
@@ -79,12 +81,14 @@ internal static class LootFilterValidation
                 continue;
             }
             var values = item.ValueKind == JsonValueKind.Array ? item.EnumerateArray().ToArray() : [item];
-            Require(values.Length >= 1 && values.Length <= (property.Name == "rarity" ? 7 : 64), $"{field} has too many or no values.");
+            var maxValues = property.Name == "rarity" ? Rarities.Length : property.Name == "tier" ? Tiers.Length : 64;
+            Require(values.Length >= 1 && values.Length <= maxValues, $"{field} has too many or no values.");
             foreach (var entry in values)
             {
                 var text = Text(entry, field);
                 Require(text.Length > 0, $"{field} cannot be empty.");
                 if (property.Name == "rarity") Require(Rarities.Contains(text), $"{field} contains an unsupported rarity.");
+                else if (property.Name == "tier") Require(Tiers.Contains(text), $"{field} contains an unsupported tier.");
                 else if (property.Name == "code") Require(text.Length <= 4 && text.Any(c => c != ' ') && text.All(c => c is >= ' ' and <= '~'), $"{field} requires 1–4 printable ASCII characters.");
                 else Require(text.Length <= 127 && !text.Any(c => c is '\t' or '\r' or '\n'), $"{field} requires at most 127 characters with no tabs or newlines.");
             }
@@ -100,7 +104,9 @@ internal static class LootFilterValidation
     private static void Boolean(JsonElement value, string path) => Require(value.ValueKind is JsonValueKind.True or JsonValueKind.False, $"{path} must be true or false.");
     private static void Color(JsonElement value, string path)
     {
-        var match = Rgba.Match(Text(value, path));
+        var text = Text(value, path);
+        if (HexColor.IsMatch(text.Trim())) return;
+        var match = Rgba.Match(text);
         Require(match.Success && Enumerable.Range(1, 3).All(i => int.TryParse(match.Groups[i].Value, out var n) && n is >= 0 and <= 255)
             && double.TryParse(match.Groups[4].Value, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var alpha) && alpha is >= 0 and <= 1, $"{path} requires RGBA with RGB 0–255 and opacity 0–1.");
     }

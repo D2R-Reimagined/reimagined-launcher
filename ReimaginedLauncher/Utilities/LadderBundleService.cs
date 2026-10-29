@@ -153,6 +153,9 @@ public sealed class LadderBundleService(
 
             foreach (var file in bundle.Files)
             {
+                // The downloaded payload is verified, but the installed loot filter belongs to the player.
+                if (LadderRuntimeFileService.IsPlayerFilterPath(file.TargetPath)) continue;
+
                 var path = ResolveTargetPath(normalized, file.TargetPath);
                 if (!File.Exists(path))
                 {
@@ -162,9 +165,6 @@ public sealed class LadderBundleService(
                     }
                     continue;
                 }
-
-                // The downloaded payload is verified, but the installed loot filter belongs to the player.
-                if (LadderRuntimeFileService.IsPlayerFilterPath(file.TargetPath)) continue;
 
                 var info = new FileInfo(path);
                 var currentMatches = info.Length == file.SizeBytes
