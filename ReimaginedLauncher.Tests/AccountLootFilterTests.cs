@@ -70,6 +70,11 @@ public sealed class AccountLootFilterTests
     [InlineData("{\"version\":3,\"version\":3,\"rules\":[]}")]
     [InlineData("{\"version\":3,\"rules\":[{\"show\":{},\"hide\":{}}]}")]
     [InlineData("{\"version\":3,\"rules\":[{\"show\":{\"conditions\":{\"itemLevel\":{\"gte\":100}}}}]}")]
+    [InlineData("{\"version\":3,\"rules\":[{\"show\":{\"conditions\":{\"rarity\":\"cursed\"}}}]}")]
+    [InlineData("{\"version\":3,\"rules\":[{\"show\":{\"conditions\":{\"tier\":\"mythic\"}}}]}")]
+    [InlineData("{\"version\":3,\"rules\":[{\"show\":{\"conditions\":{\"tier\":[\"normal\",\"exceptional\",\"elite\",\"normal\"]}}}]}")]
+    [InlineData("{\"version\":3,\"rules\":[{\"show\":{\"tooltip\":{\"outlineColor\":\"RGBA(255,255,255,1)\"}}}]}")]
+    [InlineData("{\"version\":3,\"rules\":[{\"show\":{\"minimapIcon\":{\"shape\":\"pentagon\",\"borderColor\":\"RGBA(255,255,255,1)\",\"fillColor\":\"RGBA(255,0,0,1)\"}}}]}")]
     public void InvalidDocumentNeverChangesExistingFilter(string json)
     {
         var root = Path.Combine(Path.GetTempPath(), "launcher-filter-test-" + Guid.NewGuid().ToString("N"), "mods", "Reimagined", "d2rloader");
@@ -82,6 +87,30 @@ public sealed class AccountLootFilterTests
             Assert.False(Directory.Exists(LocalPluginInstallService.BackupDirectory(root, ".launcher-filter-backups")));
         }
         finally { if (Directory.Exists(root)) Directory.Delete(Path.GetFullPath(Path.Combine(root, "..", "..", "..")), true); }
+    }
+    [Fact]
+    public void ValidationAcceptsWebsiteStrictPresetEquipmentTiersTooltipBordersAndAllMinimapShapes()
+    {
+        var strict = JsonSerializer.Deserialize<JsonElement>("""{"version":3,"rules":[{"show":{"ruleName":"Drop-only unique and set bases","conditions":{"rarity":["unique","set"],"code":["cm1","cjw","7gd","7fb","7gs","7wa","obb","pae","paf","ned","nee","bae","uul","uth","utp","upl","uhn","urs","aqv","cqv","ame","amf","amb","drb","drf","7ar","7cs","7wb","hgl","ghm","ful","hbt","hbl"]},"tooltip":{"backgroundColor":"RGBA(28, 12, 44, 0.92)","borderColor":"RGBA(210, 120, 255, 1)","textColor":"RGBA(240, 200, 255, 1)"},"minimapIcon":{"shape":"star","size":24,"borderColor":"RGBA(255, 255, 255, 1)","fillColor":"RGBA(210, 120, 255, 1)"},"dropSound":"Filter01"}},{"show":{"ruleName":"Uniques and sets","conditions":{"rarity":["unique","set"]},"tooltip":{"borderColor":"RGBA(215, 175, 85, 1)"},"minimapIcon":{"shape":"diamond","size":20,"borderColor":"RGBA(255, 255, 255, 1)","fillColor":"RGBA(215, 175, 85, 1)"},"dropSound":"Filter01"}},{"show":{"ruleName":"Power orbs and Gem Clusters","conditions":{"code":["ka3","1ka","oos","1os","ooc","1oc","ooa","1oa","ooi","1oi","ooe","1oe","oor","1or","1gc"]},"tooltip":{"backgroundColor":"RGBA(15, 28, 48, 0.92)","borderColor":"RGBA(110, 200, 255, 1)","textColor":"RGBA(185, 230, 255, 1)"},"minimapIcon":{"shape":"square","size":20,"borderColor":"RGBA(255, 255, 255, 1)","fillColor":"RGBA(110, 200, 255, 1)"},"dropSound":"Filter03"}},{"show":{"ruleName":"Rare and crafted equipment","conditions":{"rarity":["rare","crafted"],"tier":["normal","exceptional","elite"]}}},{"hide":{"ruleName":"Hide ordinary equipment through magic","conditions":{"itemType":["weap","armo"],"tier":"normal","rarity":["inferior","normal","superior","magic"],"sockets":{"eq":0},"ethereal":false}}}]}""");
+        var stored = LootFilterValidation.Validate(strict);
+        Assert.Contains("borderColor", stored);
+        foreach (var shape in new[] { "circle", "square", "diamond", "triangle", "triangleDown", "star", "spark", "kite", "hexagon", "cross", "chevron", "bullseye" })
+            LootFilterValidation.Validate(JsonSerializer.SerializeToElement(new { version = 3, rules = new[] { new { show = new { minimapIcon = new { shape, borderColor = "RGBA(255,255,255,1)", fillColor = "RGBA(0,0,0,0.5)" } } } } }));
+        foreach (var rarity in new[] { "inferior", "normal", "superior", "magic", "set", "rare", "unique", "crafted" })
+            LootFilterValidation.Validate(JsonSerializer.SerializeToElement(new { version = 3, rules = new[] { new { show = new { conditions = new { rarity } } } } }));
+        foreach (var tier in new[] { "normal", "exceptional", "elite" })
+            LootFilterValidation.Validate(JsonSerializer.SerializeToElement(new { version = 3, rules = new[] { new { show = new { conditions = new { tier } } } } }));
+        foreach (var tooltip in new object[]
+        {
+            new { backgroundColor = "RGBA(0, 0, 0, 0.85)" },
+            new { borderColor = "RGBA(225, 205, 255, 1)" },
+            new { textColor = "RGBA(255, 128, 0, 1)" },
+            new { backgroundColor = "#1C0C2CEB", borderColor = "#D278FF", textColor = "#F0C8FFFF" },
+            new { backgroundColor = "RGBA(0, 0, 0, 0.85)", borderColor = "RGBA(225, 205, 255, 1)", textColor = "RGBA(255, 128, 0, 1)" }
+        })
+        {
+            LootFilterValidation.Validate(JsonSerializer.SerializeToElement(new { version = 3, rules = new[] { new { show = new { tooltip } } } }));
+        }
     }
     [Fact]
     public void FilterInstallKeepsThreeBackupsAndExportsNoMetadata()

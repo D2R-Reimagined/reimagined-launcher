@@ -34,39 +34,31 @@ public sealed class LauncherAuthenticationService(ReimaginedApiHttpClient apiCli
     private LauncherTokenResponse? _session;
     private GameSessionToken? _activeGameToken;
 
+    public event EventHandler? SessionChanged;
+
+    internal Func<AppSettings, Task> SaveSettingsAsync { get; set; } = SettingsManager.SaveAsync;
+    internal Action<Uri> BrowserOpener { get; set; } = OpenBrowser;
+
     public ReimaginedUserResponse? CurrentUser => _session?.User;
     public bool IsSignedIn => CurrentUser is not null;
+
+    public void BindSettings(AppSettings settings)
+    {
+        _settings = settings;
+        apiClient.AccessTokenProvider = GetAccessTokenAsync;
+    }
 
     public async Task InitializeAsync(
         AppSettings settings,
         CancellationToken cancellationToken = default)
     {
-        _settings = settings;
-        apiClient.AccessTokenProvider = GetAccessTokenAsync;
+        BindSettings(settings);
         if (string.IsNullOrWhiteSpace(settings.D2RReimaginedRefreshToken))
         {
             return;
         }
 
-        await _sessionLock.WaitAsync(cancellationToken);
-        try
-        {
-            var refreshed = await apiClient.RefreshLauncherSessionAsync(
-                settings.D2RReimaginedRefreshToken,
-                cancellationToken);
-            if (refreshed is null)
-            {
-                settings.D2RReimaginedRefreshToken = null;
-                await SettingsManager.SaveAsync(settings);
-                return;
-            }
-
-            await StoreSessionAsync(refreshed);
-        }
-        finally
-        {
-            _sessionLock.Release();
-        }
+        _ = await GetAccessTokenAsync(cancellationToken);
     }
 
     public async Task<ReimaginedUserResponse> SignInAsync(
@@ -74,86 +66,151 @@ public sealed class LauncherAuthenticationService(ReimaginedApiHttpClient apiCli
     {
         var settings = _settings
             ?? throw new InvalidOperationException("Launcher settings have not finished loading.");
-        await _sessionLock.WaitAsync(cancellationToken);
-        try
-        {
-            var verifier = Base64UrlEncode(RandomNumberGenerator.GetBytes(64));
-            var challenge = Base64UrlEncode(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));
-            var state = Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
 
-            var listener = new TcpListener(IPAddress.Loopback, 0);
-            listener.Start();
+        if (_session is { } currentSession
+            && currentSession.ExpiresAtUtc > DateTime.UtcNow.AddMinutes(1))
+        {
+            return currentSession.User;
+        }
+
+        if (!string.IsNullOrWhiteSpace(settings.D2RReimaginedRefreshToken))
+        {
             try
             {
-                var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-                var redirectUri = $"http://127.0.0.1:{port}/oauth/callback";
-                OpenBrowser(CreateAuthorizationUri(redirectUri, challenge, state));
+                _ = await GetAccessTokenAsync(cancellationToken);
+                if (_session is { } restoredSession)
+                {
+                    return restoredSession.User;
+                }
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                LaunchDiagnostics.Log($"Could not restore cached Reimagined session before sign-in ({exception.Message}); continuing with browser sign-in.");
+            }
+        }
 
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeout.CancelAfter(SignInTimeout);
-                using var client = await listener.AcceptTcpClientAsync(timeout.Token);
-                await using var stream = client.GetStream();
+        var verifier = Base64UrlEncode(RandomNumberGenerator.GetBytes(64));
+        var challenge = Base64UrlEncode(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));
+        var state = Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
 
-                CallbackResult callback;
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            var redirectUri = $"http://127.0.0.1:{port}/oauth/callback";
+            BrowserOpener(CreateAuthorizationUri(redirectUri, challenge, state));
+
+            using var callbackTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            callbackTimeout.CancelAfter(SignInTimeout);
+
+            while (true)
+            {
+                TcpClient client;
                 try
                 {
-                    callback = await ReadCallbackAsync(stream, state, timeout.Token);
+                    client = await listener.AcceptTcpClientAsync(callbackTimeout.Token);
                 }
-                catch
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                 {
-                    await WriteBrowserResponseAsync(
-                        stream,
-                        "Sign-in failed",
-                        "The launcher could not validate this sign-in response.",
-                        timeout.Token);
-                    throw;
+                    throw new TimeoutException("Website sign-in timed out. Please try again.");
                 }
 
-                if (!string.IsNullOrEmpty(callback.Error))
+                using (client)
+                await using (var stream = client.GetStream())
                 {
-                    await WriteBrowserResponseAsync(
-                        stream,
-                        "Sign-in cancelled",
-                        "You can close this tab and return to the launcher.",
-                        timeout.Token);
-                    throw new InvalidOperationException("Website sign-in was cancelled.");
-                }
+                    CallbackReadOutcome outcome;
+                    try
+                    {
+                        outcome = await ReadCallbackAsync(stream, state, callbackTimeout.Token);
+                    }
+                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                    {
+                        throw new TimeoutException("Website sign-in timed out. Please try again.");
+                    }
+                    catch (Exception)
+                    {
+                        await TryWriteBrowserResponseAsync(
+                            stream,
+                            "Sign-in failed",
+                            "The launcher could not validate this sign-in response.");
+                        throw;
+                    }
 
-                var session = await apiClient.ExchangeLauncherCodeAsync(
-                    callback.Code!,
-                    verifier,
-                    redirectUri,
-                    timeout.Token);
-                if (session is null)
-                {
-                    await WriteBrowserResponseAsync(
-                        stream,
-                        "Sign-in expired",
-                        "Return to the launcher and start sign-in again.",
-                        timeout.Token);
-                    throw new InvalidOperationException("The launcher authorization code was invalid or expired.");
-                }
+                    if (outcome.Kind == CallbackOutcomeKind.IgnoreConnection)
+                    {
+                        continue;
+                    }
 
-                await StoreSessionAsync(session);
-                await WriteBrowserResponseAsync(
-                    stream,
-                    "Launcher connected",
-                    $"Signed in as {WebUtility.HtmlEncode(session.User.DisplayName)}. You can close this tab.",
-                    timeout.Token);
-                return session.User;
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                throw new TimeoutException("Website sign-in timed out. Please try again.");
-            }
-            finally
-            {
-                listener.Stop();
+                    if (outcome.Kind == CallbackOutcomeKind.NotFound)
+                    {
+                        await TryWriteNotFoundResponseAsync(stream);
+                        continue;
+                    }
+
+                    var callback = outcome.Result!;
+                    if (!string.IsNullOrEmpty(callback.Error))
+                    {
+                        await TryWriteBrowserResponseAsync(
+                            stream,
+                            "Sign-in cancelled",
+                            "You can close this tab and return to the launcher.");
+                        throw new InvalidOperationException("Website sign-in was cancelled.");
+                    }
+
+                    LauncherTokenResponse? session;
+                    try
+                    {
+                        session = await apiClient.ExchangeLauncherCodeAsync(
+                            callback.Code!,
+                            verifier,
+                            redirectUri,
+                            cancellationToken);
+                    }
+                    catch (Exception exception)
+                    {
+                        await TryWriteBrowserResponseAsync(
+                            stream,
+                            "Sign-in failed",
+                            "The launcher could not reach the D2R Reimagined API to finish signing in. Return to the launcher and try again.");
+                        if (exception is OperationCanceledException && !cancellationToken.IsCancellationRequested)
+                        {
+                            throw new TimeoutException("Timed out while exchanging the launcher sign-in code with the API. Please try again.", exception);
+                        }
+
+                        throw;
+                    }
+
+                    if (session is null)
+                    {
+                        await TryWriteBrowserResponseAsync(
+                            stream,
+                            "Sign-in expired",
+                            "Return to the launcher and start sign-in again.");
+                        throw new InvalidOperationException("The launcher authorization code was invalid or expired.");
+                    }
+
+                    await _sessionLock.WaitAsync(cancellationToken);
+                    try
+                    {
+                        await StoreSessionAsync(session);
+                    }
+                    finally
+                    {
+                        _sessionLock.Release();
+                    }
+
+                    await TryWriteBrowserResponseAsync(
+                        stream,
+                        "Launcher connected",
+                        $"Signed in as {WebUtility.HtmlEncode(session.User.DisplayName)}. You can close this tab.");
+                    return session.User;
+                }
             }
         }
         finally
         {
-            _sessionLock.Release();
+            listener.Stop();
         }
     }
 
@@ -174,14 +231,32 @@ public sealed class LauncherAuthenticationService(ReimaginedApiHttpClient apiCli
         await _sessionLock.WaitAsync(cancellationToken);
         try
         {
+            if (_session is { } currentAfterWait
+                && currentAfterWait.ExpiresAtUtc > DateTime.UtcNow.AddMinutes(1))
+            {
+                return currentAfterWait.AccessToken;
+            }
+
+            settings = _settings;
+            if (settings is null || string.IsNullOrWhiteSpace(settings.D2RReimaginedRefreshToken))
+            {
+                return null;
+            }
+
             var refreshed = await apiClient.RefreshLauncherSessionAsync(
                 settings.D2RReimaginedRefreshToken,
                 cancellationToken);
             if (refreshed is null)
             {
+                var hadSession = _session is not null;
                 _session = null;
                 settings.D2RReimaginedRefreshToken = null;
-                await SettingsManager.SaveAsync(settings);
+                await SaveSettingsAsync(settings);
+                if (hadSession)
+                {
+                    SessionChanged?.Invoke(this, EventArgs.Empty);
+                }
+
                 return null;
             }
 
@@ -308,6 +383,7 @@ public sealed class LauncherAuthenticationService(ReimaginedApiHttpClient apiCli
         if (settings is null)
         {
             _session = null;
+            SessionChanged?.Invoke(this, EventArgs.Empty);
             return;
         }
 
@@ -326,7 +402,8 @@ public sealed class LauncherAuthenticationService(ReimaginedApiHttpClient apiCli
             {
                 _session = null;
                 settings.D2RReimaginedRefreshToken = null;
-                await SettingsManager.SaveAsync(settings);
+                await SaveSettingsAsync(settings);
+                SessionChanged?.Invoke(this, EventArgs.Empty);
             }
         }
         finally
@@ -338,13 +415,13 @@ public sealed class LauncherAuthenticationService(ReimaginedApiHttpClient apiCli
     private async Task StoreSessionAsync(LauncherTokenResponse session)
     {
         _session = session;
-        if (_settings is null)
+        if (_settings is not null)
         {
-            return;
+            _settings.D2RReimaginedRefreshToken = session.RefreshToken;
+            await SaveSettingsAsync(_settings);
         }
 
-        _settings.D2RReimaginedRefreshToken = session.RefreshToken;
-        await SettingsManager.SaveAsync(_settings);
+        SessionChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private static Uri CreateAuthorizationUri(
@@ -410,7 +487,7 @@ public sealed class LauncherAuthenticationService(ReimaginedApiHttpClient apiCli
         Process.Start(startInfo)?.Dispose();
     }
 
-    private static async Task<CallbackResult> ReadCallbackAsync(
+    private static async Task<CallbackReadOutcome> ReadCallbackAsync(
         NetworkStream stream,
         string expectedState,
         CancellationToken cancellationToken)
@@ -421,8 +498,23 @@ public sealed class LauncherAuthenticationService(ReimaginedApiHttpClient apiCli
             detectEncodingFromByteOrderMarks: false,
             bufferSize: 1024,
             leaveOpen: true);
-        var requestLine = await reader.ReadLineAsync(cancellationToken);
-        if (string.IsNullOrWhiteSpace(requestLine) || requestLine.Length > 8192)
+
+        string? requestLine;
+        try
+        {
+            requestLine = await reader.ReadLineAsync(cancellationToken);
+        }
+        catch (IOException)
+        {
+            return new CallbackReadOutcome(CallbackOutcomeKind.IgnoreConnection, null);
+        }
+
+        if (string.IsNullOrWhiteSpace(requestLine))
+        {
+            return new CallbackReadOutcome(CallbackOutcomeKind.IgnoreConnection, null);
+        }
+
+        if (requestLine.Length > 8192)
         {
             throw new InvalidOperationException("The launcher callback request was invalid.");
         }
@@ -445,7 +537,7 @@ public sealed class LauncherAuthenticationService(ReimaginedApiHttpClient apiCli
         var requestUri = new Uri(new Uri("http://127.0.0.1"), parts[1]);
         if (requestUri.AbsolutePath != "/oauth/callback")
         {
-            throw new InvalidOperationException("The launcher callback path was invalid.");
+            return new CallbackReadOutcome(CallbackOutcomeKind.NotFound, null);
         }
 
         var query = ParseQuery(requestUri.Query);
@@ -461,7 +553,7 @@ public sealed class LauncherAuthenticationService(ReimaginedApiHttpClient apiCli
             throw new InvalidOperationException("The launcher callback did not include a valid result.");
         }
 
-        return new CallbackResult(code, error);
+        return new CallbackReadOutcome(CallbackOutcomeKind.Callback, new CallbackResult(code, error));
     }
 
     private static Dictionary<string, string> ParseQuery(string query)
@@ -485,26 +577,63 @@ public sealed class LauncherAuthenticationService(ReimaginedApiHttpClient apiCli
             Encoding.ASCII.GetBytes(right));
     }
 
-    private static async Task WriteBrowserResponseAsync(
+    private static async Task TryWriteBrowserResponseAsync(
         NetworkStream stream,
         string title,
-        string message,
-        CancellationToken cancellationToken)
+        string message)
     {
-        var body = "<!doctype html><html><head><meta charset=\"utf-8\"><title>"
-            + title
-            + "</title><style>body{margin:0;background:#070707;color:#e9dfcf;font:16px system-ui;display:grid;place-items:center;min-height:100vh}main{max-width:36rem;padding:2rem;border:1px solid #7b2326;background:#140b0c;border-radius:.75rem}h1{color:#d7a84c}</style></head><body><main><h1>"
-            + title
-            + "</h1><p>"
-            + message
-            + "</p></main></body></html>";
-        var bodyBytes = Encoding.UTF8.GetBytes(body);
-        var headers = Encoding.ASCII.GetBytes(
-            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
-            + $"Content-Length: {bodyBytes.Length}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n");
-        await stream.WriteAsync(headers, cancellationToken);
-        await stream.WriteAsync(bodyBytes, cancellationToken);
-        await stream.FlushAsync(cancellationToken);
+        try
+        {
+            using var writeTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var body = "<!doctype html><html><head><meta charset=\"utf-8\"><title>"
+                + title
+                + "</title><style>body{margin:0;background:#070707;color:#e9dfcf;font:16px system-ui;display:grid;place-items:center;min-height:100vh}main{max-width:36rem;padding:2rem;border:1px solid #7b2326;background:#140b0c;border-radius:.75rem}h1{color:#d7a84c}</style></head><body><main><h1>"
+                + title
+                + "</h1><p>"
+                + message
+                + "</p></main></body></html>";
+            var bodyBytes = Encoding.UTF8.GetBytes(body);
+            var headers = Encoding.ASCII.GetBytes(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
+                + $"Content-Length: {bodyBytes.Length}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n");
+            await stream.WriteAsync(headers, writeTimeout.Token);
+            await stream.WriteAsync(bodyBytes, writeTimeout.Token);
+            await stream.FlushAsync(writeTimeout.Token);
+            ShutdownSend(stream);
+        }
+        catch
+        {
+            // Best-effort browser response before closing the loopback socket.
+        }
+    }
+
+    private static async Task TryWriteNotFoundResponseAsync(NetworkStream stream)
+    {
+        try
+        {
+            using var writeTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            var headers = Encoding.ASCII.GetBytes(
+                "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n");
+            await stream.WriteAsync(headers, writeTimeout.Token);
+            await stream.FlushAsync(writeTimeout.Token);
+            ShutdownSend(stream);
+        }
+        catch
+        {
+            // Best-effort 404 response for non-callback browser probes (e.g. /favicon.ico).
+        }
+    }
+
+    private static void ShutdownSend(NetworkStream stream)
+    {
+        try
+        {
+            stream.Socket.Shutdown(SocketShutdown.Send);
+        }
+        catch
+        {
+            // Ignore socket shutdown errors if the peer already closed.
+        }
     }
 
     private static string Base64UrlEncode(byte[] value)
@@ -512,5 +641,13 @@ public sealed class LauncherAuthenticationService(ReimaginedApiHttpClient apiCli
         return Convert.ToBase64String(value).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
 
+    private enum CallbackOutcomeKind
+    {
+        IgnoreConnection,
+        NotFound,
+        Callback
+    }
+
+    private sealed record CallbackReadOutcome(CallbackOutcomeKind Kind, CallbackResult? Result);
     private sealed record CallbackResult(string? Code, string? Error);
 }

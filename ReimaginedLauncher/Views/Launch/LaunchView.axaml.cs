@@ -48,6 +48,7 @@ public partial class LaunchView : UserControl
     private (bool Compact, bool CompactModes, bool StackedActions)? _layoutState;
     private readonly DispatcherTimer _ladderScheduleTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private ServerSaveMonitor? _preparedServerSaves;
+    private bool _hasServerSaveStatus;
     // The secrets this launch hands to the game, gathered while preparing and
     // written to the session file (outside mods/) just before the process starts.
     private GameSessionToken? _launchGameToken;
@@ -527,6 +528,7 @@ public partial class LaunchView : UserControl
         LoaderExtensionsGrid.IsVisible = !isLadderExperience;
         ShowLadderRegions();
         LadderAuthenticationWarningBanner.IsVisible = isLadderExperience && !isReimaginedSignedIn;
+        ServerSaveStatusPanel.IsVisible = isLadderExperience && supportsD2RLoader && _hasServerSaveStatus;
         RefreshLocalRigPanel(profile);
         RefreshLadderAuthenticationState();
 
@@ -777,7 +779,7 @@ public partial class LaunchView : UserControl
     {
         if (_isLaunching || _isRunningLadderAction || MainWindow.IsInstallInProgress) return;
 
-        if (MainWindow.IsGameRunning())
+        if (!await MainWindow.WaitForClosingGameToExitAsync())
         {
             Notifications.SendNotification("Close Diablo II: Resurrected before repairing the mod.", "Warning");
             return;
@@ -814,7 +816,7 @@ public partial class LaunchView : UserControl
                                  && (profile.LaunchExperience == LaunchExperience.Ladder || experience == LaunchExperience.Ladder);
         if (profile.LaunchExperience != experience)
         {
-            if (MainWindow.IsGameRunning())
+            if (!await MainWindow.WaitForClosingGameToExitAsync())
             {
                 Notifications.SendNotification("Close Diablo II: Resurrected before changing play modes.", "Mode switch blocked");
                 return;
@@ -865,6 +867,11 @@ public partial class LaunchView : UserControl
             }
 
             profile.LaunchExperience = experience;
+            if (experience != LaunchExperience.Ladder)
+            {
+                _hasServerSaveStatus = false;
+                ServerSaveStatusPanel.IsVisible = false;
+            }
             await SettingsManager.SaveAsync(MainWindow.Settings);
             MainWindow.Instance?.RefreshLocalModState();
             if (experience == LaunchExperience.Ladder)
@@ -1909,7 +1916,7 @@ public partial class LaunchView : UserControl
     private async Task RunLadderSetupActionAsync()
     {
         if (SelectedLadder is not { ActiveBundle: { } bundle } ladder || _isLaunching || _isRunningLadderAction
-            || MainWindow.IsInstallInProgress || MainWindow.IsGameRunning())
+            || MainWindow.IsInstallInProgress || !await MainWindow.WaitForClosingGameToExitAsync())
         {
             return;
         }
@@ -2442,7 +2449,7 @@ public partial class LaunchView : UserControl
         LaunchDiagnostics.Log("Launch/Install button clicked.");
 
         if (_isLaunching || _isSteamSetupRunning || _isRunningLadderAction || MainWindow.IsInstallInProgress
-            || SteamGameHandoff.IsLaunchPendingOrRunning || MainWindow.IsGameRunning())
+            || !await MainWindow.WaitForClosingGameToExitAsync() || SteamGameHandoff.IsLaunchPendingOrRunning)
         {
             LaunchDiagnostics.Log("Action ignored because an action is already in progress.");
             return;
@@ -3318,7 +3325,10 @@ public partial class LaunchView : UserControl
     {
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
-            ServerSaveStatusPanel.IsVisible = true;
+            _hasServerSaveStatus = true;
+            var profile = MainWindow.Settings.CurrentProfile;
+            ServerSaveStatusPanel.IsVisible = profile.Type != InstallationType.D2RMM
+                                              && profile.LaunchExperience == LaunchExperience.Ladder;
             ServerSaveStatusPanel.Classes.Set("warning-banner", display.Warning);
             ServerSaveStatusText.Text = display.Message;
             ServerSaveConfirmedText.Text = display.Confirmed;
@@ -3372,6 +3382,7 @@ public partial class LaunchView : UserControl
     private async Task<bool> PrepareServerSavesAsync(InstallationProfile profile)
     {
         _preparedServerSaves = null;
+        _hasServerSaveStatus = false;
         ServerSaveStatusPanel.IsVisible = false;
         var isLadderLaunch = profile.Type != InstallationType.D2RMM
                              && profile.LaunchExperience == LaunchExperience.Ladder;

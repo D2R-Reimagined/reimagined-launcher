@@ -83,7 +83,11 @@ public sealed class D2RLoaderExtensionInfo : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new(name));
     }
 
-    public string ConfigEditHint => CanEditConfig ? "Open the existing configuration file. Unavailable on Ladder." : "No unique matching config found, or editing is unavailable on Ladder. Refresh after a config is created.";
+    public string ConfigEditHint => CanEditConfig
+        ? "Open the existing configuration file. Unavailable on Ladder."
+        : Kind == D2RLoaderExtensionKind.Plugin && D2RLoaderConfigService.IsNonEditableExtension(FileName)
+            ? "This plugin's configuration cannot be edited in the launcher."
+            : "No unique matching config found, or editing is unavailable on Ladder. Refresh after a config is created.";
     public string ScopeBadge => Scope == D2RLoaderExtensionScope.Global ? "GLOBAL" : "MOD";
     public bool IsDisabled => !IsEnabled;
     public string ScopeLabel => Scope == D2RLoaderExtensionScope.Global ? "GLOBAL - affects other mods" : "SELECTED MOD";
