@@ -41,7 +41,8 @@ internal static class LadderSavePathRegistry
                 IgnoreInaccessible = false
             })
             .Select(path => Path.GetRelativePath(modsDirectory, path))
-            .Where(path => IsValidPath(path, ladderId) && !claimedPaths.Contains(path.Replace('\\', '/')))
+            .Where(path => IsValidPath(path, ladderId) && !LadderSaveDirectoryService.IsPreviewSavePath(path)
+                && !claimedPaths.Contains(path.Replace('\\', '/')))
             .ToArray();
         if (candidates.Length > 1)
             throw new IOException($"Multiple existing save folders match this ladder: {string.Join(", ", candidates)}. Select the correct folder before continuing; character saves are not changed.");

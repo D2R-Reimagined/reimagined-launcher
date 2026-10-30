@@ -45,12 +45,19 @@ public static class LadderSaveDirectoryService
         return slug.Length == 0 ? $"ReimaginedThree-{suffix}" : $"ReimaginedThree-{slug}-{suffix}";
     }
 
+    private const string PreviewSavePathPrefix = "ReimaginedPreview-";
+
     /// <summary>
-    /// Ends in "-preview", not the ladder ID, so the registry never takes it for
-    /// the ladder's real folder.
+    /// Still ends in the ladder ID, which server-saves requires of a ladder
+    /// folder, but carries its own prefix so the registry never takes it for the
+    /// ladder's real folder (<see cref="IsPreviewSavePath"/>).
     /// </summary>
     public static string BuildPreviewSavePath(Guid ladderId, string? ladderName) =>
-        BuildLadderSavePath(ladderId, ladderName) + "-preview";
+        PreviewSavePathPrefix + BuildLadderSavePath(ladderId, ladderName)["ReimaginedThree-".Length..];
+
+    public static bool IsPreviewSavePath(string path) =>
+        Path.GetFileName(path.Replace('\\', '/').TrimEnd('/').Replace('/', Path.DirectorySeparatorChar))
+            .StartsWith(PreviewSavePathPrefix, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Turns a ladder name into a safe folder fragment. Apostrophes are dropped

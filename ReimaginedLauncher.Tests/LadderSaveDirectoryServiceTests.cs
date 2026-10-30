@@ -312,8 +312,10 @@ public sealed class LadderSaveDirectoryServiceTests : IDisposable
         Directory.CreateDirectory(normalSaves);
         await File.WriteAllTextAsync(Path.Combine(normalSaves, "Settings.json"), "normal settings");
 
+        var mods = Path.Combine(savedGames, "Diablo II Resurrected", "mods");
         var preview = await LadderSaveDirectoryService.PrepareAsync(installDirectory, Ladder, "Season 1", savedGames, preview: true);
-        var expected = Path.Combine(savedGames, "Diablo II Resurrected", "mods", "ReimaginedThree-Season-1-d630a3fc9da311f1a936c87f5404bb80-preview");
+        // Ending in the ladder ID is what server-saves checks before it will run.
+        var expected = Path.Combine(mods, "ReimaginedPreview-Season-1-d630a3fc9da311f1a936c87f5404bb80");
         Assert.Equal(expected, preview.DirectoryPath);
         Assert.Equal("normal settings", await File.ReadAllTextAsync(Path.Combine(expected, "Settings.json")));
         await File.WriteAllTextAsync(Path.Combine(expected, "Hero.d2s"), "preview character");
@@ -321,8 +323,9 @@ public sealed class LadderSaveDirectoryServiceTests : IDisposable
         Assert.Equal(expected, (await LadderSaveDirectoryService.PrepareAsync(installDirectory, Ladder, "Season 1", savedGames, preview: true)).DirectoryPath);
         Assert.False(File.Exists(Path.Combine(expected, "Hero.d2s")));
 
+        // The ladder's first real launch must not adopt the preview folder it finds.
         var real = await LadderSaveDirectoryService.PrepareAsync(installDirectory, Ladder, "Season 1", savedGames);
-        Assert.Equal(expected[..^"-preview".Length], real.DirectoryPath);
+        Assert.Equal(Path.Combine(mods, "ReimaginedThree-Season-1-d630a3fc9da311f1a936c87f5404bb80"), real.DirectoryPath);
     }
 
     [Fact]
