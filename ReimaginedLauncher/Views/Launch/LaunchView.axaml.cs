@@ -210,7 +210,7 @@ public partial class LaunchView : UserControl
         if (MainWindow.Settings.CurrentProfile.LaunchExperience == LaunchExperience.Ladder
             && _ladderAction is LadderAction.Waiting or LadderAction.Play)
         {
-            if (_ladderSchedule?.IsLive(SelectedLadder) != true) _ladderAction = LadderAction.Waiting;
+            if (_ladderSchedule?.CanPlay(SelectedLadder) != true) _ladderAction = LadderAction.Waiting;
             StartGameButton.Content = LadderActionLabel(_ladderAction);
             if (_ladderAction == LadderAction.Waiting) StartGameButton.IsEnabled = false;
         }
@@ -1140,7 +1140,8 @@ public partial class LaunchView : UserControl
     }
 
     private bool HasAvailableLadder => _activeLadders.Any(ladder =>
-        LadderLaunchSchedule.IsAvailable(ladder, _ladderSchedule?.Now ?? DateTimeOffset.UtcNow));
+        LadderLaunchSchedule.IsAvailable(ladder, _ladderSchedule?.Now ?? DateTimeOffset.UtcNow)
+        || _ladderSchedule?.IsPreview(ladder) == true);
 
     private LadderResponse? SelectedLadder
     {
@@ -1869,7 +1870,7 @@ public partial class LaunchView : UserControl
         }
         if (_ladderBundleReadiness.IsReady && _missingRequiredLadderExtensions.Count == 0)
         {
-            return _ladderSchedule?.IsLive(SelectedLadder) == true ? LadderAction.Play : LadderAction.Waiting;
+            return _ladderSchedule?.CanPlay(SelectedLadder) == true ? LadderAction.Play : LadderAction.Waiting;
         }
         if (!_ladderBundleReadiness.CanRepair)
         {
@@ -1892,7 +1893,7 @@ public partial class LaunchView : UserControl
             LadderAction.Download => "Download",
             LadderAction.Update => "Update",
             LadderAction.Restore => "Restore Ladder",
-            LadderAction.Play => "Start Game",
+            LadderAction.Play => _ladderSchedule?.IsPreview(SelectedLadder) == true ? "Start Admin Preview" : "Start Game",
             LadderAction.Waiting => LadderLaunchSchedule.Countdown(
                 SelectedLadder?.StartDateUtc ?? DateTimeOffset.MinValue, _ladderSchedule?.Now ?? DateTimeOffset.UtcNow),
             _ => "Start Game"
@@ -1903,6 +1904,8 @@ public partial class LaunchView : UserControl
         LadderAction.Download => "Downloads and verifies everything this ladder requires. This does not start the game.",
         LadderAction.Update => "Update the required package or apply your optional plugin and patch selections. This does not start the game.",
         LadderAction.Restore => "Restores and verifies the cached ladder package while preserving your normal installation. This does not start the game.",
+        LadderAction.Play when _ladderSchedule?.IsPreview(SelectedLadder) == true =>
+            "Admin preview: this ladder has not started. You can connect and play to check it, but nothing is saved - every preview starts from an empty character list.",
         LadderAction.Play => "Verifies the isolated ladder installation, enforces its extension allowlist, and starts ReimaginedLadder through D2RLoader.",
         LadderAction.Waiting => "Your package is ready. Play unlocks after the API confirms the ladder is live and the installation is verified again.",
         _ => _ladderBundleReadiness?.Status ?? "This ladder cannot be played from this installation yet."
@@ -2499,7 +2502,7 @@ public partial class LaunchView : UserControl
                 if (_isRefreshingLadders) return;
                 var requestedLadderId = SelectedLadder?.Id;
                 await RefreshLadderStateAsync();
-                if (requestedLadderId != SelectedLadder?.Id || _ladderSchedule?.IsLive(SelectedLadder) != true)
+                if (requestedLadderId != SelectedLadder?.Id || _ladderSchedule?.CanPlay(SelectedLadder) != true)
                 {
                     Notifications.SendNotification("The selected ladder has not been confirmed live. Wait for the countdown and live-status check.", "Ladder unavailable");
                     return;
@@ -2560,7 +2563,7 @@ public partial class LaunchView : UserControl
                 }
             }
 
-            if (profile.LaunchExperience == LaunchExperience.Ladder && _ladderSchedule?.IsLive(SelectedLadder) != true)
+            if (profile.LaunchExperience == LaunchExperience.Ladder && _ladderSchedule?.CanPlay(SelectedLadder) != true)
             {
                 var unavailableMessage = GetLadderUnavailableMessage();
                 LaunchDiagnostics.Log($"Ladder launch blocked: {unavailableMessage}");
@@ -3475,7 +3478,8 @@ public partial class LaunchView : UserControl
             var preparation = await LadderSaveDirectoryService.PrepareAsync(
                 profile.InstallDirectory,
                 ladder.Id,
-                ladder.Name);
+                ladder.Name,
+                preview: _ladderSchedule?.IsPreview(ladder) == true);
             if (preparation.DirectoryPath is null)
             {
                 var message = preparation.ErrorMessage ?? "The ladder save folder could not be prepared.";

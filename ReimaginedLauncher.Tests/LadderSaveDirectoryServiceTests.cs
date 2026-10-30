@@ -303,6 +303,29 @@ public sealed class LadderSaveDirectoryServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task APreviewGetsAFolderOfItsOwnEmptiedOnEveryLaunch()
+    {
+        var installDirectory = CreateInstall("ReimaginedThree", null);
+        WriteLadderMod(installDirectory, "ReimaginedThree");
+        var savedGames = Path.Combine(_testDirectory, "Saved Games");
+        var normalSaves = Path.Combine(savedGames, "Diablo II Resurrected", "mods", "ReimaginedThree");
+        Directory.CreateDirectory(normalSaves);
+        await File.WriteAllTextAsync(Path.Combine(normalSaves, "Settings.json"), "normal settings");
+
+        var preview = await LadderSaveDirectoryService.PrepareAsync(installDirectory, Ladder, "Season 1", savedGames, preview: true);
+        var expected = Path.Combine(savedGames, "Diablo II Resurrected", "mods", "ReimaginedThree-Season-1-d630a3fc9da311f1a936c87f5404bb80-preview");
+        Assert.Equal(expected, preview.DirectoryPath);
+        Assert.Equal("normal settings", await File.ReadAllTextAsync(Path.Combine(expected, "Settings.json")));
+        await File.WriteAllTextAsync(Path.Combine(expected, "Hero.d2s"), "preview character");
+
+        Assert.Equal(expected, (await LadderSaveDirectoryService.PrepareAsync(installDirectory, Ladder, "Season 1", savedGames, preview: true)).DirectoryPath);
+        Assert.False(File.Exists(Path.Combine(expected, "Hero.d2s")));
+
+        var real = await LadderSaveDirectoryService.PrepareAsync(installDirectory, Ladder, "Season 1", savedGames);
+        Assert.Equal(expected[..^"-preview".Length], real.DirectoryPath);
+    }
+
+    [Fact]
     public async Task PreparationIgnoresPackageMetadataWithoutChangingNormalInstallation()
     {
         var installDirectory = CreateInstall("NexusSaves", "OldNexusSaves");

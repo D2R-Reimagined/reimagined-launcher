@@ -77,12 +77,13 @@ public sealed partial class ReimaginedApiHttpClient
             var schedule = await response.Content.ReadFromJsonAsync<LadderScheduleResponse>(JsonOptions, timeout.Token)
                 ?? throw new InvalidDataException("The ladder schedule response was empty.");
             var receivedAt = Stopwatch.GetTimestamp();
-            var available = schedule.Ladders.Where(entry => entry.EndDateUtc > schedule.ServerTimeUtc
-                && entry.StartDateUtc <= schedule.ServerTimeUtc + LadderLaunchSchedule.PreloadWindow).ToArray();
+            var available = schedule.Ladders.Where(entry => entry.IsPreview || (entry.EndDateUtc > schedule.ServerTimeUtc
+                && entry.StartDateUtc <= schedule.ServerTimeUtc + LadderLaunchSchedule.PreloadWindow)).ToArray();
             foreach (var id in _schedulePolicies.Keys.Where(id => !available.Any(entry => entry.Id == id)).ToArray())
                 _schedulePolicies.Remove(id);
             var ladders = new List<LadderResponse>();
             var live = new List<LadderResponse>();
+            var preview = new List<LadderResponse>();
             foreach (var entry in available)
             {
                 if (!_schedulePolicies.TryGetValue(entry.Id, out var cached) || cached.Version != entry.PolicyVersion)
@@ -104,9 +105,10 @@ public sealed partial class ReimaginedApiHttpClient
                 }
                 ladders.Add(cached.Policy);
                 if (entry.IsLive) live.Add(cached.Policy);
+                if (entry.IsPreview) preview.Add(cached.Policy);
             }
             cancellationToken.ThrowIfCancellationRequested();
-            return new LadderLaunchSchedule(ladders, live, schedule.ServerTimeUtc + Stopwatch.GetElapsedTime(receivedAt));
+            return new LadderLaunchSchedule(ladders, live, schedule.ServerTimeUtc + Stopwatch.GetElapsedTime(receivedAt), preview);
         }
         finally { _scheduleGate.Release(); }
     }

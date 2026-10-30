@@ -49,6 +49,32 @@ public sealed class LadderLaunchScheduleTests
     }
 
     [Fact]
+    public void AdminPreviewPlaysBeforeStartOnlyForTheListedBundleAndEndsAtStart()
+    {
+        var ladder = Ladder(Now.AddDays(3));
+        var preview = new LadderLaunchSchedule([ladder], [], Now, [ladder]);
+        Assert.True(preview.IsPreview(ladder));
+        Assert.True(preview.CanPlay(ladder));
+        Assert.False(preview.IsLive(ladder));
+        Assert.Single(preview.Available);
+        Assert.False(new LadderLaunchSchedule([ladder], [], Now).CanPlay(ladder));
+        Assert.False(new LadderLaunchSchedule([ladder], [], Now, [ladder with { StartDateUtc = Now.AddDays(4) }]).CanPlay(ladder));
+
+        var started = Ladder(Now.AddMinutes(-1));
+        Assert.False(new LadderLaunchSchedule([started], [], Now, [started]).CanPlay(started));
+    }
+
+    [Fact]
+    public async Task AdminPreviewFetchesTheDistantLaddersPolicy()
+    {
+        var ladder = Ladder(Now.AddDays(2));
+        using var handler = new ScheduleHandler(ladder) { Preview = true };
+        var schedule = await new ReimaginedApiHttpClient(new HttpClient(handler)).GetLadderLaunchScheduleAsync();
+        Assert.True(schedule.IsPreview(Assert.Single(schedule.Available)));
+        Assert.Equal(new[] { "/ladders/schedule", $"/ladders/{ladder.Id}/client-policy" }, handler.Paths);
+    }
+
+    [Fact]
     public void CountdownRoundsUpAndWaitsForVerificationAtZero()
     {
         Assert.Equal("Starts in 01:00:00", LadderLaunchSchedule.Countdown(Now.AddHours(1), Now));
@@ -170,7 +196,7 @@ public sealed class LadderLaunchScheduleTests
     {
         public List<string> Paths { get; } = [];
         public List<string?> Tokens { get; } = [];
-        public bool Live, FailSchedule, MismatchedVersion, Empty, Hidden;
+        public bool Live, FailSchedule, MismatchedVersion, Empty, Hidden, Preview;
         public string Version = "version-1";
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -183,7 +209,7 @@ public sealed class LadderLaunchScheduleTests
             {
                 Content = path == "/ladders/schedule"
                     ? JsonContent.Create(new LadderScheduleResponse(Now, Empty || (Hidden && request.Headers.Authorization is null) ? [] :
-                        [new(ladder.Id, ladder.Name, ladder.StartDateUtc, ladder.EndDateUtc, Version, Live)]))
+                        [new(ladder.Id, ladder.Name, ladder.StartDateUtc, ladder.EndDateUtc, Version, Live, Preview)]))
                     : JsonContent.Create(ladder)
             };
             response.Headers.Add("X-Ladder-Policy-Version", MismatchedVersion ? "changed" : Version);

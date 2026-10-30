@@ -46,6 +46,13 @@ public static class LadderSaveDirectoryService
     }
 
     /// <summary>
+    /// Ends in "-preview", not the ladder ID, so the registry never takes it for
+    /// the ladder's real folder.
+    /// </summary>
+    public static string BuildPreviewSavePath(Guid ladderId, string? ladderName) =>
+        BuildLadderSavePath(ladderId, ladderName) + "-preview";
+
+    /// <summary>
     /// Turns a ladder name into a safe folder fragment. Apostrophes are dropped
     /// rather than replaced so "Ben's" reads as "Bens", not "Ben-s"; every other
     /// run of non-alphanumerics collapses to a single dash.
@@ -99,13 +106,19 @@ public static class LadderSaveDirectoryService
     /// own save folder and seeds it with the player's settings and loot filters.
     /// Returns the resolved ladder save directory or an actionable failure message.
     /// </summary>
+    /// <param name="preview">
+    /// An admin preview of a ladder that has not started: D2R gets a folder of
+    /// its own, emptied on every launch, so nothing played there is mistaken
+    /// for - or offered to the server as - a character on the real ladder.
+    /// </param>
     public static Task<LadderSavePreparationResult> PrepareAsync(
         string? installDirectory,
         Guid ladderId,
         string? ladderName,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool preview = false)
     {
-        return PrepareAsync(installDirectory, ladderId, ladderName, null, cancellationToken);
+        return PrepareAsync(installDirectory, ladderId, ladderName, null, cancellationToken, preview);
     }
 
     internal static async Task<LadderSavePreparationResult> PrepareAsync(
@@ -113,7 +126,8 @@ public static class LadderSaveDirectoryService
         Guid ladderId,
         string? ladderName,
         string? savedGamesPath,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool preview = false)
     {
         var normalizedInstallDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(installDirectory);
         try
@@ -134,8 +148,11 @@ public static class LadderSaveDirectoryService
             }
 
             var modsDirectory = Path.GetDirectoryName(defaultSaveDirectory)!;
-            var ladderSavePath = LadderSavePathRegistry.GetOrCreate(modsDirectory, ladderId, ladderName);
+            var ladderSavePath = preview
+                ? BuildPreviewSavePath(ladderId, ladderName)
+                : LadderSavePathRegistry.GetOrCreate(modsDirectory, ladderId, ladderName);
             var ladderDirectory = Path.Combine(modsDirectory, ladderSavePath);
+            if (preview && Directory.Exists(ladderDirectory)) Directory.Delete(ladderDirectory, recursive: true);
             Directory.CreateDirectory(ladderDirectory);
             SeedPlayerPreferences(defaultSaveDirectory, ladderDirectory);
             if (!await WriteSavePathAsync(modInfoPath, ladderSavePath, cancellationToken))
