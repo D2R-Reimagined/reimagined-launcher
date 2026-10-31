@@ -260,7 +260,7 @@ public static class PluginsService
 
         try
         {
-            ZipFile.ExtractToDirectory(zipPath, tempDirectory, overwriteFiles: true);
+            ZipFileService.ExtractToDirectory(zipPath, tempDirectory, overwriteFiles: true);
 
             var pluginInfoPaths = Directory.GetFiles(tempDirectory, PluginInfoFileName, SearchOption.AllDirectories);
             if (pluginInfoPaths.Length == 0)
@@ -346,7 +346,7 @@ public static class PluginsService
 
         try
         {
-            ZipFile.ExtractToDirectory(zipPath, tempDirectory, overwriteFiles: true);
+            ZipFileService.ExtractToDirectory(zipPath, tempDirectory, overwriteFiles: true);
 
             var pluginInfoPaths = Directory.GetFiles(tempDirectory, PluginInfoFileName, SearchOption.AllDirectories);
             if (pluginInfoPaths.Length == 0)

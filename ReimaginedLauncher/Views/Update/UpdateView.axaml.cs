@@ -374,7 +374,7 @@ public partial class UpdateView : UserControl
                 {
                     tempDir = Path.Combine(Path.GetTempPath(), $"d2rmm_extract_{Guid.NewGuid():N}");
                     Directory.CreateDirectory(tempDir);
-                    ZipFile.ExtractToDirectory(zipPath, tempDir);
+                    ZipFileService.ExtractToDirectory(zipPath, tempDir);
 
                     var sourceMpqDir = ResolveSourceModFolder(tempDir);
 
@@ -451,7 +451,7 @@ public partial class UpdateView : UserControl
                         Directory.Delete(modDir, recursive: true);
                     }
 
-                    ZipFile.ExtractToDirectory(zipPath, installDirectory, overwriteFiles: true);
+                    ZipFileService.ExtractToDirectory(zipPath, installDirectory, overwriteFiles: true);
                 }
                 finally
                 {
