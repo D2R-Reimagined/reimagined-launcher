@@ -99,7 +99,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
     [InlineData(SaveConversionState.Unresolved, SaveForceKind.Force, false)]
     [InlineData(SaveConversionState.Unresolved, null, false)]
     [InlineData(SaveConversionState.AlreadyCompatible, null, false)]
-    [InlineData(SaveConversionState.AlreadyCompatible, SaveForceKind.ChooseSourceLayout, false)]
+    [InlineData(SaveConversionState.AlreadyCompatible, SaveForceKind.ChooseSourceLayout, true)]
     [InlineData(SaveConversionState.Blocked, null, false)]
     [InlineData(SaveConversionState.Experimental, SaveForceKind.Force, false)]
     [InlineData(SaveConversionState.Experimental, SaveForceKind.ChooseSourceLayout, false)]
@@ -481,9 +481,11 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.Equal(SaveForceKind.ChooseSourceLayout, plan.ForceOption?.Kind);
         Assert.Contains(source.Label, plan.ForceOption!.SourceLayouts);
         Assert.Contains("recoverable historical interpretation", plan.Operation);
+        Assert.True(SaveConversionService.NeedsConversion(plan));
         var row = new SaveConversionRowViewModel(plan, service.CheckRename);
-        Assert.Null(row.SelectedSourceChoice?.Layout);
-        Assert.Equal(source.Label, row.SourceChoices[1].Layout);
+        Assert.Equal(source.Label, row.SelectedSourceChoice?.Layout);
+        Assert.Null(row.SourceChoices[^1].Layout);
+        Assert.False(row.IsSelected);
 
         var chosen = service.Plan(path, Path.Combine(StagingDirectory, "chosen"),
             new MigrationOverrides(Force: true, SourceLayout: source.Label));

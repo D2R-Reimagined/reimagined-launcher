@@ -52,8 +52,8 @@ public class SaveConversionRowViewModel : INotifyPropertyChanged
                     ForceOption: { Kind: SaveForceKind.ChooseSourceLayout, TargetAlsoFits: true } option
                 } =>
                 [
-                    new SaveSourceChoice(null, $"{plan.TargetLabel} (target parse)"),
-                    .. option.SourceLayouts.Select(layout => new SaveSourceChoice(layout, layout))
+                    .. option.SourceLayouts.Select(layout => new SaveSourceChoice(layout, layout)),
+                    new SaveSourceChoice(null, $"{plan.TargetLabel} (target parse)")
                 ],
             _ => []
         };

@@ -30,9 +30,10 @@ public sealed class SaveCheckpointTests
         var encoding = Assert.Single(registry.StatEncodings);
         var path = registry.PathOf(encoding);
         var fixturePath = Path.Combine(SaveMigrationFixtures.InstalledDirectory, "itemstatcost.txt");
-        var expected = File.ReadAllLines(fixturePath);
+        // The release appends stats after the 442 development rows; the *ID comment column is ignored.
+        var expected = File.ReadAllLines(fixturePath)[..443];
         (expected[367], expected[433]) = (expected[433], expected[367]);
-        Assert.Equal(expected, File.ReadAllLines(path));
+        Assert.Equal(expected.Select(WithoutCommentId), File.ReadAllLines(path).Select(WithoutCommentId));
 
         var stats = TableSchema.Extract(TableKind.ItemStatCost, TableSnapshot.Load(path));
         Assert.Equal(442, stats.Count);
@@ -42,6 +43,13 @@ public sealed class SaveCheckpointTests
         Assert.Equal("16", stats[78].Field("Save Bits"));
         Assert.Equal(["lab_boss_kill", "lab_kill_dummy", "lab_kill_display", "extra_stbounce"],
             stats.Skip(438).Select(stat => stat.Key));
+    }
+
+    private static string WithoutCommentId(string line)
+    {
+        var cells = line.Split('\t');
+        cells[1] = string.Empty;
+        return string.Join('\t', cells);
     }
 
     [Fact]
