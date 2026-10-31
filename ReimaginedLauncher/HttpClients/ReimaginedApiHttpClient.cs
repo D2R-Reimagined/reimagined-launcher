@@ -192,6 +192,74 @@ public sealed partial class ReimaginedApiHttpClient
         }
     }
 
+    /// <summary>The bundle's signed manifest, byte for byte; the caller verifies it.</summary>
+    public async Task<byte[]> GetLadderBundleManifestAsync(
+        LadderBundleResponse bundle,
+        CancellationToken cancellationToken = default)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromMinutes(1));
+        using var request = new HttpRequestMessage(HttpMethod.Get, FilesUri(bundle, "manifest"));
+        await AuthorizeAsync(request, timeout.Token);
+        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+        response.EnsureSuccessStatusCode();
+        await using var body = await response.Content.ReadAsStreamAsync(timeout.Token);
+        using var output = new MemoryStream();
+        var buffer = new byte[81920];
+        int read;
+        while ((read = await body.ReadAsync(buffer, timeout.Token)) > 0)
+        {
+            if (output.Length + read > LadderBundleFileDownloader.MaxManifestBytes)
+                throw new InvalidDataException("The ladder bundle manifest exceeds its allowed size.");
+            output.Write(buffer, 0, read);
+        }
+
+        return output.ToArray();
+    }
+
+    /// <summary>One download URL per requested file, asked for in a single call.</summary>
+    public async Task<IReadOnlyList<LadderBundleFileLink>> GetLadderBundleFileLinksAsync(
+        LadderBundleResponse bundle,
+        IReadOnlyList<string> sha256,
+        CancellationToken cancellationToken = default)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromMinutes(1));
+        using var request = new HttpRequestMessage(HttpMethod.Post, FilesUri(bundle, null))
+        {
+            Content = JsonContent.Create(new { sha256 }, options: JsonOptions)
+        };
+        await AuthorizeAsync(request, timeout.Token);
+        using var response = await _httpClient.SendAsync(request, timeout.Token);
+        response.EnsureSuccessStatusCode();
+        var links = await response.Content.ReadFromJsonAsync<LadderBundleFileLinksResponse>(JsonOptions, timeout.Token)
+            ?? throw new InvalidDataException("The ladder bundle file list response was empty.");
+        return links.Files;
+    }
+
+    /// <summary>
+    /// Fetches one file object into <paramref name="destination"/>, inflated and
+    /// checked against <paramref name="sha256"/>.
+    /// </summary>
+    public async Task DownloadLadderBundleFileAsync(
+        LadderBundleFileLink link,
+        long sizeBytes,
+        string destination,
+        Action<long>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        var accessToken = AccessTokenProvider is null ? null : await AccessTokenProvider(cancellationToken);
+        await new LadderBundleFileDownloader(_httpClient, accessToken)
+            .DownloadAsync(link.Url, link.Sha256, sizeBytes, destination, progress, cancellationToken);
+    }
+
+    private static string FilesUri(LadderBundleResponse bundle, string? leaf)
+    {
+        var path = bundle.FilesPath?.Trim().TrimStart('/').TrimEnd('/')
+            ?? throw new InvalidOperationException("This ladder bundle has no per-file downloads.");
+        return leaf is null ? path : path + "/" + leaf;
+    }
+
     public async Task<byte[]> DownloadOptionalExtensionAsync(
         Guid ladderId,
         LadderAllowedExtensionResponse extension,
