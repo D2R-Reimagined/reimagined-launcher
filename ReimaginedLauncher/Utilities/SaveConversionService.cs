@@ -305,12 +305,17 @@ public sealed class SaveConversionService
         : [];
 
     /// <summary>
-    /// A file the automatic prompt reports: verified conversions, and unresolved files that only need a source choice.
+    /// A file the automatic prompt reports: verified conversions, and files that only need a source choice, including
+    /// saves that also parse as the target but migrate differently from a historical layout (e.g. classic or non-Warlock saves).
     /// Files that would need experimental Force Conversion are left to the manual conversion window.
     /// </summary>
     public static bool NeedsConversion(SaveConversionPlan plan) =>
         plan.State is SaveConversionState.Verified or SaveConversionState.VerifiedWithWarnings
-        || plan is { State: SaveConversionState.Unresolved, ForceOption.Kind: SaveForceKind.ChooseSourceLayout };
+        || plan is
+        {
+            State: SaveConversionState.Unresolved or SaveConversionState.AlreadyCompatible,
+            ForceOption.Kind: SaveForceKind.ChooseSourceLayout
+        };
 
     internal static string AutomaticPromptKey(InstallationProfile profile, string saveDirectory,
         string targetFingerprint) =>
