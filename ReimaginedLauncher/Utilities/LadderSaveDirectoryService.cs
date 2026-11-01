@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -24,7 +25,7 @@ public sealed record LadderSavePreparationResult(string? DirectoryPath, string? 
 public static class LadderSaveDirectoryService
 {
     /// <summary>Longest slug taken from a ladder's name, before the id suffix.</summary>
-    private const int MaxSlugLength = 40;
+    private const int MaxSlugLength = 24;
 
     /// <summary>
     /// Files that describe how the player likes to play rather than who their
@@ -36,12 +37,18 @@ public static class LadderSaveDirectoryService
     private static readonly string[] CarriedPatterns = ["*.fltr"];
 
     /// <summary>
-    /// New folders use the full ladder ID; existing folder names are kept by the registry.
+    /// Folder name for one ladder, e.g. "ReimaginedThree-Bens-Bitchin-HC-Ladder-d630a3fc".
+    /// Uses the 8-character ladder ID prefix so nested plugin files stay within Windows MAX_PATH;
+    /// the registry falls back to the full ID only if another ladder claims the same short ID.
     /// </summary>
-    public static string BuildLadderSavePath(Guid ladderId, string? ladderName)
+    public static string BuildLadderSavePath(Guid ladderId, string? ladderName) =>
+        BuildLadderSavePath(ladderId, ladderName, useFullId: false);
+
+    internal static string BuildLadderSavePath(Guid ladderId, string? ladderName, bool useFullId)
     {
         var slug = Slugify(ladderName);
-        var suffix = ladderId.ToString("N");
+        var id = ladderId.ToString("N");
+        var suffix = useFullId ? id : id[..8];
         return slug.Length == 0 ? $"ReimaginedThree-{suffix}" : $"ReimaginedThree-{slug}-{suffix}";
     }
 
@@ -161,6 +168,7 @@ public static class LadderSaveDirectoryService
             var ladderDirectory = Path.Combine(modsDirectory, ladderSavePath);
             if (preview && Directory.Exists(ladderDirectory)) Directory.Delete(ladderDirectory, recursive: true);
             Directory.CreateDirectory(ladderDirectory);
+            ShortenRejectedSnapshotPaths(ladderDirectory);
             SeedPlayerPreferences(defaultSaveDirectory, ladderDirectory);
             if (!await WriteSavePathAsync(modInfoPath, ladderSavePath, cancellationToken))
             {
@@ -175,6 +183,111 @@ public static class LadderSaveDirectoryService
             LaunchDiagnostics.LogException("ladder saves: could not prepare the ladder save folder", exception);
             return new LadderSavePreparationResult(null, $"The ladder save folder could not be prepared: {exception.Message}");
         }
+    }
+
+    /// <summary>
+    /// Shortens over-length 64-character hex folder and file names written by
+    /// server-saves under <c>.server-saves/rejected-snapshots</c> so paths inside
+    /// the ladder save directory stay below Windows MAX_PATH (260 characters).
+    /// </summary>
+    internal static void ShortenRejectedSnapshotPaths(string ladderDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(ladderDirectory)) return;
+
+        var rejectedRoot = ToExtendedPath(Path.Combine(ladderDirectory, ".server-saves", "rejected-snapshots"));
+        if (!Directory.Exists(rejectedRoot)) return;
+
+        try
+        {
+            foreach (var directory in Directory.GetDirectories(rejectedRoot))
+            {
+                ShortenRejectedSnapshotFilesInDirectory(directory);
+
+                var directoryName = Path.GetFileName(directory);
+                if (!IsHex64(directoryName)) continue;
+
+                var shortDirectory = Path.Combine(rejectedRoot, directoryName[..8]);
+                if (!Directory.Exists(shortDirectory))
+                {
+                    Directory.Move(directory, shortDirectory);
+                    continue;
+                }
+
+                foreach (var file in Directory.GetFiles(directory))
+                {
+                    var destination = Path.Combine(shortDirectory, Path.GetFileName(file));
+                    if (!File.Exists(destination))
+                    {
+                        File.Move(file, destination);
+                    }
+                }
+
+                if (!Directory.EnumerateFileSystemEntries(directory).Any())
+                {
+                    Directory.Delete(directory, recursive: false);
+                }
+            }
+
+            ShortenRejectedSnapshotFilesInDirectory(rejectedRoot);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            LaunchDiagnostics.Log($"ladder saves: could not shorten rejected snapshot paths: {exception.Message}");
+        }
+    }
+
+    private static void ShortenRejectedSnapshotFilesInDirectory(string directory)
+    {
+        foreach (var file in Directory.GetFiles(directory))
+        {
+            var fileName = Path.GetFileName(file);
+            var shortFileName = ShortenSnapshotFileName(fileName);
+            if (string.Equals(fileName, shortFileName, StringComparison.Ordinal)) continue;
+
+            var destination = Path.Combine(directory, shortFileName);
+            if (!File.Exists(destination))
+            {
+                File.Move(file, destination);
+            }
+        }
+    }
+
+    internal static string ShortenSnapshotFileName(string fileName)
+    {
+        const string prefix = "snapshot-";
+        if (!fileName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            || fileName.Length <= prefix.Length + 64
+            || fileName[prefix.Length + 64] != '.'
+            || !IsHex64(fileName.AsSpan(prefix.Length, 64)))
+        {
+            return fileName;
+        }
+
+        return string.Concat(fileName.AsSpan(0, prefix.Length + 8), fileName.AsSpan(prefix.Length + 64));
+    }
+
+    private static bool IsHex64(ReadOnlySpan<char> value)
+    {
+        if (value.Length != 64) return false;
+        foreach (var character in value)
+        {
+            if (!char.IsAsciiHexDigit(character)) return false;
+        }
+
+        return true;
+    }
+
+    internal static string ToExtendedPath(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        if (!OperatingSystem.IsWindows() || fullPath.StartsWith(@"\\?\", StringComparison.Ordinal))
+        {
+            return fullPath;
+        }
+
+        return fullPath.StartsWith(@"\\", StringComparison.Ordinal)
+            ? string.Concat(@"\\?\UNC\", fullPath.AsSpan(2))
+            : @"\\?\" + fullPath;
     }
 
     private static LadderSavePreparationResult PreparationFailed(string message)

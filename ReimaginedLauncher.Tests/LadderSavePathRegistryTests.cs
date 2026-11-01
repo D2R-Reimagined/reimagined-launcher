@@ -13,8 +13,27 @@ public sealed class LadderSavePathRegistryTests : IDisposable
     public void FirstChoicePersistsAcrossRenameEvenBeforeFolderCreation()
     {
         var first = LadderSavePathRegistry.GetOrCreate(_mods, Ladder, "First Name");
-        Assert.Equal("ReimaginedThree-First-Name-" + Ladder.ToString("N"), first);
+        Assert.Equal("ReimaginedThree-First-Name-" + Ladder.ToString("N")[..8], first);
         Assert.Equal(first, LadderSavePathRegistry.GetOrCreate(_mods, Ladder, "New Name"));
+    }
+
+    [Fact]
+    public void ExistingFullIdRegistryEntryMigratesToShortIdOnNextLookup()
+    {
+        var fullFolder = "ReimaginedThree-First-Name-" + Ladder.ToString("N");
+        var fullDirectory = Path.Combine(_mods, fullFolder);
+        Directory.CreateDirectory(fullDirectory);
+        File.WriteAllText(Path.Combine(fullDirectory, "Hero.d2s"), "character");
+
+        var registryFile = LadderSavePathRegistry.RegistryPath(_mods);
+        Directory.CreateDirectory(Path.GetDirectoryName(registryFile)!);
+        File.WriteAllText(registryFile, JsonSerializer.Serialize(new Dictionary<Guid, string> { [Ladder] = fullFolder }));
+
+        var resolved = LadderSavePathRegistry.GetOrCreate(_mods, Ladder, "New Name");
+        var expected = "ReimaginedThree-First-Name-" + Ladder.ToString("N")[..8];
+        Assert.Equal(expected, resolved);
+        Assert.False(Directory.Exists(fullDirectory));
+        Assert.Equal("character", File.ReadAllText(Path.Combine(_mods, expected, "Hero.d2s")));
     }
 
     [Fact]
