@@ -17,7 +17,7 @@ public sealed class LocalPluginInstallTests : IDisposable
     private string Zip(params (string Name, string Content)[] entries)
     {
         var path = Path.Combine(directory, Guid.NewGuid().ToString("N") + ".zip");
-        using var zip = ZipFile.Open(path, ZipArchiveMode.Create);
+        using var zip = ZipFileService.Open(path, ZipArchiveMode.Create);
         foreach (var entry in entries) { using var writer = new StreamWriter(zip.CreateEntry(entry.Name).Open()); writer.Write(entry.Content); }
         return path;
     }

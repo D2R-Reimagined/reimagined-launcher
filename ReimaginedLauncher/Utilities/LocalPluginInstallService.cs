@@ -67,7 +67,7 @@ internal static class LocalPluginInstallService
         }
         else if (Path.GetExtension(file).Equals(".zip", StringComparison.OrdinalIgnoreCase))
         {
-            using var archive = ZipFile.OpenRead(file);
+            using var archive = ZipFileService.OpenRead(file);
             if (archive.Entries.Count > 2048) throw new InvalidDataException("The package contains too many files.");
             var primaryDllStem = archive.Entries
                 .Where(entry => !string.IsNullOrEmpty(entry.Name) && Path.GetExtension(entry.Name).Equals(".dll", StringComparison.OrdinalIgnoreCase))

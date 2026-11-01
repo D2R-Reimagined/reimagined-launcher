@@ -413,7 +413,7 @@ public sealed class D2RLoaderInstallerService
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
 
-        using var archive = ZipFile.OpenRead(archivePath);
+        using var archive = ZipFileService.OpenRead(archivePath);
         foreach (var entry in archive.Entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
