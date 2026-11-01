@@ -19,7 +19,7 @@ public static class ZipFileService
         string destinationDirectoryName,
         bool overwriteFiles)
     {
-        ZipFile.ExtractToDirectory(sourceArchiveFileName, destinationDirectoryName, overwriteFiles: true);
+        ZipFile.ExtractToDirectory(sourceArchiveFileName, destinationDirectoryName, overwriteFiles);
         ResetPermissions(destinationDirectoryName);
     }
 
