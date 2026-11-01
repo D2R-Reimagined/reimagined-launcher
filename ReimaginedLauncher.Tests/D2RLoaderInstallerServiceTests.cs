@@ -46,6 +46,32 @@ public sealed class D2RLoaderInstallerServiceTests : IDisposable
     }
 
     [Fact]
+    public void InstallerIgnoresReadOnlyUnixPermissionsStoredInTheArchive()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var archivePath = CreateArchive(
+            ("D2RLoader.exe", "loader"),
+            ("D2RCore.dll", "core"));
+        using (var archive = ZipFile.Open(archivePath, ZipArchiveMode.Update))
+        {
+            foreach (var entry in archive.Entries)
+            {
+                entry.ExternalAttributes = unchecked((int)(0x8124u << 16));
+            }
+        }
+        var stagingDirectory = Path.Combine(_testDirectory, "staging");
+        var installDirectory = Path.Combine(_testDirectory, "install");
+
+        D2RLoaderInstallerService.ExtractArchive(archivePath, stagingDirectory);
+        D2RLoaderInstallerService.InstallExtractedFiles(stagingDirectory, installDirectory);
+
+        var expected = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        Assert.Equal(expected, File.GetUnixFileMode(Path.Combine(stagingDirectory, "D2RCore.dll")) & expected);
+        Assert.Equal(expected, File.GetUnixFileMode(Path.Combine(installDirectory, "D2RCore.dll")) & expected);
+        Assert.Equal("core", File.ReadAllText(Path.Combine(installDirectory, "D2RCore.dll")));
+    }
+
+    [Fact]
     public void ExtractArchiveRejectsPathsOutsideTheStagingDirectory()
     {
         var archivePath = CreateArchive(

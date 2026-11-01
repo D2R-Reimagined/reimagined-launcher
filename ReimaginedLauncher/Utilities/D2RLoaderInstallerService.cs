@@ -413,6 +413,7 @@ public sealed class D2RLoaderInstallerService
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
 
+        ZipPermissionSanitizer.StripUnixPermissions(archivePath);
         using var archive = ZipFile.OpenRead(archivePath);
         foreach (var entry in archive.Entries)
         {

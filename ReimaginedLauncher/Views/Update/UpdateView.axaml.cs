@@ -362,6 +362,8 @@ public partial class UpdateView : UserControl
             return;
         }
 
+        ZipPermissionSanitizer.StripUnixPermissions(zipPath);
+
         SetInstallProgress("Installing...", "Extracting and installing mod files. Please wait.");
 
         var profile = MainWindow.Settings.CurrentProfile;
