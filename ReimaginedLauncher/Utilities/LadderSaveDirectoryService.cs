@@ -215,11 +215,7 @@ public static class LadderSaveDirectoryService
 
                 foreach (var file in Directory.GetFiles(directory))
                 {
-                    var destination = Path.Combine(shortDirectory, Path.GetFileName(file));
-                    if (!File.Exists(destination))
-                    {
-                        File.Move(file, destination);
-                    }
+                    MoveFileWithoutCollision(file, shortDirectory, Path.GetFileName(file));
                 }
 
                 if (!Directory.EnumerateFileSystemEntries(directory).Any())
@@ -244,10 +240,28 @@ public static class LadderSaveDirectoryService
             var shortFileName = ShortenSnapshotFileName(fileName);
             if (string.Equals(fileName, shortFileName, StringComparison.Ordinal)) continue;
 
-            var destination = Path.Combine(directory, shortFileName);
-            if (!File.Exists(destination))
+            MoveFileWithoutCollision(file, directory, shortFileName);
+        }
+    }
+
+    private static void MoveFileWithoutCollision(string sourcePath, string destinationDirectory, string preferredFileName)
+    {
+        var destination = Path.Combine(destinationDirectory, preferredFileName);
+        if (!File.Exists(destination))
+        {
+            File.Move(sourcePath, destination);
+            return;
+        }
+
+        var stem = Path.GetFileNameWithoutExtension(preferredFileName);
+        var extension = Path.GetExtension(preferredFileName);
+        for (var index = 2; ; index++)
+        {
+            var candidate = Path.Combine(destinationDirectory, $"{stem}-{index}{extension}");
+            if (!File.Exists(candidate))
             {
-                File.Move(file, destination);
+                File.Move(sourcePath, candidate);
+                return;
             }
         }
     }

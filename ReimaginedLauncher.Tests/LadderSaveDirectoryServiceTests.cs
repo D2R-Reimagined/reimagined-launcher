@@ -453,6 +453,42 @@ public sealed class LadderSaveDirectoryServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ShortenRejectedSnapshotPathsPreservesCollidingShortPrefixesWithoutDataLoss()
+    {
+        const string folderOne = "d539ea8fb839d77da258d72c56218d3c6debcf2e0477ffa9550a88c0e9bbba78";
+        const string folderTwo = "d539ea8f11111111111111111111111111111111111111111111111111111111";
+        const string snapshotOne = "snapshot-f709a0a9ab46c7df4df9027ad662e2bbda7695a573e4762df5590b86465ae006.json";
+        const string snapshotTwo = "snapshot-f709a0a922222222222222222222222222222222222222222222222222222222.json";
+
+        var ladderDirectory = Path.Combine(_testDirectory, "ReimaginedThree-Hallowing-Ladder-0b9a2bb3");
+        var rejectedRoot = Path.Combine(ladderDirectory, ".server-saves", "rejected-snapshots");
+        var dirOne = LadderSaveDirectoryService.ToExtendedPath(Path.Combine(rejectedRoot, folderOne));
+        var dirTwo = LadderSaveDirectoryService.ToExtendedPath(Path.Combine(rejectedRoot, folderTwo));
+        Directory.CreateDirectory(dirOne);
+        Directory.CreateDirectory(dirTwo);
+
+        await File.WriteAllTextAsync(Path.Combine(dirOne, snapshotOne), "{\"operationId\":\"one\"}");
+        await File.WriteAllTextAsync(Path.Combine(dirOne, snapshotTwo), "{\"operationId\":\"two\"}");
+        await File.WriteAllTextAsync(Path.Combine(dirTwo, snapshotOne), "{\"operationId\":\"three\"}");
+
+        LadderSaveDirectoryService.ShortenRejectedSnapshotPaths(ladderDirectory);
+
+        Assert.False(Directory.Exists(dirOne));
+        Assert.False(Directory.Exists(dirTwo));
+
+        var shortDir = Path.Combine(rejectedRoot, "d539ea8f");
+        Assert.True(Directory.Exists(shortDir));
+
+        var contents = new HashSet<string>
+        {
+            await File.ReadAllTextAsync(Path.Combine(shortDir, "snapshot-f709a0a9.json")),
+            await File.ReadAllTextAsync(Path.Combine(shortDir, "snapshot-f709a0a9-2.json")),
+            await File.ReadAllTextAsync(Path.Combine(shortDir, "snapshot-f709a0a9-3.json"))
+        };
+        Assert.Equal(new HashSet<string> { "{\"operationId\":\"one\"}", "{\"operationId\":\"two\"}", "{\"operationId\":\"three\"}" }, contents);
+    }
+
+    [Fact]
     public async Task PreparationReportsTheUnderlyingFolderFailureWithoutApplyingALadderRedirect()
     {
         var installDirectory = CreateInstall("ReimaginedThree", null);

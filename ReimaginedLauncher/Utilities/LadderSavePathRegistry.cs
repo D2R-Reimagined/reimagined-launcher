@@ -109,6 +109,26 @@ internal static class LadderSavePathRegistry
         var newDirectory = Path.Combine(modsDirectory, NormalizeSeparators(candidate));
         if (Directory.Exists(newDirectory))
         {
+            if (!Directory.Exists(oldDirectory))
+            {
+                shortenedPath = candidate;
+                return true;
+            }
+
+            if (!Directory.EnumerateFileSystemEntries(LadderSaveDirectoryService.ToExtendedPath(oldDirectory)).Any())
+            {
+                try
+                {
+                    Directory.Delete(LadderSaveDirectoryService.ToExtendedPath(oldDirectory), recursive: false);
+                    shortenedPath = candidate;
+                    return true;
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    return false;
+                }
+            }
+
             return false;
         }
 
