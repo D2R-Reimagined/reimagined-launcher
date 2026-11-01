@@ -42,7 +42,7 @@ public sealed class LadderSaveDirectoryServiceTests : IDisposable
     {
         var slug = LadderSaveDirectoryService.Slugify(new string('a', 500));
 
-        Assert.True(slug.Length <= 40, $"slug was {slug.Length} characters");
+        Assert.True(slug.Length <= 24, $"slug was {slug.Length} characters");
     }
 
     [Fact]
@@ -50,7 +50,7 @@ public sealed class LadderSaveDirectoryServiceTests : IDisposable
     {
         var path = LadderSaveDirectoryService.BuildLadderSavePath(Ladder, "Ben's Bitchin HC Ladder");
 
-        Assert.Equal("ReimaginedThree-Bens-Bitchin-HC-Ladder-d630a3fc9da311f1a936c87f5404bb80", path);
+        Assert.Equal("ReimaginedThree-Bens-Bitchin-HC-Ladder-d630a3fc", path);
     }
 
     [Fact]
@@ -67,7 +67,7 @@ public sealed class LadderSaveDirectoryServiceTests : IDisposable
     {
         var path = LadderSaveDirectoryService.BuildLadderSavePath(Ladder, "!!!");
 
-        Assert.Equal("ReimaginedThree-d630a3fc9da311f1a936c87f5404bb80", path);
+        Assert.Equal("ReimaginedThree-d630a3fc", path);
     }
 
     [Fact]
@@ -239,7 +239,7 @@ public sealed class LadderSaveDirectoryServiceTests : IDisposable
     [Fact]
     public async Task FullLadderIdsAreNotAcceptedAsNormalSavePaths()
     {
-        var install = CreateInstall(LadderSaveDirectoryService.BuildLadderSavePath(Ladder, "Test"), null);
+        var install = CreateInstall(LadderSaveDirectoryService.BuildLadderSavePath(Ladder, "Test", useFullId: true), null);
         Assert.False(await LadderSaveDirectoryService.RestoreIfRedirectedAsync(install));
     }
 
@@ -289,7 +289,7 @@ public sealed class LadderSaveDirectoryServiceTests : IDisposable
         await File.WriteAllTextAsync(Path.Combine(normalSaves, "Hero.d2s"), "local character");
         await File.WriteAllTextAsync(Path.Combine(normalSaves, "Settings.json"), "normal settings");
         var result = await LadderSaveDirectoryService.PrepareAsync(installDirectory, Ladder, "Season 1", savedGames);
-        var expected = Path.Combine(savedGames, "Diablo II Resurrected", "mods", "ReimaginedThree-Season-1-d630a3fc9da311f1a936c87f5404bb80");
+        var expected = Path.Combine(savedGames, "Diablo II Resurrected", "mods", "ReimaginedThree-Season-1-d630a3fc");
         Assert.Null(result.ErrorMessage);
         Assert.Equal(expected, result.DirectoryPath);
         Assert.Equal("Old-Ladder-aaaaaaaa", ReadCurrentSavePath(installDirectory));
@@ -315,7 +315,7 @@ public sealed class LadderSaveDirectoryServiceTests : IDisposable
         var mods = Path.Combine(savedGames, "Diablo II Resurrected", "mods");
         var preview = await LadderSaveDirectoryService.PrepareAsync(installDirectory, Ladder, "Season 1", savedGames, preview: true);
         // Ending in the ladder ID is what server-saves checks before it will run.
-        var expected = Path.Combine(mods, "ReimaginedPreview-Season-1-d630a3fc9da311f1a936c87f5404bb80");
+        var expected = Path.Combine(mods, "ReimaginedPreview-Season-1-d630a3fc");
         Assert.Equal(expected, preview.DirectoryPath);
         Assert.Equal("normal settings", await File.ReadAllTextAsync(Path.Combine(expected, "Settings.json")));
         await File.WriteAllTextAsync(Path.Combine(expected, "Hero.d2s"), "preview character");
@@ -325,7 +325,7 @@ public sealed class LadderSaveDirectoryServiceTests : IDisposable
 
         // The ladder's first real launch must not adopt the preview folder it finds.
         var real = await LadderSaveDirectoryService.PrepareAsync(installDirectory, Ladder, "Season 1", savedGames);
-        Assert.Equal(Path.Combine(mods, "ReimaginedThree-Season-1-d630a3fc9da311f1a936c87f5404bb80"), real.DirectoryPath);
+        Assert.Equal(Path.Combine(mods, "ReimaginedThree-Season-1-d630a3fc"), real.DirectoryPath);
     }
 
     [Fact]
@@ -336,7 +336,7 @@ public sealed class LadderSaveDirectoryServiceTests : IDisposable
         var result = await LadderSaveDirectoryService.PrepareAsync(
             installDirectory, Ladder, "Season 1", Path.Combine(_testDirectory, "Saved Games"));
         Assert.Null(result.ErrorMessage);
-        Assert.EndsWith("ReimaginedThree-Season-1-d630a3fc9da311f1a936c87f5404bb80", result.DirectoryPath);
+        Assert.EndsWith("ReimaginedThree-Season-1-d630a3fc", result.DirectoryPath);
         Assert.True(await LadderSaveDirectoryService.RestoreAsync(installDirectory));
         Assert.Equal("NexusSaves", ReadCurrentSavePath(installDirectory));
         Assert.False(NormalModInstallationService.RequiresRecovery(installDirectory));
@@ -362,7 +362,7 @@ public sealed class LadderSaveDirectoryServiceTests : IDisposable
         var result = await LadderSaveDirectoryService.PrepareAsync(installDirectory, Ladder, "Season 1", savedGames);
 
         Assert.Null(result.ErrorMessage);
-        Assert.EndsWith("ReimaginedThree-Season-1-d630a3fc9da311f1a936c87f5404bb80", result.DirectoryPath);
+        Assert.EndsWith("ReimaginedThree-Season-1-d630a3fc", result.DirectoryPath);
         Assert.False(Directory.Exists(NormalModInstallationService.NormalModRoot(installDirectory)));
     }
 
@@ -412,6 +412,80 @@ public sealed class LadderSaveDirectoryServiceTests : IDisposable
         Assert.Equal("existing character", await File.ReadAllTextAsync(Path.Combine(existing, "Hero.d2s")));
         Assert.Equal("existing preferences", await File.ReadAllTextAsync(Path.Combine(existing, "Settings.json")));
         Assert.Contains(folder + "/", await File.ReadAllTextAsync(modInfo));
+    }
+
+    [Fact]
+    public async Task PreparationShortensFullLadderIdFolderAndRejectedSnapshotPaths()
+    {
+        var ladder = Guid.Parse("0b9a2bb3-07bd-4e29-b485-36e2cf3b09ad");
+        const string longFolder = "ReimaginedThree-Hallowing-Ladder-0b9a2bb307bd4e29b48536e2cf3b09ad";
+        const string shortFolder = "ReimaginedThree-Hallowing-Ladder-0b9a2bb3";
+        const string randomSubfolder = "d539ea8fb839d77da258d72c56218d3c6debcf2e0477ffa9550a88c0e9bbba78";
+        const string snapshotFile = "snapshot-f709a0a9ab46c7df4df9027ad662e2bbda7695a573e4762df5590b86465ae006.json";
+
+        var savedGames = Path.Combine(_testDirectory, "Saved Games");
+        var mods = Path.Combine(savedGames, "Diablo II Resurrected", "mods");
+        var existing = Path.Combine(mods, longFolder);
+        var rejectedDir = LadderSaveDirectoryService.ToExtendedPath(
+            Path.Combine(existing, ".server-saves", "rejected-snapshots", randomSubfolder));
+        Directory.CreateDirectory(rejectedDir);
+        await File.WriteAllTextAsync(Path.Combine(existing, "Hero.d2s"), "existing character");
+        await File.WriteAllTextAsync(Path.Combine(rejectedDir, snapshotFile), "{\"operationId\":\"test\"}");
+
+        var install = CreateInstall("ReimaginedThree", null);
+        WriteLadderMod(install, "ReimaginedThree");
+        var result = await LadderSaveDirectoryService.PrepareAsync(install, ladder, "Hallowing Ladder", savedGames);
+
+        var expectedDirectory = Path.Combine(mods, shortFolder);
+        Assert.Null(result.ErrorMessage);
+        Assert.Equal(expectedDirectory, result.DirectoryPath);
+        Assert.False(Directory.Exists(existing));
+        Assert.Equal("existing character", await File.ReadAllTextAsync(Path.Combine(expectedDirectory, "Hero.d2s")));
+
+        var shortenedSnapshot = Path.Combine(
+            expectedDirectory,
+            ".server-saves",
+            "rejected-snapshots",
+            "d539ea8f",
+            "snapshot-f709a0a9.json");
+        Assert.True(File.Exists(shortenedSnapshot));
+        Assert.Equal("{\"operationId\":\"test\"}", await File.ReadAllTextAsync(shortenedSnapshot));
+    }
+
+    [Fact]
+    public async Task ShortenRejectedSnapshotPathsPreservesCollidingShortPrefixesWithoutDataLoss()
+    {
+        const string folderOne = "d539ea8fb839d77da258d72c56218d3c6debcf2e0477ffa9550a88c0e9bbba78";
+        const string folderTwo = "d539ea8f11111111111111111111111111111111111111111111111111111111";
+        const string snapshotOne = "snapshot-f709a0a9ab46c7df4df9027ad662e2bbda7695a573e4762df5590b86465ae006.json";
+        const string snapshotTwo = "snapshot-f709a0a922222222222222222222222222222222222222222222222222222222.json";
+
+        var ladderDirectory = Path.Combine(_testDirectory, "ReimaginedThree-Hallowing-Ladder-0b9a2bb3");
+        var rejectedRoot = Path.Combine(ladderDirectory, ".server-saves", "rejected-snapshots");
+        var dirOne = LadderSaveDirectoryService.ToExtendedPath(Path.Combine(rejectedRoot, folderOne));
+        var dirTwo = LadderSaveDirectoryService.ToExtendedPath(Path.Combine(rejectedRoot, folderTwo));
+        Directory.CreateDirectory(dirOne);
+        Directory.CreateDirectory(dirTwo);
+
+        await File.WriteAllTextAsync(Path.Combine(dirOne, snapshotOne), "{\"operationId\":\"one\"}");
+        await File.WriteAllTextAsync(Path.Combine(dirOne, snapshotTwo), "{\"operationId\":\"two\"}");
+        await File.WriteAllTextAsync(Path.Combine(dirTwo, snapshotOne), "{\"operationId\":\"three\"}");
+
+        LadderSaveDirectoryService.ShortenRejectedSnapshotPaths(ladderDirectory);
+
+        Assert.False(Directory.Exists(dirOne));
+        Assert.False(Directory.Exists(dirTwo));
+
+        var shortDir = Path.Combine(rejectedRoot, "d539ea8f");
+        Assert.True(Directory.Exists(shortDir));
+
+        var contents = new HashSet<string>
+        {
+            await File.ReadAllTextAsync(Path.Combine(shortDir, "snapshot-f709a0a9.json")),
+            await File.ReadAllTextAsync(Path.Combine(shortDir, "snapshot-f709a0a9-2.json")),
+            await File.ReadAllTextAsync(Path.Combine(shortDir, "snapshot-f709a0a9-3.json"))
+        };
+        Assert.Equal(new HashSet<string> { "{\"operationId\":\"one\"}", "{\"operationId\":\"two\"}", "{\"operationId\":\"three\"}" }, contents);
     }
 
     [Fact]
