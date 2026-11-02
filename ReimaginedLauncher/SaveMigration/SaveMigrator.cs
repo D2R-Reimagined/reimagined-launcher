@@ -24,6 +24,8 @@ public sealed class SaveMigrator
     private const uint SaveMagic = 0xAA55AA55;
     private const int StashTabHeaderSize = 64;
     private const int MaxListedProblems = 5;
+    private const int TeleportNovaStatId = 442;
+    private const int ItemDropOnlyStatId = 443;
 
     // Retail binary versions D2SSharp 0.0.22 is known to read; any other version is only attempted experimentally.
     private static readonly HashSet<uint> SupportedVersions = [97, 98, 99, 105];
@@ -40,19 +42,23 @@ public sealed class SaveMigrator
     private readonly IReadOnlyList<SnapshotComparison> _comparisons;
     private readonly IReadOnlyList<ResolvedIdentityMapping> _identityMappings;
     private readonly IReadOnlyList<SaveDataDefinition> _newerLayouts;
+    private readonly IReadOnlyList<SaveDataDefinition> _targetFailureSources;
 
     /// <param name="newerLayouts">Registered layouts that postdate the target. They are never converted from; a file they explain
     /// better than every source is refused as a downgrade, and one they explain as well is never verified.</param>
+    /// <param name="targetFailureSources">Sources only tried when no other source and not the target can decode the file.</param>
     public SaveMigrator(IReadOnlyList<SaveDataDefinition> sources, SaveDataDefinition target,
         IReadOnlyList<SnapshotComparison> comparisons,
         IReadOnlyList<ResolvedIdentityMapping>? identityMappings = null,
-        IReadOnlyList<SaveDataDefinition>? newerLayouts = null)
+        IReadOnlyList<SaveDataDefinition>? newerLayouts = null,
+        IReadOnlyList<SaveDataDefinition>? targetFailureSources = null)
     {
         _sources = sources;
         _target = target;
         _comparisons = comparisons;
         _identityMappings = identityMappings ?? [];
         _newerLayouts = newerLayouts ?? [];
+        _targetFailureSources = targetFailureSources ?? [];
     }
 
     /// <summary>A migrator from earlier frozen releases and compatible development layouts to the installed game data.</summary>
@@ -128,13 +134,16 @@ public sealed class SaveMigrator
             }
         }
 
-        var comparisons = sources
+        List<SaveDataDefinition> targetFailureSources = ItemDropOnlyAtTeleportNova(installedTarget, targetStats) is { } hotfix
+            ? [hotfix]
+            : [];
+        var comparisons = sources.Concat(targetFailureSources)
             .Select(source => source.ItemTables)
             .DistinctBy(tables => (tables.Label, tables.Directory))
             .Select(tables => TableComparer.Compare(tables, targetTables))
             .ToList();
         return new SaveMigrator(sources, SaveDataDefinition.FromSnapshot(targetTables), comparisons,
-            registry.IdentityMappingsUpTo(targetOrder), newerLayouts);
+            registry.IdentityMappingsUpTo(targetOrder), newerLayouts, targetFailureSources);
 
         SaveDataDefinition Release(SaveCheckpoint checkpoint) => SaveDataDefinition
             .FromSnapshot(Snapshot(checkpoint.Label, checkpoint.Directory))
@@ -151,6 +160,34 @@ public sealed class SaveMigrator
 
             return snapshot;
         }
+    }
+
+    /// <summary>
+    /// The first 3.1.0 download saved item_drop_only at 442; the replacement build inserted teleport_nova there and moved it to 443
+    /// without changing the version. Reading the installed tables with those two rows swapped recovers such saves.
+    /// </summary>
+    private static SaveDataDefinition? ItemDropOnlyAtTeleportNova(InstalledGameData installedTarget,
+        IReadOnlyList<TableDefinition> targetStats)
+    {
+        if (targetStats.Count <= ItemDropOnlyStatId
+            || targetStats[TeleportNovaStatId].Key != "teleport_nova"
+            || targetStats[ItemDropOnlyStatId].Key != "item_drop_only")
+        {
+            return null;
+        }
+
+        var directory = Path.Combine(installedTarget.CopiedDirectory, "stat-encodings", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var lines = File.ReadAllLines(Path.Combine(installedTarget.CopiedDirectory,
+            TableSchema.FileName(TableKind.ItemStatCost)), System.Text.Encoding.Latin1);
+        // Line 0 is the header, so a stat's line is its save id + 1.
+        (lines[TeleportNovaStatId + 1], lines[ItemDropOnlyStatId + 1]) =
+            (lines[ItemDropOnlyStatId + 1], lines[TeleportNovaStatId + 1]);
+        var statPath = Path.Combine(directory, TableSchema.FileName(TableKind.ItemStatCost));
+        File.WriteAllLines(statPath, lines, System.Text.Encoding.Latin1);
+        return SaveDataDefinition.WithFrozenStatEncoding("Installed items with item_drop_only at stat 442", statPath,
+                installedTarget.Snapshot, Path.Combine(directory, "composed"))
+            .WithCharacterVersions([TargetVersion]);
     }
 
     public SaveDataDefinition Target => _target;
@@ -431,6 +468,13 @@ public sealed class SaveMigrator
 
             var inspection = SaveInspector.Inspect(input, owner._sources, owner._comparisons);
             var decoded = Decode(owner._sources, inspection.Attempts, "");
+            if (decoded.Count == 0 && owner._targetFailureSources.Count > 0
+                                   && !SaveInspector.Inspect(input, [Target], []).Attempts[0].Succeeded)
+            {
+                decoded = Decode(owner._targetFailureSources,
+                    SaveInspector.Inspect(input, owner._targetFailureSources, owner._comparisons).Attempts, "");
+            }
+
             if (IsNewerThanTarget(decoded))
             {
                 return null;
