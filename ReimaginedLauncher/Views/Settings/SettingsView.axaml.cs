@@ -63,11 +63,14 @@ public partial class SettingsView : UserControl
         var profile = MainWindow.Settings.CurrentProfile;
         var isD2Rmm = profile.Type == InstallationType.D2RMM;
         var isLutris = profile.Type == InstallationType.Lutris;
-        var isOnline = profile.LaunchExperience == LaunchExperience.Online;
+        var isOnline = GameLauncherService.UsesD2RLoader(profile);
+        var playModeName = profile.LaunchExperience == LaunchExperience.Ladder ? "Ladder" : "Mod+D2RLoader";
         LaunchParametersPanel.IsEnabled = !isD2Rmm;
         D2RmmLaunchParamsNotice.IsVisible = isD2Rmm;
         LutrisLaunchParamsNotice.IsVisible = isLutris;
         OnlineLaunchParamsNotice.IsVisible = !isD2Rmm && isOnline;
+        OnlineLaunchParamsNoticeText.Text =
+            $"Offline-only options (-enablerespec, -resetofflinemaps, -players, and -seed) are saved but not sent to D2RLoader while the {playModeName} play mode is selected.";
         EnableRespecCheckBox.IsEnabled = !isOnline;
         ResetOfflineMapsCheckBox.IsEnabled = !isOnline;
         PlayersComboBox.IsEnabled = !isOnline;
