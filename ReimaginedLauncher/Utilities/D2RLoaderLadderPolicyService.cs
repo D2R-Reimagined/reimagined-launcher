@@ -20,7 +20,8 @@ public sealed record LadderApprovedExtensionState(
     LadderExtensionApproval Approval,
     bool IsInstalled,
     bool IsLadderDisabled,
-    string? Version = null);
+    string? Version = null,
+    string? Author = null);
 
 public sealed record LadderD2RLoaderPolicyPreview(
     IReadOnlyList<LadderApprovedExtensionState> ApprovedExtensions,
@@ -41,16 +42,25 @@ public static partial class D2RLoaderService
         CancellationToken cancellationToken = default)
     {
         var inventory = DiscoverForLadderPolicy(installDirectory);
+        var onlineInventory = Discover(installDirectory, LaunchExperience.Online, includeManualDisabled: true);
         var matches = await MatchApprovalsAsync(inventory.Extensions, approvals, cancellationToken);
         var approvedStates = approvals
             .Select(approval =>
             {
                 var installed = matches.FirstOrDefault(match => match.Approval.Id == approval.Id)?.Extension;
+                var fallback = installed
+                    ?? inventory.Extensions.FirstOrDefault(extension =>
+                        extension.Kind == approval.Kind
+                        && string.Equals(extension.FileName, approval.FileName, StringComparison.OrdinalIgnoreCase))
+                    ?? onlineInventory.Extensions.FirstOrDefault(extension =>
+                        extension.Kind == approval.Kind
+                        && string.Equals(extension.FileName, approval.FileName, StringComparison.OrdinalIgnoreCase));
                 return new LadderApprovedExtensionState(
                     approval,
                     installed is not null,
                     installed?.IsLadderDisabled ?? false,
-                    installed?.Version);
+                    installed?.Version,
+                    installed?.Author ?? fallback?.Author);
             })
             .OrderBy(state => state.Approval.Kind)
             .ThenBy(state => state.Approval.Name, StringComparer.OrdinalIgnoreCase)

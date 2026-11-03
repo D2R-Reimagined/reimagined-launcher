@@ -143,21 +143,24 @@ public partial class LaunchView
         var total = 0;
         foreach (var border in this.GetVisualDescendants().OfType<Border>().Where(b => b.Classes.Contains("extension-card")))
         {
-            string name, file, scope;
+            string name, file, author, scope;
             bool enabled;
             if (!ladder && border.DataContext is D2RLoaderExtensionInfo entry)
             {
-                name = entry.Name; file = entry.FileName;
+                name = entry.Name; file = entry.FileName; author = entry.Author ?? string.Empty;
                 scope = entry.Scope == D2RLoaderExtensionScope.Global ? "Global" : "Mod";
                 enabled = entry.IsEnabled;
             }
             else if (ladder && border.DataContext is LadderExtensionChoice choice)
             {
-                name = choice.Name; file = choice.FileName; scope = "Mod"; enabled = choice.IsSelected;
+                name = choice.Name; file = choice.FileName; author = choice.Author ?? string.Empty;
+                scope = "Mod"; enabled = choice.IsSelected;
             }
             else continue;
             total++;
-            var visible = (name.Contains(query, StringComparison.OrdinalIgnoreCase) || file.Contains(query, StringComparison.OrdinalIgnoreCase))
+            var visible = (name.Contains(query, StringComparison.OrdinalIgnoreCase)
+                           || file.Contains(query, StringComparison.OrdinalIgnoreCase)
+                           || author.Contains(query, StringComparison.OrdinalIgnoreCase))
                 && (_heroPluginFilter == "All" || _heroPluginFilter == "Enabled" && enabled || _heroPluginFilter == scope);
             if (border.IsVisible != visible) border.IsVisible = visible;
             if (visible) shown++;

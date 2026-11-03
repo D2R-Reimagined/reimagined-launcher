@@ -44,11 +44,30 @@ internal static class D2RLoaderPluginVersion
                 if (getter >= exports.RelativeVirtualAddress
                     && (long)getter < (long)exports.RelativeVirtualAddress + exports.Size) return (null, null);
 
-                // Optimized x64 metadata getters return a static PluginInfo via LEA RAX,[RIP+disp32]; RET.
-                var code = pe.GetSectionData(getter).GetReader(0, 8);
-                if (code.ReadByte() != 0x48 || code.ReadByte() != 0x8d || code.ReadByte() != 0x05)
+                // Follow an optional incremental-link relative JMP thunk (E9 disp32).
+                var thunk = pe.GetSectionData(getter).GetReader(0, 5);
+                if (thunk.ReadByte() == 0xe9)
+                {
+                    getter = checked(getter + 5 + thunk.ReadInt32());
+                }
+
+                // Optimized x64 metadata getters return a static PluginInfo via LEA RAX,[RIP+disp32]; RET
+                // (optionally wrapped in PUSH RDI / POP RDI: 40 57 ... 5F C3).
+                var code = pe.GetSectionData(getter).GetReader(0, 11);
+                var b0 = code.ReadByte();
+                var leaOffset = 0;
+                var hasPushRdi = false;
+                if (b0 == 0x40 && code.ReadByte() == 0x57)
+                {
+                    hasPushRdi = true;
+                    leaOffset = 2;
+                    b0 = code.ReadByte();
+                }
+
+                if (b0 != 0x48 || code.ReadByte() != 0x8d || code.ReadByte() != 0x05)
                     return (null, null);
-                var infoRva = checked(getter + 7 + code.ReadInt32());
+                var infoRva = checked(getter + leaOffset + 7 + code.ReadInt32());
+                if (hasPushRdi && code.ReadByte() != 0x5f) return (null, null);
                 if (code.ReadByte() != 0xc3) return (null, null);
                 return (
                     ReadInfoField(pe, header.ImageBase, infoRva, 24),
