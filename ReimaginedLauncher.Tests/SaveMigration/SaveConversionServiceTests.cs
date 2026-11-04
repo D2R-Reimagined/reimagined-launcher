@@ -72,12 +72,14 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void BaseItemDropOnlyIsDetectedBeforeLoaderLaunchAndConvertedOnce(bool sharedStash)
+    [InlineData(false, LaunchExperience.Offline)]
+    [InlineData(true, LaunchExperience.Offline)]
+    [InlineData(false, LaunchExperience.Online)]
+    [InlineData(true, LaunchExperience.Online)]
+    public void BaseItemDropOnlyIsDetectedBeforeLaunchAndConvertedOnce(bool sharedStash, LaunchExperience experience)
     {
         var profile = CreateAutomaticCheckProfile(SaveMigrationFixtures.InstalledDirectory);
-        profile.LaunchExperience = LaunchExperience.Online;
+        profile.LaunchExperience = experience;
         var target = InstalledTarget.Value;
         var baseStats = Path.Combine(SaveMigrationFixtures.DataDirectory, "D2RR 3.1.0 initial", "itemstatcost.txt");
         var source = SaveDataDefinition.WithFrozenStatEncoding("Base mod", baseStats, target.Snapshot,
