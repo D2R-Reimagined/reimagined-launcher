@@ -810,6 +810,150 @@ public sealed class LadderBundleServiceTests : IDisposable
         Assert.Contains(tampered.Problems, problem => problem.StartsWith("D2RLoader 1.3.1-beta", StringComparison.Ordinal));
     }
 
+    private static readonly (string Id, string FileName, byte[] Content)[] ChangedFilesRelease =
+    [
+        ("maps", "d2rl-maps.dll", "map-code"u8.ToArray()),
+        ("levels", "levels.txt", "level-data"u8.ToArray()),
+        ("armor", "armor.txt", "armor-data"u8.ToArray()),
+        ("weapons", "weapons.txt", "weapon-data"u8.ToArray()),
+        ("misc", "misc.txt", "misc-data"u8.ToArray())
+    ];
+
+    private async Task<(BundleFixture Update, FileObjectHandler Handler)> InstallThenUpdateAsync(
+        params (string Id, byte[] Content)[] changes)
+    {
+        var original = CreateBundle(ChangedFilesRelease);
+        await CreateService(original.Archive).InstallOrRepairAsync(_installDirectory, original.Descriptor);
+        var updated = ChangedFilesRelease
+            .Select(file => changes.FirstOrDefault(change => change.Id == file.Id) is { Content: { } content }
+                ? (file.Id, file.FileName, content) : file)
+            .ToArray();
+        var update = CreateBundle(updated, updated.Select(file => file.Item3).ToArray(), withFiles: true);
+        return (update, new FileObjectHandler(update));
+    }
+
+    [Fact]
+    public async Task UpdateDownloadsOnlyTheChangedFilesAndCopiesTheRest()
+    {
+        var (update, handler) = await InstallThenUpdateAsync(("maps", "map-code v2"u8.ToArray()));
+        var service = new LadderBundleService(new ReimaginedApiHttpClient(new HttpClient(handler)),
+            new D2RLoaderInstallerService(new HttpClient(handler)));
+
+        await service.InstallOrRepairAsync(_installDirectory, update.Descriptor);
+
+        var changed = update.Descriptor.Files.Single(file => file.FileName == "d2rl-maps.dll");
+        Assert.Equal([changed.Sha256.ToUpperInvariant()], handler.FileObjectRequests);
+        Assert.Equal(0, handler.ArchiveRequests);
+        Assert.Equal("map-code v2", await File.ReadAllTextAsync(Path.Combine(
+            ModInstallationPaths.LadderModRoot(_installDirectory), "d2rloader", "plugins", "d2rl-maps.dll")));
+        Assert.True((await service.GetReadinessAsync(_installDirectory, update.Descriptor)).IsReady);
+        Assert.False(Directory.EnumerateDirectories(Path.Combine(_installDirectory, ".reimagined-launcher", "ladder-bundles"), "files-*").Any());
+    }
+
+    [Fact]
+    public async Task AModifiedInstalledFileIsDownloadedRatherThanCopied()
+    {
+        var (update, handler) = await InstallThenUpdateAsync(("maps", "map-code v2"u8.ToArray()));
+        var levels = Directory.EnumerateFiles(ModInstallationPaths.LadderModRoot(_installDirectory), "levels.txt", SearchOption.AllDirectories).Single();
+        await File.WriteAllTextAsync(levels, "level-dat!");
+        var service = new LadderBundleService(new ReimaginedApiHttpClient(new HttpClient(handler)),
+            new D2RLoaderInstallerService(new HttpClient(handler)));
+
+        await service.InstallOrRepairAsync(_installDirectory, update.Descriptor);
+
+        Assert.Equal(2, handler.FileObjectRequests.Count);
+        Assert.Equal("level-data", await File.ReadAllTextAsync(levels));
+        Assert.True((await service.GetReadinessAsync(_installDirectory, update.Descriptor)).IsReady);
+    }
+
+    [Fact]
+    public async Task AFileObjectThatFailsItsSignedHashFallsBackToTheArchive()
+    {
+        var (update, handler) = await InstallThenUpdateAsync(("maps", "map-code v2"u8.ToArray()));
+        handler.Tamper = true;
+        var service = new LadderBundleService(new ReimaginedApiHttpClient(new HttpClient(handler)),
+            new D2RLoaderInstallerService(new HttpClient(handler)));
+
+        await service.InstallOrRepairAsync(_installDirectory, update.Descriptor);
+
+        Assert.Equal(1, handler.ArchiveRequests);
+        Assert.Equal("map-code v2", await File.ReadAllTextAsync(Path.Combine(
+            ModInstallationPaths.LadderModRoot(_installDirectory), "d2rloader", "plugins", "d2rl-maps.dll")));
+        Assert.True((await service.GetReadinessAsync(_installDirectory, update.Descriptor)).IsReady);
+    }
+
+    [Fact]
+    public async Task MostlyChangedReleasesAndRevisionsWithoutFilesUseTheArchive()
+    {
+        var (update, handler) = await InstallThenUpdateAsync(
+            ("maps", Encoding.UTF8.GetBytes(new string('m', 100))),
+            ("levels", Encoding.UTF8.GetBytes(new string('l', 100))),
+            ("armor", Encoding.UTF8.GetBytes(new string('a', 100))));
+        var service = new LadderBundleService(new ReimaginedApiHttpClient(new HttpClient(handler)),
+            new D2RLoaderInstallerService(new HttpClient(handler)));
+        await service.InstallOrRepairAsync(_installDirectory, update.Descriptor);
+        Assert.Equal((0, 0, 1), (handler.ManifestRequests, handler.FileObjectRequests.Count, handler.ArchiveRequests));
+
+        var archiveOnly = new FileObjectHandler(update with { Descriptor = update.Descriptor with { FilesPath = null } });
+        Directory.Delete(Path.Combine(_installDirectory, ".reimagined-launcher", "ladder-bundles", "downloads"), recursive: true);
+        File.WriteAllText(Directory.EnumerateFiles(ModInstallationPaths.LadderModRoot(_installDirectory), "misc.txt", SearchOption.AllDirectories).Single(), "repair me");
+        await new LadderBundleService(new ReimaginedApiHttpClient(new HttpClient(archiveOnly)),
+            new D2RLoaderInstallerService(new HttpClient(archiveOnly))).InstallOrRepairAsync(_installDirectory, archiveOnly.Fixture.Descriptor);
+        Assert.Equal((0, 1), (archiveOnly.ManifestRequests, archiveOnly.ArchiveRequests));
+    }
+
+    /// <summary>
+    /// The API and object storage of a revision with per-file downloads: the
+    /// manifest, the link list, gzip file objects on another host, and the
+    /// archive for a fallback.
+    /// </summary>
+    private sealed class FileObjectHandler(BundleFixture fixture) : HttpMessageHandler
+    {
+        public BundleFixture Fixture => fixture;
+        public bool Tamper { get; set; }
+        public int ManifestRequests;
+        public int ArchiveRequests;
+        public List<string> FileObjectRequests { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var uri = request.RequestUri!;
+            if (uri.Host == "storage.example.test")
+            {
+                Assert.Null(request.Headers.Authorization);
+                var sha256 = uri.AbsolutePath.Trim('/')[..64];
+                lock (FileObjectRequests) FileObjectRequests.Add(sha256);
+                var content = fixture.Contents[sha256];
+                using var gzip = new MemoryStream();
+                using (var writer = new GZipStream(gzip, CompressionLevel.Optimal, leaveOpen: true))
+                    writer.Write(Tamper ? [.. content, (byte)'!'] : content);
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(gzip.ToArray()) };
+            }
+
+            if (uri.AbsolutePath.EndsWith("/files/manifest", StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref ManifestRequests);
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(fixture.ManifestBytes) };
+            }
+
+            if (request.Method == HttpMethod.Post && uri.AbsolutePath.EndsWith("/files", StringComparison.Ordinal))
+            {
+                using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
+                var links = body.RootElement.GetProperty("sha256").EnumerateArray()
+                    .Select(value => new LadderBundleFileLink(value.GetString()!, $"https://storage.example.test/{value.GetString()}.gz"))
+                    .ToArray();
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(JsonSerializer.Serialize(new LadderBundleFileLinksResponse(links), JsonOptions),
+                        Encoding.UTF8, "application/json")
+                };
+            }
+
+            Interlocked.Increment(ref ArchiveRequests);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(fixture.Archive) };
+        }
+    }
+
     private sealed class RoutingResponseHandler(byte[] bundle, byte[] loader) : HttpMessageHandler
     {
         public List<Uri> Requests { get; } = [];
@@ -842,7 +986,8 @@ public sealed class LadderBundleServiceTests : IDisposable
         (string Id, string FileName, byte[] Content)[] signedFiles,
         byte[][] archivedContents,
         int schemaVersion = 2,
-        IReadOnlyDictionary<string, string>? targetPaths = null)
+        IReadOnlyDictionary<string, string>? targetPaths = null,
+        bool withFiles = false)
     {
         var bundleId = Guid.NewGuid();
         var ladderId = Guid.NewGuid();
@@ -918,8 +1063,11 @@ public sealed class LadderBundleServiceTests : IDisposable
             manifest.CreatedAtUtc,
             manifest.CreatedAtUtc,
             null,
-            $"/ladder-bundles/{bundleId}/download");
-        return new BundleFixture(descriptor, archive);
+            $"/ladder-bundles/{bundleId}/download",
+            withFiles ? $"/ladder-bundles/{bundleId}/files" : null);
+        var contents = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        foreach (var file in signedFiles) contents.TryAdd(Convert.ToHexString(SHA256.HashData(file.Content)), file.Content);
+        return new BundleFixture(descriptor, archive, manifestBytes, contents);
     }
 
     private static void WriteEntry(ZipArchive archive, string path, byte[] content)
@@ -946,7 +1094,11 @@ public sealed class LadderBundleServiceTests : IDisposable
         }
     }
 
-    private sealed record BundleFixture(LadderBundleResponse Descriptor, byte[] Archive);
+    private sealed record BundleFixture(
+        LadderBundleResponse Descriptor,
+        byte[] Archive,
+        byte[] ManifestBytes,
+        IReadOnlyDictionary<string, byte[]> Contents);
 
     private sealed class StaticResponseHandler(byte[] response) : HttpMessageHandler
     {

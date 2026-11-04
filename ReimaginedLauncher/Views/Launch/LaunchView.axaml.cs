@@ -2832,11 +2832,14 @@ public partial class LaunchView : UserControl
         }
 
         var isLadderLaunch = profile.LaunchExperience == LaunchExperience.Ladder;
+        // What the cosmetics page says now is what this session shows, until /mtx sync.
+        var cosmeticSnapshot = await _apiHttpClient.GetCosmeticSnapshotAsync(token.AccessToken);
         var secrets = new GameSessionSecrets(
             token.AccessToken,
             token.ExpiresAtUtc,
             isLadderLaunch ? _launchLadderTicket : null,
-            isLadderLaunch ? _launchStatusSessionId : null);
+            isLadderLaunch ? _launchStatusSessionId : null,
+            cosmeticSnapshot);
         if (await GameSessionSecretsService.WriteAsync(profile.InstallDirectory, secrets))
         {
             return (true, true);

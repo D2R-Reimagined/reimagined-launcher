@@ -17,7 +17,8 @@ public sealed record GameSessionSecrets(
     string AccessToken,
     DateTimeOffset ExpiresAtUtc,
     string? LadderLaunchTicket = null,
-    string? StatusSessionId = null);
+    string? StatusSessionId = null,
+    string? CosmeticSnapshot = null);
 
 /// <summary>
 /// Keeps the game session's secrets out of the mod folder.
@@ -97,6 +98,11 @@ public static class GameSessionSecretsService
             .Append('\n');
         builder.Append("status_session_id = ")
             .Append(QuoteValue(secrets.StatusSessionId ?? string.Empty, "status_session_id"))
+            .Append('\n');
+        // Not a secret: a signed list of what this player's character shows. It is
+        // here because this file is what a launch hands its plugins.
+        builder.Append("cosmetic_snapshot = ")
+            .Append(QuoteValue(secrets.CosmeticSnapshot ?? string.Empty, "cosmetic_snapshot"))
             .Append('\n');
         return builder.ToString();
     }

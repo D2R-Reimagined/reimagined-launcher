@@ -28,7 +28,7 @@ public sealed class GameSessionSecretsServiceTests : IDisposable
     public void FormatWritesTheContractExactly()
     {
         var content = GameSessionSecretsService.Format(
-            new GameSessionSecrets("tok", Expiry, "ticket", "status-id"));
+            new GameSessionSecrets("tok", Expiry, "ticket", "status-id", "payload.signature"));
 
         Assert.Equal(
             "# Reimagined launcher - secrets for the running game session.\n"
@@ -37,7 +37,8 @@ public sealed class GameSessionSecretsServiceTests : IDisposable
             + "access_token = \"tok\"\n"
             + $"expires_at_unix = {Expiry.ToUnixTimeSeconds()}\n"
             + "ladder_launch_ticket = \"ticket\"\n"
-            + "status_session_id = \"status-id\"\n",
+            + "status_session_id = \"status-id\"\n"
+            + "cosmetic_snapshot = \"payload.signature\"\n",
             content);
         Assert.DoesNotContain("\r", content);
     }
@@ -49,6 +50,41 @@ public sealed class GameSessionSecretsServiceTests : IDisposable
 
         Assert.Contains("ladder_launch_ticket = \"\"\n", content);
         Assert.Contains("status_session_id = \"\"\n", content);
+    }
+
+    [Fact]
+    public void FormatWritesAnEmptySnapshotWhenTheApiHadNone()
+    {
+        // An empty value, so a plugin reading the file knows to fetch one itself.
+        var content = GameSessionSecretsService.Format(new GameSessionSecrets("tok", Expiry));
+
+        Assert.Contains("cosmetic_snapshot = \"\"\n", content);
+    }
+
+    [Fact]
+    public void FormatRefusesASnapshotThatCouldSmuggleInAKey()
+    {
+        Assert.Throws<ArgumentException>(() => GameSessionSecretsService.Format(
+            new GameSessionSecrets("tok", Expiry, CosmeticSnapshot: "a.b\naccess_token = \"x\"")));
+    }
+
+    [Theory]
+    [InlineData("bXR4MQ.c2ln-_09", true)]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("nodot", false)]
+    [InlineData("a.b.c", false)]
+    [InlineData("a.b\nc", false)]
+    [InlineData("a.b\"c", false)]
+    public void OnlyWellFormedSnapshotTokensReachTheSessionFile(string? token, bool expected)
+    {
+        Assert.Equal(expected, ReimaginedLauncher.HttpClients.ReimaginedApiHttpClient.IsCosmeticSnapshotToken(token));
+    }
+
+    [Fact]
+    public void AnOverlongSnapshotTokenIsDropped()
+    {
+        Assert.False(ReimaginedLauncher.HttpClients.ReimaginedApiHttpClient.IsCosmeticSnapshotToken(new string('a', 400) + ".b"));
     }
 
     [Fact]

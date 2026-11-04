@@ -251,6 +251,12 @@ public sealed class LadderBundleService(
             throw new InvalidOperationException(string.Join(" ", preInstallProblems));
         }
 
+        if (await TryInstallChangedFilesAsync(normalized, bundle, progress, cancellationToken))
+        {
+            await VerifyInstalledAsync(normalized, bundle, requiredLoader, cancellationToken);
+            return;
+        }
+
         var archiveBytes = await ReadCachedArchiveAsync(normalized, bundle, cancellationToken);
         if (archiveBytes is null)
         {
@@ -284,15 +290,223 @@ public sealed class LadderBundleService(
         progress?.Report(new LadderBundleProgress("Verifying ladder package signature and contents..."));
         var downloaded = VerifyArchive(bundle, archiveBytes);
         progress?.Report(new LadderBundleProgress("Installing ladder package..."));
-        await InstallVerifiedAsync(normalized, bundle, downloaded, cancellationToken);
+        await InstallVerifiedAsync(normalized, bundle, downloaded.Manifest, downloaded.ManifestBytes,
+            (stagingRoot, token) => StageVerifiedFilesAsync(stagingRoot, downloaded, token), cancellationToken);
+        await VerifyInstalledAsync(normalized, bundle, requiredLoader, cancellationToken);
+    }
 
-        var readiness = await GetReadinessAsync(normalized, bundle, cancellationToken, requiredLoader: requiredLoader);
+    private async Task VerifyInstalledAsync(
+        string installDirectory,
+        LadderBundleResponse bundle,
+        LadderD2RLoaderResponse? requiredLoader,
+        CancellationToken cancellationToken)
+    {
+        var readiness = await GetReadinessAsync(installDirectory, bundle, cancellationToken, requiredLoader: requiredLoader);
         if (!readiness.IsReady)
         {
             throw new InvalidDataException("The installed ladder bundle did not pass final verification: " + readiness.Status);
         }
 
         LaunchDiagnostics.Log($"Installed signed ladder bundle {bundle.Id} revision {bundle.Revision}.");
+    }
+
+    /// <summary>
+    /// A file the changed-files install could not stage. Nothing has been
+    /// swapped yet when this is thrown, so the whole archive can still be used.
+    /// </summary>
+    private sealed class ChangedFilesUnavailableException(string message, Exception? inner = null)
+        : Exception(message, inner);
+
+    /// <summary>
+    /// Most releases change a few plugins of a mod measured in gigabytes. When
+    /// the revision offers its files one by one and this install already holds
+    /// most of them, only the rest are downloaded and everything else is copied
+    /// from the install, then installed through the same staging and swap as an
+    /// archive. Every file is checked against the signed manifest either way.
+    /// Returns false, having changed nothing, whenever the archive is the
+    /// better or the only way.
+    /// </summary>
+    private async Task<bool> TryInstallChangedFilesAsync(
+        string installDirectory,
+        LadderBundleResponse bundle,
+        IProgress<LadderBundleProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(bundle.FilesPath)
+            || HasCachedPackage(installDirectory, bundle)
+            || !Directory.Exists(ModInstallationPaths.LadderModRoot(installDirectory)))
+            return false;
+
+        var objectsRoot = Path.Combine(installDirectory, ".reimagined-launcher", "ladder-bundles",
+            "files-" + Guid.NewGuid().ToString("N")[..8]);
+        var installing = false;
+        try
+        {
+            progress?.Report(new LadderBundleProgress("Checking which ladder files changed..."));
+            var present = await FindInstalledCopiesAsync(installDirectory, bundle, cancellationToken);
+            var unique = bundle.Files.DistinctBy(file => file.Sha256.ToUpperInvariant()).ToArray();
+            var missing = unique.Where(file => !present.ContainsKey(file.Sha256.ToUpperInvariant())).ToArray();
+            var missingBytes = missing.Sum(file => file.SizeBytes);
+            // Past half of the package, one archive costs about the same bytes
+            // in far fewer requests.
+            if (missingBytes * 2 > unique.Sum(file => file.SizeBytes))
+            {
+                LaunchDiagnostics.Log($"Ladder bundle r{bundle.Revision}: {missing.Length} of {unique.Length} files changed; downloading the whole package.");
+                return false;
+            }
+
+            var manifestBytes = await apiClient.GetLadderBundleManifestAsync(bundle, cancellationToken);
+            // The descriptor's file list, which chose what is missing, is held
+            // to the signed one here.
+            var manifest = VerifyManifest(bundle, manifestBytes, bundle.ManifestSignature);
+            await DownloadMissingFilesAsync(bundle, missing, missingBytes, objectsRoot, progress, cancellationToken);
+
+            progress?.Report(new LadderBundleProgress("Installing ladder package..."));
+            installing = true;
+            await InstallVerifiedAsync(installDirectory, bundle, manifest, manifestBytes,
+                (stagingRoot, token) => StageChangedFilesAsync(stagingRoot, manifest, present, objectsRoot, token),
+                cancellationToken);
+            LaunchDiagnostics.Log($"Ladder bundle r{bundle.Revision}: downloaded {missing.Length} changed files ({FormatBytes(missingBytes)}); {unique.Length - missing.Length} came from the install.");
+            return true;
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested
+                                          && (!installing || exception is ChangedFilesUnavailableException))
+        {
+            LaunchDiagnostics.Log($"Ladder bundle r{bundle.Revision}: changed-files install unavailable ({exception.Message}); downloading the whole package.");
+            return false;
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(objectsRoot)) Directory.Delete(objectsRoot, recursive: true);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                LaunchDiagnostics.Log($"Could not remove ladder file download folder: {exception.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Where this install already holds each signed file, by SHA-256: the
+    /// installed copy, or the baseline of a file the game rewrites at runtime.
+    /// </summary>
+    private static async Task<Dictionary<string, string>> FindInstalledCopiesAsync(
+        string installDirectory,
+        LadderBundleResponse bundle,
+        CancellationToken cancellationToken)
+    {
+        var present = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var file in bundle.Files)
+        {
+            var sha256 = file.Sha256.ToUpperInvariant();
+            if (present.ContainsKey(sha256)) continue;
+            var installed = ResolveTargetPath(installDirectory, file.TargetPath);
+            var candidates = LadderRuntimeFileService.IsMutableSignedPath(file.TargetPath)
+                ? new[] { installed, LadderRuntimeFileService.GetBaselinePath(installDirectory, installed) }
+                : new[] { installed };
+            foreach (var candidate in candidates)
+            {
+                if (!File.Exists(candidate) || new FileInfo(candidate).Length != file.SizeBytes) continue;
+                if (!string.Equals(await Sha256Async(candidate, cancellationToken), sha256, StringComparison.OrdinalIgnoreCase)) continue;
+                present[sha256] = candidate;
+                break;
+            }
+        }
+
+        return present;
+    }
+
+    private async Task DownloadMissingFilesAsync(
+        LadderBundleResponse bundle,
+        IReadOnlyList<LadderBundleManifestFile> missing,
+        long missingBytes,
+        string objectsRoot,
+        IProgress<LadderBundleProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (missing.Count == 0) return;
+        var links = new Dictionary<string, LadderBundleFileLink>(StringComparer.Ordinal);
+        foreach (var link in await apiClient.GetLadderBundleFileLinksAsync(
+                     bundle, missing.Select(file => file.Sha256.ToUpperInvariant()).ToArray(), cancellationToken))
+            links.TryAdd(link.Sha256.ToUpperInvariant(), link);
+        if (missing.Any(file => !links.ContainsKey(file.Sha256.ToUpperInvariant())))
+            throw new InvalidDataException("The API did not offer every changed ladder file.");
+
+        var message = missing.Count == 1
+            ? $"Downloading 1 changed ladder file for r{bundle.Revision}..."
+            : $"Downloading {missing.Count:N0} changed ladder files for r{bundle.Revision}...";
+        long received = 0;
+        var watch = Stopwatch.StartNew();
+        void Report()
+        {
+            var bytes = Math.Max(0, Interlocked.Read(ref received));
+            var speed = bytes / Math.Max(.001, watch.Elapsed.TotalSeconds);
+            progress?.Report(new LadderBundleProgress(message,
+                Math.Clamp(bytes * 100d / Math.Max(1, missingBytes), 0, 100),
+                FormatDownloadDetails(new LadderBundleDownloadProgress(bytes, missingBytes,
+                    Math.Clamp(bytes * 100d / Math.Max(1, missingBytes), 0, 100), speed,
+                    speed > 0 && bytes < missingBytes ? TimeSpan.FromSeconds((missingBytes - bytes) / speed) : null))));
+        }
+
+        Report();
+        var transfer = Parallel.ForEachAsync(missing,
+            new ParallelOptions { MaxDegreeOfParallelism = 6, CancellationToken = cancellationToken },
+            async (file, token) =>
+            {
+                var sha256 = file.Sha256.ToUpperInvariant();
+                await apiClient.DownloadLadderBundleFileAsync(links[sha256], file.SizeBytes,
+                    Path.Combine(objectsRoot, sha256), count => Interlocked.Add(ref received, count), token);
+            });
+        while (!transfer.IsCompleted)
+        {
+            await Task.WhenAny(transfer, Task.Delay(250, CancellationToken.None));
+            Report();
+        }
+
+        await transfer;
+    }
+
+    private static async Task StageChangedFilesAsync(
+        string stagingRoot,
+        LadderBundleManifest manifest,
+        IReadOnlyDictionary<string, string> present,
+        string objectsRoot,
+        CancellationToken cancellationToken)
+    {
+        foreach (var file in manifest.Files)
+        {
+            var sha256 = file.Sha256.ToUpperInvariant();
+            var source = present.TryGetValue(sha256, out var installed) ? installed : Path.Combine(objectsRoot, sha256);
+            var staged = ResolveUnderRoot(stagingRoot, file.TargetPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(staged)!);
+            try
+            {
+                await using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read,
+                    81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                await using var output = new FileStream(staged, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                    81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                var buffer = new byte[81920];
+                int read;
+                while ((read = await input.ReadAsync(buffer, cancellationToken)) > 0)
+                {
+                    hash.AppendData(buffer, 0, read);
+                    await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                }
+
+                await output.FlushAsync(cancellationToken);
+                // An installed copy can change between the check and this copy.
+                if (output.Length != file.SizeBytes
+                    || !string.Equals(Convert.ToHexString(hash.GetHashAndReset()), sha256, StringComparison.OrdinalIgnoreCase))
+                    throw new ChangedFilesUnavailableException($"{file.TargetPath} changed while the update was being staged.");
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                throw new ChangedFilesUnavailableException($"{file.TargetPath} could not be staged: {exception.Message}", exception);
+            }
+        }
     }
 
     private static string FormatDownloadDetails(LadderBundleDownloadProgress progress)
@@ -415,13 +629,63 @@ public sealed class LadderBundleService(
         }
 
         var manifestBytes = ReadEntry(manifestEntry, MaxManifestBytes);
+        var signatureText = Encoding.ASCII.GetString(ReadEntry(signatureEntry, 4096)).Trim();
+        var manifest = VerifyManifest(bundle, manifestBytes, signatureText);
+
+        var expectedEntries = manifest.Files.Select(file => file.ArchivePath).ToHashSet(StringComparer.Ordinal);
+        expectedEntries.Add("manifest.json");
+        expectedEntries.Add("manifest.sig");
+        var actualEntries = archive.Entries
+            .Where(entry => !entry.FullName.EndsWith("/", StringComparison.Ordinal))
+            .Select(entry => entry.FullName)
+            .ToArray();
+        if (actualEntries.Length != expectedEntries.Count
+            || actualEntries.Any(entry => !expectedEntries.Contains(entry)))
+        {
+            throw new InvalidDataException("The ladder bundle contains files not declared by its signed manifest.");
+        }
+
+        foreach (var file in manifest.Files)
+        {
+            var entry = archive.GetEntry(file.ArchivePath)
+                ?? throw new InvalidDataException($"The ladder bundle is missing {file.ArchivePath}.");
+            if (entry.Length != file.SizeBytes)
+            {
+                throw new InvalidDataException($"{file.FileName} has an invalid size.");
+            }
+
+            var currentHash = HashEntry(entry, MaxBundleFileBytes);
+            if (!string.Equals(
+                    currentHash,
+                    file.Sha256,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException($"{file.FileName} failed its signed SHA-256 check.");
+            }
+
+        }
+
+        return new DownloadedLadderBundle(manifest, manifestBytes, archiveBytes);
+    }
+
+    /// <summary>
+    /// Checks the manifest bytes against the descriptor and the signature
+    /// against a trusted key, and every file it declares for a safe path, size
+    /// and hash format. What the files contain is the caller's to check.
+    /// </summary>
+    private static LadderBundleManifest VerifyManifest(LadderBundleResponse bundle, byte[] manifestBytes, string signatureText)
+    {
+        if (manifestBytes.LongLength is <= 0 or > MaxManifestBytes)
+        {
+            throw new InvalidDataException("The ladder bundle manifest has an invalid size.");
+        }
+
         var manifestHash = Convert.ToHexString(SHA256.HashData(manifestBytes));
         if (!string.Equals(manifestHash, bundle.ManifestSha256, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException("The ladder bundle manifest SHA-256 does not match the API descriptor.");
         }
 
-        var signatureText = Encoding.ASCII.GetString(ReadEntry(signatureEntry, 4096)).Trim();
         if (!string.Equals(signatureText, bundle.ManifestSignature, StringComparison.Ordinal))
         {
             throw new InvalidDataException("The ladder bundle signature does not match the API descriptor.");
@@ -449,19 +713,6 @@ public sealed class LadderBundleService(
             throw new InvalidDataException("The ladder bundle contains an invalid number of managed files.");
         }
 
-        var expectedEntries = manifest.Files.Select(file => file.ArchivePath).ToHashSet(StringComparer.Ordinal);
-        expectedEntries.Add("manifest.json");
-        expectedEntries.Add("manifest.sig");
-        var actualEntries = archive.Entries
-            .Where(entry => !entry.FullName.EndsWith("/", StringComparison.Ordinal))
-            .Select(entry => entry.FullName)
-            .ToArray();
-        if (actualEntries.Length != expectedEntries.Count
-            || actualEntries.Any(entry => !expectedEntries.Contains(entry)))
-        {
-            throw new InvalidDataException("The ladder bundle contains files not declared by its signed manifest.");
-        }
-
         var targetPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         long totalUncompressedBytes = 0;
         foreach (var file in manifest.Files)
@@ -471,37 +722,32 @@ public sealed class LadderBundleService(
             {
                 throw new InvalidDataException($"The ladder bundle declares {file.TargetPath} more than once.");
             }
-            var entry = archive.GetEntry(file.ArchivePath)
-                ?? throw new InvalidDataException($"The ladder bundle is missing {file.ArchivePath}.");
-            if (entry.Length != file.SizeBytes || entry.Length < 0 || entry.Length > MaxBundleFileBytes)
+            if (file.SizeBytes is < 0 or > MaxBundleFileBytes)
             {
                 throw new InvalidDataException($"{file.FileName} has an invalid size.");
             }
 
-            totalUncompressedBytes = checked(totalUncompressedBytes + entry.Length);
+            totalUncompressedBytes = checked(totalUncompressedBytes + file.SizeBytes);
             if (totalUncompressedBytes > MaxBundleUncompressedBytes)
             {
                 throw new InvalidDataException("The ladder bundle expands beyond the 4 GiB limit.");
             }
-
-            var currentHash = HashEntry(entry, MaxBundleFileBytes);
-            if (!string.Equals(
-                    currentHash,
-                    file.Sha256,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidDataException($"{file.FileName} failed its signed SHA-256 check.");
-            }
-
         }
 
-        return new DownloadedLadderBundle(manifest, manifestBytes, archiveBytes);
+        return manifest;
     }
 
+    /// <summary>
+    /// <paramref name="stageFiles"/> writes every file of the verified
+    /// <paramref name="manifest"/> under the staging root it is given; the swap,
+    /// backup and rollback are the same however the files got there.
+    /// </summary>
     private static async Task InstallVerifiedAsync(
         string installDirectory,
         LadderBundleResponse bundle,
-        DownloadedLadderBundle downloaded,
+        LadderBundleManifest manifest,
+        byte[] manifestBytes,
+        Func<string, CancellationToken, Task> stageFiles,
         CancellationToken cancellationToken)
     {
         var managementRoot = Path.Combine(installDirectory, ".reimagined-launcher", "ladder-bundles");
@@ -520,7 +766,7 @@ public sealed class LadderBundleService(
         DirectoryContentTransaction? contentTransaction = null;
         try
         {
-            await StageVerifiedFilesAsync(stagingRoot, downloaded, cancellationToken);
+            await stageFiles(stagingRoot, cancellationToken);
 
             if (!Directory.Exists(stagedModRoot))
             {
@@ -562,9 +808,9 @@ public sealed class LadderBundleService(
                 bundle.Revision,
                 bundle.ArtifactSha256,
                 bundle.ManifestSha256,
-                Convert.ToBase64String(downloaded.ManifestBytes),
+                Convert.ToBase64String(manifestBytes),
                 bundle.ManifestSignature,
-                downloaded.Manifest.Files.Select(file => new InstalledLadderBundleFile(
+                manifest.Files.Select(file => new InstalledLadderBundleFile(
                     file.TargetPath,
                     file.Sha256,
                     file.SizeBytes)).ToArray(),

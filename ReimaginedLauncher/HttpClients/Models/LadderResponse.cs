@@ -59,7 +59,17 @@ public sealed record LadderBundleResponse(
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset? PublishedAtUtc,
     DateTimeOffset? RevokedAtUtc,
-    string DownloadPath);
+    string DownloadPath,
+    // Null when the revision can only be installed from its whole archive.
+    string? FilesPath = null);
+
+public sealed record LadderBundleFileLinksResponse(IReadOnlyList<LadderBundleFileLink> Files);
+
+/// <summary>
+/// Where one file object of a bundle can be fetched: absolute for object
+/// storage, API-relative otherwise. The bytes are gzip of the signed file.
+/// </summary>
+public sealed record LadderBundleFileLink(string Sha256, string Url);
 
 public sealed record LadderBundleCompatibility(
     string MinimumLauncherVersion,
