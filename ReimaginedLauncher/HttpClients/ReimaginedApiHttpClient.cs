@@ -36,6 +36,9 @@ public sealed partial class ReimaginedApiHttpClient
     /// <summary>Deadline for the small JSON calls, which used to inherit it from the client.</summary>
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
 
+    /// <summary>A cosmetic must never make a player wait to start the game.</summary>
+    private static readonly TimeSpan CosmeticSnapshotTimeout = TimeSpan.FromSeconds(4);
+
     private readonly HttpClient _httpClient;
     private readonly SemaphoreSlim _scheduleGate = new(1, 1);
     private readonly Dictionary<Guid, (string Version, LadderResponse Policy)> _schedulePolicies = [];
@@ -447,6 +450,52 @@ public sealed partial class ReimaginedApiHttpClient
         }
 
         return minted;
+    }
+
+    /// <summary>
+    /// The player's cosmetics page selections, signed for this launch. Null when
+    /// there is no snapshot to have: an API without the route, cosmetics off or
+    /// unconfigured, or anything else that goes wrong. The game must start
+    /// regardless, so this never throws and waits a few seconds at most; the
+    /// supporter-mtx plugin fetches one itself on joining a game if this returns null.
+    /// </summary>
+    public async Task<string?> GetCosmeticSnapshotAsync(string gameToken, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "cosmetics/mtx/me/snapshot");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", gameToken);
+            request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(CosmeticSnapshotTimeout);
+            using var response = await _httpClient.SendAsync(request, timeout.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                LaunchDiagnostics.Log($"cosmetic snapshot: the API answered {(int)response.StatusCode}; the game fetches one itself.");
+                return null;
+            }
+
+            var snapshot = await response.Content.ReadFromJsonAsync<CosmeticSnapshotResponse>(JsonOptions, timeout.Token);
+            return IsCosmeticSnapshotToken(snapshot?.Token) ? snapshot!.Token : null;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException or JsonException or InvalidOperationException)
+        {
+            LaunchDiagnostics.Log($"cosmetic snapshot: unavailable for this launch ({exception.GetType().Name}); the game fetches one itself.");
+            return null;
+        }
+    }
+
+    private sealed record CosmeticSnapshotResponse(string? Token);
+
+    /// <summary>
+    /// base64url "." base64url, at the plugins' size limit. Anything else is dropped
+    /// here: a value the session file refuses to write would block a ladder launch.
+    /// </summary>
+    internal static bool IsCosmeticSnapshotToken(string? token)
+    {
+        return token is { Length: > 2 and <= 400 }
+               && token.Count(c => c == '.') == 1
+               && token.All(c => c is '.' or '-' or '_' || char.IsAsciiLetterOrDigit(c));
     }
 
     /// <summary>Revokes a game-session token, authenticated with that token itself.</summary>

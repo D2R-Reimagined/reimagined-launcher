@@ -175,8 +175,9 @@ public partial class LaunchView
             await ConfigureSupporterPortalsAsync(rigProfile, gameToken.AccessToken);
             _localRigConfigs = await LocalD2rdsRigService.PointAtApiAsync(install!, apiBase);
 
+            var cosmeticSnapshot = await _apiHttpClient.GetCosmeticSnapshotAsync(gameToken.AccessToken);
             if (!await GameSessionSecretsService.WriteAsync(install, new GameSessionSecrets(
-                    gameToken.AccessToken, gameToken.ExpiresAtUtc, session.LaunchTicket, statusSessionId)))
+                    gameToken.AccessToken, gameToken.ExpiresAtUtc, session.LaunchTicket, statusSessionId, cosmeticSnapshot)))
                 throw new InvalidOperationException("The session file could not be written.");
 
             var beforeClient = LocalD2rdsRigService.GameProcessIds();
