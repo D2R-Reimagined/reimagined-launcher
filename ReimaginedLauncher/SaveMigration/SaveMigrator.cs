@@ -42,23 +42,23 @@ public sealed class SaveMigrator
     private readonly IReadOnlyList<SnapshotComparison> _comparisons;
     private readonly IReadOnlyList<ResolvedIdentityMapping> _identityMappings;
     private readonly IReadOnlyList<SaveDataDefinition> _newerLayouts;
-    private readonly IReadOnlyList<SaveDataDefinition> _targetFailureSources;
+    private readonly IReadOnlyList<SaveDataDefinition> _compatibilitySources;
 
     /// <param name="newerLayouts">Registered layouts that postdate the target. They are never converted from; a file they explain
     /// better than every source is refused as a downgrade, and one they explain as well is never verified.</param>
-    /// <param name="targetFailureSources">Sources only tried when no other source and not the target can decode the file.</param>
+    /// <param name="compatibilitySources">Additional compatibility sources checked alongside registered releases.</param>
     public SaveMigrator(IReadOnlyList<SaveDataDefinition> sources, SaveDataDefinition target,
         IReadOnlyList<SnapshotComparison> comparisons,
         IReadOnlyList<ResolvedIdentityMapping>? identityMappings = null,
         IReadOnlyList<SaveDataDefinition>? newerLayouts = null,
-        IReadOnlyList<SaveDataDefinition>? targetFailureSources = null)
+        IReadOnlyList<SaveDataDefinition>? compatibilitySources = null)
     {
         _sources = sources;
         _target = target;
         _comparisons = comparisons;
         _identityMappings = identityMappings ?? [];
         _newerLayouts = newerLayouts ?? [];
-        _targetFailureSources = targetFailureSources ?? [];
+        _compatibilitySources = compatibilitySources ?? [];
     }
 
     /// <summary>A migrator from earlier frozen releases and compatible development layouts to the installed game data.</summary>
@@ -134,16 +134,16 @@ public sealed class SaveMigrator
             }
         }
 
-        List<SaveDataDefinition> targetFailureSources = ItemDropOnlyAtTeleportNova(installedTarget, targetStats) is { } hotfix
+        List<SaveDataDefinition> compatibilitySources = ItemDropOnlyAtTeleportNova(registry, installedTarget, targetStats) is { } hotfix
             ? [hotfix]
             : [];
-        var comparisons = sources.Concat(targetFailureSources)
+        var comparisons = sources.Concat(compatibilitySources)
             .Select(source => source.ItemTables)
             .DistinctBy(tables => (tables.Label, tables.Directory))
             .Select(tables => TableComparer.Compare(tables, targetTables))
             .ToList();
         return new SaveMigrator(sources, SaveDataDefinition.FromSnapshot(targetTables), comparisons,
-            registry.IdentityMappingsUpTo(targetOrder), newerLayouts, targetFailureSources);
+            registry.IdentityMappingsUpTo(targetOrder), newerLayouts, compatibilitySources);
 
         SaveDataDefinition Release(SaveCheckpoint checkpoint) => SaveDataDefinition
             .FromSnapshot(Snapshot(checkpoint.Label, checkpoint.Directory))
@@ -164,9 +164,9 @@ public sealed class SaveMigrator
 
     /// <summary>
     /// The first 3.1.0 download saved item_drop_only at 442; the replacement build inserted teleport_nova there and moved it to 443
-    /// without changing the version. Reading the installed tables with those two rows swapped recovers such saves.
+    /// without changing the version. The frozen base encoding recovers saves made before that insertion.
     /// </summary>
-    private static SaveDataDefinition? ItemDropOnlyAtTeleportNova(InstalledGameData installedTarget,
+    private static SaveDataDefinition? ItemDropOnlyAtTeleportNova(SaveCheckpointRegistry registry, InstalledGameData installedTarget,
         IReadOnlyList<TableDefinition> targetStats)
     {
         if (targetStats.Count <= ItemDropOnlyStatId
@@ -177,14 +177,7 @@ public sealed class SaveMigrator
         }
 
         var directory = Path.Combine(installedTarget.CopiedDirectory, "stat-encodings", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory);
-        var lines = File.ReadAllLines(Path.Combine(installedTarget.CopiedDirectory,
-            TableSchema.FileName(TableKind.ItemStatCost)), System.Text.Encoding.Latin1);
-        // Line 0 is the header, so a stat's line is its save id + 1.
-        (lines[TeleportNovaStatId + 1], lines[ItemDropOnlyStatId + 1]) =
-            (lines[ItemDropOnlyStatId + 1], lines[TeleportNovaStatId + 1]);
-        var statPath = Path.Combine(directory, TableSchema.FileName(TableKind.ItemStatCost));
-        File.WriteAllLines(statPath, lines, System.Text.Encoding.Latin1);
+        var statPath = registry.PathOf("D2RR 3.1.0 initial/itemstatcost.txt");
         return SaveDataDefinition.WithFrozenStatEncoding("Installed items with item_drop_only at stat 442", statPath,
                 installedTarget.Snapshot, Path.Combine(directory, "composed"))
             .WithCharacterVersions([TargetVersion]);
@@ -468,12 +461,10 @@ public sealed class SaveMigrator
 
             var inspection = SaveInspector.Inspect(input, owner._sources, owner._comparisons);
             var decoded = Decode(owner._sources, inspection.Attempts, "");
-            if (decoded.Count == 0 && owner._targetFailureSources.Count > 0
-                                   && !SaveInspector.Inspect(input, [Target], []).Attempts[0].Succeeded)
-            {
-                decoded = Decode(owner._targetFailureSources,
-                    SaveInspector.Inspect(input, owner._targetFailureSources, owner._comparisons).Attempts, "");
-            }
+            decoded.AddRange(Decode(owner._compatibilitySources,
+                SaveInspector.Inspect(input, owner._compatibilitySources, owner._comparisons).Attempts, "")
+                .Where(candidate => candidate.Attempt.AllItems.Any(item =>
+                    item.Stats.Any(stat => (int)stat.Id == TeleportNovaStatId))));
 
             if (IsNewerThanTarget(decoded))
             {

@@ -427,13 +427,13 @@ public sealed class SaveMigrationTests(ITestOutputHelper testOutput)
         Assert.Single(output.SelectMany(tab => tab.Items).SelectMany(item => item.Stats),
             stat => (int)stat.Id == 443 && stat.Value == 1);
 
-        // The same item saved with the installed ids parses as the target, so the fallback is never tried.
+        // Current saves are checked against both encodings without selecting the base encoding.
         var current = Path.Combine(inputDirectory, "ItemDropOnlyAt443Stash.d2i");
         File.WriteAllBytes(current,
             stash.ToBytes(target.CreateExternalData(SaveMigrator.TargetVersion), SaveMigrator.TargetVersion));
         var currentResult = Migrator.Value.Migrate(current, SaveMigrationFixtures.NewCopyDirectory());
         Assert.NotEqual(label, currentResult.SourceLayout);
-        Assert.DoesNotContain(currentResult.Identification, line => line.StartsWith(label, StringComparison.Ordinal));
+        Assert.Contains(currentResult.Identification, line => line.StartsWith(label, StringComparison.Ordinal));
     }
 
     /// <summary>BruhII (2.1.2) with four items rewritten to carry 2.1.2 identities that later releases renamed.</summary>

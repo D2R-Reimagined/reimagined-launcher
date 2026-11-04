@@ -71,6 +71,80 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.Equal(SHA256.HashData(original), SHA256.HashData(File.ReadAllBytes(FixturePath(fixture))));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void BaseItemDropOnlyIsDetectedBeforeLoaderLaunchAndConvertedOnce(bool sharedStash)
+    {
+        var profile = CreateAutomaticCheckProfile(SaveMigrationFixtures.InstalledDirectory);
+        profile.LaunchExperience = LaunchExperience.Online;
+        var target = InstalledTarget.Value;
+        var baseStats = Path.Combine(SaveMigrationFixtures.DataDirectory, "D2RR 3.1.0 initial", "itemstatcost.txt");
+        var source = SaveDataDefinition.WithFrozenStatEncoding("Base mod", baseStats, target.Snapshot,
+            Path.Combine(_root, "base-tables"));
+        Assert.Equal("item_drop_only", source.Stat(442)!.Key);
+        Assert.Null(source.Stat(443));
+        var service = CreateService();
+        var path = CopyFixture(sharedStash ? "ModernSharedStashSoftCoreV2.d2i" : "FuckBenFuckingF.d2s");
+        var version = SaveMigrator.TargetVersion;
+        if (sharedStash)
+        {
+            var converted = service.Plan(path, Path.Combine(StagingDirectory, "prepare")).ConvertedBytes!;
+            var stash = D2StashSave.Read(converted, Migrator.Value.Target.CreateExternalData(version));
+            var item = stash.SelectMany(tab => tab.Items).First(item => item.Stats.Count > 0);
+            item.Stats.Add(item.Stats[0] with { Id = (StatId)442, Layer = 0, Value = 1 });
+            File.WriteAllBytes(path, stash.ToBytes(source.CreateExternalData(version), version));
+        }
+        else
+        {
+            var save = D2Save.Read(File.ReadAllBytes(path), Migrator.Value.Target.CreateExternalData(version));
+            var item = save.Items.First(item => item.Stats.Count > 0);
+            item.Stats.Add(item.Stats[0] with { Id = (StatId)442, Layer = 0, Value = 1 });
+            File.WriteAllBytes(path, save.ToBytes(source.CreateExternalData(version), version));
+        }
+        var original = File.ReadAllBytes(path);
+        var detected = CheckAutomatically(profile);
+        Assert.Contains(path, detected.Files);
+        Assert.Equal(original, File.ReadAllBytes(path));
+        Assert.True(RecordShownPrompt(profile, profile.InstallDirectory, detected.TargetFingerprint!));
+        Assert.Empty(CheckAutomatically(profile).Files);
+        var launchCheck = SaveConversionService.FindOfflineSavesNeedingConversion(profile, ignorePromptHistory: true);
+        Assert.Contains(path, launchCheck.Files);
+        var plan = service.Plan(path, Path.Combine(StagingDirectory, "convert"));
+        Assert.False(plan.IsBlocked, plan.Report);
+        Assert.NotNull(plan.ConvertedBytes);
+        Assert.Contains("item_drop_only 442 -> item_drop_only 443", plan.Report);
+        var outputStats = sharedStash
+            ? D2StashSave.Read(plan.ConvertedBytes!, Migrator.Value.Target.CreateExternalData(version))
+                .SelectMany(tab => tab.Items).SelectMany(item => item.Stats)
+            : D2Save.Read(plan.ConvertedBytes!, Migrator.Value.Target.CreateExternalData(version))
+                .Items.SelectMany(item => item.Stats);
+        Assert.Contains(outputStats, stat => (int)stat.Id == 443 && stat.Value == 1);
+        Assert.DoesNotContain(outputStats, stat => (int)stat.Id == 442);
+        var outcome = service.Apply(plan, null, service.CreateBackupBatchDirectory());
+        Assert.True(outcome.Succeeded, outcome.Message);
+        Assert.Equal(original, File.ReadAllBytes(Path.Combine(outcome.BackupDirectory!, Path.GetFileName(path))));
+        Assert.Equal(SaveConversionState.AlreadyCompatible,
+            service.Plan(path, Path.Combine(StagingDirectory, "again")).State);
+        Assert.Empty(CheckAutomatically(profile).Files);
+    }
+
+    [Fact]
+    public void ChangedSavesOrPlayModeInvalidateTheAutomaticPrompt()
+    {
+        var profile = CreateAutomaticCheckProfile(SaveMigrationFixtures.InstalledDirectory);
+        var path = CopyFixture("BruhII.d2s");
+        Assert.True(RecordShownPrompt(profile, profile.InstallDirectory, "target"));
+        Assert.True(SaveConversionService.WasAutomaticPromptShown(profile, SaveDirectory, "target"));
+        profile.LaunchExperience = LaunchExperience.Online;
+        Assert.False(SaveConversionService.WasAutomaticPromptShown(profile, SaveDirectory, "target"));
+        Assert.True(RecordShownPrompt(profile, profile.InstallDirectory, "target"));
+        var bytes = File.ReadAllBytes(path);
+        bytes[^1] ^= 1;
+        File.WriteAllBytes(path, bytes);
+        Assert.False(SaveConversionService.WasAutomaticPromptShown(profile, SaveDirectory, "target"));
+    }
+
     [Fact]
     public void FindSavesNeedingConversionReportsOnlyConvertibleSavesAndWritesNothing()
     {
@@ -340,10 +414,10 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
             Type = InstallationType.BattleNet, InstallDirectory = Path.Combine(_root, "install"),
             SaveDirectory = SaveDirectory
         };
-        Assert.True(RecordShownPrompt(profile, profile.InstallDirectory, InstalledTarget.Value.Fingerprint));
         var service = CreateService();
         var path = CopyFixture("BruhII.d2s");
         var original = File.ReadAllBytes(path);
+        Assert.True(RecordShownPrompt(profile, profile.InstallDirectory, InstalledTarget.Value.Fingerprint));
 
         Assert.True(SaveConversionService.WasAutomaticPromptShown(profile, SaveDirectory,
             InstalledTarget.Value.Fingerprint));
