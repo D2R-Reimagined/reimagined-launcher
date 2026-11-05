@@ -443,21 +443,28 @@
                 <Border x:Name="AllowedLadderPluginsPanel" Background="Transparent" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0" CornerRadius="10" Padding="0">
                   <StackPanel Spacing="4">
                     <TextBlock Text="Plugins" FontFamily="Georgia" FontSize="17" FontWeight="SemiBold" IsVisible="False"/>
+                    <Border Padding="5,2,5,4" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Margin="0,0,0,2">
+                      <Grid ColumnDefinitions="24,2*,1.4*,1.1*,64,84" ColumnSpacing="8">
+                        <TextBlock Text="PLUGIN" Classes="scope-label" VerticalAlignment="Center" Grid.Column="1"/>
+                        <TextBlock Text="AUTHOR" Classes="scope-label" VerticalAlignment="Center" Grid.Column="2"/>
+                        <TextBlock Text="VERSION" Classes="scope-label" VerticalAlignment="Center" Grid.Column="3"/>
+                        <TextBlock Text="SCOPE" Classes="scope-label" VerticalAlignment="Center" HorizontalAlignment="Center" Grid.Column="4"/>
+                        <TextBlock Text="CONFIG" Classes="scope-label" VerticalAlignment="Center" HorizontalAlignment="Center" Grid.Column="5"/>
+                      </Grid>
+                    </Border>
                     <ItemsControl x:Name="AllowedLadderPluginsItemsControl">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="httpModels:LadderExtensionChoice">
                           <Border Classes="extension-card" Padding="5,1" ToolTip.Tip="{Binding Detail}" BorderThickness="0" CornerRadius="2">
-                            <Grid ColumnDefinitions="Auto,3*,2*,Auto,Auto" ColumnSpacing="8" RowDefinitions="Auto,Auto">
-                              <CheckBox IsChecked="{Binding IsSelected, Mode=OneWay}" IsEnabled="{Binding CanToggle}" Click="OnLadderExtensionSelectionChanged" VerticalAlignment="Center" MinHeight="24" Height="24" Classes="hero-entry"/>
-                              <Grid VerticalAlignment="Center" Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" FontSize="13"/>
-                                <TextBlock Text="REQUIRED" IsVisible="{Binding IsRequired}" FontSize="9" VerticalAlignment="Center" Foreground="#D8BE85" Grid.Column="1"/>
-                              </Grid>
-                              <TextBlock Text="{Binding VersionLabel}" Classes="muted" FontSize="12" VerticalAlignment="Center" Grid.Column="2" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding VersionLabel}"/>
-                              <Border Background="#39352B" CornerRadius="9" Padding="6,2" VerticalAlignment="Center" Grid.Column="3">
+                            <Grid ColumnDefinitions="24,2*,1.4*,1.1*,64,84" ColumnSpacing="8" RowDefinitions="Auto,Auto">
+                              <CheckBox IsChecked="{Binding IsSelected, Mode=OneWay}" IsEnabled="{Binding CanToggle}" Click="OnLadderExtensionSelectionChanged" HorizontalAlignment="Center" VerticalAlignment="Center" MinHeight="24" Height="24" Classes="hero-entry"/>
+                              <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" FontSize="13" Grid.Column="1"/>
+                              <TextBlock Text="{Binding AuthorLabel}" Classes="muted" FontSize="12" VerticalAlignment="Center" Grid.Column="2" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding AuthorLabel}"/>
+                              <TextBlock Text="{Binding VersionLabel}" Classes="muted" FontSize="12" VerticalAlignment="Center" Grid.Column="3" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding VersionLabel}"/>
+                              <Border Background="#39352B" CornerRadius="9" Padding="6,2" VerticalAlignment="Center" HorizontalAlignment="Center" Grid.Column="4">
                                 <TextBlock Text="MOD" FontSize="10"/>
                               </Border>
-                              <Button Content="Edit Config" IsEnabled="{Binding CanEditConfig}" Padding="7,1" MinHeight="24" FontSize="11" VerticalAlignment="Center" Grid.Column="4" ToolTip.Tip="{Binding ConfigEditHint}" Click="OnEditExtensionConfigClick"/>
+                              <Button Content="Edit Config" IsEnabled="{Binding CanEditConfig}" Padding="7,1" MinHeight="24" FontSize="11" VerticalAlignment="Center" HorizontalAlignment="Center" Grid.Column="5" ToolTip.Tip="{Binding ConfigEditHint}" Click="OnEditExtensionConfigClick"/>
                             </Grid>
                           </Border>
                         </DataTemplate>
@@ -468,21 +475,28 @@
                 <Border x:Name="AllowedLadderPatchesPanel" Grid.Column="1" Background="Transparent" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0" CornerRadius="10" Padding="0">
                   <StackPanel Spacing="4">
                     <TextBlock Text="Patches" FontFamily="Georgia" FontSize="17" FontWeight="SemiBold"/>
+                    <Border Padding="5,2,5,4" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Margin="0,0,0,2">
+                      <Grid ColumnDefinitions="24,2*,1.4*,1.1*,64,84" ColumnSpacing="8">
+                        <TextBlock Text="PATCH" Classes="scope-label" VerticalAlignment="Center" Grid.Column="1"/>
+                        <TextBlock Text="AUTHOR" Classes="scope-label" VerticalAlignment="Center" Grid.Column="2"/>
+                        <TextBlock Text="VERSION" Classes="scope-label" VerticalAlignment="Center" Grid.Column="3"/>
+                        <TextBlock Text="SCOPE" Classes="scope-label" VerticalAlignment="Center" HorizontalAlignment="Center" Grid.Column="4"/>
+                        <TextBlock Text="CONFIG" Classes="scope-label" VerticalAlignment="Center" HorizontalAlignment="Center" Grid.Column="5"/>
+                      </Grid>
+                    </Border>
                     <ItemsControl x:Name="AllowedLadderPatchesItemsControl">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="httpModels:LadderExtensionChoice">
                           <Border Classes="extension-card" Padding="5,1" ToolTip.Tip="{Binding Detail}" BorderThickness="0" CornerRadius="2">
-                            <Grid ColumnDefinitions="Auto,3*,2*,Auto,Auto" ColumnSpacing="8" RowDefinitions="Auto,Auto">
-                              <CheckBox IsChecked="{Binding IsSelected, Mode=OneWay}" IsEnabled="{Binding CanToggle}" Click="OnLadderExtensionSelectionChanged" VerticalAlignment="Center" MinHeight="24" Height="24" Classes="hero-entry"/>
-                              <Grid VerticalAlignment="Center" Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" FontSize="13"/>
-                                <TextBlock Text="REQUIRED" IsVisible="{Binding IsRequired}" FontSize="9" VerticalAlignment="Center" Foreground="#D8BE85" Grid.Column="1"/>
-                              </Grid>
-                              <TextBlock Text="{Binding VersionLabel}" Classes="muted" FontSize="12" VerticalAlignment="Center" Grid.Column="2" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding VersionLabel}"/>
-                              <Border Background="#39352B" CornerRadius="9" Padding="6,2" VerticalAlignment="Center" Grid.Column="3">
+                            <Grid ColumnDefinitions="24,2*,1.4*,1.1*,64,84" ColumnSpacing="8" RowDefinitions="Auto,Auto">
+                              <CheckBox IsChecked="{Binding IsSelected, Mode=OneWay}" IsEnabled="{Binding CanToggle}" Click="OnLadderExtensionSelectionChanged" HorizontalAlignment="Center" VerticalAlignment="Center" MinHeight="24" Height="24" Classes="hero-entry"/>
+                              <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" FontSize="13" Grid.Column="1"/>
+                              <TextBlock Text="{Binding AuthorLabel}" Classes="muted" FontSize="12" VerticalAlignment="Center" Grid.Column="2" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding AuthorLabel}"/>
+                              <TextBlock Text="{Binding VersionLabel}" Classes="muted" FontSize="12" VerticalAlignment="Center" Grid.Column="3" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding VersionLabel}"/>
+                              <Border Background="#39352B" CornerRadius="9" Padding="6,2" VerticalAlignment="Center" HorizontalAlignment="Center" Grid.Column="4">
                                 <TextBlock Text="MOD" FontSize="10"/>
                               </Border>
-                              <Button Content="Edit Config" IsEnabled="{Binding CanEditConfig}" Padding="7,1" MinHeight="24" FontSize="11" VerticalAlignment="Center" Grid.Column="4" ToolTip.Tip="{Binding ConfigEditHint}" Click="OnEditExtensionConfigClick"/>
+                              <Button Content="Edit Config" IsEnabled="{Binding CanEditConfig}" Padding="7,1" MinHeight="24" FontSize="11" VerticalAlignment="Center" HorizontalAlignment="Center" Grid.Column="5" ToolTip.Tip="{Binding ConfigEditHint}" Click="OnEditExtensionConfigClick"/>
                             </Grid>
                           </Border>
                         </DataTemplate>
@@ -500,22 +514,30 @@
                   <TextBlock Text="Plugins" FontFamily="Georgia" FontSize="18" FontWeight="SemiBold"/>
                   <TextBlock x:Name="LoaderPluginCountText" Grid.Column="1" Classes="muted" VerticalAlignment="Center"/>
                 </Grid>
+                <Border Padding="5,2,5,4" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Margin="0,0,0,2">
+                  <Grid ColumnDefinitions="24,2*,1.4*,1.1*,64,84" ColumnSpacing="8">
+                    <TextBlock Text="PLUGIN" Classes="scope-label" VerticalAlignment="Center" Grid.Column="1"/>
+                    <TextBlock Text="AUTHOR" Classes="scope-label" VerticalAlignment="Center" Grid.Column="2"/>
+                    <TextBlock Text="VERSION" Classes="scope-label" VerticalAlignment="Center" Grid.Column="3"/>
+                    <TextBlock Text="SCOPE" Classes="scope-label" VerticalAlignment="Center" HorizontalAlignment="Center" Grid.Column="4"/>
+                    <TextBlock Text="CONFIG" Classes="scope-label" VerticalAlignment="Center" HorizontalAlignment="Center" Grid.Column="5"/>
+                  </Grid>
+                </Border>
                 <TextBlock x:Name="NoLoaderPluginsText" Classes="muted" Text="No plugin DLLs were found."/>
                 <ItemsControl x:Name="LoaderPluginsItemsControl">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="utilities:D2RLoaderExtensionInfo">
                       <Border Classes="extension-card" Padding="5,1" ToolTip.Tip="{Binding FileVersionDetail}" BorderThickness="0" CornerRadius="2">
-                        <Grid ColumnDefinitions="Auto,3*,2*,Auto,Auto" ColumnSpacing="8" RowDefinitions="Auto,Auto">
-                          <CheckBox IsChecked="{Binding IsEnabled, Mode=OneWay}" IsEnabled="{Binding CanToggle}" Click="OnExtensionToggleClick" VerticalAlignment="Center" MinHeight="24" Height="24" Classes="hero-entry"/>
-                          <Grid VerticalAlignment="Center" Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" FontSize="13"/>
-                          </Grid>
-                          <TextBlock Text="{Binding VersionLabel}" Classes="muted" FontSize="12" VerticalAlignment="Center" Grid.Column="2" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding VersionLabel}"/>
-                          <Border Background="#39352B" CornerRadius="9" Padding="6,2" VerticalAlignment="Center" Grid.Column="3">
+                        <Grid ColumnDefinitions="24,2*,1.4*,1.1*,64,84" ColumnSpacing="8" RowDefinitions="Auto,Auto">
+                          <CheckBox IsChecked="{Binding IsEnabled, Mode=OneWay}" IsEnabled="{Binding CanToggle}" Click="OnExtensionToggleClick" HorizontalAlignment="Center" VerticalAlignment="Center" MinHeight="24" Height="24" Classes="hero-entry"/>
+                          <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" FontSize="13" Grid.Column="1"/>
+                          <TextBlock Text="{Binding AuthorLabel}" Classes="muted" FontSize="12" VerticalAlignment="Center" Grid.Column="2" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding AuthorLabel}"/>
+                          <TextBlock Text="{Binding VersionLabel}" Classes="muted" FontSize="12" VerticalAlignment="Center" Grid.Column="3" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding VersionLabel}"/>
+                          <Border Background="#39352B" CornerRadius="9" Padding="6,2" VerticalAlignment="Center" HorizontalAlignment="Center" Grid.Column="4">
                             <TextBlock Text="{Binding ScopeBadge}" FontSize="10"/>
                           </Border>
-                          <Button Content="Edit Config" IsEnabled="{Binding CanEditConfig}" Padding="7,1" MinHeight="24" FontSize="11" VerticalAlignment="Center" Grid.Column="4" ToolTip.Tip="{Binding ConfigEditHint}" Click="OnEditExtensionConfigClick"/>
-                          <TextBlock Text="{Binding ToggleStatus}" IsVisible="{Binding HasToggleConflict}" Classes="muted" TextWrapping="Wrap" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="4"/>
+                          <Button Content="Edit Config" IsEnabled="{Binding CanEditConfig}" Padding="7,1" MinHeight="24" FontSize="11" VerticalAlignment="Center" HorizontalAlignment="Center" Grid.Column="5" ToolTip.Tip="{Binding ConfigEditHint}" Click="OnEditExtensionConfigClick"/>
+                          <TextBlock Text="{Binding ToggleStatus}" IsVisible="{Binding HasToggleConflict}" Classes="muted" TextWrapping="Wrap" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="5"/>
                         </Grid>
                       </Border>
                     </DataTemplate>
@@ -529,22 +551,30 @@
                   <TextBlock Text="Patches" FontFamily="Georgia" FontSize="18" FontWeight="SemiBold"/>
                   <TextBlock x:Name="LoaderPatchCountText" Grid.Column="1" Classes="muted" VerticalAlignment="Center"/>
                 </Grid>
+                <Border Padding="5,2,5,4" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Margin="0,0,0,2">
+                  <Grid ColumnDefinitions="24,2*,1.4*,1.1*,64,84" ColumnSpacing="8">
+                    <TextBlock Text="PATCH" Classes="scope-label" VerticalAlignment="Center" Grid.Column="1"/>
+                    <TextBlock Text="AUTHOR" Classes="scope-label" VerticalAlignment="Center" Grid.Column="2"/>
+                    <TextBlock Text="VERSION" Classes="scope-label" VerticalAlignment="Center" Grid.Column="3"/>
+                    <TextBlock Text="SCOPE" Classes="scope-label" VerticalAlignment="Center" HorizontalAlignment="Center" Grid.Column="4"/>
+                    <TextBlock Text="CONFIG" Classes="scope-label" VerticalAlignment="Center" HorizontalAlignment="Center" Grid.Column="5"/>
+                  </Grid>
+                </Border>
                 <TextBlock x:Name="NoLoaderPatchesText" Classes="muted" Text="No patch manifests were found."/>
                 <ItemsControl x:Name="LoaderPatchesItemsControl">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="utilities:D2RLoaderExtensionInfo">
                       <Border Classes="extension-card" Padding="5,1" ToolTip.Tip="{Binding FileVersionDetail}" BorderThickness="0" CornerRadius="2">
-                        <Grid ColumnDefinitions="Auto,3*,2*,Auto,Auto" ColumnSpacing="8" RowDefinitions="Auto,Auto">
-                          <CheckBox IsChecked="{Binding IsEnabled, Mode=OneWay}" IsEnabled="{Binding CanToggle}" Click="OnExtensionToggleClick" VerticalAlignment="Center" MinHeight="24" Height="24" Classes="hero-entry"/>
-                          <Grid VerticalAlignment="Center" Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" FontSize="13"/>
-                          </Grid>
-                          <TextBlock Text="{Binding VersionLabel}" Classes="muted" FontSize="12" VerticalAlignment="Center" Grid.Column="2" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding VersionLabel}"/>
-                          <Border Background="#39352B" CornerRadius="9" Padding="6,2" VerticalAlignment="Center" Grid.Column="3">
+                        <Grid ColumnDefinitions="24,2*,1.4*,1.1*,64,84" ColumnSpacing="8" RowDefinitions="Auto,Auto">
+                          <CheckBox IsChecked="{Binding IsEnabled, Mode=OneWay}" IsEnabled="{Binding CanToggle}" Click="OnExtensionToggleClick" HorizontalAlignment="Center" VerticalAlignment="Center" MinHeight="24" Height="24" Classes="hero-entry"/>
+                          <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" FontSize="13" Grid.Column="1"/>
+                          <TextBlock Text="{Binding AuthorLabel}" Classes="muted" FontSize="12" VerticalAlignment="Center" Grid.Column="2" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding AuthorLabel}"/>
+                          <TextBlock Text="{Binding VersionLabel}" Classes="muted" FontSize="12" VerticalAlignment="Center" Grid.Column="3" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding VersionLabel}"/>
+                          <Border Background="#39352B" CornerRadius="9" Padding="6,2" VerticalAlignment="Center" HorizontalAlignment="Center" Grid.Column="4">
                             <TextBlock Text="{Binding ScopeBadge}" FontSize="10"/>
                           </Border>
-                          <Button Content="Edit Config" IsEnabled="{Binding CanEditConfig}" Padding="7,1" MinHeight="24" FontSize="11" VerticalAlignment="Center" Grid.Column="4" ToolTip.Tip="{Binding ConfigEditHint}" Click="OnEditExtensionConfigClick"/>
-                          <TextBlock Text="{Binding ToggleStatus}" IsVisible="{Binding HasToggleConflict}" Classes="muted" TextWrapping="Wrap" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="4"/>
+                          <Button Content="Edit Config" IsEnabled="{Binding CanEditConfig}" Padding="7,1" MinHeight="24" FontSize="11" VerticalAlignment="Center" HorizontalAlignment="Center" Grid.Column="5" ToolTip.Tip="{Binding ConfigEditHint}" Click="OnEditExtensionConfigClick"/>
+                          <TextBlock Text="{Binding ToggleStatus}" IsVisible="{Binding HasToggleConflict}" Classes="muted" TextWrapping="Wrap" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="5"/>
                         </Grid>
                       </Border>
                     </DataTemplate>

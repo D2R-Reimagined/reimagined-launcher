@@ -37,6 +37,20 @@ public sealed class D2RLoaderPluginVersionTests
     }
 
     [Fact]
+    public void ReadsJumpThunkAndPushPopGetterWithoutLoadingDll()
+    {
+        var bytes = CreatePlugin();
+        bytes[0x300] = 0xe9;
+        BitConverter.GetBytes(0x1120 - 0x1105).CopyTo(bytes, 0x301);
+        new byte[] { 0x40, 0x57, 0x48, 0x8d, 0x05 }.CopyTo(bytes, 0x320);
+        BitConverter.GetBytes(0x1180 - 0x1129).CopyTo(bytes, 0x325);
+        bytes[0x329] = 0x5f;
+        bytes[0x32a] = 0xc3;
+        Assert.Equal("0.2.14", ReadFixture(bytes));
+        Assert.Equal("yinyin", ReadFixture(bytes, author: true));
+    }
+
+    [Fact]
     public void UnsupportedGetterReturnsNoVersion()
     {
         var bytes = CreatePlugin();

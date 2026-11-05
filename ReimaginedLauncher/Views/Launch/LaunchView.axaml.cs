@@ -1738,6 +1738,7 @@ public partial class LaunchView : UserControl
                         Name = state.Approval.Name,
                         FileName = state.Approval.FileName,
                         Kind = state.Approval.Kind,
+                        Author = state.Author,
                         Version = state.Version ?? ladder.ActiveBundle?.Files.FirstOrDefault(file =>
                             string.Equals(file.FileName, state.Approval.FileName, StringComparison.OrdinalIgnoreCase)
                             && string.Equals(file.Sha256, state.Approval.Sha256, StringComparison.OrdinalIgnoreCase))?.Version,

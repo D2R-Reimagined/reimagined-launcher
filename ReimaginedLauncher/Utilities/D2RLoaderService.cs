@@ -41,6 +41,7 @@ public sealed class D2RLoaderExtensionInfo : INotifyPropertyChanged
     public string? Version { get; init; }
     public string? Author { get; init; }
     public bool HasAuthor => !string.IsNullOrWhiteSpace(Author);
+    public string AuthorLabel => HasAuthor ? Author!.Trim() : string.Empty;
     public string? Description { get; init; }
     public bool HasDescription => !string.IsNullOrWhiteSpace(Description);
     public int PatchCount { get; init; }
@@ -283,12 +284,17 @@ public static partial class D2RLoaderService
                 }
 
                 var (peVersion, peAuthor) = D2RLoaderPluginVersion.ReadMetadata(path);
+                var author = !string.IsNullOrWhiteSpace(peAuthor)
+                    ? peAuthor
+                    : string.IsNullOrWhiteSpace(versionInfo.CompanyName)
+                        ? null
+                        : versionInfo.CompanyName.Trim();
                 cached = new CachedPluginMetadata(
                     writeTicks,
                     length,
                     name,
                     peVersion ?? NormalizeVersion(versionInfo.FileVersion),
-                    peAuthor,
+                    author,
                     versionInfo.FileDescription);
                 if (fileInfo.Exists)
                 {
