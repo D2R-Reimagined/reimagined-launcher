@@ -1157,8 +1157,9 @@ public sealed class SaveConversionService
             problems.Add("invalid checksum or declared size");
         }
 
+        // Trailing extension data is carried by D2SSharp and is not an incompatibility.
         var trailer = attempt.TrailingBytes > 0
-            ? $", {attempt.TrailingBytes} trailing byte(s) after the standard sections"
+            ? $", {attempt.TrailingBytes} byte(s) of extension data after the standard sections"
             : "";
         return problems.Count == 0
             ? (true, $"complete parse, {attempt.AllItems.Count()} item(s){trailer}")

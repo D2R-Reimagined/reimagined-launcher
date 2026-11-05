@@ -280,6 +280,7 @@ public sealed class SaveMigrator
         private SaveInspector.ItemTypeIndex _targetTypes = null!;
         private IExternalData _sourceData = null!;
         private IExternalData _targetData = null!;
+        private byte[] _sourceTrailer = [];
         private uint _sourceVersion;
         private int _changes;
         private int _itemsInspected;
@@ -338,10 +339,10 @@ public sealed class SaveMigrator
             var root = Parse(data, _sourceData);
             if (root is D2Save { TrailingData.Length: > 0 } withTrailer)
             {
-                var trailer = withTrailer.TrailingData.ToArray();
-                withTrailer.TrailingData = [];
-                _notes.Add(
-                    $"Trimmed {trailer.Length} byte(s) of trailing data after the standard sections ({DescribeTrailer(trailer)}).");
+                _sourceTrailer = withTrailer.TrailingData.ToArray();
+                _warnings.Add(
+                    $"{_sourceTrailer.Length} byte(s) of opaque extension data follow the standard sections ({DescribeTrailer(_sourceTrailer)}). "
+                    + "They are carried over byte-for-byte; the launcher cannot interpret or migrate them.");
             }
 
             var before = Flatten(root);
@@ -1339,8 +1340,15 @@ public sealed class SaveMigrator
             }
 
             var trailer = reparsed is D2Save reparsedSave ? reparsedSave.TrailingData : [];
-            _checks.Add(new MigrationCheck($"Reparse with {Target.Label} definitions", trailer.Length == 0,
+            _checks.Add(new MigrationCheck($"Reparse with {Target.Label} definitions", true,
                 $"parses, {trailer.Length} trailing byte(s)", Critical: true));
+            if (_sourceTrailer.Length > 0 || trailer.Length > 0)
+            {
+                _checks.Add(new MigrationCheck("Trailing extension data preserved byte-for-byte",
+                    trailer.AsSpan().SequenceEqual(_sourceTrailer),
+                    $"source {_sourceTrailer.Length} byte(s), output {trailer.Length} byte(s)"
+                    + (trailer.AsSpan().SequenceEqual(_sourceTrailer) ? ", identical" : ", different")));
+            }
 
             var after = Flatten(reparsed);
             if (overrides.RebuildWithTarget)
