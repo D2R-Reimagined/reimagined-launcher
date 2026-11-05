@@ -27,6 +27,31 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
     private string StagingDirectory => Path.Combine(_root, "staging");
     private string BackupRoot => Path.Combine(_root, "backups");
 
+    [Fact]
+    public void TargetRebuildTrimsTrailingDataFromTargetVersionSave()
+    {
+        var service = CreateService();
+        var path = CopyFixture("FuckBenFuckingF.d2s");
+        byte[] trailer = [.. "BAS8"u8, 1, 0, 2, 0, .. Enumerable.Range(0, 100).Select(value => (byte)value)];
+        File.WriteAllBytes(path, WithValidHeader([.. File.ReadAllBytes(path), .. trailer]));
+
+        var plan = service.Plan(path, StagingDirectory);
+        Assert.Equal(SaveConversionState.AlreadyCompatible, plan.State);
+        Assert.Null(plan.ConvertedBytes);
+
+        var forced = service.Plan(path, Path.Combine(StagingDirectory, "forced"), new MigrationOverrides(Force: true));
+        Assert.Equal(SaveConversionState.Experimental, forced.State);
+        Assert.NotNull(forced.ConvertedBytes);
+        Assert.Contains("Trimmed 108 byte(s) of trailing data", forced.Report);
+        var output = D2Save.Read(forced.ConvertedBytes!,
+            Migrator.Value.Target.CreateExternalData(SaveMigrator.TargetVersion));
+        Assert.Empty(output.TrailingData);
+
+        var outcome = service.Apply(forced, null, service.CreateBackupBatchDirectory());
+        Assert.True(outcome.Succeeded);
+        Assert.Equal(forced.ConvertedBytes, File.ReadAllBytes(path));
+    }
+
     [Theory]
     [InlineData("FuckBenFuckingF.d2s", true)]
     [InlineData("basetolabpr.d2s", false)]
@@ -795,7 +820,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
     }
 
     [Fact]
-    public void TrailingExtensionDataIsCarriedOverByteForByte()
+    public void TrailingExtensionDataIsTrimmed()
     {
         var service = CreateService();
         var path = CopyFixture("Popsicle.d2s");
@@ -807,11 +832,11 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         var plan = service.Plan(path, StagingDirectory);
         Log(plan);
         Assert.Contains(plan.State, new[] { SaveConversionState.Verified, SaveConversionState.VerifiedWithWarnings });
-        Assert.Contains("opaque extension data", plan.Report);
-        Assert.Contains("[PASS] Trailing extension data preserved byte-for-byte", plan.Report);
+        Assert.Contains("Trimmed 49 byte(s) of trailing data", plan.Report);
+        Assert.Contains("[PASS] Reparse with Current installed Reimagined 3.1.0 definitions: parses, 0 trailing byte(s)", plan.Report);
         var output = D2Save.Read(plan.ConvertedBytes!,
             Migrator.Value.Target.CreateExternalData(SaveMigrator.TargetVersion));
-        Assert.Equal(trailer, output.TrailingData);
+        Assert.Empty(output.TrailingData);
 
         Assert.True(service.Apply(plan, null, service.CreateBackupBatchDirectory()).Succeeded);
         Assert.Equal(SaveConversionState.AlreadyCompatible,
@@ -855,12 +880,16 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         var existingBackups = Directory.GetFiles(BackupRoot, "*", SearchOption.AllDirectories)
             .ToDictionary(file => file, File.ReadAllBytes);
 
-        // A decodable save whose opaque trailer pushes it past the retail size limit: the source is recoverable, but any output that
-        // preserves the trailer must fail the critical output header check.
-        var path = CopyFixture("Popsicle.d2s");
-        var trailer = Enumerable.Range(0, SaveMigrator.RetailCharacterSizeLimit + 1).Select(value => (byte)(value * 31))
-            .ToArray();
-        var oversized = WithValidHeader([.. File.ReadAllBytes(path), .. trailer]);
+        // A decodable save with enough items that serializing it pushes it past the retail size limit: the source is recoverable, but any output that
+        // serializes the items must fail the critical output header check.
+        var path = CopyFixture("FuckBenFuckingF.d2s");
+        var sourceDef = Migrator.Value.Target;
+        var save = D2Save.Read(File.ReadAllBytes(path), sourceDef.CreateExternalData(SaveMigrator.TargetVersion));
+        while (save.ToBytes(sourceDef.CreateExternalData(SaveMigrator.TargetVersion), SaveMigrator.TargetVersion).Length <= SaveMigrator.RetailCharacterSizeLimit)
+        {
+            save.Items.Add(save.Items[0]);
+        }
+        var oversized = save.ToBytes(sourceDef.CreateExternalData(SaveMigrator.TargetVersion), SaveMigrator.TargetVersion);
         File.WriteAllBytes(path, oversized);
 
         var forced = service.Plan(path, Path.Combine(StagingDirectory, "forced"), new MigrationOverrides(Force: true));
@@ -879,11 +908,10 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.NotNull(candidate);
         Assert.Equal(Path.Combine(BackupRoot, "RecoveryCandidates"),
             Path.GetDirectoryName(Path.GetDirectoryName(candidate)));
-        Assert.Equal("Popsicle.d2s.recovery-candidate", Path.GetFileName(candidate));
+        Assert.Equal("FuckBenFuckingF.d2s.recovery-candidate", Path.GetFileName(candidate));
         Assert.Contains(candidate, forced.BlockingReason);
         var candidateBytes = File.ReadAllBytes(candidate);
         Assert.True(candidateBytes.Length > SaveMigrator.RetailCharacterSizeLimit);
-        Assert.Equal(trailer, candidateBytes[^trailer.Length..]);
         var candidateReport = File.ReadAllText(candidate + ".report.txt");
         Assert.StartsWith("EXPERIMENTAL RECOVERY CANDIDATE - FAILED A CRITICAL CHECK AND WAS NOT APPLIED.",
             candidateReport);
@@ -891,7 +919,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
 
         Assert.False(service.Apply(forced, null, service.CreateBackupBatchDirectory()).Succeeded);
         Assert.Equal(oversized, File.ReadAllBytes(path));
-        Assert.Equal(["BruhII.d2s", "Popsicle.d2s"],
+        Assert.Equal(["BruhII.d2s", "FuckBenFuckingF.d2s"],
             Directory.GetFiles(SaveDirectory).Select(Path.GetFileName).Order());
         foreach (var (file, bytes) in existingBackups)
         {
