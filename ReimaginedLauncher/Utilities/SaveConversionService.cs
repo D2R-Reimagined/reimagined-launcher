@@ -318,8 +318,17 @@ public sealed class SaveConversionService
         };
 
     internal static string AutomaticPromptKey(InstallationProfile profile, string saveDirectory,
-        string targetFingerprint) =>
-        $"{AutomaticPromptDirectory(profile.InstallDirectory)}|{AutomaticPromptDirectory(saveDirectory)}|{targetFingerprint}";
+        string targetFingerprint)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        foreach (var path in DiscoverSaveFiles(saveDirectory).Order(StringComparer.Ordinal))
+        {
+            hash.AppendData(Encoding.UTF8.GetBytes(Path.GetFileName(path)));
+            hash.AppendData([0]);
+            hash.AppendData(SHA256.HashData(File.ReadAllBytes(path)));
+        }
+        return $"{AutomaticPromptDirectory(profile.InstallDirectory)}|{AutomaticPromptDirectory(saveDirectory)}|{profile.LaunchExperience}|{targetFingerprint}|{Convert.ToHexStringLower(hash.GetHashAndReset())}";
+    }
 
     private static string AutomaticPromptDirectory(string? directory) =>
         Path.TrimEndingDirectorySeparator(directory?.Trim() ?? string.Empty);
@@ -371,7 +380,7 @@ public sealed class SaveConversionService
     /// <param name="findSaves">Replaces <see cref="FindSavesNeedingConversion"/>; tests use it to observe planning.</param>
     internal static (IReadOnlyList<string> Files, string? TargetFingerprint, string SaveDirectory, bool PromptAlreadyShown)
         FindOfflineSavesNeedingConversion(InstallationProfile profile,
-            Func<SaveConversionService, string, string, IReadOnlyList<string>>? findSaves = null)
+            Func<SaveConversionService, string, string, IReadOnlyList<string>>? findSaves = null, bool ignorePromptHistory = false)
     {
         var saveDirectory = ResolveOfflineSaveDirectory(profile);
         if (DiscoverSaveFiles(saveDirectory).Count == 0 || FindNormalModInfo(profile) is null)
@@ -383,7 +392,7 @@ public sealed class SaveConversionService
         try
         {
             var installedTarget = LoadInstalledTarget(profile, Path.Combine(staging, "installed-target"));
-            if (WasAutomaticPromptShown(profile, saveDirectory, installedTarget.Fingerprint))
+            if (!ignorePromptHistory && WasAutomaticPromptShown(profile, saveDirectory, installedTarget.Fingerprint))
             {
                 return ([], installedTarget.Fingerprint, saveDirectory, true);
             }
@@ -1148,9 +1157,8 @@ public sealed class SaveConversionService
             problems.Add("invalid checksum or declared size");
         }
 
-        // Trailing extension data is carried by D2SSharp and is not an incompatibility.
         var trailer = attempt.TrailingBytes > 0
-            ? $", {attempt.TrailingBytes} byte(s) of extension data after the standard sections"
+            ? $", {attempt.TrailingBytes} trailing byte(s) after the standard sections"
             : "";
         return problems.Count == 0
             ? (true, $"complete parse, {attempt.AllItems.Count()} item(s){trailer}")

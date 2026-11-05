@@ -27,6 +27,31 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
     private string StagingDirectory => Path.Combine(_root, "staging");
     private string BackupRoot => Path.Combine(_root, "backups");
 
+    [Fact]
+    public void TargetRebuildTrimsTrailingDataFromTargetVersionSave()
+    {
+        var service = CreateService();
+        var path = CopyFixture("FuckBenFuckingF.d2s");
+        byte[] trailer = [.. "BAS8"u8, 1, 0, 2, 0, .. Enumerable.Range(0, 100).Select(value => (byte)value)];
+        File.WriteAllBytes(path, WithValidHeader([.. File.ReadAllBytes(path), .. trailer]));
+
+        var plan = service.Plan(path, StagingDirectory);
+        Assert.Equal(SaveConversionState.AlreadyCompatible, plan.State);
+        Assert.Null(plan.ConvertedBytes);
+
+        var forced = service.Plan(path, Path.Combine(StagingDirectory, "forced"), new MigrationOverrides(Force: true));
+        Assert.Equal(SaveConversionState.Experimental, forced.State);
+        Assert.NotNull(forced.ConvertedBytes);
+        Assert.Contains("Trimmed 108 byte(s) of trailing data", forced.Report);
+        var output = D2Save.Read(forced.ConvertedBytes!,
+            Migrator.Value.Target.CreateExternalData(SaveMigrator.TargetVersion));
+        Assert.Empty(output.TrailingData);
+
+        var outcome = service.Apply(forced, null, service.CreateBackupBatchDirectory());
+        Assert.True(outcome.Succeeded);
+        Assert.Equal(forced.ConvertedBytes, File.ReadAllBytes(path));
+    }
+
     [Theory]
     [InlineData("FuckBenFuckingF.d2s", true)]
     [InlineData("basetolabpr.d2s", false)]
@@ -69,6 +94,82 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.Equal(alreadyCompatible ? 0 : 2,
             Directory.GetFiles(BackupRoot, "*", SearchOption.AllDirectories).Length);
         Assert.Equal(SHA256.HashData(original), SHA256.HashData(File.ReadAllBytes(FixturePath(fixture))));
+    }
+
+    [Theory]
+    [InlineData(false, LaunchExperience.Offline)]
+    [InlineData(true, LaunchExperience.Offline)]
+    [InlineData(false, LaunchExperience.Online)]
+    [InlineData(true, LaunchExperience.Online)]
+    public void BaseItemDropOnlyIsDetectedBeforeLaunchAndConvertedOnce(bool sharedStash, LaunchExperience experience)
+    {
+        var profile = CreateAutomaticCheckProfile(SaveMigrationFixtures.InstalledDirectory);
+        profile.LaunchExperience = experience;
+        var target = InstalledTarget.Value;
+        var baseStats = Path.Combine(SaveMigrationFixtures.DataDirectory, "D2RR 3.1.0 initial", "itemstatcost.txt");
+        var source = SaveDataDefinition.WithFrozenStatEncoding("Base mod", baseStats, target.Snapshot,
+            Path.Combine(_root, "base-tables"));
+        Assert.Equal("item_drop_only", source.Stat(442)!.Key);
+        Assert.Null(source.Stat(443));
+        var service = CreateService();
+        var path = CopyFixture(sharedStash ? "ModernSharedStashSoftCoreV2.d2i" : "FuckBenFuckingF.d2s");
+        var version = SaveMigrator.TargetVersion;
+        if (sharedStash)
+        {
+            var converted = service.Plan(path, Path.Combine(StagingDirectory, "prepare")).ConvertedBytes!;
+            var stash = D2StashSave.Read(converted, Migrator.Value.Target.CreateExternalData(version));
+            var item = stash.SelectMany(tab => tab.Items).First(item => item.Stats.Count > 0);
+            item.Stats.Add(item.Stats[0] with { Id = (StatId)442, Layer = 0, Value = 1 });
+            File.WriteAllBytes(path, stash.ToBytes(source.CreateExternalData(version), version));
+        }
+        else
+        {
+            var save = D2Save.Read(File.ReadAllBytes(path), Migrator.Value.Target.CreateExternalData(version));
+            var item = save.Items.First(item => item.Stats.Count > 0);
+            item.Stats.Add(item.Stats[0] with { Id = (StatId)442, Layer = 0, Value = 1 });
+            File.WriteAllBytes(path, save.ToBytes(source.CreateExternalData(version), version));
+        }
+        var original = File.ReadAllBytes(path);
+        var detected = CheckAutomatically(profile);
+        Assert.Contains(path, detected.Files);
+        Assert.Equal(original, File.ReadAllBytes(path));
+        Assert.True(RecordShownPrompt(profile, profile.InstallDirectory, detected.TargetFingerprint!));
+        Assert.Empty(CheckAutomatically(profile).Files);
+        var launchCheck = SaveConversionService.FindOfflineSavesNeedingConversion(profile, ignorePromptHistory: true);
+        Assert.Contains(path, launchCheck.Files);
+        var plan = service.Plan(path, Path.Combine(StagingDirectory, "convert"));
+        Assert.False(plan.IsBlocked, plan.Report);
+        Assert.NotNull(plan.ConvertedBytes);
+        Assert.Contains("item_drop_only 442 -> item_drop_only 443", plan.Report);
+        var outputStats = sharedStash
+            ? D2StashSave.Read(plan.ConvertedBytes!, Migrator.Value.Target.CreateExternalData(version))
+                .SelectMany(tab => tab.Items).SelectMany(item => item.Stats)
+            : D2Save.Read(plan.ConvertedBytes!, Migrator.Value.Target.CreateExternalData(version))
+                .Items.SelectMany(item => item.Stats);
+        Assert.Contains(outputStats, stat => (int)stat.Id == 443 && stat.Value == 1);
+        Assert.DoesNotContain(outputStats, stat => (int)stat.Id == 442);
+        var outcome = service.Apply(plan, null, service.CreateBackupBatchDirectory());
+        Assert.True(outcome.Succeeded, outcome.Message);
+        Assert.Equal(original, File.ReadAllBytes(Path.Combine(outcome.BackupDirectory!, Path.GetFileName(path))));
+        Assert.Equal(SaveConversionState.AlreadyCompatible,
+            service.Plan(path, Path.Combine(StagingDirectory, "again")).State);
+        Assert.Empty(CheckAutomatically(profile).Files);
+    }
+
+    [Fact]
+    public void ChangedSavesOrPlayModeInvalidateTheAutomaticPrompt()
+    {
+        var profile = CreateAutomaticCheckProfile(SaveMigrationFixtures.InstalledDirectory);
+        var path = CopyFixture("BruhII.d2s");
+        Assert.True(RecordShownPrompt(profile, profile.InstallDirectory, "target"));
+        Assert.True(SaveConversionService.WasAutomaticPromptShown(profile, SaveDirectory, "target"));
+        profile.LaunchExperience = LaunchExperience.Online;
+        Assert.False(SaveConversionService.WasAutomaticPromptShown(profile, SaveDirectory, "target"));
+        Assert.True(RecordShownPrompt(profile, profile.InstallDirectory, "target"));
+        var bytes = File.ReadAllBytes(path);
+        bytes[^1] ^= 1;
+        File.WriteAllBytes(path, bytes);
+        Assert.False(SaveConversionService.WasAutomaticPromptShown(profile, SaveDirectory, "target"));
     }
 
     [Fact]
@@ -340,10 +441,10 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
             Type = InstallationType.BattleNet, InstallDirectory = Path.Combine(_root, "install"),
             SaveDirectory = SaveDirectory
         };
-        Assert.True(RecordShownPrompt(profile, profile.InstallDirectory, InstalledTarget.Value.Fingerprint));
         var service = CreateService();
         var path = CopyFixture("BruhII.d2s");
         var original = File.ReadAllBytes(path);
+        Assert.True(RecordShownPrompt(profile, profile.InstallDirectory, InstalledTarget.Value.Fingerprint));
 
         Assert.True(SaveConversionService.WasAutomaticPromptShown(profile, SaveDirectory,
             InstalledTarget.Value.Fingerprint));
@@ -719,7 +820,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
     }
 
     [Fact]
-    public void TrailingExtensionDataIsCarriedOverByteForByte()
+    public void TrailingExtensionDataIsTrimmed()
     {
         var service = CreateService();
         var path = CopyFixture("Popsicle.d2s");
@@ -731,11 +832,11 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         var plan = service.Plan(path, StagingDirectory);
         Log(plan);
         Assert.Contains(plan.State, new[] { SaveConversionState.Verified, SaveConversionState.VerifiedWithWarnings });
-        Assert.Contains("opaque extension data", plan.Report);
-        Assert.Contains("[PASS] Trailing extension data preserved byte-for-byte", plan.Report);
+        Assert.Contains("Trimmed 49 byte(s) of trailing data", plan.Report);
+        Assert.Contains("[PASS] Reparse with Current installed Reimagined 3.1.0 definitions: parses, 0 trailing byte(s)", plan.Report);
         var output = D2Save.Read(plan.ConvertedBytes!,
             Migrator.Value.Target.CreateExternalData(SaveMigrator.TargetVersion));
-        Assert.Equal(trailer, output.TrailingData);
+        Assert.Empty(output.TrailingData);
 
         Assert.True(service.Apply(plan, null, service.CreateBackupBatchDirectory()).Succeeded);
         Assert.Equal(SaveConversionState.AlreadyCompatible,
@@ -779,12 +880,16 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         var existingBackups = Directory.GetFiles(BackupRoot, "*", SearchOption.AllDirectories)
             .ToDictionary(file => file, File.ReadAllBytes);
 
-        // A decodable save whose opaque trailer pushes it past the retail size limit: the source is recoverable, but any output that
-        // preserves the trailer must fail the critical output header check.
-        var path = CopyFixture("Popsicle.d2s");
-        var trailer = Enumerable.Range(0, SaveMigrator.RetailCharacterSizeLimit + 1).Select(value => (byte)(value * 31))
-            .ToArray();
-        var oversized = WithValidHeader([.. File.ReadAllBytes(path), .. trailer]);
+        // A decodable save with enough items that serializing it pushes it past the retail size limit: the source is recoverable, but any output that
+        // serializes the items must fail the critical output header check.
+        var path = CopyFixture("FuckBenFuckingF.d2s");
+        var sourceDef = Migrator.Value.Target;
+        var save = D2Save.Read(File.ReadAllBytes(path), sourceDef.CreateExternalData(SaveMigrator.TargetVersion));
+        while (save.ToBytes(sourceDef.CreateExternalData(SaveMigrator.TargetVersion), SaveMigrator.TargetVersion).Length <= SaveMigrator.RetailCharacterSizeLimit)
+        {
+            save.Items.Add(save.Items[0]);
+        }
+        var oversized = save.ToBytes(sourceDef.CreateExternalData(SaveMigrator.TargetVersion), SaveMigrator.TargetVersion);
         File.WriteAllBytes(path, oversized);
 
         var forced = service.Plan(path, Path.Combine(StagingDirectory, "forced"), new MigrationOverrides(Force: true));
@@ -803,11 +908,10 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.NotNull(candidate);
         Assert.Equal(Path.Combine(BackupRoot, "RecoveryCandidates"),
             Path.GetDirectoryName(Path.GetDirectoryName(candidate)));
-        Assert.Equal("Popsicle.d2s.recovery-candidate", Path.GetFileName(candidate));
+        Assert.Equal("FuckBenFuckingF.d2s.recovery-candidate", Path.GetFileName(candidate));
         Assert.Contains(candidate, forced.BlockingReason);
         var candidateBytes = File.ReadAllBytes(candidate);
         Assert.True(candidateBytes.Length > SaveMigrator.RetailCharacterSizeLimit);
-        Assert.Equal(trailer, candidateBytes[^trailer.Length..]);
         var candidateReport = File.ReadAllText(candidate + ".report.txt");
         Assert.StartsWith("EXPERIMENTAL RECOVERY CANDIDATE - FAILED A CRITICAL CHECK AND WAS NOT APPLIED.",
             candidateReport);
@@ -815,7 +919,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
 
         Assert.False(service.Apply(forced, null, service.CreateBackupBatchDirectory()).Succeeded);
         Assert.Equal(oversized, File.ReadAllBytes(path));
-        Assert.Equal(["BruhII.d2s", "Popsicle.d2s"],
+        Assert.Equal(["BruhII.d2s", "FuckBenFuckingF.d2s"],
             Directory.GetFiles(SaveDirectory).Select(Path.GetFileName).Order());
         foreach (var (file, bytes) in existingBackups)
         {

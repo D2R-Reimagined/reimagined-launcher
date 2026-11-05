@@ -98,7 +98,7 @@ public class InstallationProfile
     public StackDropOption RuneStackDrops { get; set; }
     public bool RemoveVignette { get; set; }
 
-    // Install directory, offline save folder and installed TXT fingerprint the automatic Convert Save Data prompt was last shown for.
+    // Installation, mode, save contents and installed TXT fingerprint last shown by the automatic conversion prompt.
     public string? SaveConversionPromptKey { get; set; }
 }
 

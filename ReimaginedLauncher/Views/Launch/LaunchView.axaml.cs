@@ -883,6 +883,8 @@ public partial class LaunchView : UserControl
         {
             await PromptInstallD2RLoaderAsync(profile);
         }
+        if (experience is LaunchExperience.Offline or LaunchExperience.Online && MainWindow.Instance is { } mainWindow)
+            await mainWindow.CheckSavesForConversionAsync($"{experience} selected");
     }
 
     private async Task PromptForMissingD2RLoaderAsync()
@@ -2617,6 +2619,15 @@ public partial class LaunchView : UserControl
             {
                 LaunchDiagnostics.Log("Mod tweak preparation returned false.");
                 SetLaunchStatus($"{actionName} preparation failed.");
+                return;
+            }
+
+            if (profile.Type != InstallationType.D2RMM
+                && profile.LaunchExperience is LaunchExperience.Offline or LaunchExperience.Online
+                && MainWindow.Instance is { } mainWindow
+                && !await mainWindow.CheckSavesForConversionAsync($"before {profile.LaunchExperience} launch", beforeLaunch: true))
+            {
+                SetLaunchStatus("Review save conversion before launching again.");
                 return;
             }
 

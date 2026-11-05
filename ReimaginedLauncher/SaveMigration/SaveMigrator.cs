@@ -24,6 +24,8 @@ public sealed class SaveMigrator
     private const uint SaveMagic = 0xAA55AA55;
     private const int StashTabHeaderSize = 64;
     private const int MaxListedProblems = 5;
+    private const int TeleportNovaStatId = 442;
+    private const int ItemDropOnlyStatId = 443;
 
     // Retail binary versions D2SSharp 0.0.22 is known to read; any other version is only attempted experimentally.
     private static readonly HashSet<uint> SupportedVersions = [97, 98, 99, 105];
@@ -40,19 +42,23 @@ public sealed class SaveMigrator
     private readonly IReadOnlyList<SnapshotComparison> _comparisons;
     private readonly IReadOnlyList<ResolvedIdentityMapping> _identityMappings;
     private readonly IReadOnlyList<SaveDataDefinition> _newerLayouts;
+    private readonly IReadOnlyList<SaveDataDefinition> _compatibilitySources;
 
     /// <param name="newerLayouts">Registered layouts that postdate the target. They are never converted from; a file they explain
     /// better than every source is refused as a downgrade, and one they explain as well is never verified.</param>
+    /// <param name="compatibilitySources">Additional compatibility sources checked alongside registered releases.</param>
     public SaveMigrator(IReadOnlyList<SaveDataDefinition> sources, SaveDataDefinition target,
         IReadOnlyList<SnapshotComparison> comparisons,
         IReadOnlyList<ResolvedIdentityMapping>? identityMappings = null,
-        IReadOnlyList<SaveDataDefinition>? newerLayouts = null)
+        IReadOnlyList<SaveDataDefinition>? newerLayouts = null,
+        IReadOnlyList<SaveDataDefinition>? compatibilitySources = null)
     {
         _sources = sources;
         _target = target;
         _comparisons = comparisons;
         _identityMappings = identityMappings ?? [];
         _newerLayouts = newerLayouts ?? [];
+        _compatibilitySources = compatibilitySources ?? [];
     }
 
     /// <summary>A migrator from earlier frozen releases and compatible development layouts to the installed game data.</summary>
@@ -128,13 +134,16 @@ public sealed class SaveMigrator
             }
         }
 
-        var comparisons = sources
+        List<SaveDataDefinition> compatibilitySources = ItemDropOnlyAtTeleportNova(registry, installedTarget, targetStats) is { } hotfix
+            ? [hotfix]
+            : [];
+        var comparisons = sources.Concat(compatibilitySources)
             .Select(source => source.ItemTables)
             .DistinctBy(tables => (tables.Label, tables.Directory))
             .Select(tables => TableComparer.Compare(tables, targetTables))
             .ToList();
         return new SaveMigrator(sources, SaveDataDefinition.FromSnapshot(targetTables), comparisons,
-            registry.IdentityMappingsUpTo(targetOrder), newerLayouts);
+            registry.IdentityMappingsUpTo(targetOrder), newerLayouts, compatibilitySources);
 
         SaveDataDefinition Release(SaveCheckpoint checkpoint) => SaveDataDefinition
             .FromSnapshot(Snapshot(checkpoint.Label, checkpoint.Directory))
@@ -151,6 +160,27 @@ public sealed class SaveMigrator
 
             return snapshot;
         }
+    }
+
+    /// <summary>
+    /// The first 3.1.0 download saved item_drop_only at 442; the replacement build inserted teleport_nova there and moved it to 443
+    /// without changing the version. The frozen base encoding recovers saves made before that insertion.
+    /// </summary>
+    private static SaveDataDefinition? ItemDropOnlyAtTeleportNova(SaveCheckpointRegistry registry, InstalledGameData installedTarget,
+        IReadOnlyList<TableDefinition> targetStats)
+    {
+        if (targetStats.Count <= ItemDropOnlyStatId
+            || targetStats[TeleportNovaStatId].Key != "teleport_nova"
+            || targetStats[ItemDropOnlyStatId].Key != "item_drop_only")
+        {
+            return null;
+        }
+
+        var directory = Path.Combine(installedTarget.CopiedDirectory, "stat-encodings", Guid.NewGuid().ToString("N"));
+        var statPath = registry.PathOf("D2RR 3.1.0 initial/itemstatcost.txt");
+        return SaveDataDefinition.WithFrozenStatEncoding("Installed items with item_drop_only at stat 442", statPath,
+                installedTarget.Snapshot, Path.Combine(directory, "composed"))
+            .WithCharacterVersions([TargetVersion]);
     }
 
     public SaveDataDefinition Target => _target;
@@ -250,7 +280,6 @@ public sealed class SaveMigrator
         private SaveInspector.ItemTypeIndex _targetTypes = null!;
         private IExternalData _sourceData = null!;
         private IExternalData _targetData = null!;
-        private byte[] _sourceTrailer = [];
         private uint _sourceVersion;
         private int _changes;
         private int _itemsInspected;
@@ -309,10 +338,10 @@ public sealed class SaveMigrator
             var root = Parse(data, _sourceData);
             if (root is D2Save { TrailingData.Length: > 0 } withTrailer)
             {
-                _sourceTrailer = withTrailer.TrailingData.ToArray();
-                _warnings.Add(
-                    $"{_sourceTrailer.Length} byte(s) of opaque extension data follow the standard sections ({DescribeTrailer(_sourceTrailer)}). "
-                    + "They are carried over byte-for-byte; the launcher cannot interpret or migrate them.");
+                var trailer = withTrailer.TrailingData.ToArray();
+                withTrailer.TrailingData = [];
+                _notes.Add(
+                    $"Trimmed {trailer.Length} byte(s) of trailing data after the standard sections ({DescribeTrailer(trailer)}).");
             }
 
             var before = Flatten(root);
@@ -431,6 +460,11 @@ public sealed class SaveMigrator
 
             var inspection = SaveInspector.Inspect(input, owner._sources, owner._comparisons);
             var decoded = Decode(owner._sources, inspection.Attempts, "");
+            decoded.AddRange(Decode(owner._compatibilitySources,
+                SaveInspector.Inspect(input, owner._compatibilitySources, owner._comparisons).Attempts, "")
+                .Where(candidate => candidate.Attempt.AllItems.Any(item =>
+                    item.Stats.Any(stat => (int)stat.Id == TeleportNovaStatId))));
+
             if (IsNewerThanTarget(decoded))
             {
                 return null;
@@ -1305,15 +1339,8 @@ public sealed class SaveMigrator
             }
 
             var trailer = reparsed is D2Save reparsedSave ? reparsedSave.TrailingData : [];
-            _checks.Add(new MigrationCheck($"Reparse with {Target.Label} definitions", true,
+            _checks.Add(new MigrationCheck($"Reparse with {Target.Label} definitions", trailer.Length == 0,
                 $"parses, {trailer.Length} trailing byte(s)", Critical: true));
-            if (_sourceTrailer.Length > 0 || trailer.Length > 0)
-            {
-                _checks.Add(new MigrationCheck("Trailing extension data preserved byte-for-byte",
-                    trailer.AsSpan().SequenceEqual(_sourceTrailer),
-                    $"source {_sourceTrailer.Length} byte(s), output {trailer.Length} byte(s)"
-                    + (trailer.AsSpan().SequenceEqual(_sourceTrailer) ? ", identical" : ", different")));
-            }
 
             var after = Flatten(reparsed);
             if (overrides.RebuildWithTarget)

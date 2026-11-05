@@ -392,6 +392,50 @@ public sealed class SaveMigrationTests(ITestOutputHelper testOutput)
         Assert.Single(output.SelectMany(tab => tab.Items), item => item.ItemCodeString.Trim() == "r34");
     }
 
+    [Fact]
+    public void ItemDropOnlySavedAtTeleportNovaIdIsMovedToItsInstalledId()
+    {
+        const string label = "Installed items with item_drop_only at stat 442";
+        var target = Migrator.Value.Target;
+        Assert.Equal(("teleport_nova", "item_drop_only"), (target.Stat(442)!.Key, target.Stat(443)!.Key));
+        var directory = SaveMigrationFixtures.NewCopyDirectory();
+        SaveMigrationFixtures.CopyInstalledTables(directory);
+        var statPath = Path.Combine(directory, "itemstatcost.txt");
+        var lines = File.ReadAllLines(statPath, System.Text.Encoding.Latin1);
+        (lines[443], lines[444]) = (lines[444], lines[443]);
+        File.WriteAllLines(statPath, lines, System.Text.Encoding.Latin1);
+        var firstDownload = SaveDataDefinition.FromSnapshot(GameDataSnapshot.Load("first 3.1.0 download", directory));
+        Assert.Equal("item_drop_only", firstDownload.Stat(442)!.Key);
+
+        var converted = File.ReadAllBytes(Convert("ModernSharedStashSoftCoreV2.d2i").OutputPath!);
+        var stash = D2StashSave.Read(converted, target.CreateExternalData(SaveMigrator.TargetVersion));
+        var marked = stash.SelectMany(tab => tab.Items).First(item => item.Stats.Count > 0);
+        marked.Stats.Add(marked.Stats[0] with { Id = (StatId)442, Layer = 0, Value = 1 });
+        var inputDirectory = Path.Combine(RepositoryRoot.Value, "ReimaginedLauncher.Tests", "TestOutput",
+            "SaveMigration", "Input");
+        Directory.CreateDirectory(inputDirectory);
+        var input = Path.Combine(inputDirectory, "ItemDropOnlyAt442Stash.d2i");
+        File.WriteAllBytes(input,
+            stash.ToBytes(firstDownload.CreateExternalData(SaveMigrator.TargetVersion), SaveMigrator.TargetVersion));
+
+        var result = ConvertFile(input);
+
+        Assert.Equal(label, result.SourceLayout);
+        Assert.Contains(result.Stats, stat => stat is { SourceName: "item_drop_only", SourceId: 442, TargetId: 443 });
+        var output = D2StashSave.Read(File.ReadAllBytes(result.OutputPath!),
+            target.CreateExternalData(SaveMigrator.TargetVersion));
+        Assert.Single(output.SelectMany(tab => tab.Items).SelectMany(item => item.Stats),
+            stat => (int)stat.Id == 443 && stat.Value == 1);
+
+        // Current saves are checked against both encodings without selecting the base encoding.
+        var current = Path.Combine(inputDirectory, "ItemDropOnlyAt443Stash.d2i");
+        File.WriteAllBytes(current,
+            stash.ToBytes(target.CreateExternalData(SaveMigrator.TargetVersion), SaveMigrator.TargetVersion));
+        var currentResult = Migrator.Value.Migrate(current, SaveMigrationFixtures.NewCopyDirectory());
+        Assert.NotEqual(label, currentResult.SourceLayout);
+        Assert.Contains(currentResult.Identification, line => line.StartsWith(label, StringComparison.Ordinal));
+    }
+
     /// <summary>BruhII (2.1.2) with four items rewritten to carry 2.1.2 identities that later releases renamed.</summary>
     private static (SaveMigrationResult Result, D2Save Save) ConvertHistoricalRenames()
     {
