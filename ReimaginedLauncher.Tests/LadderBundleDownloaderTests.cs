@@ -14,11 +14,16 @@ public sealed class LadderBundleDownloaderTests : IDisposable
     private static readonly byte[] Payload = Enumerable.Range(0, LadderBundleDownloader.ChunkBytes + 4096).Select(i => (byte)(i % 251)).ToArray();
     private static string Hash => Convert.ToHexString(SHA256.HashData(Payload));
 
-    private Task<byte[]> Download(Handler handler, CancellationToken token = default, string? hash = null)
+    private Task<byte[]> Download(Handler handler, CancellationToken token = default, string? hash = null,
+        TimeSpan? requestTimeout = null)
     {
         var client = new HttpClient(handler) { BaseAddress = new Uri("https://api.example.com/"), Timeout = Timeout.InfiniteTimeSpan };
-        return new LadderBundleDownloader(client) { RetryDelay = TimeSpan.Zero, RequestTimeout = TimeSpan.FromMilliseconds(200) }
-            .DownloadAsync("bundle/download", Payload.Length, hash ?? Hash, CachePath, null, token);
+        var downloader = new LadderBundleDownloader(client)
+        {
+            RetryDelay = TimeSpan.Zero,
+            RequestTimeout = requestTimeout ?? TimeSpan.FromSeconds(30)
+        };
+        return downloader.DownloadAsync("bundle/download", Payload.Length, hash ?? Hash, CachePath, null, token);
     }
 
     [Fact]
@@ -44,7 +49,7 @@ public sealed class LadderBundleDownloaderTests : IDisposable
     public async Task RequestTimeoutRetriesWithoutUserRetry()
     {
         var handler = new Handler { TimeoutOnce = true };
-        Assert.Equal(Payload, await Download(handler));
+        Assert.Equal(Payload, await Download(handler, requestTimeout: TimeSpan.FromMilliseconds(200)));
         Assert.True(handler.FirstChunkRequests >= 2);
     }
 

@@ -19,7 +19,7 @@ public partial class SaveConversionWindow : Window
 {
     private readonly ObservableCollection<SaveConversionRowViewModel> _rows = [];
 
-    private readonly Dictionary<(SaveConversionRowViewModel Row, string? Source, bool Force), SaveConversionPlan>
+    private readonly Dictionary<(SaveConversionRowViewModel Row, MigrationOverrides Overrides), SaveConversionPlan>
         _plans = [];
 
     private readonly string _stagingDirectory =
@@ -201,16 +201,18 @@ public partial class SaveConversionWindow : Window
         }
 
         var force = ForceCheckBox.IsChecked == true;
+        var removeTrailingData = force && RemoveTrailingDataCheckBox.IsChecked == true &&
+                                 row.BasePlan.Kind == SaveFileKind.Character;
         var targetChoiceSelected = row.IsSourceUncertain && row.SelectedSourceChoice is { Layout: null };
         var plan = row.IsSourceUncertain
             ? targetChoiceSelected
-                ? force ? await PlanAsync(service, row, null, true) : row.BasePlan
-                : await PlanAsync(service, row, row.SelectedSourceChoice!.Layout, force)
+                ? force ? await PlanAsync(service, row, null, true, removeTrailingData) : row.BasePlan
+                : await PlanAsync(service, row, row.SelectedSourceChoice!.Layout, force, removeTrailingData)
             : force && (row.BasePlan.State == SaveConversionState.AlreadyCompatible ||
                         row.BasePlan is
                             { State: SaveConversionState.Unresolved, ForceOption.Kind: SaveForceKind.Force } ||
-                        row.BasePlan.CanAttemptRecovery)
-                ? await PlanAsync(service, row, null, true)
+                        row.BasePlan.CanAttemptRecovery || (removeTrailingData && row.BasePlan.ConvertedBytes is not null))
+                ? await PlanAsync(service, row, null, true, removeTrailingData)
                 : row.BasePlan;
         if (plan != row.Plan || select is not null)
         {
@@ -219,24 +221,24 @@ public partial class SaveConversionWindow : Window
     }
 
     private async Task<SaveConversionPlan> PlanAsync(SaveConversionService service, SaveConversionRowViewModel row,
-        string? source, bool force)
+        string? source, bool force, bool removeTrailingData)
     {
-        if (_plans.TryGetValue((row, source, force), out var cached))
+        var overrides = new MigrationOverrides(Force: force, SourceLayout: source, RemoveTrailingData: removeTrailingData);
+        if (_plans.TryGetValue((row, overrides), out var cached))
         {
             return cached;
         }
 
-        var overrides = new MigrationOverrides(Force: force, SourceLayout: source);
         var path = row.BasePlan.SourcePath;
         var staging = NewStagingDirectory();
         var plan = await Task.Run(() => service.Plan(path, staging, overrides));
         LaunchDiagnostics.Log(
             $"Save conversion analysis for {path} (source {source ?? "identified"}, force {force}): {plan.State} - {plan.Operation}");
-        _plans[(row, source, force)] = plan;
+        _plans[(row, overrides)] = plan;
         return plan;
     }
 
-    private async void OnForceChanged(object? sender, RoutedEventArgs e)
+    private async void OnConversionOptionsChanged(object? sender, RoutedEventArgs e)
     {
         if (_isBusy || _service is not { } service)
         {
@@ -249,6 +251,11 @@ public partial class SaveConversionWindow : Window
                 : "Restoring verified conversions...");
         try
         {
+            if (ForceCheckBox.IsChecked != true)
+            {
+                RemoveTrailingDataCheckBox.IsChecked = false;
+            }
+
             foreach (var row in _rows.ToList())
             {
                 BusyText.Text = $"Analyzing {row.FileName}...";
@@ -396,6 +403,7 @@ public partial class SaveConversionWindow : Window
         CloseButton.IsEnabled = !isBusy;
         FilesItemsControl.IsEnabled = !isBusy;
         ForceCheckBox.IsEnabled = !isBusy && _service is not null;
+        RemoveTrailingDataCheckBox.IsEnabled = ForceCheckBox.IsEnabled && ForceCheckBox.IsChecked == true;
         UpdateSummary();
     }
 

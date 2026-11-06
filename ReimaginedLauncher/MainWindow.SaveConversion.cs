@@ -13,19 +13,22 @@ public partial class MainWindow
     /// <summary>
     /// Analyzes the offline saves on a dedicated background thread and opens the conversion window
     /// when any of them need converting or review. Only the most recent check may prompt, never over another dialog,
-    /// and once per installation, play mode, save contents and installed target data outside launch checks.
+    /// and once per installation, play mode, save contents and installed target data outside launch and install checks.
     /// </summary>
     /// <returns>True when launch may proceed without a conversion review.</returns>
-    public async Task<bool> CheckSavesForConversionAsync(string trigger, bool beforeLaunch = false)
+    public async Task<bool> CheckSavesForConversionAsync(string trigger, bool beforeLaunch = false,
+        bool afterInstall = false)
     {
         var generation = ++_saveConversionCheckGeneration;
+        var ignorePromptHistory = beforeLaunch || afterInstall;
         var profile = Settings.CurrentProfile;
         var installDirectory = profile.InstallDirectory;
         var experience = profile.LaunchExperience;
         try
         {
             var (files, targetFingerprint, saveDirectory, promptAlreadyShown) = await Task.Factory.StartNew(
-                () => SaveConversionService.FindOfflineSavesNeedingConversion(profile, ignorePromptHistory: beforeLaunch),
+                () => SaveConversionService.FindOfflineSavesNeedingConversion(profile,
+                    ignorePromptHistory: ignorePromptHistory),
                 CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
             LaunchDiagnostics.Log(promptAlreadyShown
                 ? $"Save conversion check ({trigger}): skipped, the prompt was already shown for this installed target and save folder."
@@ -39,7 +42,7 @@ public partial class MainWindow
             bool IsPromptCurrent() =>
                 ReferenceEquals(profile, Settings.CurrentProfile) && profile.LaunchExperience == experience &&
                 SaveConversionService.IsAnalyzedInstallation(profile, installDirectory, saveDirectory) &&
-                (beforeLaunch || !SaveConversionService.WasAutomaticPromptShown(profile, saveDirectory, analyzedTarget));
+                (ignorePromptHistory || !SaveConversionService.WasAutomaticPromptShown(profile, saveDirectory, analyzedTarget));
 
             if (generation != _saveConversionCheckGeneration || IsInstallInProgress ||
                 IsGameRunning() || !IsVisible || OwnedWindows.Count > 0 || !IsPromptCurrent())

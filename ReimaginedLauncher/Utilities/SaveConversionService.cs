@@ -311,11 +311,11 @@ public sealed class SaveConversionService
     /// </summary>
     public static bool NeedsConversion(SaveConversionPlan plan) =>
         plan.State is SaveConversionState.Verified or SaveConversionState.VerifiedWithWarnings
-        || plan is
-        {
-            State: SaveConversionState.Unresolved or SaveConversionState.AlreadyCompatible,
-            ForceOption.Kind: SaveForceKind.ChooseSourceLayout
-        };
+         || plan is
+         {
+             State: SaveConversionState.Unresolved or SaveConversionState.AlreadyCompatible,
+             ForceOption.Kind: SaveForceKind.ChooseSourceLayout
+         };
 
     internal static string AutomaticPromptKey(InstallationProfile profile, string saveDirectory,
         string targetFingerprint)
@@ -355,7 +355,8 @@ public sealed class SaveConversionService
         string analyzedSaveDirectory, string targetFingerprint, string? shownTargetFingerprint,
         IEnumerable<SaveConversionPlan> shownPlans)
     {
-        if (shownTargetFingerprint != targetFingerprint || !shownPlans.Any(NeedsConversion) ||
+        if (shownTargetFingerprint != targetFingerprint ||
+            !shownPlans.Any(NeedsConversion) ||
             !IsAnalyzedInstallation(profile, analyzedInstallDirectory, analyzedSaveDirectory))
         {
             return false;
@@ -488,7 +489,8 @@ public sealed class SaveConversionService
             var forced = overrides?.Force == true;
             var targetRebuild = forced && targetFits && overrides?.SourceLayout is null;
             var result = targetRebuild
-                ? migrator.Rebuild(path, Path.Combine(stagingDirectory, "target-rebuild"))
+                ? migrator.Rebuild(path, Path.Combine(stagingDirectory, "target-rebuild"),
+                    removeTrailingData: overrides?.RemoveTrailingData == true)
                 : migrator.Migrate(path, stagingDirectory, overrides);
             var output = result.OutputPath is { } outputPath ? File.ReadAllBytes(outputPath) : null;
             var targetReadableWithoutHistoricalSource = targetFits && result.SourceLayout is null

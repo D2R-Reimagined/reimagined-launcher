@@ -259,7 +259,7 @@ public partial class UpdateView : UserControl
         if (_modFilesInstalled && MainWindow.Instance is { } mainWindow)
         {
             _modFilesInstalled = false;
-            _ = mainWindow.CheckSavesForConversionAsync("after mod install");
+            _ = mainWindow.CheckSavesForConversionAsync("after mod install", afterInstall: true);
         }
     }
 

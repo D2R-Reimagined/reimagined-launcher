@@ -199,8 +199,9 @@ public sealed class SaveMigrator
         new Run(this, Path.GetFullPath(inputPath), Path.GetFullPath(outputDirectory),
             overrides ?? MigrationOverrides.None).Execute();
 
-    public SaveMigrationResult Rebuild(string inputPath, string outputDirectory) =>
-        Migrate(inputPath, outputDirectory, new MigrationOverrides(Force: true, RebuildWithTarget: true));
+    public SaveMigrationResult Rebuild(string inputPath, string outputDirectory, bool removeTrailingData = false) =>
+        Migrate(inputPath, outputDirectory, new MigrationOverrides(Force: true, RebuildWithTarget: true,
+            RemoveTrailingData: removeTrailingData));
 
     private sealed record FieldDifference(string Path, string? Before, string? After)
     {
@@ -336,9 +337,10 @@ public sealed class SaveMigrator
             _targetData = Target.CreateExternalData(TargetVersion);
 
             var root = Parse(data, _sourceData);
-            if (root is D2Save { TrailingData.Length: > 0 } withTrailer)
+            if (overrides is { Force: true, RemoveTrailingData: true } &&
+                root is D2Save { TrailingData.Length: > 0 } withTrailer)
             {
-                var trailer = withTrailer.TrailingData.ToArray();
+                var trailer = withTrailer.TrailingData;
                 withTrailer.TrailingData = [];
                 _notes.Add(
                     $"Trimmed {trailer.Length} byte(s) of trailing data after the standard sections ({DescribeTrailer(trailer)}).");
@@ -1338,9 +1340,11 @@ public sealed class SaveMigrator
                 return;
             }
 
-            var trailer = reparsed is D2Save reparsedSave ? reparsedSave.TrailingData : [];
-            _checks.Add(new MigrationCheck($"Reparse with {Target.Label} definitions", trailer.Length == 0,
-                $"parses, {trailer.Length} trailing byte(s)", Critical: true));
+            var expectedTrailer = migratedRoot is D2Save originalSave ? originalSave.TrailingData : [];
+            var actualTrailer = reparsed is D2Save reparsedSave ? reparsedSave.TrailingData : [];
+            var trailerMatches = actualTrailer.AsSpan().SequenceEqual(expectedTrailer);
+            _checks.Add(new MigrationCheck($"Reparse with {Target.Label} definitions", trailerMatches,
+                trailerMatches ? "parses" : "trailing data differs from the expected output", Critical: true));
 
             var after = Flatten(reparsed);
             if (overrides.RebuildWithTarget)
