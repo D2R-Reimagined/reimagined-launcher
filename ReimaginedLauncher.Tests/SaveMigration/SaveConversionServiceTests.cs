@@ -28,10 +28,13 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
     private string BackupRoot => Path.Combine(_root, "backups");
 
     [Fact]
-    public void TargetRebuildTrimsTrailingDataFromTargetVersionSave()
+    public void TargetRebuildOnlyTrimsTrailingDataWhenRequested()
     {
         var service = CreateService();
         var path = CopyFixture("FuckBenFuckingF.d2s");
+        var normalized = Migrator.Value.Rebuild(path, Path.Combine(StagingDirectory, "normalize"));
+        Assert.NotNull(normalized.OutputPath);
+        File.WriteAllBytes(path, File.ReadAllBytes(normalized.OutputPath!));
         byte[] trailer = [.. "BAS8"u8, 1, 0, 2, 0, .. Enumerable.Range(0, 100).Select(value => (byte)value)];
         File.WriteAllBytes(path, WithValidHeader([.. File.ReadAllBytes(path), .. trailer]));
 
@@ -39,7 +42,13 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.Equal(SaveConversionState.AlreadyCompatible, plan.State);
         Assert.Null(plan.ConvertedBytes);
 
-        var forced = service.Plan(path, Path.Combine(StagingDirectory, "forced"), new MigrationOverrides(Force: true));
+        var forcedWithoutRemoval = service.Plan(path, Path.Combine(StagingDirectory, "preserve"),
+            new MigrationOverrides(Force: true));
+        Assert.Equal(SaveConversionState.AlreadyCompatible, forcedWithoutRemoval.State);
+        Assert.Null(forcedWithoutRemoval.ConvertedBytes);
+
+        var forced = service.Plan(path, Path.Combine(StagingDirectory, "forced"),
+            new MigrationOverrides(Force: true, RemoveTrailingData: true));
         Assert.Equal(SaveConversionState.Experimental, forced.State);
         Assert.NotNull(forced.ConvertedBytes);
         Assert.Contains("Trimmed 108 byte(s) of trailing data", forced.Report);
@@ -582,8 +591,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.Equal(SaveForceKind.ChooseSourceLayout, plan.ForceOption?.Kind);
         Assert.Contains(source.Label, plan.ForceOption!.SourceLayouts);
         Assert.Contains("recoverable historical interpretation", plan.Operation);
-        Assert.False(plan.OnlyRemovesTrailingData);
-        Assert.True(SaveConversionService.NeedsConversion(plan, includeTrailingDataOnly: false));
+        Assert.True(SaveConversionService.NeedsConversion(plan));
         var row = new SaveConversionRowViewModel(plan, service.CheckRename);
         Assert.Equal(source.Label, row.SelectedSourceChoice?.Layout);
         Assert.Null(row.SourceChoices[^1].Layout);
@@ -597,10 +605,13 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
     }
 
     [Fact]
-    public void HistoricalAlternativeThatOnlyTrimsTrailingDataIsLeftToInstallChecksAndManualConversion()
+    public void TrailingDataAloneDoesNotTriggerAutomaticConversion()
     {
         var installed = InstalledTarget.Value;
         var path = CopyFixture("FuckBenFuckingF.d2s");
+        var normalized = Migrator.Value.Rebuild(path, Path.Combine(StagingDirectory, "normalize"));
+        Assert.NotNull(normalized.OutputPath);
+        File.WriteAllBytes(path, File.ReadAllBytes(normalized.OutputPath!));
         byte[] trailer = [.. "BAS8"u8, 1, 0, 2, 0, .. "PET3"u8, .. Enumerable.Range(0, 100).Select(value => (byte)value)];
         File.WriteAllBytes(path, WithValidHeader([.. File.ReadAllBytes(path), .. trailer]));
         var original = File.ReadAllBytes(path);
@@ -626,18 +637,14 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Log(plan);
 
         Assert.Equal(SaveConversionState.AlreadyCompatible, plan.State);
-        Assert.Equal(source.Label, plan.HistoricalAlternative);
-        Assert.True(plan.OnlyRemovesTrailingData);
-        Assert.True(SaveConversionService.NeedsConversion(plan));
-        Assert.False(SaveConversionService.NeedsConversion(plan, includeTrailingDataOnly: false));
-        Assert.Equal(new[] { path }, service.FindSavesNeedingConversion(SaveDirectory, Path.Combine(StagingDirectory, "all")));
-        Assert.Empty(service.FindSavesNeedingConversion(SaveDirectory, Path.Combine(StagingDirectory, "automatic"),
-            includeTrailingDataOnly: false));
+        Assert.Null(plan.HistoricalAlternative);
+        Assert.False(SaveConversionService.NeedsConversion(plan));
+        Assert.Empty(service.FindSavesNeedingConversion(SaveDirectory, Path.Combine(StagingDirectory, "automatic")));
         var install = Path.Combine(_root, "install");
         var profile = new InstallationProfile
             { Type = InstallationType.BattleNet, InstallDirectory = install, SaveDirectory = SaveDirectory };
         Assert.False(SaveConversionService.RecordAutomaticPromptShown(profile, install, SaveDirectory, "target-a",
-            "target-a", [plan], includeTrailingDataOnly: false));
+            "target-a", [plan]));
         Assert.Equal(original, File.ReadAllBytes(path));
     }
 
@@ -865,8 +872,12 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.Empty(Directory.GetFiles(BackupRoot, "*", SearchOption.AllDirectories));
     }
 
-    [Fact]
-    public void TrailingExtensionDataIsTrimmed()
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void HistoricalConversionOnlyTrimsTrailingDataWithBothOptionsEnabled(bool force, bool removeTrailingData)
     {
         var service = CreateService();
         var path = CopyFixture("Popsicle.d2s");
@@ -875,14 +886,22 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
             [.. "EXT1"u8, 1, 0, 2, 0, .. Enumerable.Range(0, 37).Select(value => (byte)(value * 7)), .. "ABCD"u8];
         File.WriteAllBytes(path, WithValidHeader([.. File.ReadAllBytes(path), .. trailer]));
 
-        var plan = service.Plan(path, StagingDirectory);
+        var plan = service.Plan(path, StagingDirectory,
+            new MigrationOverrides(Force: force, RemoveTrailingData: removeTrailingData));
         Log(plan);
         Assert.Contains(plan.State, new[] { SaveConversionState.Verified, SaveConversionState.VerifiedWithWarnings });
-        Assert.Contains("Trimmed 49 byte(s) of trailing data", plan.Report);
-        Assert.Contains("[PASS] Reparse with Current installed Reimagined 3.1.0 definitions: parses, 0 trailing byte(s)", plan.Report);
         var output = D2Save.Read(plan.ConvertedBytes!,
             Migrator.Value.Target.CreateExternalData(SaveMigrator.TargetVersion));
-        Assert.Empty(output.TrailingData);
+        if (force && removeTrailingData)
+        {
+            Assert.Contains("Trimmed 49 byte(s) of trailing data", plan.Report);
+            Assert.Empty(output.TrailingData);
+        }
+        else
+        {
+            Assert.DoesNotContain("Trimmed", plan.Report);
+            Assert.Equal(trailer, output.TrailingData);
+        }
 
         Assert.True(service.Apply(plan, null, service.CreateBackupBatchDirectory()).Succeeded);
         Assert.Equal(SaveConversionState.AlreadyCompatible,

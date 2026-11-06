@@ -34,9 +34,11 @@
             <TextBlock x:Name="TargetExplanationText" Classes="muted" FontSize="12" TextWrapping="Wrap" />
             <StackPanel Spacing="2">
                 <CheckBox x:Name="ForceCheckBox" Content="Force conversion (experimental)"
-                          IsCheckedChanged="OnForceChanged" />
+                          IsCheckedChanged="OnConversionOptionsChanged" />
                 <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Margin="28,0,0,0"
                            Text="Attempt conversion of unverified saves, or a best-effort target-definition rebuild for saves that already parse with the installed data. Every change or loss is reported and originals are backed up. Files that cannot be decoded or structurally verified remain blocked." />
+                <CheckBox x:Name="RemoveTrailingDataCheckBox" Content="Remove trailing data from character saves"
+                          Margin="28,0,0,0" IsEnabled="False" IsCheckedChanged="OnConversionOptionsChanged" />
             </StackPanel>
             <TextBlock x:Name="SaveDirectoryText" Classes="muted" FontSize="12" TextWrapping="Wrap" />
             <Button x:Name="BackupDirectoryButton" Classes="link-button" HorizontalAlignment="Left"

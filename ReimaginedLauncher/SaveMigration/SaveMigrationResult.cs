@@ -29,7 +29,9 @@ public enum ReferenceOutcome
 /// <param name="Force">Accept every reported uncertainty: unresolved identities, unverifiable stats, repaired headers and reported value or field losses.</param>
 /// <param name="SourceLayout">Use this source layout instead of identifying one; it must still parse the file.</param>
 /// <param name="RebuildWithTarget">Decode and rebuild with the installed target definitions instead of historical layouts.</param>
-public sealed record MigrationOverrides(bool Force = false, string? SourceLayout = null, bool RebuildWithTarget = false)
+/// <param name="RemoveTrailingData">Remove bytes after the standard character sections when Force is enabled.</param>
+public sealed record MigrationOverrides(bool Force = false, string? SourceLayout = null, bool RebuildWithTarget = false,
+    bool RemoveTrailingData = false)
 {
     public static readonly MigrationOverrides None = new();
 

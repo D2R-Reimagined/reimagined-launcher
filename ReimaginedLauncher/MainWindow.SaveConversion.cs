@@ -14,7 +14,6 @@ public partial class MainWindow
     /// Analyzes the offline saves on a dedicated background thread and opens the conversion window
     /// when any of them need converting or review. Only the most recent check may prompt, never over another dialog,
     /// and once per installation, play mode, save contents and installed target data outside launch and install checks.
-    /// Saves whose conversion would only trim trailing data are reported only after a mod install or update.
     /// </summary>
     /// <returns>True when launch may proceed without a conversion review.</returns>
     public async Task<bool> CheckSavesForConversionAsync(string trigger, bool beforeLaunch = false,
@@ -29,7 +28,7 @@ public partial class MainWindow
         {
             var (files, targetFingerprint, saveDirectory, promptAlreadyShown) = await Task.Factory.StartNew(
                 () => SaveConversionService.FindOfflineSavesNeedingConversion(profile,
-                    ignorePromptHistory: ignorePromptHistory, includeTrailingDataOnly: afterInstall),
+                    ignorePromptHistory: ignorePromptHistory),
                 CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
             LaunchDiagnostics.Log(promptAlreadyShown
                 ? $"Save conversion check ({trigger}): skipped, the prompt was already shown for this installed target and save folder."
@@ -58,13 +57,11 @@ public partial class MainWindow
                 (shownTargetFingerprint, shownPlans) =>
                 {
                     if (IsPromptCurrent() && SaveConversionService.RecordAutomaticPromptShown(profile,
-                            installDirectory, saveDirectory, analyzedTarget, shownTargetFingerprint, shownPlans,
-                            includeTrailingDataOnly: afterInstall))
+                            installDirectory, saveDirectory, analyzedTarget, shownTargetFingerprint, shownPlans))
                     {
                         _ = SaveAutomaticPromptStateAsync();
                     }
-                },
-                includeTrailingDataOnly: afterInstall);
+                });
             await window.ShowDialog(this);
             return false;
         }
