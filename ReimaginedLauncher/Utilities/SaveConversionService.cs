@@ -90,6 +90,9 @@ public sealed class SaveConversionPlan
     /// <summary>A viable historical interpretation whose migration differs from the installed-target parse.</summary>
     public string? HistoricalAlternative { get; init; }
 
+    /// <summary>The historical output equals a target-definition round-trip, so converting would only trim trailing data.</summary>
+    public bool OnlyRemovesTrailingData { get; init; }
+
     /// <summary>The output was rebuilt by parsing with the installed target definitions.</summary>
     public bool IsTargetRebuild { get; init; }
 
@@ -307,15 +310,17 @@ public sealed class SaveConversionService
     /// <summary>
     /// A file the automatic prompt reports: verified conversions, and files that only need a source choice, including
     /// saves that also parse as the target but migrate differently from a historical layout (e.g. classic or non-Warlock saves).
-    /// Files that would need experimental Force Conversion are left to the manual conversion window.
+    /// Files that would need experimental Force Conversion are left to the manual conversion window, and files whose conversion
+    /// would only trim trailing data are reported only when <paramref name="includeTrailingDataOnly"/> is set.
     /// </summary>
-    public static bool NeedsConversion(SaveConversionPlan plan) =>
-        plan.State is SaveConversionState.Verified or SaveConversionState.VerifiedWithWarnings
-        || plan is
-        {
-            State: SaveConversionState.Unresolved or SaveConversionState.AlreadyCompatible,
-            ForceOption.Kind: SaveForceKind.ChooseSourceLayout
-        };
+    public static bool NeedsConversion(SaveConversionPlan plan, bool includeTrailingDataOnly = true) =>
+        (plan.State is SaveConversionState.Verified or SaveConversionState.VerifiedWithWarnings
+         || plan is
+         {
+             State: SaveConversionState.Unresolved or SaveConversionState.AlreadyCompatible,
+             ForceOption.Kind: SaveForceKind.ChooseSourceLayout
+         })
+        && (includeTrailingDataOnly || !plan.OnlyRemovesTrailingData);
 
     internal static string AutomaticPromptKey(InstallationProfile profile, string saveDirectory,
         string targetFingerprint)
@@ -353,9 +358,10 @@ public sealed class SaveConversionService
     /// </summary>
     internal static bool RecordAutomaticPromptShown(InstallationProfile profile, string? analyzedInstallDirectory,
         string analyzedSaveDirectory, string targetFingerprint, string? shownTargetFingerprint,
-        IEnumerable<SaveConversionPlan> shownPlans)
+        IEnumerable<SaveConversionPlan> shownPlans, bool includeTrailingDataOnly = true)
     {
-        if (shownTargetFingerprint != targetFingerprint || !shownPlans.Any(NeedsConversion) ||
+        if (shownTargetFingerprint != targetFingerprint ||
+            !shownPlans.Any(plan => NeedsConversion(plan, includeTrailingDataOnly)) ||
             !IsAnalyzedInstallation(profile, analyzedInstallDirectory, analyzedSaveDirectory))
         {
             return false;
@@ -366,10 +372,11 @@ public sealed class SaveConversionService
     }
 
     /// <summary>Analyzes every save in <paramref name="saveDirectory"/> and returns those that need conversion. Nothing is written.</summary>
-    public IReadOnlyList<string> FindSavesNeedingConversion(string saveDirectory, string stagingDirectory) =>
+    public IReadOnlyList<string> FindSavesNeedingConversion(string saveDirectory, string stagingDirectory,
+        bool includeTrailingDataOnly = true) =>
         DiscoverSaveFiles(saveDirectory)
             .Where((path, index) =>
-                NeedsConversion(Plan(path, Path.Combine(stagingDirectory, index.ToString()))))
+                NeedsConversion(Plan(path, Path.Combine(stagingDirectory, index.ToString())), includeTrailingDataOnly))
             .ToList();
 
     /// <summary>
@@ -380,7 +387,8 @@ public sealed class SaveConversionService
     /// <param name="findSaves">Replaces <see cref="FindSavesNeedingConversion"/>; tests use it to observe planning.</param>
     internal static (IReadOnlyList<string> Files, string? TargetFingerprint, string SaveDirectory, bool PromptAlreadyShown)
         FindOfflineSavesNeedingConversion(InstallationProfile profile,
-            Func<SaveConversionService, string, string, IReadOnlyList<string>>? findSaves = null, bool ignorePromptHistory = false)
+            Func<SaveConversionService, string, string, IReadOnlyList<string>>? findSaves = null, bool ignorePromptHistory = false,
+            bool includeTrailingDataOnly = true)
     {
         var saveDirectory = ResolveOfflineSaveDirectory(profile);
         if (DiscoverSaveFiles(saveDirectory).Count == 0 || FindNormalModInfo(profile) is null)
@@ -400,7 +408,7 @@ public sealed class SaveConversionService
             var service = CreateForInstalledTarget(SaveCheckpointRegistry.Load(DefaultDataDirectory), installedTarget);
             var plans = Path.Combine(staging, "plans");
             var files = findSaves is null
-                ? service.FindSavesNeedingConversion(saveDirectory, plans)
+                ? service.FindSavesNeedingConversion(saveDirectory, plans, includeTrailingDataOnly)
                 : findSaves(service, saveDirectory, plans);
             return (files, installedTarget.Fingerprint, saveDirectory, false);
         }
@@ -538,7 +546,8 @@ public sealed class SaveConversionService
             SaveConversionPlan Create(SaveConversionState state, string operation, string summary,
                 string? blockingReason, byte[]? converted,
                 SaveForceOption? force = null, string? recoveryCandidate = null,
-                string? historicalAlternative = null, bool isTargetRebuild = false) => new()
+                string? historicalAlternative = null, bool isTargetRebuild = false,
+                bool onlyRemovesTrailingData = false) => new()
             {
                 SourcePath = path,
                 Kind = kind,
@@ -555,6 +564,7 @@ public sealed class SaveConversionService
                 IssueGroups = state == SaveConversionState.AlreadyCompatible ? [] : CategorizeIssues(result),
                 ForceOption = force,
                 HistoricalAlternative = historicalAlternative,
+                OnlyRemovesTrailingData = onlyRemovesTrailingData,
                 IsTargetRebuild = isTargetRebuild,
                 CanAttemptRecovery = state == SaveConversionState.Blocked && !forced &&
                                      result.RejectedOutputPath is not null,
@@ -625,6 +635,9 @@ public sealed class SaveConversionService
                 var hasHistoricalAlternative = result.IsRecoverable && result.SourceLayout is not null
                                                                     && historicalOutput is not null
                                                                     && !historicalOutput.AsSpan().SequenceEqual(data);
+                var onlyRemovesTrailingData = hasHistoricalAlternative && targetAttempt.TrailingBytes > 0
+                                              && MatchesTargetRoundTrip(migrator, path,
+                                                  Path.Combine(stagingDirectory, "target-round-trip"), historicalOutput!);
                 var failedAttempts = result.Identification
                     .Where(line => line.Contains(": rejected", StringComparison.Ordinal))
                     .ToList();
@@ -654,7 +667,7 @@ public sealed class SaveConversionService
                             : $"The save parses with installed {target} definitions. This does not guarantee that the game can load it; no different viable historical output was found.",
                     null, null, forceOption, historicalAlternative: hasHistoricalAlternative
                         ? string.Join(", ", historicalLayouts)
-                        : null);
+                        : null, onlyRemovesTrailingData: onlyRemovesTrailingData);
             }
 
             if (overrides?.SourceLayout is null && result.AmbiguousSourceLayouts.Count > 1)
@@ -1163,6 +1176,14 @@ public sealed class SaveConversionService
         return problems.Count == 0
             ? (true, $"complete parse, {attempt.AllItems.Count()} item(s){trailer}")
             : (false, $"parses, but {string.Join(", ", problems)}{trailer}");
+    }
+
+    private static bool MatchesTargetRoundTrip(SaveMigrator migrator, string path, string stagingDirectory,
+        byte[] historicalOutput)
+    {
+        var roundTrip = migrator.Rebuild(path, stagingDirectory);
+        return roundTrip.OutputPath is { } outputPath
+               && File.ReadAllBytes(outputPath).AsSpan().SequenceEqual(historicalOutput);
     }
 
     private static string DescribeByteDifferences(byte[] before, byte[] after)

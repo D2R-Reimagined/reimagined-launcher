@@ -582,7 +582,8 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.Equal(SaveForceKind.ChooseSourceLayout, plan.ForceOption?.Kind);
         Assert.Contains(source.Label, plan.ForceOption!.SourceLayouts);
         Assert.Contains("recoverable historical interpretation", plan.Operation);
-        Assert.True(SaveConversionService.NeedsConversion(plan));
+        Assert.False(plan.OnlyRemovesTrailingData);
+        Assert.True(SaveConversionService.NeedsConversion(plan, includeTrailingDataOnly: false));
         var row = new SaveConversionRowViewModel(plan, service.CheckRename);
         Assert.Equal(source.Label, row.SelectedSourceChoice?.Layout);
         Assert.Null(row.SourceChoices[^1].Layout);
@@ -593,6 +594,51 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.Equal(SaveConversionState.Experimental, chosen.State);
         Assert.Equal(source.Label, chosen.SourceLabel);
         Assert.NotNull(chosen.ConvertedBytes);
+    }
+
+    [Fact]
+    public void HistoricalAlternativeThatOnlyTrimsTrailingDataIsLeftToInstallChecksAndManualConversion()
+    {
+        var installed = InstalledTarget.Value;
+        var path = CopyFixture("FuckBenFuckingF.d2s");
+        byte[] trailer = [.. "BAS8"u8, 1, 0, 2, 0, .. "PET3"u8, .. Enumerable.Range(0, 100).Select(value => (byte)value)];
+        File.WriteAllBytes(path, WithValidHeader([.. File.ReadAllBytes(path), .. trailer]));
+        var original = File.ReadAllBytes(path);
+        var sourceDirectory = CopyInstalledFixtureToCustomDirectory();
+        var uniqueItems = Path.Combine(sourceDirectory, "uniqueitems.txt");
+        var lines = File.ReadAllLines(uniqueItems, System.Text.Encoding.Latin1);
+        var rarity = Array.IndexOf(lines[0].Split('\t'), "rarity");
+        var cells = lines[1].Split('\t');
+        cells[rarity] = cells[rarity] == "1" ? "2" : "1";
+        lines[1] = string.Join('\t', cells);
+        File.WriteAllLines(uniqueItems, lines, System.Text.Encoding.Latin1);
+
+        var targetDefinition = SaveDataDefinition.FromSnapshot(installed.Snapshot);
+        var sourceSnapshot = GameDataSnapshot.Load("Same-encoding historical source", sourceDirectory);
+        var source = SaveDataDefinition.WithAppendedStats(sourceSnapshot.Label, sourceSnapshot,
+            installed.Snapshot, installed.Snapshot);
+        var comparison = TableComparer.Compare(source.ItemTables, installed.Snapshot);
+        var migrator = new SaveMigrator([source], targetDefinition, [comparison]);
+        var service = new SaveConversionService(() => migrator, BackupRoot, () => _gameRunning,
+            installedTarget: installed);
+
+        var plan = service.Plan(path, Path.Combine(StagingDirectory, "trailer"));
+        Log(plan);
+
+        Assert.Equal(SaveConversionState.AlreadyCompatible, plan.State);
+        Assert.Equal(source.Label, plan.HistoricalAlternative);
+        Assert.True(plan.OnlyRemovesTrailingData);
+        Assert.True(SaveConversionService.NeedsConversion(plan));
+        Assert.False(SaveConversionService.NeedsConversion(plan, includeTrailingDataOnly: false));
+        Assert.Equal(new[] { path }, service.FindSavesNeedingConversion(SaveDirectory, Path.Combine(StagingDirectory, "all")));
+        Assert.Empty(service.FindSavesNeedingConversion(SaveDirectory, Path.Combine(StagingDirectory, "automatic"),
+            includeTrailingDataOnly: false));
+        var install = Path.Combine(_root, "install");
+        var profile = new InstallationProfile
+            { Type = InstallationType.BattleNet, InstallDirectory = install, SaveDirectory = SaveDirectory };
+        Assert.False(SaveConversionService.RecordAutomaticPromptShown(profile, install, SaveDirectory, "target-a",
+            "target-a", [plan], includeTrailingDataOnly: false));
+        Assert.Equal(original, File.ReadAllBytes(path));
     }
 
     [Theory]

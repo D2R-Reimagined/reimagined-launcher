@@ -30,6 +30,7 @@ public partial class SaveConversionWindow : Window
     private readonly Func<bool>? _isPromptCurrent;
     private readonly Action<string?, IReadOnlyList<SaveConversionPlan>>? _promptShown;
     private readonly bool _isAutomaticPrompt;
+    private readonly bool _includeTrailingDataOnly = true;
     private SaveConversionService? _service;
     private bool _isBusy;
 
@@ -61,7 +62,7 @@ public partial class SaveConversionWindow : Window
 
             var analyzedTarget = await InitializeConversionAsync();
             if (_isPromptCurrent?.Invoke() == false || (_isAutomaticPrompt && (analyzedTarget is null ||
-                    !_rows.Any(row => SaveConversionService.NeedsConversion(row.BasePlan)))))
+                    !_rows.Any(row => SaveConversionService.NeedsConversion(row.BasePlan, _includeTrailingDataOnly)))))
             {
                 Close();
                 return;
@@ -79,9 +80,11 @@ public partial class SaveConversionWindow : Window
     /// Called after initialization with the analyzed installed target fingerprint and the analyzed plans. A failed initialization,
     /// or one that leaves no save needing conversion, closes the window without calling it.
     /// </param>
+    /// <param name="includeTrailingDataOnly">Whether a save whose conversion would only trim trailing data keeps the prompt open.</param>
     public SaveConversionWindow(string promptMessage, Func<bool>? isPromptCurrent = null,
-        Action<string?, IReadOnlyList<SaveConversionPlan>>? promptShown = null) : this()
+        Action<string?, IReadOnlyList<SaveConversionPlan>>? promptShown = null, bool includeTrailingDataOnly = true) : this()
     {
+        _includeTrailingDataOnly = includeTrailingDataOnly;
         PromptText.Text = promptMessage;
         PromptBanner.IsVisible = true;
         _isAutomaticPrompt = true;
