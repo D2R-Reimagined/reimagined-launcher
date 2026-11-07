@@ -632,13 +632,11 @@ public sealed class SaveConversionService
                         rebuildFailure, null, recoveryCandidate: rebuildCandidate, isTargetRebuild: true);
                 }
 
-                if (output.AsSpan().SequenceEqual(data) ||
-                    (overrides?.RemoveTrailingData != true &&
-                     SameStandardSave(output, result.OutputPath!, data, targetAttempt, migrator.Target, kind)))
+                if (output.AsSpan().SequenceEqual(data))
                 {
                     return Create(SaveConversionState.AlreadyCompatible,
-                        $"The forced {target} target-definition round-trip was byte-identical in the standard sections; no repair occurred. The parser cannot establish in-game compatibility.",
-                        "The target-definition round-trip left the standard save data unchanged, so no repair occurred. The in-game error remains unexplained.",
+                        $"The forced {target} target-definition round-trip was byte-identical; no repair occurred. The parser cannot establish in-game compatibility.",
+                        "The target-definition round-trip produced identical bytes, so no repair occurred. The in-game error remains unexplained.",
                         null, null, isTargetRebuild: true);
                 }
 
@@ -1109,7 +1107,9 @@ public sealed class SaveConversionService
         }
 
         var externalData = _migrator.Value.Target.CreateExternalData(version);
-        return D2Save.Read(bytes, externalData).Character.Preview.Name == newName
+        var save = D2Save.Read(bytes, externalData);
+        return save.Character.Preview.Name == newName
+               && save.TrailingData.AsSpan().SequenceEqual(D2Save.Read(before, externalData).TrailingData)
                && ReadEmbeddedName(bytes) == newName
             ? null
             : "the renamed save did not reparse with the new name.";

@@ -496,15 +496,16 @@ public sealed class SaveMigrator
                 return selected;
             }
 
-            var fewestUndefined = decoded.Min(candidate => candidate.Undefined);
-            var viable = decoded.Where(candidate => candidate.Undefined == fewestUndefined)
+            // Prefer the layout that defines every decoded stat and leaves the least data unparsed.
+            var cleanest = decoded.Min(candidate => Rank(candidate));
+            var viable = decoded.Where(candidate => Rank(candidate) == cleanest)
                 .Select(candidate => (candidate.Definition, candidate.Attempt)).ToList();
             if (viable.Count < decoded.Count)
             {
                 _identification.Add($"{Labels(viable)} explain the file best: "
-                                    + string.Join(", ", decoded.Where(candidate => candidate.Undefined != fewestUndefined)
+                                    + string.Join(", ", decoded.Where(candidate => Rank(candidate) != cleanest)
                                         .Select(candidate =>
-                                            $"{candidate.Definition.Label} leaves {candidate.Undefined} stat id(s) undefined"))
+                                            $"{candidate.Definition.Label} leaves {candidate.Undefined} stat id(s) undefined and {candidate.Attempt.TrailingBytes} trailing byte(s)"))
                                     + ".");
             }
 
@@ -567,6 +568,10 @@ public sealed class SaveMigrator
 
             static string Labels(List<(SaveDataDefinition Definition, ParseAttempt Attempt)> group) =>
                 string.Join(" = ", group.Select(candidate => candidate.Definition.Label));
+
+            static (int Undefined, int Trailing) Rank(
+                (SaveDataDefinition Definition, ParseAttempt Attempt, int Undefined) candidate) =>
+                (candidate.Undefined, candidate.Attempt.TrailingBytes);
         }
 
         private List<(SaveDataDefinition Definition, ParseAttempt Attempt, int Undefined)> Decode(
@@ -654,9 +659,9 @@ public sealed class SaveMigrator
 
             return false;
 
-            static (int Undefined, int Disagreements) Fit(
+            static (int Undefined, int Trailing, int Disagreements) Fit(
                 (SaveDataDefinition Definition, ParseAttempt Attempt, int Undefined) candidate) =>
-                (candidate.Undefined, Disagreements(candidate.Attempt));
+                (candidate.Undefined, candidate.Attempt.TrailingBytes, Disagreements(candidate.Attempt));
         }
 
         private static int Disagreements(ParseAttempt attempt) =>
@@ -1353,7 +1358,11 @@ public sealed class SaveMigrator
                 return;
             }
 
-            _checks.Add(new MigrationCheck($"Reparse with {Target.Label} definitions", true, "parses", Critical: true));
+            var expectedTrailer = migratedRoot is D2Save originalSave ? originalSave.TrailingData : [];
+            var actualTrailer = reparsed is D2Save reparsedSave ? reparsedSave.TrailingData : [];
+            var trailerMatches = actualTrailer.AsSpan().SequenceEqual(expectedTrailer);
+            _checks.Add(new MigrationCheck($"Reparse with {Target.Label} definitions", trailerMatches,
+                trailerMatches ? "parses" : "trailing data differs from the expected output", Critical: true));
 
             var after = Flatten(reparsed);
             if (overrides.RebuildWithTarget)

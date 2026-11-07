@@ -40,6 +40,8 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
 
         var plan = service.Plan(path, StagingDirectory);
         Assert.Equal(SaveConversionState.AlreadyCompatible, plan.State);
+        Assert.Contains("108 trailing byte(s)", plan.Report);
+        Assert.False(SaveConversionService.NeedsConversion(plan));
         Assert.Null(plan.ConvertedBytes);
 
         var forcedWithoutRemoval = service.Plan(path, Path.Combine(StagingDirectory, "preserve"),
@@ -50,6 +52,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         var forced = service.Plan(path, Path.Combine(StagingDirectory, "forced"),
             new MigrationOverrides(Force: true, RemoveTrailingData: true));
         Assert.Equal(SaveConversionState.Experimental, forced.State);
+        Assert.False(SaveConversionService.NeedsConversion(forced));
         Assert.NotNull(forced.ConvertedBytes);
         Assert.Contains("Trimmed 108 byte(s) of trailing data", forced.Report);
         Assert.DoesNotContain("$.TrailingData", forced.Report);
