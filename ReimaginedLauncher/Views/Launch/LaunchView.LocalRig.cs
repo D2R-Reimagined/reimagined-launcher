@@ -98,6 +98,7 @@ public partial class LaunchView
 
         _localRigBusy = true;
         _isLaunching = true;
+        System.Threading.Interlocked.Increment(ref _launchSessionGeneration);
         _localRigServer = [];
         _localRigClient = [];
         GameSessionToken? gameToken = null;

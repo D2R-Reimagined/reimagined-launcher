@@ -54,6 +54,7 @@ public partial class LaunchView : UserControl
     private GameSessionToken? _launchGameToken;
     private string? _launchLadderTicket;
     private string? _launchStatusSessionId;
+    private long _launchSessionGeneration;
     private LadderLaunchSchedule? _ladderSchedule;
     private long _lastLadderRefresh;
     private TimeSpan _ladderRefreshInterval;
@@ -2455,9 +2456,21 @@ public partial class LaunchView : UserControl
         LaunchDiagnostics.Log("Launch/Install button clicked.");
 
         if (_isLaunching || _isSteamSetupRunning || _isRunningLadderAction || MainWindow.IsInstallInProgress
-            || !await MainWindow.WaitForClosingGameToExitAsync() || SteamGameHandoff.IsLaunchPendingOrRunning)
+            || SteamGameHandoff.IsLaunchPendingOrRunning)
         {
             LaunchDiagnostics.Log("Action ignored because an action is already in progress.");
+            return;
+        }
+
+        if (!await MainWindow.WaitForClosingGameToExitAsync())
+        {
+            LaunchDiagnostics.Log("Action ignored because a game process is still running.");
+            if (MainWindow.HasLingeringHeadlessGameProcess())
+            {
+                Notifications.SendNotification(
+                    "A previous D2RLoader.exe or D2R.exe process is still running in the background and could not be closed automatically. End it in Task Manager (and uncheck 'Run this program as an administrator' if set) before launching.",
+                    "Game still running");
+            }
             return;
         }
 
@@ -2481,6 +2494,7 @@ public partial class LaunchView : UserControl
             return;
         }
         var reservationHandedToWatcher = false;
+        var launchGeneration = Interlocked.Increment(ref _launchSessionGeneration);
         _isLaunching = true;
         StartGameButton.IsEnabled = false;
         var actionName = profile.Type == InstallationType.D2RMM ? "Installation" : "Launch";
@@ -2739,7 +2753,7 @@ public partial class LaunchView : UserControl
                         ? MainWindow.Instance : null;
                     tokenHandedToGame = _launchGameToken;
                     _ = WatchGameExitAsync(gameProcess, expectedExePath, minimizeTarget, lutrisGameExePath, _preparedServerSaves,
-                        profile.InstallDirectory, _launchGameToken, steamHandoff, steamHandoff is null ? reservation : null);
+                        profile.InstallDirectory, _launchGameToken, steamHandoff, steamHandoff is null ? reservation : null, launchGeneration);
                     reservationHandedToWatcher = reservation is not null;
                 }
             }
@@ -3199,7 +3213,8 @@ public partial class LaunchView : UserControl
         ServerSaveMonitor? serverSaves = null,
         string? installDirectory = null,
         GameSessionToken? gameToken = null,
-        SteamGameHandoff? steamHandoff = null, SteamGameHandoff? sessionReservation = null)
+        SteamGameHandoff? steamHandoff = null, SteamGameHandoff? sessionReservation = null,
+        long launchGeneration = 0)
     {
         using var monitoring = new CancellationTokenSource();
         var monitorTask = serverSaves is null ? Task.CompletedTask : MonitorServerSavesAsync(serverSaves, monitoring.Token);
@@ -3267,7 +3282,7 @@ public partial class LaunchView : UserControl
             }
             finally
             {
-                try { EndGameSession(installDirectory, gameToken, gameExitConfirmed || lutrisExitObserved); }
+                try { EndGameSession(installDirectory, gameToken, gameExitConfirmed || lutrisExitObserved, launchGeneration); }
                 finally
                 {
                     steamHandoff?.Dispose();
@@ -3285,7 +3300,7 @@ public partial class LaunchView : UserControl
     /// next launch rewrites or deletes it, launcher startup deletes it when no
     /// game is running, and the plugins ignore it once it expires.
     /// </summary>
-    private void EndGameSession(string? installDirectory, GameSessionToken? gameToken, bool exitConfirmed)
+    private void EndGameSession(string? installDirectory, GameSessionToken? gameToken, bool exitConfirmed, long launchGeneration = 0)
     {
         if (!exitConfirmed)
         {
@@ -3293,9 +3308,20 @@ public partial class LaunchView : UserControl
             return;
         }
 
-        if (GameSessionSecretsService.Delete(installDirectory))
+        if (GameSessionSecretsService.ShouldDeleteOnSessionEnd(
+                exitConfirmed,
+                launchGeneration,
+                Interlocked.Read(ref _launchSessionGeneration),
+                MainWindow.IsGameRunning()))
         {
-            LaunchDiagnostics.Log("session secrets: removed after the game exited.");
+            if (GameSessionSecretsService.Delete(installDirectory))
+            {
+                LaunchDiagnostics.Log("session secrets: removed after the game exited.");
+            }
+        }
+        else
+        {
+            LaunchDiagnostics.Log("session secrets: a newer launch or running game is active; keeping the current session file.");
         }
 
         if (gameToken is not null)

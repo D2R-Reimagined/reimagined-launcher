@@ -216,6 +216,7 @@ public partial class MainWindow : Window
         // and may be a ladder session still writing into the ladder folder.
         async Task RestoreStartupFilesAsync()
         {
+            await WaitForClosingGameToExitAsync();
             if (!IsGameRunning())
             {
                 if (profile.LaunchExperience != LaunchExperience.Ladder && profile.InstallDirectory is not null)
@@ -1884,6 +1885,7 @@ public partial class MainWindow : Window
     }
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, byte> ObservedWindowPids = new();
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, DateTime> WindowClosedSinceUtc = new();
 
     /// <summary>
     /// Waits for the game to close, taking ownership of <paramref name="gameProcess"/>.
@@ -1921,8 +1923,8 @@ public partial class MainWindow : Window
                     }
                 }
 
-                WaitForProcessOrPostWindowTeardown(processToWatch);
-                return watchingGame;
+                var exited = WaitForProcessOrPostWindowTeardown(processToWatch);
+                return watchingGame && exited;
             }
             catch (InvalidOperationException)
             {
@@ -1962,12 +1964,12 @@ public partial class MainWindow : Window
         }
     }
 
-    private static void WaitForProcessOrPostWindowTeardown(Process processToWatch)
+    private static bool WaitForProcessOrPostWindowTeardown(Process processToWatch)
     {
         if (!OperatingSystem.IsWindows())
         {
             processToWatch.WaitForExit();
-            return;
+            return true;
         }
 
         var hadWindow = false;
@@ -1983,7 +1985,11 @@ public partial class MainWindow : Window
                 if (processToWatch.MainWindowHandle != IntPtr.Zero)
                 {
                     hadWindow = true;
-                    if (pid != 0) ObservedWindowPids[pid] = 1;
+                    if (pid != 0)
+                    {
+                        ObservedWindowPids[pid] = 1;
+                        WindowClosedSinceUtc.TryRemove(pid, out _);
+                    }
                     windowClosedSinceUtc = null;
                 }
                 else if (hadWindow || (pid != 0 && ObservedWindowPids.ContainsKey(pid)))
@@ -1993,7 +1999,15 @@ public partial class MainWindow : Window
                     {
                         LaunchDiagnostics.Log(
                             $"Game window closed over 3s ago; terminating headless process {pid} stuck in plugin unload.");
-                        try { processToWatch.Kill(); } catch { }
+                        try
+                        {
+                            processToWatch.Kill();
+                        }
+                        catch (Exception exception)
+                        {
+                            LaunchDiagnostics.Log(
+                                $"Could not terminate headless game process {pid}: {exception.Message}");
+                        }
                         processToWatch.WaitForExit(2000);
                         break;
                     }
@@ -2005,16 +2019,60 @@ public partial class MainWindow : Window
             }
         }
 
-        if (pid != 0)
+        var exited = false;
+        try { exited = processToWatch.HasExited; } catch { }
+
+        if (pid != 0 && exited)
         {
             ObservedWindowPids.TryRemove(pid, out _);
+            WindowClosedSinceUtc.TryRemove(pid, out _);
         }
+
+        return exited;
     }
 
     public static void InvalidateGameRunningCache()
     {
         _lastGameRunningCheckTimestamp = 0;
         _lastGameRunningResult = false;
+    }
+
+    /// <summary>
+    /// True on Windows when at least one D2R / D2RLoader process is running with no
+    /// main window and is past initial startup.
+    /// </summary>
+    public static bool HasLingeringHeadlessGameProcess()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        foreach (var name in new[] { "D2R", "D2RLoader" })
+        {
+            foreach (var proc in Process.GetProcessesByName(name))
+            {
+                using (proc)
+                {
+                    try
+                    {
+                        if (proc.HasExited) continue;
+                        proc.Refresh();
+                        if (proc.MainWindowHandle != IntPtr.Zero) continue;
+                        if (ObservedWindowPids.ContainsKey(proc.Id)
+                            || DateTime.UtcNow - proc.StartTime.ToUniversalTime() >= TimeSpan.FromSeconds(15))
+                        {
+                            return true;
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -2057,6 +2115,7 @@ public partial class MainWindow : Window
                                 if (proc.MainWindowHandle != IntPtr.Zero)
                                 {
                                     ObservedWindowPids[proc.Id] = 1;
+                                    WindowClosedSinceUtc.TryRemove(proc.Id, out _);
                                     activeOrStarting = true;
                                     continue;
                                 }
@@ -2140,9 +2199,21 @@ public partial class MainWindow : Window
                             {
                                 LaunchDiagnostics.Log(
                                     $"Terminating headless {proc.ProcessName} process ({proc.Id}) stuck in plugin unload.");
-                                proc.Kill();
+                                try
+                                {
+                                    proc.Kill();
+                                }
+                                catch (Exception exception)
+                                {
+                                    LaunchDiagnostics.Log(
+                                        $"Could not terminate headless {proc.ProcessName} process ({proc.Id}): {exception.Message}");
+                                }
                                 proc.WaitForExit(2000);
-                                ObservedWindowPids.TryRemove(proc.Id, out _);
+                                if (proc.HasExited)
+                                {
+                                    ObservedWindowPids.TryRemove(proc.Id, out _);
+                                    WindowClosedSinceUtc.TryRemove(proc.Id, out _);
+                                }
                             }
                         }
                         catch { }
@@ -2201,10 +2272,56 @@ public partial class MainWindow : Window
                     {
                         if (!process.HasExited)
                         {
-                            count++;
-                            if (OperatingSystem.IsWindows() && process.MainWindowHandle != IntPtr.Zero)
+                            if (OperatingSystem.IsWindows())
                             {
-                                ObservedWindowPids[process.Id] = 1;
+                                process.Refresh();
+                                if (process.MainWindowHandle != IntPtr.Zero)
+                                {
+                                    ObservedWindowPids[process.Id] = 1;
+                                    WindowClosedSinceUtc.TryRemove(process.Id, out _);
+                                    count++;
+                                }
+                                else if (ObservedWindowPids.ContainsKey(process.Id))
+                                {
+                                    var closedSince = WindowClosedSinceUtc.GetOrAdd(process.Id, DateTime.UtcNow);
+                                    if (DateTime.UtcNow - closedSince >= TimeSpan.FromSeconds(3))
+                                    {
+                                        LaunchDiagnostics.Log(
+                                            $"Reaping headless {process.ProcessName} process ({process.Id}) whose window closed over 3s ago.");
+                                        try
+                                        {
+                                            process.Kill();
+                                            process.WaitForExit(1000);
+                                        }
+                                        catch (Exception exception)
+                                        {
+                                            LaunchDiagnostics.Log(
+                                                $"Could not reap headless {process.ProcessName} process ({process.Id}): {exception.Message}");
+                                        }
+
+                                        if (process.HasExited)
+                                        {
+                                            ObservedWindowPids.TryRemove(process.Id, out _);
+                                            WindowClosedSinceUtc.TryRemove(process.Id, out _);
+                                        }
+                                        else
+                                        {
+                                            count++;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        count++;
+                                    }
+                                }
+                                else
+                                {
+                                    count++;
+                                }
+                            }
+                            else
+                            {
+                                count++;
                             }
                         }
                     }

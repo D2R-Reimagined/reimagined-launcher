@@ -170,6 +170,21 @@ public static class GameSessionSecretsService
     }
 
     /// <summary>
+    /// Whether the session file should be deleted when a watched game session ends.
+    /// Returns false when the process exit was not confirmed (e.g. a lingering
+    /// elevated process could not be terminated), when a newer launch has already
+    /// started, or when another game process is still running.
+    /// </summary>
+    public static bool ShouldDeleteOnSessionEnd(
+        bool exitConfirmed,
+        long completedLaunchGeneration,
+        long currentLaunchGeneration,
+        bool isGameRunning = false)
+        => exitConfirmed
+           && completedLaunchGeneration == currentLaunchGeneration
+           && !isGameRunning;
+
+    /// <summary>
     /// Deletes the session file and any temp file a failed write left behind.
     /// A file that is already gone is success.
     /// </summary>

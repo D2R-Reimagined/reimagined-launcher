@@ -184,6 +184,37 @@ public sealed class GameSessionSecretsServiceTests : IDisposable
     }
 
     [Fact]
+    public void ShouldDeleteOnSessionEndRequiresConfirmedExitSameGenerationAndNoRunningGame()
+    {
+        Assert.True(GameSessionSecretsService.ShouldDeleteOnSessionEnd(
+            exitConfirmed: true,
+            completedLaunchGeneration: 3,
+            currentLaunchGeneration: 3,
+            isGameRunning: false));
+
+        // Unconfirmed exit (e.g. an elevated process could not be terminated).
+        Assert.False(GameSessionSecretsService.ShouldDeleteOnSessionEnd(
+            exitConfirmed: false,
+            completedLaunchGeneration: 3,
+            currentLaunchGeneration: 3,
+            isGameRunning: false));
+
+        // A newer launch has already started and written its own session.toml.
+        Assert.False(GameSessionSecretsService.ShouldDeleteOnSessionEnd(
+            exitConfirmed: true,
+            completedLaunchGeneration: 3,
+            currentLaunchGeneration: 4,
+            isGameRunning: false));
+
+        // Another game process is still running.
+        Assert.False(GameSessionSecretsService.ShouldDeleteOnSessionEnd(
+            exitConfirmed: true,
+            completedLaunchGeneration: 3,
+            currentLaunchGeneration: 3,
+            isGameRunning: true));
+    }
+
+    [Fact]
     public void ScrubBlanksEverySecretKeyAndKeepsEverythingElse()
     {
         const string toml =
