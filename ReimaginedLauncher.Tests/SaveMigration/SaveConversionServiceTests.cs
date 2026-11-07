@@ -52,6 +52,7 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.Equal(SaveConversionState.Experimental, forced.State);
         Assert.NotNull(forced.ConvertedBytes);
         Assert.Contains("Trimmed 108 byte(s) of trailing data", forced.Report);
+        Assert.DoesNotContain("$.TrailingData", forced.Report);
         var output = D2Save.Read(forced.ConvertedBytes!,
             Migrator.Value.Target.CreateExternalData(SaveMigrator.TargetVersion));
         Assert.Empty(output.TrailingData);
@@ -302,6 +303,109 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Assert.False(SaveConversionService.IsAnalyzedInstallation(profile, install, SaveDirectory));
         Assert.False(RecordShownPrompt(profile, install, "target-a"));
         Assert.Null(profile.SaveConversionPromptKey);
+    }
+
+    [Fact]
+    public void LaunchPromptResetClearsEveryProfileOfTheInstalledDirectoryOnly()
+    {
+        var install = Path.Combine(_root, "install");
+        var same = new InstallationProfile
+            { Type = InstallationType.BattleNet, InstallDirectory = install, SaveConversionLaunchPromptShown = true };
+        var sameWithOtherSpelling = new InstallationProfile
+        {
+            Type = InstallationType.Steam, InstallDirectory = install.ToUpperInvariant() + Path.DirectorySeparatorChar,
+            SaveConversionLaunchPromptShown = true
+        };
+        var other = new InstallationProfile
+        {
+            Type = InstallationType.D2RMM, InstallDirectory = Path.Combine(_root, "other-install"),
+            SaveConversionLaunchPromptShown = true
+        };
+        var settings = new AppSettings { Profiles = [same, sameWithOtherSpelling, other] };
+
+        Assert.True(SaveConversionService.ResetLaunchPrompt(settings, $" {install} "));
+
+        Assert.False(same.SaveConversionLaunchPromptShown);
+        Assert.False(sameWithOtherSpelling.SaveConversionLaunchPromptShown);
+        Assert.True(other.SaveConversionLaunchPromptShown);
+        Assert.False(SaveConversionService.ResetLaunchPrompt(settings, install));
+    }
+
+    [Fact]
+    public void LaunchPromptResetWithoutAnInstallDirectoryChangesNothing()
+    {
+        var profile = new InstallationProfile { Type = InstallationType.BattleNet, SaveConversionLaunchPromptShown = true };
+        var settings = new AppSettings { Profiles = [profile] };
+
+        Assert.False(SaveConversionService.ResetLaunchPrompt(settings, null));
+        Assert.False(SaveConversionService.ResetLaunchPrompt(settings, " "));
+        Assert.True(profile.SaveConversionLaunchPromptShown);
+    }
+
+    [Fact]
+    public void StillFlaggedConversionIsRecordedAndSkipsTheNextAutomaticCheck()
+    {
+        var profile = CreateAutomaticCheckProfile(SaveMigrationFixtures.InstalledDirectory);
+        var path = CopyFixture("BruhII.d2s");
+        var detected = CheckAutomatically(profile);
+        Assert.Contains(path, detected.Files);
+        Assert.NotNull(detected.TargetFingerprint);
+        var planningRuns = _automaticPlanningRuns;
+
+        Assert.True(SaveConversionService.RecordReviewedAfterConversion(profile, profile.InstallDirectory, SaveDirectory,
+            detected.TargetFingerprint, [StubPlan(SaveConversionState.AlreadyCompatible), StillFlaggedPlan()]));
+
+        var again = CheckAutomatically(profile);
+        Assert.True(again.PromptAlreadyShown);
+        Assert.Empty(again.Files);
+        Assert.Equal(planningRuns, _automaticPlanningRuns);
+        Assert.Contains(path, SaveConversionService.FindOfflineSavesNeedingConversion(profile, ignorePromptHistory: true).Files);
+    }
+
+    [Fact]
+    public void CleanConversionOrUnknownTargetRecordsNothing()
+    {
+        var install = Path.Combine(_root, "install");
+        var profile = new InstallationProfile
+            { Type = InstallationType.BattleNet, InstallDirectory = install, SaveDirectory = SaveDirectory };
+
+        Assert.False(SaveConversionService.RecordReviewedAfterConversion(profile, install, SaveDirectory, "target-a",
+            [StubPlan(SaveConversionState.AlreadyCompatible)]));
+        Assert.False(SaveConversionService.RecordReviewedAfterConversion(profile, install, SaveDirectory, "target-a", []));
+        Assert.False(SaveConversionService.RecordReviewedAfterConversion(profile, install, SaveDirectory, null,
+            [StillFlaggedPlan()]));
+        Assert.Null(profile.SaveConversionPromptKey);
+    }
+
+    [Fact]
+    public void ConversionReviewIsNotRecordedForAChangedInstallationOrSaveDirectory()
+    {
+        var install = Path.Combine(_root, "install");
+        var profile = new InstallationProfile
+            { Type = InstallationType.BattleNet, InstallDirectory = install, SaveDirectory = SaveDirectory };
+        Assert.True(RecordShownPrompt(profile, install, "target-a"));
+        var previousKey = profile.SaveConversionPromptKey;
+
+        profile.InstallDirectory = Path.Combine(_root, "other-install");
+        Assert.False(SaveConversionService.RecordReviewedAfterConversion(profile, install, SaveDirectory, "target-b",
+            [StillFlaggedPlan()]));
+        profile.InstallDirectory = install;
+        profile.SaveDirectory = Path.Combine(_root, "other-saves");
+        Assert.False(SaveConversionService.RecordReviewedAfterConversion(profile, install, SaveDirectory, "target-b",
+            [StillFlaggedPlan()]));
+
+        Assert.Equal(previousKey, profile.SaveConversionPromptKey);
+    }
+
+    [Fact]
+    public void LaunchPromptMarkerDefaultsToNotShownAndRoundTrips()
+    {
+        var legacy = System.Text.Json.JsonSerializer.Deserialize<InstallationProfile>("""{"SaveConversionPromptKey":"key"}""")!;
+        Assert.False(legacy.SaveConversionLaunchPromptShown);
+
+        var restored = System.Text.Json.JsonSerializer.Deserialize<InstallationProfile>(
+            System.Text.Json.JsonSerializer.Serialize(new InstallationProfile { SaveConversionLaunchPromptShown = true }))!;
+        Assert.True(restored.SaveConversionLaunchPromptShown);
     }
 
     [Fact]
@@ -1385,6 +1489,18 @@ public sealed class SaveConversionServiceTests(ITestOutputHelper testOutput) : I
         Issues = [],
         Report = "",
         SourceSha256 = ""
+    };
+
+    private SaveConversionPlan StillFlaggedPlan() => new()
+    {
+        SourcePath = Path.Combine(SaveDirectory, "Hero.d2s"),
+        Kind = SaveFileKind.Character,
+        State = SaveConversionState.AlreadyCompatible,
+        Operation = "",
+        Issues = [],
+        Report = "",
+        SourceSha256 = "",
+        ForceOption = new SaveForceOption(SaveForceKind.ChooseSourceLayout, ["3.1.0", "3.0.12"], [])
     };
 
     /// <summary>A normal mod installation whose installed TXT files are copied from <paramref name="tablesDirectory"/>.</summary>

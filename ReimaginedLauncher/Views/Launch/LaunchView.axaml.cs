@@ -2624,11 +2624,9 @@ public partial class LaunchView : UserControl
 
             if (profile.Type != InstallationType.D2RMM
                 && profile.LaunchExperience is LaunchExperience.Offline or LaunchExperience.Online
-                && MainWindow.Instance is { } mainWindow
-                && !await mainWindow.CheckSavesForConversionAsync($"before {profile.LaunchExperience} launch", beforeLaunch: true))
+                && MainWindow.Instance is { } mainWindow)
             {
-                SetLaunchStatus("Review save conversion before launching again.");
-                return;
+                await mainWindow.CheckSavesForConversionAsync($"before {profile.LaunchExperience} launch", beforeLaunch: true);
             }
 
             // One game token per launch, shared by every plugin. It is never

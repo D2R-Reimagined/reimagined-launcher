@@ -474,6 +474,18 @@ public partial class UpdateView : UserControl
 
         _modFilesInstalled = true;
 
+        if (SaveConversionService.ResetLaunchPrompt(MainWindow.Settings, installDirectory))
+        {
+            try
+            {
+                await SettingsManager.SaveAsync(MainWindow.Settings);
+            }
+            catch (Exception exception)
+            {
+                LaunchDiagnostics.LogException("Could not save the save conversion prompt state", exception);
+            }
+        }
+
         var mainWindow = MainWindow.Instance;
         if (mainWindow != null)
         {

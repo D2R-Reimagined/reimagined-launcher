@@ -14,14 +14,22 @@ public partial class MainWindow
     /// Analyzes the offline saves on a dedicated background thread and opens the conversion window
     /// when any of them need converting or review. Only the most recent check may prompt, never over another dialog,
     /// and once per installation, play mode, save contents and installed target data outside launch and install checks.
+    /// A launch check is skipped once any automatic window opened since the last completed mod install or update.
     /// </summary>
-    /// <returns>True when launch may proceed without a conversion review.</returns>
+    /// <returns>True when no conversion review was pending; always true for a launch check, which never blocks the launch.</returns>
     public async Task<bool> CheckSavesForConversionAsync(string trigger, bool beforeLaunch = false,
         bool afterInstall = false)
     {
         var generation = ++_saveConversionCheckGeneration;
         var ignorePromptHistory = beforeLaunch || afterInstall;
         var profile = Settings.CurrentProfile;
+        if (beforeLaunch && profile.SaveConversionLaunchPromptShown)
+        {
+            LaunchDiagnostics.Log(
+                $"Save conversion check ({trigger}): skipped, already prompted since the last install or update.");
+            return true;
+        }
+
         var installDirectory = profile.InstallDirectory;
         var experience = profile.LaunchExperience;
         try
@@ -36,7 +44,7 @@ public partial class MainWindow
 
             if (files.Count == 0 || targetFingerprint is not { } analyzedTarget)
             {
-                return files.Count == 0;
+                return beforeLaunch || files.Count == 0;
             }
 
             bool IsPromptCurrent() =>
@@ -47,7 +55,7 @@ public partial class MainWindow
             if (generation != _saveConversionCheckGeneration || IsInstallInProgress ||
                 IsGameRunning() || !IsVisible || OwnedWindows.Count > 0 || !IsPromptCurrent())
             {
-                return false;
+                return beforeLaunch;
             }
 
             var window = new SaveConversionWindow(
@@ -62,19 +70,22 @@ public partial class MainWindow
                         _ = SaveAutomaticPromptStateAsync();
                     }
                 });
+            profile.SaveConversionLaunchPromptShown = true;
+            await SaveAutomaticPromptStateAsync();
             await window.ShowDialog(this);
-            return false;
+            return beforeLaunch;
         }
         catch (Exception exception)
         {
             LaunchDiagnostics.LogException($"Save conversion check ({trigger}) failed", exception);
             if (beforeLaunch)
-                Notifications.SendNotification("Save compatibility could not be checked. Open Convert Save Data to review your saves before launching. " + exception.Message, "Save check failed");
-            return !beforeLaunch;
+                Notifications.SendNotification("Save compatibility could not be checked; launching anyway. Open Convert Save Data to review your saves. " + exception.Message, "Save check failed");
+            return true;
         }
     }
 
-    private static async Task SaveAutomaticPromptStateAsync()
+    /// <summary>Persists the save conversion prompt state; failures are logged, never thrown.</summary>
+    internal static async Task SaveAutomaticPromptStateAsync()
     {
         try
         {

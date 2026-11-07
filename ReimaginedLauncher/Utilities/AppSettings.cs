@@ -100,6 +100,9 @@ public class InstallationProfile
 
     // Installation, mode, save contents and installed TXT fingerprint last shown by the automatic conversion prompt.
     public string? SaveConversionPromptKey { get; set; }
+
+    // Set when the automatic conversion window opens; cleared only by a completed mod install or update.
+    public bool SaveConversionLaunchPromptShown { get; set; }
 }
 
 public class AppSettings
