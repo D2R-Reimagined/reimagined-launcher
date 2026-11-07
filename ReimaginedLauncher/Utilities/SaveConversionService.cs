@@ -366,6 +366,46 @@ public sealed class SaveConversionService
         return true;
     }
 
+    /// <summary>
+    /// Records the save folder as reviewed when a file converted in this batch would still be flagged, so the automatic prompt
+    /// cannot loop on it. An unknown target or a profile that moved away from the analyzed installation records nothing.
+    /// </summary>
+    internal static bool RecordReviewedAfterConversion(InstallationProfile profile, string? analyzedInstallDirectory,
+        string analyzedSaveDirectory, string? targetFingerprint, IEnumerable<SaveConversionPlan> replannedConverted)
+    {
+        if (targetFingerprint is null ||
+            !replannedConverted.Any(NeedsConversion) ||
+            !IsAnalyzedInstallation(profile, analyzedInstallDirectory, analyzedSaveDirectory))
+        {
+            return false;
+        }
+
+        profile.SaveConversionPromptKey = AutomaticPromptKey(profile, analyzedSaveDirectory, targetFingerprint);
+        return true;
+    }
+
+    /// <summary>Clears the launch prompt marker on every profile using <paramref name="installDirectory"/>; true when any marker changed.</summary>
+    internal static bool ResetLaunchPrompt(AppSettings settings, string? installDirectory)
+    {
+        var directory = AutomaticPromptDirectory(installDirectory);
+        if (directory.Length == 0)
+        {
+            return false;
+        }
+
+        var changed = false;
+        foreach (var profile in settings.Profiles)
+        {
+            if (profile.SaveConversionLaunchPromptShown &&
+                string.Equals(AutomaticPromptDirectory(profile.InstallDirectory), directory, StringComparison.OrdinalIgnoreCase))
+            {
+                profile.SaveConversionLaunchPromptShown = false;
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
     /// <summary>Analyzes every save in <paramref name="saveDirectory"/> and returns those that need conversion. Nothing is written.</summary>
     public IReadOnlyList<string> FindSavesNeedingConversion(string saveDirectory, string stagingDirectory) =>
         DiscoverSaveFiles(saveDirectory)
@@ -626,7 +666,8 @@ public sealed class SaveConversionService
                         : [];
                 var hasHistoricalAlternative = result.IsRecoverable && result.SourceLayout is not null
                                                                     && historicalOutput is not null
-                                                                    && !historicalOutput.AsSpan().SequenceEqual(data);
+                                                                    && !SameStandardSave(historicalOutput, historicalOutputPath!, data,
+                                                                        targetAttempt, migrator.Target, kind);
                 var failedAttempts = result.Identification
                     .Where(line => line.Contains(": rejected", StringComparison.Ordinal))
                     .ToList();
@@ -1165,6 +1206,33 @@ public sealed class SaveConversionService
         return problems.Count == 0
             ? (true, $"complete parse, {attempt.AllItems.Count()} item(s){trailer}")
             : (false, $"parses, but {string.Join(", ", problems)}{trailer}");
+    }
+
+    private static bool SameStandardSave(byte[] output, string outputPath, byte[] input, ParseAttempt inputAttempt,
+        SaveDataDefinition target, SaveFileKind kind)
+    {
+        if (output.AsSpan().SequenceEqual(input))
+        {
+            return true;
+        }
+
+        if (kind != SaveFileKind.Character)
+        {
+            return false;
+        }
+
+        var outputAttempt = SaveInspector.Inspect(outputPath, [target], []).Attempts[0];
+        if (!outputAttempt.Succeeded || (inputAttempt.TrailingBytes == 0 && outputAttempt.TrailingBytes == 0))
+        {
+            return false;
+        }
+
+        // The size and checksum include the trailer, so compare the standard sections without those fields.
+        const int sizeOffset = ChecksumOffset - sizeof(uint);
+        const int afterChecksum = ChecksumOffset + sizeof(uint);
+        return input.AsSpan(0, sizeOffset).SequenceEqual(output.AsSpan(0, sizeOffset))
+               && input.AsSpan(afterChecksum, input.Length - inputAttempt.TrailingBytes - afterChecksum)
+                   .SequenceEqual(output.AsSpan(afterChecksum, output.Length - outputAttempt.TrailingBytes - afterChecksum));
     }
 
     private static string DescribeByteDifferences(byte[] before, byte[] after)

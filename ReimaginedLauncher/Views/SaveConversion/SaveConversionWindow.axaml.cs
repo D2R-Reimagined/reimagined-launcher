@@ -31,6 +31,8 @@ public partial class SaveConversionWindow : Window
     private readonly Action<string?, IReadOnlyList<SaveConversionPlan>>? _promptShown;
     private readonly bool _isAutomaticPrompt;
     private SaveConversionService? _service;
+    private string? _analyzedInstallDirectory;
+    private string? _analyzedTarget;
     private bool _isBusy;
 
     public SaveConversionWindow()
@@ -110,6 +112,7 @@ public partial class SaveConversionWindow : Window
         }
 
         SetBusy(true, "Loading the installed Reimagined TXT files...");
+        _analyzedInstallDirectory = profile.InstallDirectory;
         try
         {
             var installedTarget = await Task.Run(() => SaveConversionService.LoadInstalledTarget(
@@ -120,6 +123,7 @@ public partial class SaveConversionWindow : Window
             _service = SaveConversionService.CreateForInstalledTarget(_registry, installedTarget);
             StatusBanner.IsVisible = false;
             await AnalyzeAsync(_service);
+            _analyzedTarget = installedTarget.Fingerprint;
             return installedTarget.Fingerprint;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
@@ -309,6 +313,7 @@ public partial class SaveConversionWindow : Window
 
         SetBusy(true, "Creating the backup folder...");
         var succeeded = 0;
+        var convertedPaths = new List<string>();
         try
         {
             var batchDirectory = await Task.Run(service.CreateBackupBatchDirectory);
@@ -322,12 +327,18 @@ public partial class SaveConversionWindow : Window
                 LaunchDiagnostics.Log(
                     $"Save conversion {(outcome.Succeeded ? "succeeded" : "failed")} for {plan.SourcePath}: {outcome.Message}");
                 succeeded += outcome.Succeeded ? 1 : 0;
+                if (outcome.Succeeded)
+                {
+                    convertedPaths.Add(outcome.FinalPath ?? plan.SourcePath);
+                }
             }
 
             foreach (var row in _rows.Except(selected))
             {
                 row.MarkSkipped();
             }
+
+            await RecordStillFlaggedAsReviewedAsync(service, convertedPaths);
 
             ShowBanner(succeeded == selected.Count
                 ? $"{succeeded} file(s) processed. The originals are kept in {batchDirectory}."
@@ -341,6 +352,40 @@ public partial class SaveConversionWindow : Window
         finally
         {
             SetBusy(false);
+        }
+    }
+
+    private async Task RecordStillFlaggedAsReviewedAsync(SaveConversionService service, IReadOnlyList<string> convertedPaths)
+    {
+        if (convertedPaths.Count == 0 || _analyzedTarget is null)
+        {
+            return;
+        }
+
+        BusyText.Text = "Checking the converted files...";
+        try
+        {
+            var plans = new List<SaveConversionPlan>();
+            foreach (var path in convertedPaths)
+            {
+                var staging = NewStagingDirectory();
+                plans.Add(await Task.Run(() => service.Plan(path, staging)));
+            }
+
+            if (!SaveConversionService.RecordReviewedAfterConversion(MainWindow.Settings.CurrentProfile,
+                    _analyzedInstallDirectory, _saveDirectory, _analyzedTarget, plans))
+            {
+                return;
+            }
+
+            LaunchDiagnostics.Log(
+                $"Save conversion: {string.Join(", ", plans.Where(SaveConversionService.NeedsConversion).Select(plan => plan.FileName))} "
+                + "would still be flagged after conversion; recorded the save folder as reviewed.");
+            await MainWindow.SaveAutomaticPromptStateAsync();
+        }
+        catch (Exception exception)
+        {
+            LaunchDiagnostics.LogException("Could not re-check the converted saves", exception);
         }
     }
 

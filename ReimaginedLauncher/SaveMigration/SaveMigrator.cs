@@ -496,7 +496,7 @@ public sealed class SaveMigrator
                 return selected;
             }
 
-            // A layout that defines every decoded stat and leaves the least data unparsed explains the file better than one that does not.
+            // Prefer the layout that defines every decoded stat and leaves the least data unparsed.
             var cleanest = decoded.Min(candidate => Rank(candidate));
             var viable = decoded.Where(candidate => Rank(candidate) == cleanest)
                 .Select(candidate => (candidate.Definition, candidate.Attempt)).ToList();
@@ -512,6 +512,18 @@ public sealed class SaveMigrator
             // The best id fit wins. Ties are only acceptable between layouts that decode identically with the same item tables.
             var best = viable.Min(candidate => Disagreements(candidate.Attempt));
             var tied = viable.Where(candidate => Disagreements(candidate.Attempt) == best).ToList();
+            // The game never writes the same stat twice into one stat list; a tied decode that does has misread a bit width.
+            var fewestRepeated = tied.Min(candidate => RepeatedStats(candidate.Attempt));
+            var misread = tied.Where(candidate => RepeatedStats(candidate.Attempt) != fewestRepeated).ToList();
+            if (misread.Count > 0)
+            {
+                tied = tied.Except(misread).ToList();
+                _identification.Add($"{Labels(tied)} explain the file best: "
+                                    + string.Join(", ", misread.Select(candidate =>
+                                        $"{candidate.Definition.Label} repeats {RepeatedStats(candidate.Attempt)} stat(s) within one item stat list"))
+                                    + ".");
+            }
+
             // Newer item tables under an older stat encoding are only needed when the encoding's own item tables cannot explain the
             // file as well: a tied layout that decodes the file identically with its own item tables keeps the save on those.
             var unneeded = tied.Where(candidate => candidate.Definition.UsesNewerItemTables
@@ -526,10 +538,11 @@ public sealed class SaveMigrator
                     $"{Labels(unneeded)}: not needed, the file decodes identically with the item tables of {Labels(tied)}.");
             }
 
-            var others = viable.Except(tied).Except(unneeded).ToList();
+            var others = viable.Except(tied).Except(unneeded).Except(misread).ToList();
             var chosen = tied.OrderBy(candidate => candidate.Definition.AppendedStats.Count).First().Definition;
-            if (tied.Select(candidate => (Signature(candidate.Attempt), candidate.Definition.ItemTables.Label))
-                    .Distinct().Count() > 1)
+            var ambiguous = tied.Select(candidate => (Signature(candidate.Attempt), candidate.Definition.ItemTables.Label))
+                .Distinct().Count() > 1;
+            if (ambiguous)
             {
                 // A source choice is only offered between historical layouts, not when the file may postdate the target.
                 _ambiguousLayouts = _chronologyUnknown ? [] : [.. tied.Select(candidate => candidate.Definition.Label)];
@@ -544,7 +557,7 @@ public sealed class SaveMigrator
                                     + $"{string.Join(", ", others.Select(other => $"{other.Definition.Label} has {Disagreements(other.Attempt)}"))}.");
             }
 
-            if (tied.Count > 1)
+            if (tied.Count > 1 && !ambiguous)
             {
                 _identification.Add(
                     $"{Labels(tied)} decode this file identically with the same item tables; using {chosen.Label}.");
@@ -653,6 +666,11 @@ public sealed class SaveMigrator
 
         private static int Disagreements(ParseAttempt attempt) =>
             attempt.IdValidations.Sum(validation => validation.ReferenceCount - validation.Hypotheses[0].Agreeing);
+
+        private static int RepeatedStats(ParseAttempt attempt) =>
+            attempt.AllItems.Sum(item => item.Stats
+                .GroupBy(stat => (stat.Source, stat.Id, stat.Layer))
+                .Sum(group => group.Count() - 1));
 
         private static string Signature(ParseAttempt attempt)
         {
@@ -1635,7 +1653,8 @@ public sealed class SaveMigrator
             // Settable properties only: computed getters (FileIndex, IsDead, ...) would double-count changes.
             foreach (var property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
             {
-                if (property.CanRead && property.CanWrite && property.GetIndexParameters().Length == 0)
+                if (property.CanRead && property.CanWrite && property.GetIndexParameters().Length == 0
+                    && !(value is D2Save && property.Name == nameof(D2Save.TrailingData)))
                 {
                     Visit(property.GetValue(value), $"{path}.{property.Name}", depth + 1);
                 }
