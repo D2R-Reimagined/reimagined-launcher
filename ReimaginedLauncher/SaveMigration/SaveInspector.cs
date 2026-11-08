@@ -171,7 +171,7 @@ public static class SaveInspector
                 foreach (var (tab, index) in stash.Select((tab, index) => (tab, index)))
                 {
                     var location = $"Stash tab {index + 1} ({tab.TabType})";
-                    notes.Add($"{location}: stash format {tab.StashFormat}, item format {tab.ItemFormat}, gold {tab.Gold}, "
+                    notes.Add($"{location}: stash format {tab.StashFormat}, item format {tab.SaveVersion}, gold {tab.Gold}, "
                               + $"{tab.Items.Count} items{(tab.Chronicle is null ? "" : ", chronicle section present")}");
                     items.AddRange(tab.Items.Select(item => Describe(item, location, definition)));
                 }
