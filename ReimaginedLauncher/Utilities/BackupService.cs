@@ -600,7 +600,7 @@ public static class BackupService
         return Task.Run(() =>
         {
             var errors = new List<string>();
-            using var archive = ZipFile.OpenRead(archivePath);
+            using var archive = ZipFileService.OpenRead(archivePath);
             foreach (var entry in archive.Entries.Where(entry => !string.IsNullOrEmpty(entry.Name)))
             {
                 var destinationPath = Path.Combine(destinationDirectory, entry.FullName.Replace('/', Path.DirectorySeparatorChar));
@@ -631,7 +631,7 @@ public static class BackupService
     {
         try
         {
-            using var archive = ZipFile.OpenRead(archivePath);
+            using var archive = ZipFileService.OpenRead(archivePath);
             return archive.Entries.Any(entry =>
             {
                 if (string.IsNullOrEmpty(entry.Name))
@@ -654,7 +654,7 @@ public static class BackupService
     {
         try
         {
-            using var archive = ZipFile.OpenRead(archivePath);
+            using var archive = ZipFileService.OpenRead(archivePath);
             return archive.Entries.Count(entry => !string.IsNullOrEmpty(entry.Name));
         }
         catch

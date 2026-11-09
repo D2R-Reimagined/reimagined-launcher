@@ -174,7 +174,7 @@ public sealed class D2RLoaderInstallerServiceTests : IDisposable
     {
         Directory.CreateDirectory(_testDirectory);
         var archivePath = Path.Combine(_testDirectory, $"{Guid.NewGuid():N}.zip");
-        using var archive = ZipFile.Open(archivePath, ZipArchiveMode.Create);
+        using var archive = ZipFileService.Open(archivePath, ZipArchiveMode.Create);
         foreach (var (path, content) in entries)
         {
             var entry = archive.CreateEntry(path);
