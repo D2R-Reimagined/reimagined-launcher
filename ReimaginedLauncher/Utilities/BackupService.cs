@@ -600,6 +600,7 @@ public static class BackupService
         return Task.Run(() =>
         {
             var errors = new List<string>();
+            ZipPermissionSanitizer.StripUnixPermissions(archivePath);
             using var archive = ZipFile.OpenRead(archivePath);
             foreach (var entry in archive.Entries.Where(entry => !string.IsNullOrEmpty(entry.Name)))
             {

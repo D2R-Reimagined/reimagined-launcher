@@ -260,6 +260,7 @@ public static class PluginsService
 
         try
         {
+            ZipPermissionSanitizer.StripUnixPermissions(zipPath);
             ZipFile.ExtractToDirectory(zipPath, tempDirectory, overwriteFiles: true);
 
             var pluginInfoPaths = Directory.GetFiles(tempDirectory, PluginInfoFileName, SearchOption.AllDirectories);
@@ -346,6 +347,7 @@ public static class PluginsService
 
         try
         {
+            ZipPermissionSanitizer.StripUnixPermissions(zipPath);
             ZipFile.ExtractToDirectory(zipPath, tempDirectory, overwriteFiles: true);
 
             var pluginInfoPaths = Directory.GetFiles(tempDirectory, PluginInfoFileName, SearchOption.AllDirectories);
