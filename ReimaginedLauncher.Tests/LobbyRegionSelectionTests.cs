@@ -89,4 +89,15 @@ public sealed class LobbyRegionSelectionTests
 
         Assert.Equal(["eu-west", "na-west", "ap-south", "na-east"], order);
     }
+
+    [Fact]
+    public void ServerPinLabelsTagAnAdminTestingServer()
+    {
+        var names = new Dictionary<string, string> { ["eu-west"] = "EU West" };
+        var open = new LobbyAdminServerResponse("eu-1", "EU 1", ["eu-west"], "10.0.0.2", true, 3, 5, 32);
+        var lab = open with { Id = "lab-1", Name = "Lab", AdminOnly = true, Online = false };
+
+        Assert.Equal("EU 1 — EU West — 3/32", LobbyServerChoice.From(open, names).Label);
+        Assert.Equal("Lab — EU West — 3/32 (admin only) (offline)", LobbyServerChoice.From(lab, names).Label);
+    }
 }

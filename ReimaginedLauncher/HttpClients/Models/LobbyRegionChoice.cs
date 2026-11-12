@@ -46,6 +46,7 @@ public sealed class LobbyServerChoice
             ? string.Join(", ", ids.Select(id => regionNames.TryGetValue(id, out var regionName) ? regionName : id))
             : "no region";
         var label = $"{name} — {regions} — {server.Games}/{server.MaxGames}";
+        if (server.AdminOnly) label += " (admin only)";
         return new LobbyServerChoice { Id = server.Id, Label = server.Online ? label : label + " (offline)" };
     }
 }

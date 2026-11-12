@@ -18,4 +18,6 @@ public sealed record LobbyAdminServerResponse(
     [property: JsonPropertyName("online")] bool Online,
     [property: JsonPropertyName("games")] int Games,
     [property: JsonPropertyName("players")] int Players,
-    [property: JsonPropertyName("max_games")] int MaxGames);
+    [property: JsonPropertyName("max_games")] int MaxGames,
+    // An admin testing server: only a pin hosts on it, and only admins join it. Older APIs omit it.
+    [property: JsonPropertyName("admin_only")] bool AdminOnly = false);
