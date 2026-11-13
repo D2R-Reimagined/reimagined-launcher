@@ -110,7 +110,10 @@ public class AppSettings
     public bool FirstTimeSetupShown { get; set; }
     public bool FirstTimeSetupCompleted { get; set; }
     public Dictionary<string, bool> LaunchCardExpansion { get; set; } = [];
-    public Dictionary<string, InstalledLootFilter> InstalledLootFilters { get; set; } = [];
+    public Dictionary<string, InstalledLootFilter> InstalledLootFilters { get; set; } =
+        new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+    public Dictionary<string, List<SyncedLootFilterEntry>> SyncedLootFilters { get; set; } =
+        new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     public double UiScale { get; set; } = 1.0;
     public bool MinimizeToTray { get; set; }
     public bool MinimizeToTrayOnClose { get; set; }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -20,10 +21,17 @@ namespace ReimaginedLauncher.Views.Launch;
 
 public partial class LaunchView
 {
+    private static readonly SolidColorBrush IdleFilterBrush = new(Color.Parse("#BCA77D"));
+    private static readonly SolidColorBrush SyncingFilterBrush = new(Color.Parse("#E0BD72"));
+    private static readonly SolidColorBrush SyncedFilterBrush = new(Color.Parse("#5CB85C"));
+
     private readonly AccountLootFilterService _accountFilters = Program.ServiceProvider.GetRequiredService<AccountLootFilterService>();
     private readonly DispatcherTimer _filterRefreshTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private CancellationTokenSource _filterContextCancellation = new();
     private string? _filterContext;
+    private string? _cachedActiveFilterRoot;
+    private (string ContextKey, bool ActiveRootExists, bool FullySynced, int SyncedCount, string? SyncedNamesTooltip)? _cachedFilterDiskState;
+    private int _filterTickCounter;
     private long _filterEpoch;
     private bool _filterBusy;
     private string? _filterInstallContext;
@@ -34,21 +42,43 @@ public partial class LaunchView
 
     private void InitializeLocalFeatures()
     {
-        _filterRefreshTimer.Tick += (_, _) => { UpdateLocalFeatureButtons(); ApplyHeroPluginFilter(); };
-        AttachedToVisualTree += (_, _) => { _filterRefreshTimer.Start(); RefreshLocalFeatures(); };
+        _filterRefreshTimer.Tick += (_, _) =>
+        {
+            var pollDisk = (++_filterTickCounter % 5) == 0;
+            if (pollDisk)
+            {
+                RefreshLocalFeatures();
+            }
+            else
+            {
+                UpdateLocalFeatureButtons(pollDisk: false);
+            }
+            ApplyHeroPluginFilter();
+        };
+        AttachedToVisualTree += (_, _) =>
+        {
+            _filterTickCounter = 0;
+            _filterRefreshTimer.Start();
+            RefreshLocalFeatures();
+        };
         DetachedFromVisualTree += (_, _) =>
         {
             _filterRefreshTimer.Stop();
             _filterContextCancellation.Cancel();
             _filterContext = null;
+            _cachedFilterDiskState = null;
             _filterEpoch++;
         };
     }
 
-    private string ContextKey()
+    private string ContextKey(bool refreshActiveRoot = false)
     {
         var profile = MainWindow.Settings.CurrentProfile;
-        return $"{_launcherAuthenticationService.CurrentUser?.Id}|{MainWindow.Settings.SelectedProfileIndex}|{profile.Type}|{profile.InstallDirectory}|{profile.LaunchExperience}|{profile.SelectedLadderId}";
+        if (refreshActiveRoot)
+        {
+            AccountLootFilterService.TryResolveRoot(profile, out _cachedActiveFilterRoot);
+        }
+        return $"{_launcherAuthenticationService.CurrentUser?.Id}|{MainWindow.Settings.SelectedProfileIndex}|{profile.Type}|{profile.InstallDirectory}|{profile.LaunchExperience}|{profile.SelectedLadderId}|{_cachedActiveFilterRoot}";
     }
 
     private void RefreshLocalFeatures()
@@ -56,10 +86,10 @@ public partial class LaunchView
         UpdateFilterSectionLayout();
         var profile = MainWindow.Settings.CurrentProfile;
         LootFilterPanel.IsVisible = profile.Type != InstallationType.D2RMM && profile.LaunchExperience != LaunchExperience.Offline;
-        var key = ContextKey();
+        _cachedFilterDiskState = null;
+        var key = ContextKey(refreshActiveRoot: true);
         if (_filterContext != key)
         {
-            var account = _launcherAuthenticationService.CurrentUser?.Id.ToString();
             _accountFilters.UseAccount(_launcherAuthenticationService.CurrentUser?.Id);
             _filterContextCancellation.Cancel();
             _filterContextCancellation.Dispose();
@@ -67,23 +97,19 @@ public partial class LaunchView
             _filterContext = key;
             _filterEpoch++;
             _filterListLoading = false;
+            _filterBusy = false;
+            _filterInstallContext = null;
             _filterListRequested = false;
-            AccountFiltersComboBox.ItemsSource = null;
-            AccountFiltersComboBox.SelectedItem = null;
-            SetFilterMessage(account is null ? "Sign in to access your account-saved filters." : null);
-
+            SetFilterMessage(null);
         }
         if (!_filterListRequested && _launcherAuthenticationService.IsSignedIn
             && LootFilterPanel.IsVisible && IsAttachedToVisualTree())
         {
             _filterListRequested = true;
-            _ = LoadAccountFiltersAsync(false);
+            _ = SyncAccountFiltersAsync(false);
         }
-        LootFilterRequirementText.IsVisible = profile.LaunchExperience != LaunchExperience.Ladder;
-        LootFilterScopeText.Text = profile.LaunchExperience == LaunchExperience.Ladder
-            ? "Applies to Ladder only."
-            : "Applies only to Mod+D2RLoader.";
-        UpdateLocalFeatureButtons();
+        LootFilterScopeText.Text = "Select your active filter in-game under Options → Gameplay → Loot Filter Profile.";
+        UpdateLocalFeatureButtons(pollDisk: true);
     }
 
     private void SetFilterMessage(string? message)
@@ -92,42 +118,129 @@ public partial class LaunchView
         LootFilterStatusText.IsVisible = !string.IsNullOrWhiteSpace(message);
     }
 
-    private void UpdateFilterIndicator()
+    private void UpdateFilterIndicator(bool pollDisk)
     {
-        InstalledLootFilter? installed = null;
-        var exists = false;
-        try
+        var user = _launcherAuthenticationService.CurrentUser;
+        var contextKey = ContextKey();
+        var syncing = (_filterBusy && _filterInstallContext == contextKey) || _filterListLoading;
+
+        bool activeRootExists;
+        bool fullySynced;
+        int syncedCount;
+        string? syncedNamesTooltip;
+
+        if (!pollDisk && _cachedFilterDiskState is { } cached && cached.ContextKey == contextKey)
         {
-            var root = LocalPluginInstallService.ResolveRoot(MainWindow.Settings.CurrentProfile);
-            MainWindow.Settings.InstalledLootFilters.TryGetValue(root, out installed);
-            exists = File.Exists(LocalPluginInstallService.SafePath(root, "config/filter.json"));
+            activeRootExists = cached.ActiveRootExists;
+            fullySynced = cached.FullySynced;
+            syncedCount = cached.SyncedCount;
+            syncedNamesTooltip = cached.SyncedNamesTooltip;
         }
-        catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException) { }
-        AccountFiltersComboBox.PlaceholderText = installed?.Name ?? "Select a filter";
-        var selected = AccountFiltersComboBox.SelectedItem as AccountLootFilter;
-        var pending = selected is not null && selected.Id != installed?.Id;
-        var applying = _filterBusy && _filterInstallContext == ContextKey();
-        FilterInstallIndicator.Text = applying ? "↻" : exists && !pending ? "✓" : "○";
-        FilterInstallIndicator.Foreground = new SolidColorBrush(applying ? Color.Parse("#E0BD72")
-            : exists && !pending ? Color.Parse("#5CB85C") : Color.Parse("#BCA77D"));
-        var status = applying ? "Applying filter..." : pending ? "Selected filter has not been applied."
-            : exists ? "Filter installed." : "No filter installed for this mode.";
-        ToolTip.SetTip(FilterInstallIndicator, status);
-        Avalonia.Automation.AutomationProperties.SetName(FilterInstallIndicator, status);
+        else
+        {
+            activeRootExists = false;
+            fullySynced = false;
+            syncedCount = 0;
+            syncedNamesTooltip = null;
+
+            try
+            {
+                var profile = MainWindow.Settings.CurrentProfile;
+                if (AccountLootFilterService.TryResolveRoot(profile, out var activeRoot) && activeRoot is not null)
+                {
+                    activeRootExists = true;
+                    MainWindow.Settings.SyncedLootFilters.TryGetValue(activeRoot, out var activeSaved);
+                    if (activeSaved is { Count: > 0 })
+                    {
+                        syncedCount = activeSaved.Count;
+                        syncedNamesTooltip = "Synced: " + string.Join(", ", activeSaved.Select(entry => entry.Name));
+                    }
+
+                    if (user is not null && _accountFilters.TryGetCachedList(user.Id, out var remote))
+                    {
+                        var roots = AccountLootFilterService.ResolveInstalledSyncRoots(profile);
+                        fullySynced = roots.Count > 0 && roots.All(root =>
+                        {
+                            MainWindow.Settings.SyncedLootFilters.TryGetValue(root, out var saved);
+                            var hadLegacy = MainWindow.Settings.InstalledLootFilters.ContainsKey(root);
+                            return AccountLootFilterService.IsFullySynced(root, remote, saved, hadLegacy);
+                        });
+                        if (fullySynced && activeSaved is null)
+                        {
+                            syncedCount = remote.Count;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException or UnauthorizedAccessException or ArgumentException) { }
+
+            _cachedFilterDiskState = (contextKey, activeRootExists, fullySynced, syncedCount, syncedNamesTooltip);
+        }
+
+        string indicator;
+        SolidColorBrush brush;
+        string summary;
+        string tooltip;
+
+        if (user is null)
+        {
+            indicator = "○";
+            brush = IdleFilterBrush;
+            summary = "Sign in to sync your saved filters.";
+            tooltip = summary;
+        }
+        else if (syncing)
+        {
+            indicator = "↻";
+            brush = SyncingFilterBrush;
+            summary = "Syncing saved filters...";
+            tooltip = summary;
+        }
+        else if (!activeRootExists)
+        {
+            indicator = "○";
+            brush = IdleFilterBrush;
+            summary = "Install this mode's mod package to sync filters.";
+            tooltip = summary;
+        }
+        else if (fullySynced)
+        {
+            indicator = "✓";
+            brush = SyncedFilterBrush;
+            summary = syncedCount == 0
+                ? "No saved filters on your account."
+                : $"Filters are synced ({syncedCount} {(syncedCount == 1 ? "filter" : "filters")}).";
+            tooltip = syncedCount > 0 && syncedNamesTooltip is not null
+                ? syncedNamesTooltip
+                : summary;
+        }
+        else
+        {
+            indicator = "○";
+            brush = IdleFilterBrush;
+            summary = "Filters not synced · Click ↻ to sync.";
+            tooltip = summary;
+        }
+
+        FilterInstallIndicator.Text = indicator;
+        FilterInstallIndicator.Foreground = brush;
+        FilterSyncSummaryText.Text = summary;
+        ToolTip.SetTip(FilterInstallIndicator, tooltip);
+        ToolTip.SetTip(FilterSyncSummaryText, tooltip);
+        Avalonia.Automation.AutomationProperties.SetName(FilterInstallIndicator, summary);
     }
 
     private bool IsAttachedToVisualTree() => TopLevel.GetTopLevel(this) is not null;
 
-    private void UpdateLocalFeatureButtons()
+    private void UpdateLocalFeatureButtons(bool pollDisk = true)
     {
-        UpdateFilterIndicator();
+        UpdateFilterIndicator(pollDisk);
         var profile = MainWindow.Settings.CurrentProfile;
         var user = _launcherAuthenticationService.CurrentUser;
         var wait = user is null ? TimeSpan.Zero : _accountFilters.Wait(user.Id);
         RefreshAccountFiltersButton.Content = wait > TimeSpan.Zero ? $"{Math.Ceiling(wait.TotalSeconds)}s" : "↻";
         RefreshAccountFiltersButton.IsEnabled = user is not null && wait <= TimeSpan.Zero && !_filterListLoading && !_filterBusy;
         FilterSignInButton.IsVisible = user is null;
-        AccountFiltersComboBox.IsEnabled = user is not null && !_filterBusy;
         var busy = _filterBusy || _pluginBusy || MainWindow.IsInstallInProgress || _isLaunching || _isRunningLadderAction;
         var extensionControlsBusy = busy && !_extensionToggleInProgress;
         var canEdit = !extensionControlsBusy && profile.Type != InstallationType.D2RMM && profile.LaunchExperience == LaunchExperience.Online;
@@ -150,123 +263,187 @@ public partial class LaunchView
             ? "Manual installation is unavailable for Ladder. Changing package contents can require a fresh package download."
             : "Install a DLL or ZIP into this mod only. Existing configs are preserved by default.");
         var available = AccountLootFilterService.IsFilterPluginAvailable(_loaderInventory, profile.LaunchExperience);
-        ApplyAccountFilterButton.IsEnabled = !busy && user is not null && _accountFilters.ServerWait(user.Id) <= TimeSpan.Zero
-            && AccountFiltersComboBox.SelectedItem is AccountLootFilter && available;
-        ToolTip.SetTip(ApplyAccountFilterButton, available ? "Download, back up, and install the selected filter."
-            : "Pyre-LootFilter or UnHoarder and mod extensions must be installed and enabled for this mode. This action does not install or enable plugins.");
+        var legacyUnhoarderOnly = AccountLootFilterService.HasLegacySingleFileFilterPluginOnly(_loaderInventory, profile.LaunchExperience);
         LootFilterAvailabilityText.IsVisible = !available && user is not null;
-        LootFilterAvailabilityText.Text = "Pyre-LootFilter or UnHoarder must be installed and enabled for this mode before applying a filter. You can still browse your account filters.";
+        LootFilterAvailabilityText.Text = legacyUnhoarderOnly
+            ? "Synced filter profiles require Pyre-LootFilter (UnHoarder only reads a single config/filter.json file)."
+            : "Enable Pyre-LootFilter in Installed Plugins to use synced loot filters in-game.";
     }
 
-    private async Task LoadAccountFiltersAsync(bool force)
+    private async Task SyncAccountFiltersAsync(bool force)
     {
-        if (_launcherAuthenticationService.CurrentUser is not { } user || _filterListLoading) return;
-        var epoch = _filterEpoch;
-        var token = _filterContextCancellation.Token;
-        var selected = (AccountFiltersComboBox.SelectedItem as AccountLootFilter)?.Id;
-        _filterListLoading = true;
-        UpdateLocalFeatureButtons();
-        try
-        {
-            var filters = await _accountFilters.ListAsync(user.Id, force, token);
-            if (epoch != _filterEpoch || ContextKey() != _filterContext) return;
-            AccountFiltersComboBox.ItemsSource = filters;
-            if (selected is null)
-            {
-                try
-                {
-                    MainWindow.Settings.InstalledLootFilters.TryGetValue(LocalPluginInstallService.ResolveRoot(MainWindow.Settings.CurrentProfile), out var installed);
-                    selected = installed?.Id;
-                }
-                catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException) { }
-            }
-            AccountFiltersComboBox.SelectedItem = filters.FirstOrDefault(filter => filter.Id == selected);
-            SetFilterMessage(filters.Count == 0
-                ? "No saved filters. Create or save one on the website."
-                : null);
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            if (epoch == _filterEpoch) SetFilterMessage("Could not load filters. " + ex.Message + " Refresh to retry.");
-        }
-        finally
-        {
-            if (epoch == _filterEpoch) { _filterListLoading = false; UpdateLocalFeatureButtons(); }
-        }
-    }
-
-    private async void OnRefreshAccountFiltersClick(object? sender, RoutedEventArgs e) => await LoadAccountFiltersAsync(true);
-    private void OnAccountFilterSelectionChanged(object? sender, SelectionChangedEventArgs e) => UpdateLocalFeatureButtons();
-    private async void OnFilterSignInClick(object? sender, RoutedEventArgs e)
-    {
-        if (MainWindow.Instance is { } window) await window.SignInToReimaginedAsync();
-        RefreshLocalFeatures();
-    }
-    private void OnFilterWebsiteClick(object? sender, RoutedEventArgs e)
-    {
-        try { Process.Start(new ProcessStartInfo(new Uri(LauncherAuthenticationService.ResolveWebsiteBaseAddress(), "loot-filter").AbsoluteUri) { UseShellExecute = true }); }
-        catch (Exception ex) { Notifications.SendNotification("Could not open the filter website: " + ex.Message, "Warning"); }
-    }
-
-    private async void OnApplyAccountFilterClick(object? sender, RoutedEventArgs e)
-    {
-        if (_filterBusy || !ApplyAccountFilterButton.IsEnabled || AccountFiltersComboBox.SelectedItem is not AccountLootFilter selected
-            || _launcherAuthenticationService.CurrentUser is not { } user) return;
-        var context = ContextKey();
+        if (_launcherAuthenticationService.CurrentUser is not { } user || _filterListLoading || _filterBusy) return;
+        var context = ContextKey(refreshActiveRoot: true);
+        _filterContext = context;
         var epoch = _filterEpoch;
         var token = _filterContextCancellation.Token;
         _filterInstallContext = context;
+        _filterListLoading = true;
         _filterBusy = true;
         var entered = false;
         var ownsInstall = false;
+        var anyCommitted = false;
+        SetFilterMessage(null);
+        UpdateLocalFeatureButtons(pollDisk: false);
         try
         {
-            var root = LocalPluginInstallService.ResolveRoot(MainWindow.Settings.CurrentProfile);
-            SetFilterMessage(null);
-            UpdateLocalFeatureButtons();
-            var details = await _apiHttpClient.GetLootFilterAsync(selected.Id, token);
+            var filters = await _accountFilters.ListAsync(user.Id, force, token);
+            if (epoch != _filterEpoch || ContextKey() != context) return;
+
+            var profile = MainWindow.Settings.CurrentProfile;
+            AccountLootFilterService.TryResolveRoot(profile, out var activeRoot);
+            var roots = AccountLootFilterService.ResolveInstalledSyncRoots(profile);
+            if (roots.Count == 0)
+            {
+                if (force)
+                {
+                    SetFilterMessage("Install the mod package first to sync filters on disk.");
+                }
+                return;
+            }
+
+            var pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+            var primaryRoot = activeRoot ?? roots[0];
+            var previousByRoot = new Dictionary<string, IReadOnlyList<SyncedLootFilterEntry>>(pathComparer);
+            var allSynced = true;
+            foreach (var root in roots)
+            {
+                if (MainWindow.Settings.SyncedLootFilters.TryGetValue(root, out var prev))
+                    previousByRoot[root] = prev;
+                var hadLegacy = MainWindow.Settings.InstalledLootFilters.ContainsKey(root);
+                if (!AccountLootFilterService.IsFullySynced(root, filters, prev, hadLegacy))
+                    allSynced = false;
+            }
+
+            if (allSynced)
+            {
+                SetFilterMessage(null);
+                if (force)
+                {
+                    var message = activeRoot is null
+                        ? "Installed mod filters are up to date."
+                        : $"Filters are up to date ({filters.Count} {(filters.Count == 1 ? "filter" : "filters")}).";
+                    Notifications.SendNotification(message, "Success");
+                }
+                return;
+            }
+
             void Check()
             {
                 token.ThrowIfCancellationRequested();
-                if (epoch != _filterEpoch || context != ContextKey()) throw new OperationCanceledException("The selected account or play mode changed.");
-                if (_isLaunching || _isRunningLadderAction) throw new InvalidOperationException("Wait for the launch or package operation to finish.");
-                }
+                if (epoch != _filterEpoch || context != ContextKey())
+                    throw new OperationCanceledException("The selected account or play mode changed.");
+                if (_isLaunching || _isRunningLadderAction)
+                    throw new InvalidOperationException("Wait for the launch or package operation to finish.");
+            }
+
             Check();
-            entered = await LocalPluginInstallService.InstallGate.WaitAsync(0, token);
-            if (!entered || MainWindow.IsInstallInProgress) throw new InvalidOperationException("Another installation is in progress.");
+            var prepared = await _accountFilters.PrepareMultiRootSyncAsync(roots, filters, previousByRoot, Check, token);
+            Check();
+
+            entered = await LocalPluginInstallService.InstallGate.WaitAsync(TimeSpan.FromSeconds(10), token);
+            if (!entered || MainWindow.IsInstallInProgress)
+                throw new InvalidOperationException("Another installation is in progress.");
             MainWindow.IsInstallInProgress = true;
             ownsInstall = true;
-            await Task.Run(() => AccountLootFilterService.Install(root, details.Document, Check), token);
-            MainWindow.Settings.InstalledLootFilters[root] = new InstalledLootFilter(details.Id, details.Name);
-            string? warning = AccountLootFilterService.TrimBackups(root);
-            try { await SettingsManager.SaveAsync(MainWindow.Settings); }
-            catch (Exception ex) { warning = "Filter installed, but the last-installed name could not be saved: " + ex.Message; }
-            Notifications.SendNotification(warning ?? "Filter installed: " + details.Name, warning is null ? "Success" : "Warning");
-            if (context == ContextKey()) SetFilterMessage(warning);
+
+            LootFilterSyncResult? primaryResult = null;
+            var warnings = new List<string>();
+            if (!string.IsNullOrWhiteSpace(prepared.Warning))
+                warnings.Add(prepared.Warning);
+
+            foreach (var root in roots)
+            {
+                previousByRoot.TryGetValue(root, out var prev);
+                var hadLegacy = MainWindow.Settings.InstalledLootFilters.ContainsKey(root);
+                var result = await Task.Run(() => AccountLootFilterService.CommitSync(root, prepared, Check, prev, hadLegacy), token);
+                MainWindow.Settings.SyncedLootFilters[root] = [.. result.Synced];
+                MainWindow.Settings.InstalledLootFilters.Remove(root);
+                anyCommitted = true;
+                if (!string.IsNullOrWhiteSpace(result.BackupWarning) && !warnings.Contains(result.BackupWarning, StringComparer.Ordinal))
+                    warnings.Add(result.BackupWarning);
+                if (pathComparer.Equals(root, primaryRoot))
+                    primaryResult = result;
+            }
+
+            primaryResult ??= new LootFilterSyncResult(prepared.TargetEntries, 0, 0, null);
+            var warning = warnings.Count > 0 ? string.Join(" ", warnings) : null;
+            try
+            {
+                await SettingsManager.SaveAsync(MainWindow.Settings);
+                anyCommitted = false;
+            }
+            catch (Exception ex)
+            {
+                warning = "Filters synced, but sync state could not be saved: " + ex.Message;
+            }
+
+            if (context == ContextKey())
+            {
+                SetFilterMessage(warning);
+            }
+
+            if (force || primaryResult.UpdatedCount > 0 || primaryResult.DeletedCount > 0 || warning is not null)
+            {
+                var summary = warning
+                    ?? (primaryResult.Synced.Count == 0
+                        ? "Removed deleted account filters."
+                        : $"Synced {primaryResult.Synced.Count} account {(primaryResult.Synced.Count == 1 ? "filter" : "filters")}.");
+                Notifications.SendNotification(summary, warning is null ? "Success" : "Warning");
+            }
         }
         catch (LootFilterRateLimitException ex)
         {
             if (epoch == _filterEpoch && context == ContextKey())
             {
                 _accountFilters.Block(user.Id, ex.RetryAt);
-                Notifications.SendNotification(ex.Message, "Warning");
+                SetFilterMessage(ex.Message);
+                if (force) Notifications.SendNotification(ex.Message, "Warning");
             }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
+            LaunchDiagnostics.LogException("Account loot filter sync", ex);
             if (epoch == _filterEpoch && context == ContextKey())
-                Notifications.SendNotification("Filter was not installed: " + ex.Message, "Error");
+            {
+                SetFilterMessage("Could not sync filters. " + ex.Message + " Click ↻ to retry.");
+                if (force) Notifications.SendNotification("Filters were not synced: " + ex.Message, "Error");
+            }
         }
         finally
         {
+            if (anyCommitted)
+            {
+                try { await SettingsManager.SaveAsync(MainWindow.Settings); }
+                catch (Exception saveEx) { LaunchDiagnostics.LogException("Saving partial loot filter sync state", saveEx); }
+            }
             if (ownsInstall) MainWindow.IsInstallInProgress = false;
             if (entered) LocalPluginInstallService.InstallGate.Release();
-            _filterBusy = false;
-            _filterInstallContext = null;
-            RefreshLocalFeatures();
+            if (epoch == _filterEpoch)
+            {
+                _filterListLoading = false;
+                _filterBusy = false;
+                _filterInstallContext = null;
+                _cachedFilterDiskState = null;
+                UpdateLocalFeatureButtons(pollDisk: true);
+            }
         }
+    }
+
+    private async void OnRefreshAccountFiltersClick(object? sender, RoutedEventArgs e) => await SyncAccountFiltersAsync(true);
+    private async void OnFilterSignInClick(object? sender, RoutedEventArgs e)
+    {
+        if (MainWindow.Instance is { } window) await window.SignInToReimaginedAsync();
+        RefreshLocalFeatures();
+    }
+    private void OnFilterWebsiteClick(object? sender, RoutedEventArgs e) => OpenFilterWebsite("loot-filter");
+    private void OnFilterWebsiteV2Click(object? sender, RoutedEventArgs e) => OpenFilterWebsite("loot-filterv2");
+
+    private static void OpenFilterWebsite(string relativePath)
+    {
+        try { Process.Start(new ProcessStartInfo(new Uri(LauncherAuthenticationService.ResolveWebsiteBaseAddress(), relativePath).AbsoluteUri) { UseShellExecute = true }); }
+        catch (Exception ex) { Notifications.SendNotification("Could not open the filter website: " + ex.Message, "Warning"); }
     }
 
     private static void RequireGameClosed()

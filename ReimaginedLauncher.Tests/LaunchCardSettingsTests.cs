@@ -41,7 +41,8 @@ public sealed class LaunchCardSettingsTests
             LastNavigationTag = "",
             Profiles = null!,
             LaunchCardExpansion = null!,
-            InstalledLootFilters = null!
+            InstalledLootFilters = null!,
+            SyncedLootFilters = null!
         };
 
         SettingsManager.SanitizeSettings(settings);
@@ -54,6 +55,15 @@ public sealed class LaunchCardSettingsTests
         Assert.NotNull(settings.Profiles);
         Assert.NotNull(settings.LaunchCardExpansion);
         Assert.NotNull(settings.InstalledLootFilters);
+        Assert.NotNull(settings.SyncedLootFilters);
+
+        var deserialized = JsonSerializer.Deserialize<AppSettings>(
+            "{\"SyncedLootFilters\":{\"c:/games/d2r/mods/Reimagined/d2rloader\":[{\"Id\":\"f1\",\"Name\":\"Starter\",\"Revision\":2,\"FileName\":\"Starter.json\"}]}}")!;
+        SettingsManager.SanitizeSettings(deserialized);
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.True(deserialized.SyncedLootFilters.ContainsKey("C:/Games/D2R/mods/Reimagined/d2rloader"));
+        }
     }
 
     [Fact]

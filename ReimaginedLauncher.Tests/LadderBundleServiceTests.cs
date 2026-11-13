@@ -563,6 +563,9 @@ public sealed class LadderBundleServiceTests : IDisposable
         var filter = LadderConfigPath("filter.json");
         const string custom = "{\"version\":3,\"rules\":[{\"hide\":{\"ruleName\":\"My strict filter\"}}]}";
         await File.WriteAllTextAsync(filter, custom);
+        var syncedFilter = LadderConfigPath(Path.Combine("filter", "SyncedV2.json"));
+        Directory.CreateDirectory(Path.GetDirectoryName(syncedFilter)!);
+        await File.WriteAllTextAsync(syncedFilter, custom);
         var readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
         Assert.True(readiness.IsReady, readiness.Status);
         await File.WriteAllTextAsync(LadderConfigPath("maps.toml"), "tampered rules");
@@ -575,6 +578,7 @@ public sealed class LadderBundleServiceTests : IDisposable
         }
         await service.InstallOrRepairAsync(_installDirectory, fixture.Descriptor);
         Assert.Equal(custom, await File.ReadAllTextAsync(filter));
+        Assert.Equal(custom, await File.ReadAllTextAsync(syncedFilter));
         Assert.Equal("ladder rule = true", await File.ReadAllTextAsync(LadderConfigPath("maps.toml")));
         readiness = await service.GetReadinessAsync(_installDirectory, fixture.Descriptor);
         Assert.True(readiness.IsReady, readiness.Status);
@@ -603,6 +607,20 @@ public sealed class LadderBundleServiceTests : IDisposable
         Assert.Equal("updated rules", await File.ReadAllTextAsync(LadderConfigPath("maps.toml")));
         var readiness = await service.GetReadinessAsync(_installDirectory, update.Descriptor);
         Assert.True(readiness.IsReady, readiness.Status);
+
+        // Once multi-profile sync replaces legacy config/filter.json with config/filter/*.json,
+        // subsequent bundle updates must not resurrect the bundle's default config/filter.json.
+        File.Delete(LadderConfigPath("filter.json"));
+        var syncedPath = LadderConfigPath(Path.Combine("filter", "Starter.json"));
+        Directory.CreateDirectory(Path.GetDirectoryName(syncedPath)!);
+        await File.WriteAllTextAsync(syncedPath, "synced starter");
+        var third = new[] { ("maps-config", "maps.toml", "third rules"u8.ToArray()), ("filter-config", "filter.json", "third default"u8.ToArray()) };
+        var thirdUpdate = CreateBundle(third, third.Select(file => file.Item3).ToArray(), targetPaths: targets);
+        var thirdService = CreateService(thirdUpdate.Archive);
+        await thirdService.InstallOrRepairAsync(_installDirectory, thirdUpdate.Descriptor);
+        Assert.False(File.Exists(LadderConfigPath("filter.json")));
+        Assert.Equal("synced starter", await File.ReadAllTextAsync(syncedPath));
+        Assert.True((await thirdService.GetReadinessAsync(_installDirectory, thirdUpdate.Descriptor)).IsReady);
     }
 
     [Fact]
@@ -619,6 +637,11 @@ public sealed class LadderBundleServiceTests : IDisposable
     [Theory]
     [InlineData("mods/Reimagined/d2rloader/config/filter.json", true)]
     [InlineData("mods/ReimaginedLadder/d2rloader/config/filter.json", true)]
+    [InlineData("mods/Reimagined/d2rloader/config/filter/Strict.json", true)]
+    [InlineData("mods/ReimaginedLadder/d2rloader/config/filter/Strict V2.json", true)]
+    [InlineData("mods/Reimagined/d2rloader/config/filter/.json", false)]
+    [InlineData("mods/Reimagined/d2rloader/config/filter/Strict.toml", false)]
+    [InlineData("mods/Reimagined/d2rloader/config/filter/sub/Strict.json", false)]
     [InlineData("mods/Reimagined/d2rloader/config/maps.toml", false)]
     [InlineData("mods/Reimagined/d2rloader/config/subfolder/filter.json", false)]
     [InlineData("mods/Reimagined/d2rloader/plugins/filter.json", false)]

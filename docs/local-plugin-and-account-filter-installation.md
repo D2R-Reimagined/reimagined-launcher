@@ -25,17 +25,13 @@ References: https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winba
 
 The existing account access token authorizes GET /loot-filters and GET /loot-filters/{id}. No filter upload, update, delete or mark-used request is sent. Sign-in/token refresh use the launcher's existing authentication flow.
 
-The dropdown caches the current account's list across navigation. Refresh is limited to five list requests per rolling minute; server Retry-After is honored for list and apply operations. Apply fetches the latest document, validates it and atomically installs only its JSON document as config/filter.json. The list-refresh limit does not stop applying an already listed filter. In-flight results are discarded if the account, installation, profile, mode or selected ladder changes.
+When signed in, the launcher automatically diff-syncs all saved account filters into `d2rloader/config/filter/*.json` across installed Online and Ladder roots, downloading only filters whose `revision` changed or whose local file is missing. Unchanged renames reuse local bytes, deleted website filters are removed after backing up the previous files, and accounts with zero website filters and no prior sync leave custom local `config/filter.json` and `config/filter/*.json` files untouched. Players choose their active filter in-game under `Options -> Gameplay -> Loot Filter Profile` (`Pyre-LootFilter`), and links are provided for both Loot Filters V1 (`/loot-filter`) and V2 (`/loot-filterv2`).
 
-Account-saved copies are visible; browser-only drafts must first be saved to the website account. Signed-out/empty states link to sign-in and the website editor. Pyre-LootFilter or UnHoarder must already be available for the selected mode. Global loot-filter plugin installations do not count as available for isolated Ladder play. The feature never installs or enables plugins. Applying while the game runs is supported; in-game activation is not confirmed by the launcher.
-
-Last-installed name and ID are stored in existing settings.json, keyed by canonical mod D2RLoader root. This describes the last launcher installation, without checksums or modification detection. If installation succeeds but settings persistence fails, the UI reports those outcomes separately.
-
-Backups live outside mod packages under `<game>/.reimagined-launcher/launcher-filter-backups/<mod>/` and `launcher-backups/<mod>/`. Keep the last three filter backups. Plugin replacement backups remain available for manual recovery. No metadata sidecar is added to filter.json.
+Refresh is limited to five list requests per rolling minute; server Retry-After is honored. Sync state (`id`, `name`, `revision`, `fileName`) is stored in `settings.json` under `SyncedLootFilters`, keyed by canonical mod D2RLoader root. Backups live outside mod packages under `<game>/.reimagined-launcher/launcher-filter-backups/<mod>/` and retain the three newest snapshots.
 
 ## Ladder filter exception
 
-Only the exact mod-scoped d2rloader/config/filter.json is exempt from installed-file size/hash enforcement, even if the signed package provides a default. A package-declared file must still exist. The signed archive payload, artifact, manifest, descriptors, signatures and all other signed files retain their checks. Repair/update copies the player's existing filter over a newly staged default; an existing full-package backup remains available. No DLL, MPQ or other config exception is introduced.
+Only `d2rloader/config/filter.json` and top-level `d2rloader/config/filter/*.json` files are exempt from installed-file size/hash enforcement on Ladder. The signed archive payload, artifact, manifest, descriptors, signatures and all other signed files retain their checks. Repair/update carries over the player's synced `config/filter/*.json` profiles (and suppresses resurrecting a bundle default `config/filter.json` once `config/filter/*.json` is in use). No DLL, MPQ or other config exception is introduced.
 
 ## Source contracts
 

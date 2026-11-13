@@ -277,10 +277,9 @@ public partial class LaunchView : UserControl
         var state = (Bounds.Width, ladder);
         if (_heroLayout == state) return;
         _heroLayout = state;
-        var available = Math.Max(0, Bounds.Width - 16);
         ConfigureGrid(HeroGrid, wide ? 2 : 1, wide ? 2 : 4);
         if (wide) HeroGrid.ColumnDefinitions = new ColumnDefinitions(Bounds.Width < 1150 ? "*,230" : "*,280");
-                PositionGridChild(ExperienceGrid, 0, 0);
+        PositionGridChild(ExperienceGrid, 0, 0);
         PositionGridChild(LaunchPanel, wide ? 1 : 0, wide ? 0 : 1);
         PositionGridChild(HeroLaunchWarnings, wide ? 1 : 0, wide ? 1 : 2);
         PositionGridChild(NormalModRepairBanner, 0, wide ? 1 : 3);
@@ -297,19 +296,12 @@ public partial class LaunchView : UserControl
         HeroSummaryPanel.IsVisible = false;
         ServerRegionsPlaceholder.IsVisible = false;
         LaunchActionsPanel.Orientation = Orientation.Vertical;
-        ConfigureGrid(FilterSelectionGrid, 3, 1);
-        FilterSelectionGrid.ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto");
-        Grid.SetColumnSpan(AccountFiltersComboBox, 1);
-        PositionGridChild(AccountFiltersComboBox, 0, 0);
-        PositionGridChild(ApplyAccountFilterButton, 1, 0);
-        PositionGridChild(FilterInstallIndicator, 2, 0);
-        var filterStrip = wide && !ladder;
-        ConfigureGrid(HeroFilterContent, filterStrip ? 2 : 1, filterStrip ? 1 : 2);
-        if (filterStrip) HeroFilterContent.ColumnDefinitions = new ColumnDefinitions("260,*");
+        ConfigureGrid(FilterSelectionGrid, 2, 1);
+        FilterSelectionGrid.ColumnDefinitions = new ColumnDefinitions("Auto,*");
+        PositionGridChild(FilterInstallIndicator, 0, 0);
+        PositionGridChild(FilterSyncSummaryText, 1, 0);
+        ConfigureGrid(HeroFilterContent, 1, 1);
         PositionGridChild(HeroFilterContent.Children[0], 0, 0);
-        PositionGridChild(HeroFilterContent.Children[1], filterStrip ? 1 : 0, filterStrip ? 0 : 1);
-        FilterSelectionGrid.Width = Math.Min(620, Math.Max(0, (wide && ladder ? (available - 24) / 3 : filterStrip ? available - 290 : available) - 28));
-        FilterSelectionGrid.HorizontalAlignment = HorizontalAlignment.Left;
         HeroFilterContent.InvalidateMeasure();
         // Reset Avalonia's cached cell placement when the hidden policy panel changes columns.
         LaunchSectionsGrid.Children.Remove(LadderPolicyPanel);
