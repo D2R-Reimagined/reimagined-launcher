@@ -166,7 +166,9 @@ public sealed class D2RLoaderConfigTests : IDisposable
             null,
             "/download");
         Assert.True(D2RLoaderConfigService.IsLockedLadderExtension("custom-rule.dll", D2RLoaderExtensionKind.Plugin, bundle));
-        Assert.False(D2RLoaderConfigService.IsLockedLadderExtension("unhoarder.dll", D2RLoaderExtensionKind.Plugin, bundle));
+        Assert.False(D2RLoaderConfigService.IsLockedLadderExtension("pyre-lootfilter.dll", D2RLoaderExtensionKind.Plugin, bundle));
+        Assert.False(D2RLoaderConfigService.IsLockedLadderConfigPath(Path.Combine(game, "mods/ReimaginedLadder/d2rloader/config/filter.json"), bundle));
+        Assert.False(D2RLoaderConfigService.IsLockedLadderConfigPath(Path.Combine(game, "mods/ReimaginedLadder/d2rloader/config/filter/Strict.json"), bundle));
     }
     [Fact]
     public void PickerCannotEscapeScopeOrOpenExecutable()

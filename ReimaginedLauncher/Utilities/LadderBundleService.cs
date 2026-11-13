@@ -903,6 +903,19 @@ public sealed class LadderBundleService(
                 File.Copy(path, target, overwrite: playerFilter);
             }
         }
+
+        var sourceLegacyFilter = Path.Combine(modRoot, "d2rloader", "config", "filter.json");
+        var stagedFilterDir = Path.Combine(stagedModRoot, "d2rloader", "config", "filter");
+        var stagedLegacyFilter = Path.Combine(stagedModRoot, "d2rloader", "config", "filter.json");
+        var hasSourceLegacy = File.Exists(sourceLegacyFilter)
+                              && (File.GetAttributes(sourceLegacyFilter) & FileAttributes.ReparsePoint) == 0;
+        if (!hasSourceLegacy
+            && Directory.Exists(stagedFilterDir)
+            && Directory.EnumerateFiles(stagedFilterDir, "*.json", SearchOption.TopDirectoryOnly).Any()
+            && File.Exists(stagedLegacyFilter))
+        {
+            File.Delete(stagedLegacyFilter);
+        }
     }
 
     /// <summary>
