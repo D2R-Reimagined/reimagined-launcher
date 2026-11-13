@@ -38,7 +38,7 @@ Only `d2rloader/config/filter.json` and top-level `d2rloader/config/filter/*.jso
 - https://github.com/D2R-Reimagined/d2r-reimagined-website/blob/master/src/lib/loot-filter/api.ts
 - https://github.com/D2R-Reimagined/d2r-reimagined-api/blob/main/src/Services/LootFilterValidation.cs
 
-LootFilterValidation.cs adapts the project's API validator to local InvalidDataException errors. It follows the current website-supported v3 schema rather than accepting arbitrary future UnHoarder extensions.
+LootFilterValidation.cs adapts the project's API validator to local InvalidDataException errors. It follows the current website-supported v3 schema.
 
 ## Validation boundaries
 
@@ -50,7 +50,7 @@ Production account listing/download, real plugin installation, live-game reload,
 
 ## UI-only comparison build
 
-The fixes-only variant retains all previously agreed features and the folder-lock fallback. Its only new changes are the explicit non-Ladder UnHoarder/D2RLoader requirement and top-right header actions on wide windows. Compact windows retain wrapping beneath the heading. Standard Offline still launches D2R directly; D2RLoader single-player is available through the D2RLoader mode.
+The fixes-only variant retains all previously agreed features and the folder-lock fallback. Its only new changes are the explicit non-Ladder Pyre-LootFilter/D2RLoader requirement and top-right header actions on wide windows. Compact windows retain wrapping beneath the heading. Standard Offline still launches D2R directly; D2RLoader single-player is available through the D2RLoader mode.
 
 ## Optional plugin checkbox build
 
@@ -85,7 +85,7 @@ Existing scope, game/installer/launch guards apply. Windows opens Notepad with a
 
 ## In-place toggle updates
 
-The shared install semaphore and MainWindow install reservation remain held through the file move. A successful toggle updates the existing observable entry (path, enabled state, metadata and config availability) and the enabled/disabled counts. It does not rediscover inventory or reassign ItemsSource. UnHoarder availability is recalculated from that same inventory. Failure restores the checkbox from the unchanged model without rebuilding either list. Pointer actions are blocked during the move without disabling/recreating the controls; keyboard/reentrant handlers retain their guards. Manual refresh and mode changes are blocked during the operation. Ladder/game/launch/context and collision guards remain in effect.
+The shared install semaphore and MainWindow install reservation remain held through the file move. A successful toggle updates the existing observable entry (path, enabled state, metadata and config availability) and the enabled/disabled counts. It does not rediscover inventory or reassign ItemsSource. Loot filter plugin availability is recalculated from that same inventory. Failure restores the checkbox from the unchanged model without rebuilding either list. Pointer actions are blocked during the move without disabling/recreating the controls; keyboard/reentrant handlers retain their guards. Manual refresh and mode changes are blocked during the operation. Ladder/game/launch/context and collision guards remain in effect.
 
 
 ## Unified Ladder extension section and stable status cards

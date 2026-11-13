@@ -79,14 +79,6 @@ internal sealed class AccountLootFilterService(ReimaginedApiHttpClient api, Time
            && (fileName.Equals("pyre-lootfilter.dll", StringComparison.OrdinalIgnoreCase)
                || fileName.Equals("d2rl-pyre-lootfilter.dll", StringComparison.OrdinalIgnoreCase));
 
-    internal static bool HasLegacySingleFileFilterPluginOnly(D2RLoaderInventory? inventory, LaunchExperience experience)
-        => inventory is { IsInstalled: true, AllowModExtensions: true }
-           && !IsFilterPluginAvailable(inventory, experience)
-           && inventory.Plugins.Any(plugin => plugin.IsEnabled
-               && plugin.FileName.Equals("unhoarder.dll", StringComparison.OrdinalIgnoreCase)
-               && (plugin.Scope == D2RLoaderExtensionScope.Reimagined
-                   || experience != LaunchExperience.Ladder && inventory.AllowGlobalExtensions));
-
     internal static bool IsFilterPluginAvailable(D2RLoaderInventory? inventory, LaunchExperience experience)
         => inventory is { IsInstalled: true, AllowModExtensions: true }
            && inventory.Plugins.Any(plugin => plugin.IsEnabled

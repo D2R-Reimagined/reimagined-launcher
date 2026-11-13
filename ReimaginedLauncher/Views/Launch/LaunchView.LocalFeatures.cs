@@ -263,11 +263,8 @@ public partial class LaunchView
             ? "Manual installation is unavailable for Ladder. Changing package contents can require a fresh package download."
             : "Install a DLL or ZIP into this mod only. Existing configs are preserved by default.");
         var available = AccountLootFilterService.IsFilterPluginAvailable(_loaderInventory, profile.LaunchExperience);
-        var legacyUnhoarderOnly = AccountLootFilterService.HasLegacySingleFileFilterPluginOnly(_loaderInventory, profile.LaunchExperience);
         LootFilterAvailabilityText.IsVisible = !available && user is not null;
-        LootFilterAvailabilityText.Text = legacyUnhoarderOnly
-            ? "Synced filter profiles require Pyre-LootFilter (UnHoarder only reads a single config/filter.json file)."
-            : "Enable Pyre-LootFilter in Installed Plugins to use synced loot filters in-game.";
+        LootFilterAvailabilityText.Text = "Enable Pyre-LootFilter in Installed Plugins to use synced loot filters in-game.";
     }
 
     private async Task SyncAccountFiltersAsync(bool force)

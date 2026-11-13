@@ -469,17 +469,13 @@ public sealed class AccountLootFilterTests
     [InlineData("pyre-lootfilter.dll", true)]
     [InlineData("PYRE-LOOTFILTER.DLL", true)]
     [InlineData("d2rl-pyre-lootfilter.dll", true)]
-    [InlineData("unhoarder.dll", false)]
-    [InlineData("UnHoarder.dll", false)]
     [InlineData("other-plugin.dll", false)]
     public void SupportedFilterPluginsRequirePyreLootFilterForProfileSync(string fileName, bool expected)
         => Assert.Equal(expected, AccountLootFilterService.IsSupportedFilterPlugin(fileName));
 
     [Theory]
     [InlineData("pyre-lootfilter.dll", D2RLoaderExtensionScope.Reimagined, LaunchExperience.Online, true, true, true)]
-    [InlineData("unhoarder.dll", D2RLoaderExtensionScope.Reimagined, LaunchExperience.Online, true, true, false)]
     [InlineData("pyre-lootfilter.dll", D2RLoaderExtensionScope.Reimagined, LaunchExperience.Ladder, true, false, true)]
-    [InlineData("unhoarder.dll", D2RLoaderExtensionScope.Reimagined, LaunchExperience.Ladder, true, false, false)]
     [InlineData("pyre-lootfilter.dll", D2RLoaderExtensionScope.Global, LaunchExperience.Online, true, true, true)]
     [InlineData("pyre-lootfilter.dll", D2RLoaderExtensionScope.Global, LaunchExperience.Online, true, false, false)]
     [InlineData("pyre-lootfilter.dll", D2RLoaderExtensionScope.Global, LaunchExperience.Ladder, true, true, false)]
