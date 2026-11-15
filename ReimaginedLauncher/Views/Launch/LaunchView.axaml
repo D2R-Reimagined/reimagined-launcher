@@ -416,6 +416,7 @@
             <WrapPanel x:Name="LoaderActionsPanel" Grid.Column="1" Orientation="Horizontal" ItemSpacing="8" LineSpacing="6" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,-8,0">
               <Button x:Name="RefreshLoaderButton" Content="Refresh" Click="OnRefreshLoaderClick" Classes="hero-compact"/>
               <Button x:Name="InstallLocalPluginButton" Content="Install Plugin/Zip" Click="OnInstallLocalPluginClick" Classes="hero-compact"/>
+              <Button x:Name="CopyLadderToNonLadderButton" Content="Copy Ladder to Non-Ladder" Click="OnCopyLadderToNonLadderClick" Classes="hero-compact"/>
               <Button x:Name="OpenLoaderFolderButton" Content="Global Folder" Click="OnOpenLoaderFolderClick" Classes="hero-compact"/>
               <Button x:Name="OpenModLoaderFolderButton" Content="Reimagined Folder" Click="OnOpenModLoaderFolderClick" Classes="hero-compact"/>
             </WrapPanel>

@@ -237,5 +237,36 @@ public sealed class D2RLoaderConfigTests : IDisposable
         Assert.Throws<InvalidOperationException>(() => D2RLoaderConfigService.ValidateSelection(profile, target, configPath));
     }
 
+    [Fact]
+    public void CreateLadderProfileAllowsCheckingLadderConfigAvailabilityFromOnlineMode()
+    {
+        Write("mods/Reimagined/d2rloader/plugins/placeholder.dll");
+        Write("mods/ReimaginedLadder/d2rloader/plugins/Controller QOL Updates.dll");
+        Write("mods/ReimaginedLadder/d2rloader/config/controller-qol.toml", "auto_verify = true");
+        Write("mods/ReimaginedLadder/d2rloader/plugins/d2rl-maps.dll");
+        Write("mods/ReimaginedLadder/d2rloader/config/maps.toml", "enabled = true");
+
+        var qolEntry = D2RLoaderConfigService.CreateLadderExtensionInfo(
+            profile,
+            "Controller QOL Updates",
+            "Controller QOL Updates.dll",
+            D2RLoaderExtensionKind.Plugin,
+            isLadderDisabled: false);
+        var mapsEntry = D2RLoaderConfigService.CreateLadderExtensionInfo(
+            profile,
+            "Reimagined Maps",
+            "d2rl-maps.dll",
+            D2RLoaderExtensionKind.Plugin,
+            isLadderDisabled: false);
+
+        Assert.False(D2RLoaderConfigService.HasExistingConfig(profile, qolEntry));
+
+        var ladderProfile = D2RLoaderConfigService.CreateLadderProfile(profile);
+        Assert.Equal(LaunchExperience.Ladder, ladderProfile.LaunchExperience);
+        Assert.Equal(LaunchExperience.Online, profile.LaunchExperience);
+        Assert.True(D2RLoaderConfigService.HasExistingConfig(ladderProfile, qolEntry));
+        Assert.False(D2RLoaderConfigService.HasExistingConfig(ladderProfile, mapsEntry));
+    }
+
     public void Dispose() { if (Directory.Exists(game)) Directory.Delete(game, true); }
 }

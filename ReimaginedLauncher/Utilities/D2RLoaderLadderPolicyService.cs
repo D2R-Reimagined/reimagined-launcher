@@ -178,6 +178,26 @@ public static partial class D2RLoaderService
         };
     }
 
+    internal static IReadOnlyList<D2RLoaderExtensionInfo> DiscoverLadderModExtensions(string ladderModRoot)
+    {
+        var extensions = new List<D2RLoaderExtensionInfo>();
+        var loaderRoot = Path.Combine(ladderModRoot, LoaderFolderName);
+        AddExtensions(extensions, loaderRoot, D2RLoaderExtensionScope.Reimagined, isLadderDisabled: false);
+        AddExtensions(
+            extensions,
+            Path.Combine(loaderRoot, LadderDisabledFolderName),
+            D2RLoaderExtensionScope.Reimagined,
+            isLadderDisabled: true);
+
+        return extensions
+            .GroupBy(extension => (extension.Kind, Name: extension.FileName.ToUpperInvariant()))
+            .Select(group => group.FirstOrDefault(item => !item.IsLadderDisabled) ?? group.First())
+            .OrderBy(extension => extension.Kind)
+            .ThenBy(extension => extension.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(extension => extension.FileName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
     private static async Task<IReadOnlyList<ApprovalMatch>> MatchApprovalsAsync(
         IReadOnlyList<D2RLoaderExtensionInfo> extensions,
         IReadOnlyList<LadderExtensionApproval> approvals,

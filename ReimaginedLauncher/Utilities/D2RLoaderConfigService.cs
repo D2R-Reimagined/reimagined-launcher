@@ -123,6 +123,17 @@ internal static class D2RLoaderConfigService
                 || Normalize(Path.GetFileNameWithoutExtension(file.FileName)) == stem));
     }
 
+    internal static InstallationProfile CreateLadderProfile(InstallationProfile profile) =>
+        profile.LaunchExperience == LaunchExperience.Ladder
+            ? profile
+            : new InstallationProfile
+            {
+                Type = profile.Type,
+                LaunchExperience = LaunchExperience.Ladder,
+                InstallDirectory = profile.InstallDirectory,
+                IsInstallDirectoryValidated = profile.IsInstallDirectoryValidated
+            };
+
     internal static D2RLoaderExtensionInfo CreateLadderExtensionInfo(
         InstallationProfile profile,
         string name,
@@ -163,7 +174,7 @@ internal static class D2RLoaderConfigService
         {
             return Resolve(profile, entry, activeBundle).File is not null;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
         {
             return false;
         }
@@ -268,6 +279,14 @@ internal static class D2RLoaderConfigService
         var safe = LocalPluginInstallService.SafePath(target.Root, relative);
         if (!System.IO.File.Exists(safe)) throw new FileNotFoundException("The configuration file no longer exists.", safe);
         return safe;
+    }
+
+    internal static bool IsTextConfigFile(string path) => IsTextConfig(path);
+
+    internal static string GetCanonicalConfigStem(string path)
+    {
+        var stem = Normalize(Path.GetFileNameWithoutExtension(path));
+        return ConfigStemAliases.TryGetValue(stem, out var alias) ? alias : stem;
     }
 
     private static bool IsTextConfig(string path) => new[] { ".toml", ".json", ".ini", ".cfg", ".yaml", ".yml", ".txt" }

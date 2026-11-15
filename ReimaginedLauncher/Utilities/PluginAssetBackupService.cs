@@ -107,62 +107,117 @@ public static class PluginAssetBackupService
         try
         {
             var manifest = LoadManifestUnsafe();
-            if (manifest.Entries.Count == 0)
-            {
-                return;
-            }
-
-            var restoredEntries = new List<PluginAssetBackupEntry>();
-
-            foreach (var entry in manifest.Entries)
-            {
-                try
-                {
-                    if (entry.OriginalExisted &&
-                        !string.IsNullOrWhiteSpace(entry.BackupAbsolutePath) &&
-                        File.Exists(entry.BackupAbsolutePath))
-                    {
-                        var destinationFolder = Path.GetDirectoryName(entry.TargetAbsolutePath);
-                        if (!string.IsNullOrWhiteSpace(destinationFolder))
-                        {
-                            Directory.CreateDirectory(destinationFolder);
-                        }
-
-                        await FileCopyHelper.CopyFileAsync(entry.BackupAbsolutePath, entry.TargetAbsolutePath)
-                            .ConfigureAwait(false);
-                        TryDeleteFile(entry.BackupAbsolutePath);
-                    }
-                    else if (!entry.OriginalExisted && File.Exists(entry.TargetAbsolutePath))
-                    {
-                        TryDeleteFile(entry.TargetAbsolutePath);
-                    }
-
-                    restoredEntries.Add(entry);
-                }
-                catch (Exception ex)
-                {
-                    LaunchDiagnostics.LogException(
-                        $"Failed to restore plugin asset '{entry.TargetAbsolutePath}'", ex);
-                    Notifications.SendNotification(
-                        $"Failed to restore '{Path.GetFileName(entry.TargetAbsolutePath)}': {ex.Message}",
-                        "Warning");
-
-                    // Leave the entry intact so the next Start Game pass can
-                    // retry the restore instead of orphaning the backup.
-                }
-            }
-
-            if (restoredEntries.Count > 0)
-            {
-                manifest.Entries.RemoveAll(restoredEntries.Contains);
-                SaveManifestUnsafe(manifest);
-            }
-
-            CleanupOrphanGuidFoldersUnsafe(manifest);
+            await RestoreEntriesUnsafeAsync(manifest, manifest.Entries.ToList()).ConfigureAwait(false);
         }
         finally
         {
             ServiceLock.Release();
+        }
+    }
+
+    internal static async Task RestoreUnderDirectoryAsync(string directoryPath)
+    {
+        if (string.IsNullOrWhiteSpace(directoryPath) || !Path.IsPathRooted(directoryPath))
+        {
+            return;
+        }
+
+        var prefix = NormalizePath(directoryPath).TrimEnd(Path.DirectorySeparatorChar)
+                     + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        await ServiceLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            var manifest = LoadManifestUnsafe();
+            var matching = manifest.Entries
+                .Where(entry => NormalizePath(entry.TargetAbsolutePath).StartsWith(prefix, comparison))
+                .ToList();
+            await RestoreEntriesUnsafeAsync(manifest, matching, throwOnFailure: true).ConfigureAwait(false);
+        }
+        finally
+        {
+            ServiceLock.Release();
+        }
+    }
+
+    private static async Task RestoreEntriesUnsafeAsync(
+        PluginAssetBackupManifest manifest,
+        IReadOnlyList<PluginAssetBackupEntry> entries,
+        bool throwOnFailure = false)
+    {
+        if (entries.Count == 0)
+        {
+            return;
+        }
+
+        var restoredEntries = new List<PluginAssetBackupEntry>();
+        Exception? firstFailure = null;
+
+        foreach (var entry in entries)
+        {
+            try
+            {
+                if (entry.OriginalExisted &&
+                    !string.IsNullOrWhiteSpace(entry.BackupAbsolutePath) &&
+                    File.Exists(entry.BackupAbsolutePath))
+                {
+                    var destinationFolder = Path.GetDirectoryName(entry.TargetAbsolutePath);
+                    if (!string.IsNullOrWhiteSpace(destinationFolder))
+                    {
+                        Directory.CreateDirectory(destinationFolder);
+                    }
+
+                    if (File.Exists(entry.TargetAbsolutePath))
+                    {
+                        var attrs = File.GetAttributes(entry.TargetAbsolutePath);
+                        if ((attrs & FileAttributes.ReadOnly) != 0)
+                        {
+                            File.SetAttributes(entry.TargetAbsolutePath, attrs & ~FileAttributes.ReadOnly);
+                        }
+                    }
+
+                    await FileCopyHelper.CopyFileAsync(entry.BackupAbsolutePath, entry.TargetAbsolutePath)
+                        .ConfigureAwait(false);
+                    TryDeleteFile(entry.BackupAbsolutePath);
+                }
+                else if (!entry.OriginalExisted && File.Exists(entry.TargetAbsolutePath))
+                {
+                    if (!TryDeleteFile(entry.TargetAbsolutePath))
+                    {
+                        throw new IOException($"Could not remove plugin asset '{entry.TargetAbsolutePath}'.");
+                    }
+                }
+
+                restoredEntries.Add(entry);
+            }
+            catch (Exception ex)
+            {
+                firstFailure ??= ex;
+                LaunchDiagnostics.LogException(
+                    $"Failed to restore plugin asset '{entry.TargetAbsolutePath}'", ex);
+                Notifications.SendNotification(
+                    $"Failed to restore '{Path.GetFileName(entry.TargetAbsolutePath)}': {ex.Message}",
+                    "Warning");
+
+                // Leave the entry intact so the next Start Game pass can
+                // retry the restore instead of orphaning the backup.
+            }
+        }
+
+        if (restoredEntries.Count > 0)
+        {
+            manifest.Entries.RemoveAll(restoredEntries.Contains);
+            SaveManifestUnsafe(manifest);
+        }
+
+        CleanupOrphanGuidFoldersUnsafe(manifest);
+
+        if (throwOnFailure && firstFailure is not null)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(firstFailure);
         }
     }
 
@@ -448,22 +503,29 @@ public static class PluginAssetBackupService
         return Path.Combine(BackupRootDirectory, subfolder, fileName);
     }
 
-    private static void TryDeleteFile(string path)
+    private static bool TryDeleteFile(string path)
     {
         try
         {
             if (File.Exists(path))
             {
+                var attributes = File.GetAttributes(path);
+                if ((attributes & FileAttributes.ReadOnly) != 0)
+                {
+                    File.SetAttributes(path, attributes & ~FileAttributes.ReadOnly);
+                }
+
                 File.Delete(path);
             }
         }
         catch (Exception ex)
         {
             LaunchDiagnostics.LogException($"Failed to delete plugin asset backup file '{path}'", ex);
-            return;
+            return false;
         }
 
         TryDeleteEmptyBackupSubfolder(Path.GetDirectoryName(path));
+        return true;
     }
 
     private static void TryDeleteEmptyBackupSubfolder(string? directory)

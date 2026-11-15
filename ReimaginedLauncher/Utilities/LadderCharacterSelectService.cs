@@ -185,7 +185,7 @@ public static partial class LadderCharacterSelectService
         });
     }
 
-    private static string RemoveGeneratedWidgets(string layout)
+    internal static string RemoveGeneratedWidgets(string layout)
     {
         foreach (var widgetName in new[]
                  {

@@ -26,7 +26,7 @@ internal static class LocalPluginInstallService
         if (profile.Type == InstallationType.D2RMM || string.IsNullOrWhiteSpace(profile.InstallDirectory)
             || !File.Exists(Path.Combine(profile.InstallDirectory, "D2R.exe")))
             throw new InvalidOperationException("Select a valid Diablo II: Resurrected installation first.");
-        var root = Path.GetFullPath(Path.Combine(CanonicalInstallDirectory(profile.InstallDirectory), "mods", ModInstallationPaths.ModName(profile.LaunchExperience), "d2rloader"));
+        var root = Path.GetFullPath(Path.Combine(CanonicalDirectoryPath(profile.InstallDirectory), "mods", ModInstallationPaths.ModName(profile.LaunchExperience), "d2rloader"));
         if (!Directory.Exists(Path.GetDirectoryName(root)))
             throw new DirectoryNotFoundException("Install the selected mod before installing a plugin or filter.");
         EnsureNoLinks(root);
@@ -327,17 +327,27 @@ internal static class LocalPluginInstallService
                 throw new InvalidDataException("Reserved package filename: " + name);
         }
     }
-    private static string CanonicalInstallDirectory(string path)
+    internal static string CanonicalDirectoryPath(string path)
     {
         var full = Path.GetFullPath(path);
-        var current = Path.GetPathRoot(full)!;
-        foreach (var part in full[current.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+        var root = Path.GetPathRoot(full)!;
+        var current = root;
+        foreach (var part in full[root.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
         {
             current = Path.Combine(current, part);
+            if (!Directory.Exists(current))
+            {
+                continue;
+            }
+
             var directory = new DirectoryInfo(current);
             if ((directory.Attributes & FileAttributes.ReparsePoint) != 0)
-                current = directory.ResolveLinkTarget(true)?.FullName ?? throw new IOException("Could not resolve the selected installation directory.");
+            {
+                current = directory.ResolveLinkTarget(true)?.FullName
+                          ?? throw new IOException("Could not resolve symbolic link or junction: " + current);
+            }
         }
+
         return current;
     }
 
