@@ -44,12 +44,11 @@ public static class GameSessionSecretsService
 
     /// <summary>The keys that must never hold a real value inside mods/.</summary>
     internal static readonly IReadOnlyList<string> SecretKeys =
-        ["access_token", "ladder_launch_ticket", "status_session_id"];
+        ["access_token", "ladder_launch_ticket", "status_session_id", "api_token", "lobby_server_key"];
 
     /// <summary>
-    /// Our plugins whose configs have ever carried a secret. lobby-bridge never
-    /// had one written by the launcher, but it accepts overrides of the
-    /// server-saves keys in its own config, so it is scrubbed too.
+    /// Our plugins whose configs have ever carried a secret. lobby-bridge and d2rds
+    /// are also included so no credentials leak when mods/ is shared.
     /// </summary>
     internal static readonly IReadOnlyList<string> ScrubbedPluginIds =
     [
@@ -62,7 +61,8 @@ public static class GameSessionSecretsService
         SupporterPortalsConfigService.PluginId,
         TradeNotificationsConfigService.PluginId,
         TradePriceCheckConfigService.PluginId,
-        "lobby-bridge"
+        "lobby-bridge",
+        "d2rds"
     ];
 
     private const string Header =
@@ -218,13 +218,31 @@ public static class GameSessionSecretsService
             return 0;
         }
 
+        var scrubbedIds = new HashSet<string>(ScrubbedPluginIds, StringComparer.OrdinalIgnoreCase);
         var scrubbed = 0;
         foreach (var directory in EnumerateConfigDirectories(normalized))
         {
-            foreach (var pluginId in ScrubbedPluginIds)
+            IEnumerable<string> files;
+            try
             {
-                var path = Path.Combine(directory, $"{pluginId}.toml");
-                if (!File.Exists(path))
+                files = Directory.EnumerateFiles(directory);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                LaunchDiagnostics.Log($"session secrets: could not inspect {directory}: {exception.Message}");
+                continue;
+            }
+
+            foreach (var path in files)
+            {
+                if (!Path.GetExtension(path).Equals(".toml", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var stem = Path.GetFileNameWithoutExtension(path);
+                if (!scrubbedIds.Contains(stem)
+                    && !(stem.StartsWith("d2rl-", StringComparison.OrdinalIgnoreCase) && scrubbedIds.Contains(stem[5..])))
                 {
                     continue;
                 }
@@ -287,6 +305,31 @@ public static class GameSessionSecretsService
         {
             yield return Path.Combine(transaction, "previous", "d2rloader", "config");
             yield return Path.Combine(transaction, "staged", "d2rloader", "config");
+        }
+
+        var normalBackups = Path.Combine(management, LadderToNormalCopyService.BackupFolderName);
+        string[] normalBackupDirectories;
+        try
+        {
+            normalBackupDirectories = Directory.Exists(normalBackups)
+                ? Directory.GetDirectories(normalBackups)
+                : [];
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            LaunchDiagnostics.Log($"session secrets: could not list {normalBackups}: {exception.Message}");
+            normalBackupDirectories = [];
+        }
+
+        foreach (var backup in normalBackupDirectories)
+        {
+            var name = Path.GetFileName(backup);
+            if (string.IsNullOrEmpty(name) || name.StartsWith('.'))
+            {
+                continue;
+            }
+
+            yield return Path.Combine(backup, ModInstallationPaths.NormalModName, "d2rloader", "config");
         }
     }
 

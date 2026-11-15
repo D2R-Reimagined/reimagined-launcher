@@ -49,16 +49,25 @@ internal sealed class DirectoryContentTransaction(string source, string target, 
                 if (LocalPluginInstallService.Hash(temp) != newHash) throw new IOException("A staged package file changed: " + relative);
                 AssertUnchanged(destination, previousHash);
                 cancellationToken.ThrowIfCancellationRequested();
+                if (existed) ClearReadOnlyAttribute(destination);
                 File.Move(temp, destination, existed);
                 changes.Add(new Change(relative, existed, newHash));
             }
-            finally { if (File.Exists(temp)) File.Delete(temp); }
+            finally
+            {
+                if (File.Exists(temp))
+                {
+                    ClearReadOnlyAttribute(temp);
+                    File.Delete(temp);
+                }
+            }
         }
         foreach (var (relative, oldHash) in old.Where(file => !incoming.ContainsKey(file.Key)))
         {
             cancellationToken.ThrowIfCancellationRequested();
             var destination = PathAt(target, relative);
             AssertUnchanged(destination, oldHash);
+            ClearReadOnlyAttribute(destination);
             File.Delete(destination);
             changes.Add(new Change(relative, true, null));
         }
@@ -78,10 +87,26 @@ internal sealed class DirectoryContentTransaction(string source, string target, 
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
                     var restore = destination + "." + Guid.NewGuid().ToString("N") + ".restore";
-                    try { File.Copy(PathAt(backup, change.Relative), restore); File.Move(restore, destination, change.InstalledHash is not null); }
-                    finally { if (File.Exists(restore)) File.Delete(restore); }
+                    try
+                    {
+                        File.Copy(PathAt(backup, change.Relative), restore);
+                        if (change.InstalledHash is not null) ClearReadOnlyAttribute(destination);
+                        File.Move(restore, destination, change.InstalledHash is not null);
+                    }
+                    finally
+                    {
+                        if (File.Exists(restore))
+                        {
+                            ClearReadOnlyAttribute(restore);
+                            File.Delete(restore);
+                        }
+                    }
                 }
-                else File.Delete(destination);
+                else
+                {
+                    ClearReadOnlyAttribute(destination);
+                    File.Delete(destination);
+                }
             }
             catch (Exception ex) { failures.Add(ex); }
         }
@@ -112,4 +137,12 @@ internal sealed class DirectoryContentTransaction(string source, string target, 
     }
     private static string PathAt(string root, string relative)
         => LocalPluginInstallService.SafePath(root, relative.Replace(Path.DirectorySeparatorChar, '/'));
+
+    private static void ClearReadOnlyAttribute(string filePath)
+    {
+        if (!File.Exists(filePath)) return;
+        var attributes = File.GetAttributes(filePath);
+        if ((attributes & FileAttributes.ReadOnly) != 0)
+            File.SetAttributes(filePath, attributes & ~FileAttributes.ReadOnly);
+    }
 }

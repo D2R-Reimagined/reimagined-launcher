@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -137,6 +138,13 @@ public partial class LaunchView
         LoaderPluginsItemsControl.IsHitTestVisible = !_extensionToggleInProgress;
         LoaderPatchesItemsControl.IsHitTestVisible = !_extensionToggleInProgress;
         InstallLocalPluginButton.IsHitTestVisible = !_extensionToggleInProgress;
+        CopyLadderToNonLadderButton.IsHitTestVisible = !_extensionToggleInProgress;
+        var isModLoaderMode = profile.Type != InstallationType.D2RMM && profile.LaunchExperience == LaunchExperience.Online;
+        CopyLadderToNonLadderButton.IsVisible = isModLoaderMode;
+        CopyLadderToNonLadderButton.IsEnabled = !extensionControlsBusy && isModLoaderMode;
+        ToolTip.SetTip(
+            CopyLadderToNonLadderButton,
+            "Copy ReimaginedLadder and your chosen plugins/patches into Non-Ladder mods/Reimagined.");
         ExtensionToggleHelpText.Text = profile.LaunchExperience == LaunchExperience.Ladder
             ? "Required Ladder entries are package-managed. Select approved optional entries below. Manual installation is unavailable, and Ladder rule configs are locked."
             : "Checked means this file is enabled for the next D2RLoader launch; loader scope settings still apply. Close D2R and D2RLoader to change it. Global changes affect other mods, and another copy may remain enabled.";
@@ -271,6 +279,7 @@ public partial class LaunchView
 
     private static void RequireGameClosed()
     {
+        MainWindow.InvalidateGameRunningCache();
         if (MainWindow.IsGameRunning() || SteamGameHandoff.IsLaunchPendingOrRunning)
             throw new InvalidOperationException("Close D2R and D2RLoader before installing plugins.");
     }
@@ -318,6 +327,354 @@ public partial class LaunchView
         }
         catch (Exception ex) { Notifications.SendNotification("Plugin installation stopped: " + ex.Message, "Error"); }
         finally { _pluginBusy = false; RefreshInstallDirectoryState(); }
+    }
+
+    private static bool IsInstallDirectoryValidForProfile(InstallationProfile profile) =>
+        profile.Type != InstallationType.D2RMM
+        && (profile.Type == InstallationType.Steam
+            ? InstallDirectoryValidator.IsValidSteamInstallDirectory(profile.InstallDirectory)
+            : InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory));
+
+    private async Task<LadderCopyDialogState> InspectCopyLadderDialogStateAsync(
+        bool includeRemoteReadiness,
+        CancellationToken cancellationToken)
+    {
+        var profile = MainWindow.Settings.CurrentProfile;
+        var isInstallDirValid = IsInstallDirectoryValidForProfile(profile);
+        var installDirectory = InstallDirectoryValidator.NormalizeInstallDirectory(profile.InstallDirectory);
+        if (!isInstallDirValid || installDirectory is null)
+        {
+            return new LadderCopyDialogState(
+                false,
+                false,
+                null,
+                null,
+                false,
+                false,
+                null,
+                "Select a valid Diablo II: Resurrected install directory on the Launch tab first.");
+        }
+
+        if (includeRemoteReadiness)
+        {
+            var waitIterations = 0;
+            while (_isRefreshingLadders && waitIterations++ < 100)
+            {
+                await Task.Delay(50, cancellationToken);
+            }
+
+            if (!_ladderStatusLoaded || _ladderLoadError is not null)
+            {
+                await RefreshLadderStateAsync();
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+        }
+
+        var hasLocalLadder = LadderToNormalCopyService.HasInstalledLadderMod(installDirectory);
+        LadderToNormalCopyPlan? plan = hasLocalLadder
+            ? await Task.Run(() => LadderToNormalCopyService.Inspect(installDirectory), cancellationToken)
+            : null;
+        var selectedLadderId = SelectedLadder?.Id;
+        var knownLadders = _activeLadders
+            .Select(item => new KnownLadderSaveHint(item.Id, item.Name, item.Id == selectedLadderId))
+            .ToList();
+        if (SelectedLadder is { } selectedLadder && knownLadders.All(item => item.LadderId != selectedLadder.Id))
+        {
+            knownLadders.Add(new KnownLadderSaveHint(selectedLadder.Id, selectedLadder.Name, IsSelectedLadder: true));
+        }
+
+        LadderCharacterMigrationInspection? characterMigration = plan is not null
+            ? await Task.Run(
+                () => LadderCharacterMigrationService.Inspect(plan.TargetSavePath, knownLadders),
+                cancellationToken)
+            : null;
+
+        if (!includeRemoteReadiness)
+        {
+            return new LadderCopyDialogState(
+                true,
+                hasLocalLadder,
+                plan,
+                characterMigration,
+                false,
+                false,
+                null,
+                hasLocalLadder ? string.Empty : "Checking for active Ladder package...");
+        }
+
+        if (SelectedLadder is not { ActiveBundle: { } bundle } ladder)
+        {
+            return new LadderCopyDialogState(
+                true,
+                hasLocalLadder,
+                plan,
+                characterMigration,
+                false,
+                false,
+                SelectedLadder?.Name,
+                GetLadderUnavailableMessage());
+        }
+
+        var readiness = await _ladderBundleService.GetReadinessAsync(
+            installDirectory,
+            bundle,
+            cancellationToken,
+            allowedExtensions: ladder.AllowedExtensions,
+            selectedExtensionIds: GetEffectiveSelectedLadderExtensionIds(ladder),
+            requiredLoader: ladder.RequiredD2RLoader);
+        var canDownloadOrUpdate = !readiness.IsReady && readiness.CanRepair;
+        var isUpdateAvailable = hasLocalLadder && canDownloadOrUpdate;
+        var summary = $"{ladder.Name} (r{bundle.Revision})";
+        var statusMessage = canDownloadOrUpdate
+            ? hasLocalLadder
+                ? readiness.RequiresBundleRepair
+                    ? $"Ladder package update available: {summary}."
+                    : $"Optional Ladder extensions can be synchronized for {summary}."
+                : $"Ready to download {summary}."
+            : readiness.IsReady
+                ? $"Installed Ladder matches {summary}."
+                : readiness.Status;
+
+        return new LadderCopyDialogState(
+            true,
+            hasLocalLadder,
+            plan,
+            characterMigration,
+            canDownloadOrUpdate,
+            isUpdateAvailable,
+            summary,
+            statusMessage);
+    }
+
+    private async void OnCopyLadderToNonLadderClick(object? sender, RoutedEventArgs e)
+    {
+        if (_pluginBusy || !CopyLadderToNonLadderButton.IsEnabled || TopLevel.GetTopLevel(this) is not Window owner)
+        {
+            return;
+        }
+
+        _pluginBusy = true;
+        UpdateLocalFeatureButtons();
+        var context = ContextKey();
+        try
+        {
+            var initialState = await InspectCopyLadderDialogStateAsync(
+                includeRemoteReadiness: false,
+                CancellationToken.None);
+
+            LadderToNormalCopyResult? completedStep1 = null;
+
+            var dialog = new CopyLadderToNonLadderWindow(
+                initialState,
+                token => InspectCopyLadderDialogStateAsync(includeRemoteReadiness: true, token),
+                async (progress, token) =>
+                {
+                    var currentProfile = MainWindow.Settings.CurrentProfile;
+                    if (context != ContextKey()
+                        || currentProfile.Type == InstallationType.D2RMM
+                        || currentProfile.LaunchExperience != LaunchExperience.Online)
+                    {
+                        return "The selected installation or play mode changed. Reopen the dialog and retry.";
+                    }
+
+                    if (!IsInstallDirectoryValidForProfile(currentProfile))
+                    {
+                        return "Select a valid Diablo II: Resurrected install folder first.";
+                    }
+
+                    completedStep1 = null;
+                    return await RunLadderSetupCoreAsync(progress, notifyOnFailure: false, token);
+                },
+                async (enabledKeys, keepExistingConfigs, migrationRequest, progress, token) =>
+                {
+                    var profile = MainWindow.Settings.CurrentProfile;
+                    void Check()
+                    {
+                        var currentProfile = MainWindow.Settings.CurrentProfile;
+                        if (currentProfile.Type == InstallationType.D2RMM || currentProfile.LaunchExperience != LaunchExperience.Online)
+                            throw new InvalidOperationException("Copy Ladder to Non-Ladder is available in Mod + D2RLoader mode only.");
+                        if (context != ContextKey())
+                            throw new InvalidOperationException("The selected installation or play mode changed. Reopen the dialog and retry.");
+                        if (_isLaunching || _isRunningLadderAction)
+                            throw new InvalidOperationException("Wait for the active launch or Ladder operation to finish.");
+                        RequireGameClosed();
+                    }
+
+                    Check();
+                    var installDirectory = profile.InstallDirectory;
+                    if (!IsInstallDirectoryValidForProfile(profile) || string.IsNullOrWhiteSpace(installDirectory))
+                    {
+                        throw new InvalidOperationException("Select a valid Diablo II: Resurrected install folder first.");
+                    }
+
+                    if (!await LocalPluginInstallService.InstallGate.WaitAsync(0, token))
+                    {
+                        throw new InvalidOperationException("Another installation is in progress.");
+                    }
+
+                    var ownsInstall = false;
+                    var modCopyCompleted = false;
+                    var priorStep1 = completedStep1;
+                    try
+                    {
+                        if (MainWindow.IsInstallInProgress)
+                        {
+                            throw new InvalidOperationException("Another installation is in progress.");
+                        }
+
+                        MainWindow.IsInstallInProgress = true;
+                        ownsInstall = true;
+                        RefreshInstallDirectoryState();
+                        return await Task.Run(
+                            async () =>
+                            {
+                                if (migrationRequest is not null)
+                                {
+                                    progress.Report("Validating selected character migration files...");
+                                    LadderCharacterMigrationService.ValidateRequest(migrationRequest, Check);
+                                }
+
+                                LadderToNormalCopyResult modCopy;
+                                if (priorStep1 is { } previous
+                                    && Directory.Exists(previous.DestinationModRoot))
+                                {
+                                    modCopy = previous;
+                                }
+                                else
+                                {
+                                    modCopy = await LadderToNormalCopyService.CopyAsync(
+                                        installDirectory,
+                                        enabledKeys,
+                                        keepExistingConfigs,
+                                        Check,
+                                        progress,
+                                        token);
+                                    completedStep1 = modCopy;
+                                }
+
+                                Volatile.Write(ref modCopyCompleted, true);
+
+                                LadderCharacterMigrationResult? migrationResult = null;
+                                if (migrationRequest is not null)
+                                {
+                                    try
+                                    {
+                                        var resolvedSaveDirectory = LadderCharacterMigrationService.ResolveTargetSaveDirectory(modCopy.ResolvedSavePath);
+                                        if (string.IsNullOrWhiteSpace(resolvedSaveDirectory))
+                                        {
+                                            throw new InvalidOperationException(
+                                                $"Could not resolve the Non-Ladder save directory for '{modCopy.ResolvedSavePath}'.");
+                                        }
+
+                                        var normalizedResolved = LocalPluginInstallService.CanonicalDirectoryPath(resolvedSaveDirectory)
+                                            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                                        var normalizedExpected = LocalPluginInstallService.CanonicalDirectoryPath(migrationRequest.TargetSaveDirectory)
+                                            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                                        if (!string.Equals(normalizedResolved, normalizedExpected, StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            throw new InvalidOperationException(
+                                                $"The Non-Ladder save path changed to '{modCopy.ResolvedSavePath}' during the copy. Reopen the dialog and review the character migration target before retrying.");
+                                        }
+
+                                        migrationResult = await LadderCharacterMigrationService.MigrateAsync(
+                                            migrationRequest,
+                                            Check,
+                                            progress,
+                                            token);
+                                    }
+                                    catch (LadderCharacterMigrationRollbackException ex)
+                                    {
+                                        throw new InvalidOperationException(
+                                            $"mods/Reimagined was updated, and character migration failed with incomplete rollback: {ex.Message}",
+                                            ex);
+                                    }
+                                    catch (Exception ex) when (ex is not OperationCanceledException)
+                                    {
+                                        throw new InvalidOperationException(
+                                            $"mods/Reimagined was updated, but character migration failed and saves were rolled back: {ex.Message}",
+                                            ex);
+                                    }
+                                }
+
+                                return new LadderCopyOperationOutcome(modCopy, migrationResult);
+                            },
+                            token);
+                    }
+                    finally
+                    {
+                        if (ownsInstall)
+                        {
+                            MainWindow.IsInstallInProgress = false;
+                        }
+
+                        LocalPluginInstallService.InstallGate.Release();
+                        if (Volatile.Read(ref modCopyCompleted))
+                        {
+                            RefreshInstallDirectoryState();
+                        }
+                    }
+                },
+                () => MainWindow.IsGameRunning() || SteamGameHandoff.IsLaunchPendingOrRunning,
+                () => completedStep1 is not null);
+
+            var copied = await dialog.ShowDialog<bool>(owner);
+            var completedCopyOutcome = copied ? dialog.OperationOutcome : null;
+            if (completedCopyOutcome is not null || completedStep1 is not null)
+            {
+                var installDirectory = MainWindow.Settings.CurrentProfile.InstallDirectory;
+                if (context == ContextKey()
+                    && !string.IsNullOrWhiteSpace(installDirectory)
+                    && SaveConversionService.ResetLaunchPrompt(MainWindow.Settings, installDirectory))
+                {
+                    try
+                    {
+                        await SettingsManager.SaveAsync(MainWindow.Settings);
+                    }
+                    catch (Exception exception)
+                    {
+                        LaunchDiagnostics.LogException("Could not save the save conversion prompt state", exception);
+                    }
+                }
+
+                MainWindow.Instance?.RefreshLocalModState();
+                if (MainWindow.Instance is { } mainWindow)
+                {
+                    await mainWindow.RefreshUpdateStateAsync();
+                }
+
+                RefreshLocalFeatures();
+                if (completedCopyOutcome is { } outcome)
+                {
+                    var result = outcome.ModCopyResult;
+                    var migrationSummary = outcome.CharacterMigrationResult is { } migrated
+                        ? $" Migrated {migrated.MigratedCharacterCount} character(s)"
+                          + (migrated.CopiedSharedStashCount > 0
+                              ? $" and {migrated.CopiedSharedStashCount} shared stash file(s)"
+                              : string.Empty)
+                          + "."
+                        : string.Empty;
+                    Notifications.SendNotification(
+                        $"Copied ReimaginedLadder to mods/Reimagined ({result.EnabledCount} enabled, {result.DisabledCount} disabled, savepath {result.ResolvedSavePath}).{migrationSummary}",
+                        "Success");
+                }
+                else if (completedStep1 is { } partialResult)
+                {
+                    Notifications.SendNotification(
+                        $"Copied ReimaginedLadder to mods/Reimagined ({partialResult.EnabledCount} enabled, {partialResult.DisabledCount} disabled, savepath {partialResult.ResolvedSavePath}). Character migration was not completed.",
+                        "Warning");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LaunchDiagnostics.LogException("Copy Ladder to Non-Ladder failed", ex);
+            Notifications.SendNotification($"Copy Ladder to Non-Ladder stopped: {ex.Message}", "Error");
+        }
+        finally
+        {
+            _pluginBusy = false;
+            RefreshInstallDirectoryState();
+        }
     }
 
     private async void OnEditExtensionConfigClick(object? sender, RoutedEventArgs e)

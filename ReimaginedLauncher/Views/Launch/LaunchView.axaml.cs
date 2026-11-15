@@ -5,6 +5,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
@@ -1719,6 +1721,7 @@ public partial class LaunchView : UserControl
             _ladderBundleReadiness = readiness;
             ShowLadderBundleReadiness(readiness);
             var selectedIds = GetEffectiveSelectedLadderExtensionIds(ladder);
+            var ladderProfile = D2RLoaderConfigService.CreateLadderProfile(MainWindow.Settings.CurrentProfile);
             _ladderExtensionChoices = preview.ApprovedExtensions
                 .Select(state =>
                 {
@@ -1754,9 +1757,9 @@ public partial class LaunchView : UserControl
                             ladder.ActiveBundle),
                         CanEditConfig = state.IsInstalled
                                         && D2RLoaderConfigService.HasExistingConfig(
-                                            MainWindow.Settings.CurrentProfile,
+                                            ladderProfile,
                                             D2RLoaderConfigService.CreateLadderExtensionInfo(
-                                                MainWindow.Settings.CurrentProfile,
+                                                ladderProfile,
                                                 state.Approval.Name,
                                                 state.Approval.FileName,
                                                 state.Approval.Kind,
@@ -1921,59 +1924,160 @@ public partial class LaunchView : UserControl
     /// </summary>
     private async Task RunLadderSetupActionAsync()
     {
-        if (SelectedLadder is not { ActiveBundle: { } bundle } ladder || _isLaunching || _isRunningLadderAction
-            || MainWindow.IsInstallInProgress || !await MainWindow.WaitForClosingGameToExitAsync())
+        await RunLadderSetupCoreAsync();
+    }
+
+    private async Task<string?> RunLadderSetupCoreAsync(
+        IProgress<LadderBundleProgress>? externalProgress = null,
+        bool notifyOnFailure = true,
+        CancellationToken cancellationToken = default)
+    {
+        if (SelectedLadder is not { ActiveBundle: { } bundle } ladder)
         {
-            return;
+            const string missingMessage = "No active signed ladder package is available right now.";
+            if (notifyOnFailure)
+            {
+                Notifications.SendNotification(missingMessage, "Download failed");
+            }
+
+            return missingMessage;
         }
 
-        var isUpdate = _ladderAction == LadderAction.Update;
-        _isRunningLadderAction = true;
-        MainWindow.IsInstallInProgress = true;
-        LadderExtensionsGrid.IsEnabled = false;
-        ActiveLadderComboBox.IsEnabled = false;
-        RefreshInstallDirectoryState();
-        SetLadderSetupProgress(
-            _ladderAction == LadderAction.Restore ? "Restoring the ladder package..."
-                : isUpdate ? "Updating the ladder package..." : "Downloading the ladder package...",
-            null);
+        if (_isLaunching || _isRunningLadderAction || MainWindow.IsInstallInProgress
+            || !await MainWindow.WaitForClosingGameToExitAsync())
+        {
+            return "Wait for the active game, launch, or installation to finish.";
+        }
+
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+
+        var gateEntered = await LocalPluginInstallService.InstallGate.WaitAsync(0, cancellationToken);
+        if (!gateEntered)
+        {
+            const string busyMessage = "Another installation is in progress.";
+            if (notifyOnFailure)
+            {
+                Notifications.SendNotification(busyMessage, "Warning");
+            }
+
+            return busyMessage;
+        }
+
+        var installDirectory = MainWindow.Settings.CurrentProfile.InstallDirectory;
+        var isUpdate = _ladderAction == LadderAction.Update
+                       || LadderToNormalCopyService.HasInstalledLadderMod(installDirectory);
+        var ownsInstall = false;
+        var isProgressActive = true;
         try
         {
+            MainWindow.InvalidateGameRunningCache();
+            if (_isLaunching || _isRunningLadderAction || MainWindow.IsInstallInProgress
+                || MainWindow.IsGameRunning() || SteamGameHandoff.IsLaunchPendingOrRunning)
+            {
+                const string busyMessage = "Another installation or game launch is in progress.";
+                if (notifyOnFailure)
+                {
+                    Notifications.SendNotification(busyMessage, "Warning");
+                }
+
+                return busyMessage;
+            }
+
+            _isRunningLadderAction = true;
+            MainWindow.IsInstallInProgress = true;
+            ownsInstall = true;
+            LadderExtensionsGrid.IsEnabled = false;
+            ActiveLadderComboBox.IsEnabled = false;
+            RefreshInstallDirectoryState();
+            var initialMessage = _ladderAction == LadderAction.Restore
+                ? "Restoring the ladder package..."
+                : isUpdate
+                    ? "Updating the ladder package..."
+                    : "Downloading the ladder package...";
+            SetLadderSetupProgress(initialMessage, null);
+            externalProgress?.Report(new LadderBundleProgress(initialMessage, null));
+
             var progress = new Progress<LadderBundleProgress>(update =>
-                SetLadderSetupProgress(update.Message, update.Percentage, update.Details));
-            var installDirectory = MainWindow.Settings.CurrentProfile.InstallDirectory;
+            {
+                if (!isProgressActive)
+                {
+                    return;
+                }
+
+                SetLadderSetupProgress(update.Message, update.Percentage, update.Details);
+                externalProgress?.Report(update);
+            });
             var selectedIds = GetEffectiveSelectedLadderExtensionIds(ladder);
             var readiness = await _ladderBundleService.GetReadinessAsync(installDirectory, bundle,
+                cancellationToken,
                 allowedExtensions: ladder.AllowedExtensions, selectedExtensionIds: selectedIds,
                 requiredLoader: ladder.RequiredD2RLoader);
             if (readiness.RequiresBundleRepair)
                 await Task.Run(() => _ladderBundleService.InstallOrRepairAsync(installDirectory, bundle, progress,
-                    requiredLoader: ladder.RequiredD2RLoader));
+                    cancellationToken, requiredLoader: ladder.RequiredD2RLoader), cancellationToken);
             await LadderOptionalExtensionService.SynchronizeAsync(installDirectory!, bundle,
                 ladder.AllowedExtensions, selectedIds,
-                (extension, token) => _apiHttpClient.DownloadOptionalExtensionAsync(ladder.Id, extension, progress, token), progress);
+                (extension, token) => _apiHttpClient.DownloadOptionalExtensionAsync(ladder.Id, extension, progress, token),
+                progress, cancellationToken);
             readiness = await _ladderBundleService.GetReadinessAsync(installDirectory, bundle,
+                cancellationToken,
                 allowedExtensions: ladder.AllowedExtensions, selectedExtensionIds: selectedIds,
                 requiredLoader: ladder.RequiredD2RLoader);
             if (!readiness.IsReady) throw new InvalidOperationException(readiness.Status);
-            Notifications.SendNotification(
-                $"Signed ladder package r{bundle.Revision} is installed and verified. Play becomes available when the ladder is confirmed live.",
-                "Ladder ready");
+            if (notifyOnFailure)
+            {
+                Notifications.SendNotification(
+                    $"Signed ladder package r{bundle.Revision} is installed and verified. Play becomes available when the ladder is confirmed live.",
+                    "Ladder ready");
+            }
+
+            return null;
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (HttpRequestException exception) when (exception.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            const string message = "Sign in with your D2R Reimagined account before downloading this ladder package.";
+            if (notifyOnFailure)
+            {
+                Notifications.SendNotification(message, "Sign in required");
+            }
+
+            return message;
         }
         catch (Exception exception)
         {
             LaunchDiagnostics.LogException("Failed to install signed ladder package", exception);
-            Notifications.SendNotification(exception.Message, isUpdate ? "Update failed" : "Download failed");
+            if (notifyOnFailure)
+            {
+                Notifications.SendNotification(exception.Message, isUpdate ? "Update failed" : "Download failed");
+            }
+
+            return exception.Message;
         }
         finally
         {
-            MainWindow.IsInstallInProgress = false;
-            _isRunningLadderAction = false;
-            LadderExtensionsGrid.IsEnabled = true;
-            ActiveLadderComboBox.IsEnabled = true;
-            LadderBundleProgressPanel.IsVisible = false;
-            MainWindow.Instance?.RefreshLocalModState();
-            await RefreshLadderExtensionPolicyAsync();
+            isProgressActive = false;
+            if (ownsInstall)
+            {
+                MainWindow.IsInstallInProgress = false;
+                _isRunningLadderAction = false;
+            }
+
+            LocalPluginInstallService.InstallGate.Release();
+            if (ownsInstall)
+            {
+                LadderExtensionsGrid.IsEnabled = true;
+                ActiveLadderComboBox.IsEnabled = true;
+                LadderBundleProgressPanel.IsVisible = false;
+                MainWindow.Instance?.RefreshLocalModState();
+                await RefreshLadderExtensionPolicyAsync();
+            }
         }
     }
 

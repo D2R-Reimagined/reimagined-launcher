@@ -1,0 +1,432 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:utilities="clr-namespace:ReimaginedLauncher.Utilities"
+        xmlns:launch="clr-namespace:ReimaginedLauncher.Views.Launch"
+        mc:Ignorable="d" d:DesignWidth="820" d:DesignHeight="760"
+        x:Class="ReimaginedLauncher.Views.Launch.CopyLadderToNonLadderWindow"
+        Title="Copy Ladder to Non-Ladder"
+        Width="820" Height="760" MinWidth="600" MinHeight="500"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource AppBackgroundBrush}">
+    <Window.Resources>
+        <SolidColorBrush Color="#171615" x:Key="ExpanderHeaderBackground"/>
+        <SolidColorBrush Color="#252321" x:Key="ExpanderHeaderBackgroundPointerOver"/>
+        <SolidColorBrush Color="#2A1815" x:Key="ExpanderHeaderBackgroundPressed"/>
+        <SolidColorBrush Color="#3D372D" x:Key="ExpanderHeaderBorderBrush"/>
+        <SolidColorBrush Color="#7B1D18" x:Key="ExpanderHeaderBorderBrushPointerOver"/>
+        <SolidColorBrush Color="#9E2D1E" x:Key="ExpanderHeaderBorderBrushPressed"/>
+        <Thickness x:Key="ExpanderHeaderPadding">12,6,8,6</Thickness>
+    </Window.Resources>
+    <Window.Styles>
+        <Style Selector="Expander.section-card">
+            <Setter Property="Background" Value="#171615" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1,0,1,1" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="12,10,12,12" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalAlignment" Value="Top" />
+        </Style>
+        <Style Selector="Expander.section-card:not(:expanded)">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="Expander.section-card /template/ ToggleButton#ExpanderHeader">
+            <Setter Property="MinHeight" Value="40" />
+        </Style>
+    </Window.Styles>
+    <Grid RowDefinitions="Auto,*,Auto" RowSpacing="12" Margin="20">
+        <StackPanel Spacing="6">
+            <TextBlock Classes="section-title" Text="Copy Ladder to Non-Ladder" />
+            <TextBlock Classes="muted" TextWrapping="Wrap"
+                       Text="Copies your Ladder installation to a mods/Reimagined installation. This backs up your non-ladder installation when performed. You can choose what plugins you'd like to disable below; They will be available to be re-enabled in the Mod+D2RLoader playmode." />
+        </StackPanel>
+
+        <Grid Grid.Row="1">
+            <Border x:Name="SetupRequiredPanel" Classes="panel" Padding="18" VerticalAlignment="Top" IsVisible="False">
+                <StackPanel Spacing="12">
+                    <TextBlock x:Name="SetupHeadlineText" FontWeight="SemiBold" FontSize="15"
+                               Foreground="{StaticResource GoldTextBrush}" TextWrapping="Wrap" />
+                    <TextBlock x:Name="SetupMessageText" TextWrapping="Wrap" />
+                    <TextBlock x:Name="SetupLadderStatusText" Classes="muted" FontSize="12" TextWrapping="Wrap"
+                               IsVisible="False" />
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <Button x:Name="SetupDownloadButton" Classes="accent"
+                                Content="Download/Update the ladder now"
+                                Click="OnDownloadOrUpdateLadderClick" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <ScrollViewer x:Name="StepsScrollViewer"
+                          HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto"
+                          BringIntoViewOnFocusChange="False"
+                          IsVisible="False">
+                <StackPanel Spacing="12" Margin="0,0,6,0">
+                    <Border x:Name="LadderUpdateBanner" Classes="warning-banner" Padding="12" IsVisible="False">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                            <TextBlock x:Name="LadderUpdateBannerText" Grid.Column="0"
+                                       Foreground="{StaticResource GoldTextBrush}"
+                                       TextWrapping="Wrap" VerticalAlignment="Center" />
+                            <Button x:Name="BannerUpdateButton" Grid.Column="1" Classes="accent"
+                                    Content="Download/Update the ladder now"
+                                    Click="OnDownloadOrUpdateLadderClick" />
+                        </Grid>
+                    </Border>
+
+                    <Expander x:Name="PluginsStepExpander" Classes="section-card" IsExpanded="True">
+                        <Expander.Header>
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                <TextBlock Grid.Column="0" Text="Step 1: Plugins &amp; Patches"
+                                           FontFamily="Georgia" FontSize="16" FontWeight="SemiBold"
+                                           Foreground="{StaticResource GoldTextBrush}" VerticalAlignment="Center" />
+                                <TextBlock x:Name="PluginsHeaderSummaryText" Grid.Column="1" Classes="muted"
+                                           FontSize="12" VerticalAlignment="Center" />
+                            </Grid>
+                        </Expander.Header>
+
+                        <StackPanel Spacing="10">
+                            <Border x:Name="DefaultWarningsBanner"
+                                    Background="#261315"
+                                    BorderBrush="{StaticResource DangerTextBrush}"
+                                    BorderThickness="1" CornerRadius="8" Padding="12" IsVisible="False">
+                                <TextBlock x:Name="DefaultWarningsText"
+                                           Foreground="{StaticResource DangerTextBrush}"
+                                           FontWeight="SemiBold" FontSize="12" TextWrapping="Wrap" />
+                            </Border>
+
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                <TextBox x:Name="SearchTextBox" Grid.Column="0"
+                                         PlaceholderText="Search plugins and patches..."
+                                         TextChanged="OnSearchTextChanged" />
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <Button x:Name="SelectAllButton" Content="Select All" Click="OnSelectAllClick" />
+                                    <Button x:Name="DeselectAllButton" Content="Deselect All" Click="OnDeselectAllClick" />
+                                    <Button x:Name="ResetDefaultsButton" Content="Reset Defaults" Click="OnResetDefaultsClick" />
+                                </StackPanel>
+                            </Grid>
+
+                            <TextBlock x:Name="SelectionSummaryText" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+
+                            <Border Classes="panel" Padding="8">
+                                <ScrollViewer x:Name="ExtensionsScrollViewer"
+                                              MaxHeight="260"
+                                              HorizontalScrollBarVisibility="Disabled"
+                                              VerticalScrollBarVisibility="Auto"
+                                              BringIntoViewOnFocusChange="False">
+                                    <ItemsControl x:Name="ExtensionsItemsControl">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="launch:LadderCopyExtensionRowViewModel">
+                                                <Border Background="{StaticResource SurfaceRaisedBrush}"
+                                                        BorderBrush="{StaticResource BorderBrush}"
+                                                        BorderThickness="1" CornerRadius="6" Padding="10,7" Margin="0,0,0,6">
+                                                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                                                        <CheckBox Grid.Column="0"
+                                                                  IsChecked="{Binding IsEnabled}"
+                                                                  IsEnabled="{Binding IsInteractive}"
+                                                                  VerticalAlignment="Center" />
+                                                        <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                                            <WrapPanel Orientation="Horizontal" ItemSpacing="8">
+                                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                                                                           VerticalAlignment="Center" />
+                                                                <Border Background="{StaticResource SurfaceMutedBrush}"
+                                                                        BorderBrush="{StaticResource BorderBrush}"
+                                                                        BorderThickness="1" CornerRadius="4" Padding="6,1"
+                                                                        VerticalAlignment="Center">
+                                                                    <TextBlock Text="{Binding KindBadge}" FontSize="10"
+                                                                               FontWeight="Bold"
+                                                                               Foreground="{StaticResource GoldTextBrush}" />
+                                                                </Border>
+                                                                <TextBlock Text="{Binding VersionLabel}" Classes="muted"
+                                                                           FontSize="12" VerticalAlignment="Center"
+                                                                           IsVisible="{Binding HasVersion}" />
+                                                            </WrapPanel>
+                                                            <TextBlock Text="{Binding DetailText}" Classes="muted" FontSize="12"
+                                                                       TextWrapping="Wrap" />
+                                                            <TextBlock Text="{Binding DefaultDisabledNote}" Classes="muted"
+                                                                       FontSize="11" TextWrapping="Wrap"
+                                                                       IsVisible="{Binding IsDefaultDisabled}" />
+                                                            <TextBlock Text="{Binding WarningNote}"
+                                                                       Foreground="{StaticResource DangerTextBrush}"
+                                                                       FontWeight="SemiBold" FontSize="11" TextWrapping="Wrap"
+                                                                       IsVisible="{Binding HasWarningNote}" />
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Border>
+
+                            <StackPanel Spacing="2">
+                                <CheckBox x:Name="KeepConfigsCheckBox"
+                                          Content="Keep existing Non-Ladder plugin configuration files"
+                                          IsChecked="True" />
+                                <TextBlock x:Name="KeepConfigsHelpText" Classes="muted" FontSize="12" Margin="28,0,0,0"
+                                           TextWrapping="Wrap"
+                                           Text="Checked: keep existing Non-Ladder d2rloader/config files. Unchecked: replace with Ladder plugin configs." />
+                            </StackPanel>
+                        </StackPanel>
+                    </Expander>
+
+                    <Expander x:Name="CharacterMigrationStepExpander" Classes="section-card" IsExpanded="False">
+                        <Expander.Header>
+                            <Grid ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="8">
+                                <TextBlock Grid.Column="0" Text="Step 2: Migrate Ladder Characters"
+                                           FontFamily="Georgia" FontSize="16" FontWeight="SemiBold"
+                                           Foreground="{StaticResource GoldTextBrush}" VerticalAlignment="Center" />
+                                <Border Grid.Column="1" Background="#342313" BorderBrush="{StaticResource GoldBrush}"
+                                        BorderThickness="1" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
+                                    <TextBlock Text="OPTIONAL" FontSize="10" FontWeight="Bold"
+                                               Foreground="{StaticResource GoldTextBrush}" />
+                                </Border>
+                                <TextBlock x:Name="MigrationHeaderSummaryText" Grid.Column="3" Classes="muted"
+                                           FontSize="12" VerticalAlignment="Center" />
+                            </Grid>
+                        </Expander.Header>
+
+                        <StackPanel Spacing="10">
+                            <Border Classes="warning-banner" Padding="10">
+                                <TextBlock Foreground="{StaticResource GoldTextBrush}" FontSize="12" TextWrapping="Wrap"
+                                           Text="Save safeguards: Your existing Non-Ladder save folder is fully backed up and verified before any character file is written. Existing Non-Ladder Shared Stash (.d2i) files are never overwritten, and conflicting characters stay unchecked unless you rename or explicitly confirm replacing them." />
+                            </Border>
+
+                            <CheckBox x:Name="EnableMigrationCheckBox"
+                                      Content="Migrate selected Ladder characters to Non-Ladder saves"
+                                      IsChecked="False"
+                                      IsCheckedChanged="OnEnableMigrationChanged" />
+
+                            <TextBlock x:Name="MigrationUnavailableText" Classes="muted" FontSize="12"
+                                       TextWrapping="Wrap" IsVisible="False" />
+
+                            <StackPanel x:Name="MigrationDetailsPanel" Spacing="10" IsVisible="False">
+                                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                                    <TextBlock Grid.Column="0" Text="Ladder saves source"
+                                               FontWeight="SemiBold" VerticalAlignment="Center" />
+                                    <ComboBox x:Name="LadderSourceComboBox" Grid.Column="1"
+                                              HorizontalAlignment="Stretch"
+                                              SelectionChanged="OnLadderSourceSelectionChanged">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate x:DataType="utilities:LadderSaveSourceFolder">
+                                                <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
+                                </Grid>
+
+                                <TextBlock x:Name="MigrationTargetText" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                    <TextBlock x:Name="MigrationSelectionSummaryText" Grid.Column="0" Classes="muted"
+                                               FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                        <Button x:Name="SelectSafeCharactersButton" Content="Select Safe Only"
+                                                Click="OnSelectSafeCharactersClick" />
+                                        <Button x:Name="DeselectAllCharactersButton" Content="Deselect All"
+                                                Click="OnDeselectAllCharactersClick" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <TextBlock x:Name="MigrationValidationText"
+                                           Foreground="{StaticResource DangerTextBrush}"
+                                           FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap"
+                                           IsVisible="False" />
+
+                                <Border Classes="panel" Padding="8">
+                                    <ScrollViewer x:Name="CharactersScrollViewer"
+                                                  MaxHeight="280"
+                                                  HorizontalScrollBarVisibility="Disabled"
+                                                  VerticalScrollBarVisibility="Auto"
+                                                  BringIntoViewOnFocusChange="False">
+                                        <ItemsControl x:Name="CharactersItemsControl">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="launch:LadderCharacterRowViewModel">
+                                                    <Border Background="{StaticResource SurfaceRaisedBrush}"
+                                                            BorderBrush="{StaticResource BorderBrush}"
+                                                            BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="0,0,0,6">
+                                                        <StackPanel Spacing="6">
+                                                            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                                                                <CheckBox Grid.Column="0"
+                                                                          IsChecked="{Binding IsSelected}"
+                                                                          IsEnabled="{Binding CanCheck}"
+                                                                          VerticalAlignment="Center" />
+                                                                <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                                                    <WrapPanel Orientation="Horizontal" ItemSpacing="8">
+                                                                        <TextBlock Text="{Binding CharacterName}" FontWeight="SemiBold"
+                                                                                   VerticalAlignment="Center" />
+                                                                        <Border Background="#2A1416"
+                                                                                BorderBrush="{StaticResource DangerTextBrush}"
+                                                                                BorderThickness="1" CornerRadius="4" Padding="6,1"
+                                                                                IsVisible="{Binding IsHardcore}">
+                                                                            <TextBlock Text="HARDCORE" FontSize="10" FontWeight="Bold"
+                                                                                       Foreground="{StaticResource DangerTextBrush}" />
+                                                                        </Border>
+                                                                        <Border Background="{StaticResource SurfaceMutedBrush}"
+                                                                                BorderBrush="{StaticResource BorderBrush}"
+                                                                                BorderThickness="1" CornerRadius="4" Padding="6,1">
+                                                                            <TextBlock Text="{Binding StatusBadge}" FontSize="10"
+                                                                                       FontWeight="Bold"
+                                                                                       Foreground="{Binding StatusForeground}" />
+                                                                        </Border>
+                                                                    </WrapPanel>
+                                                                    <TextBlock Text="{Binding DetailText}" Classes="muted"
+                                                                               FontSize="12" TextWrapping="Wrap" />
+                                                                    <TextBlock Text="{Binding ConflictWarningText}"
+                                                                               Foreground="{StaticResource DangerTextBrush}"
+                                                                               FontSize="11" FontWeight="SemiBold" TextWrapping="Wrap"
+                                                                               IsVisible="{Binding HasConflict}" />
+                                                                    <TextBlock Text="{Binding BlockedReason}"
+                                                                               Foreground="{StaticResource DangerTextBrush}"
+                                                                               FontSize="11" TextWrapping="Wrap"
+                                                                               IsVisible="{Binding HasBlockedReason}" />
+                                                                </StackPanel>
+                                                            </Grid>
+
+                                                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8" Margin="30,0,0,0"
+                                                                  IsVisible="{Binding ShowCopySelector}">
+                                                                <TextBlock Grid.Column="0" Text="Copy to migrate" Classes="muted"
+                                                                           FontSize="12" VerticalAlignment="Center" />
+                                                                <ComboBox Grid.Column="1"
+                                                                          ItemsSource="{Binding Copies}"
+                                                                          SelectedItem="{Binding SelectedCopy}"
+                                                                          IsEnabled="{Binding IsCopySelectorEnabled}"
+                                                                          HorizontalAlignment="Stretch" FontSize="12" MinHeight="30">
+                                                                    <ComboBox.ItemTemplate>
+                                                                        <DataTemplate x:DataType="utilities:LadderCharacterCopySnapshot">
+                                                                            <TextBlock Text="{Binding DisplayLabel}"
+                                                                                       TextTrimming="CharacterEllipsis" />
+                                                                        </DataTemplate>
+                                                                    </ComboBox.ItemTemplate>
+                                                                </ComboBox>
+                                                            </Grid>
+
+                                                            <StackPanel Spacing="6" Margin="30,2,0,0"
+                                                                        IsVisible="{Binding ShowConflictPanel}">
+                                                                <StackPanel Spacing="4" IsVisible="{Binding CanRenameOnMigrate}">
+                                                                    <CheckBox Content="Save under a new Non-Ladder name (keeps both characters):"
+                                                                              IsChecked="{Binding RenameInstead}"
+                                                                              IsEnabled="{Binding IsResolutionControlsEnabled}"
+                                                                              FontSize="12" />
+                                                                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="28,0,0,0"
+                                                                                IsVisible="{Binding RenameInstead}">
+                                                                        <TextBox Text="{Binding RenameTargetName}"
+                                                                                 MaxLength="15" Width="210" MinHeight="32"
+                                                                                 FontSize="12"
+                                                                                 IsEnabled="{Binding IsResolutionControlsEnabled}"
+                                                                                 PlaceholderText="New character name" />
+                                                                        <TextBlock Text="(2-15 letters, optional - or _)" Classes="muted"
+                                                                                   FontSize="11" VerticalAlignment="Center" />
+                                                                    </StackPanel>
+                                                                </StackPanel>
+
+                                                                <TextBlock Text="Pre-1.10/legacy save formats cannot be renamed automatically."
+                                                                           Classes="muted" FontSize="11" TextWrapping="Wrap"
+                                                                           IsVisible="{Binding ShowRenameUnsupportedNote}" />
+
+                                                                <CheckBox Content="Overwrite existing Non-Ladder character instead (replaces Non-Ladder version)"
+                                                                          IsChecked="{Binding OverwriteExisting}"
+                                                                          IsEnabled="{Binding IsOverwriteOptionEnabled}"
+                                                                          Foreground="{StaticResource DangerTextBrush}"
+                                                                          FontSize="12" />
+
+                                                                <TextBlock Text="An existing Non-Ladder file with a different filename claims this character name; overwrite is disabled — use a new name instead."
+                                                                           Foreground="{StaticResource DangerTextBrush}"
+                                                                           FontSize="11" TextWrapping="Wrap"
+                                                                           IsVisible="{Binding ShowFilenameMismatchOverwriteBlock}" />
+
+                                                                <TextBlock Text="{Binding RenameValidationError}"
+                                                                           Foreground="{StaticResource DangerTextBrush}"
+                                                                           FontSize="11" FontWeight="SemiBold" TextWrapping="Wrap"
+                                                                           IsVisible="{Binding HasRenameValidationError}" />
+                                                            </StackPanel>
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </Border>
+
+                                <StackPanel x:Name="SharedStashSection" Spacing="6" IsVisible="False">
+                                    <TextBlock Text="Shared Stashes (.d2i)" FontWeight="SemiBold" FontSize="13" />
+                                    <ItemsControl x:Name="SharedStashesItemsControl">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="launch:LadderSharedStashRowViewModel">
+                                                <Border Background="{StaticResource SurfaceRaisedBrush}"
+                                                        BorderBrush="{StaticResource BorderBrush}"
+                                                        BorderThickness="1" CornerRadius="6" Padding="10,7" Margin="0,0,0,6">
+                                                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                                                        <CheckBox Grid.Column="0"
+                                                                  IsChecked="{Binding IsSelected}"
+                                                                  IsEnabled="{Binding CanCheck}"
+                                                                  VerticalAlignment="Center" />
+                                                        <StackPanel Grid.Column="1" Spacing="2">
+                                                            <WrapPanel Orientation="Horizontal" ItemSpacing="8">
+                                                                <TextBlock Text="{Binding FileName}" FontWeight="SemiBold" />
+                                                                <Border Background="{StaticResource SurfaceMutedBrush}"
+                                                                        BorderBrush="{StaticResource BorderBrush}"
+                                                                        BorderThickness="1" CornerRadius="4" Padding="6,1">
+                                                                    <TextBlock Text="{Binding ModeBadge}" FontSize="10" FontWeight="Bold"
+                                                                               Foreground="{StaticResource GoldTextBrush}" />
+                                                                </Border>
+                                                            </WrapPanel>
+                                                            <TextBlock Text="{Binding DetailText}" Classes="muted" FontSize="12" />
+                                                            <TextBlock Text="{Binding StatusText}"
+                                                                       Foreground="{Binding StatusForeground}"
+                                                                       FontSize="11" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+
+                                <Border x:Name="OverwriteDangerBanner"
+                                        Background="#261315"
+                                        BorderBrush="{StaticResource DangerTextBrush}"
+                                        BorderThickness="1" CornerRadius="8" Padding="12" IsVisible="False">
+                                    <StackPanel Spacing="8">
+                                        <TextBlock x:Name="OverwriteDangerListText"
+                                                   Foreground="{StaticResource DangerTextBrush}"
+                                                   FontWeight="SemiBold" FontSize="12" TextWrapping="Wrap" />
+                                        <CheckBox x:Name="ConfirmOverwriteCheckBox"
+                                                  Content="I understand replacing these conflicting character(s) will overwrite my Non-Ladder versions (a full backup will be created first)."
+                                                  Foreground="{StaticResource DangerTextBrush}"
+                                                  IsCheckedChanged="OnConfirmOverwriteChanged" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </StackPanel>
+                    </Expander>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <StackPanel Grid.Row="2" Spacing="8">
+            <Border x:Name="StatusBanner" Classes="warning-banner" Padding="12" IsVisible="False">
+                <TextBlock x:Name="StatusBannerText" Foreground="{StaticResource GoldTextBrush}" TextWrapping="Wrap" />
+            </Border>
+
+            <StackPanel x:Name="BusyPanel" Spacing="4" IsVisible="False">
+                <ProgressBar x:Name="BusyProgressBar" IsIndeterminate="True" Minimum="0" Maximum="100" Height="6" />
+                <TextBlock x:Name="BusyMessageText" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                <TextBlock x:Name="BusyDetailsText" Classes="muted" FontSize="11" TextWrapping="Wrap" IsVisible="False" />
+            </StackPanel>
+
+            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+                <TextBlock x:Name="FooterStatusText" Grid.Column="0" Classes="muted" FontSize="12"
+                           TextWrapping="Wrap" VerticalAlignment="Center" />
+                <Button x:Name="CloseButton" Grid.Column="1" Content="Cancel" MinWidth="96" Click="OnCloseClick" />
+                <Button x:Name="CopyButton" Grid.Column="2" Classes="accent" Content="Copy to Non-Ladder"
+                        MinWidth="180" Click="OnCopyClick" IsVisible="False" />
+            </Grid>
+        </StackPanel>
+    </Grid>
+</Window>

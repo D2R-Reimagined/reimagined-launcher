@@ -291,7 +291,7 @@ public sealed class GameSessionSecretsServiceTests : IDisposable
             GlobalChatConfigService.PluginId, HardcoreDeathsConfigService.PluginId,
             ReimaginedFeedbackConfigService.PluginId, ServerSavesConfigService.PluginId,
             SupporterPortalsConfigService.PluginId, TradeNotificationsConfigService.PluginId,
-            TradePriceCheckConfigService.PluginId, "lobby-bridge"
+            TradePriceCheckConfigService.PluginId, "lobby-bridge", "d2rds"
         };
         foreach (var id in ids)
         {
