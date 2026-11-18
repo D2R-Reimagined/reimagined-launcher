@@ -16,8 +16,7 @@ public sealed class GlobalChatConfigServiceTests : IDisposable
     private string LadderLoaderRoot => Path.Combine(_installDirectory, "mods", "ReimaginedLadder", "d2rloader");
     private static string ConfigPathIn(string loaderRoot) => Path.Combine(loaderRoot, "config", "global-chat.toml");
 
-    // The reason this plugin exists as a separate service from chat-relay: it is
-    // offered for an ordinary D2RLoader launch, not only a ladder one.
+    // It is offered for an ordinary D2RLoader launch, not only a ladder one.
     [Theory]
     [InlineData(InstallationType.BattleNet, LaunchExperience.Online, true)]
     [InlineData(InstallationType.BattleNet, LaunchExperience.Ladder, true)]

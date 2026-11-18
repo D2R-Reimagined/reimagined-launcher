@@ -287,7 +287,7 @@ public sealed class GameSessionSecretsServiceTests : IDisposable
     {
         var ids = new[]
         {
-            AnnouncementsConfigService.PluginId, ChatRelayConfigService.PluginId,
+            AnnouncementsConfigService.PluginId,
             GlobalChatConfigService.PluginId, HardcoreDeathsConfigService.PluginId,
             ReimaginedFeedbackConfigService.PluginId, ServerSavesConfigService.PluginId,
             SupporterPortalsConfigService.PluginId, TradeNotificationsConfigService.PluginId,

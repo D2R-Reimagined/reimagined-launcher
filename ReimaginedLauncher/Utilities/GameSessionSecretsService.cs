@@ -54,7 +54,6 @@ public static class GameSessionSecretsService
     internal static readonly IReadOnlyList<string> ScrubbedPluginIds =
     [
         AnnouncementsConfigService.PluginId,
-        ChatRelayConfigService.PluginId,
         GlobalChatConfigService.PluginId,
         HardcoreDeathsConfigService.PluginId,
         ReimaginedFeedbackConfigService.PluginId,

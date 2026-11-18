@@ -1729,11 +1729,7 @@ public partial class LaunchView : UserControl
                                                        ladder.ActiveBundle,
                                                        state.Approval.FileName,
                                                        state.Approval.Sha256,
-                                                       state.Approval.Kind)
-                                                   || (state.Approval.Kind == D2RLoaderExtensionKind.Plugin
-                                                       && ChatRelayConfigService.CanSupplyApprovedPlugin(
-                                                       state.Approval.FileName,
-                                                       state.Approval.Sha256)));
+                                                       state.Approval.Kind));
                     return new LadderExtensionChoice
                     {
                         ApprovalId = state.Approval.Id,
@@ -2868,50 +2864,6 @@ public partial class LaunchView : UserControl
         return (true, false);
     }
 
-    /// <summary>
-    /// Points the chat-relay plugin at the API for a ladder launch.
-    /// </summary>
-    /// <remarks>
-    /// Never blocks the launch. Chat not reaching Discord costs a convenience;
-    /// refusing to start the game over it would cost the session. Every failure
-    /// here leaves the plugin disabled and says so in the log.
-    ///
-    /// The token decides whose name Discord shows against the messages, because
-    /// the API reads the sender from the token rather than the payload. The
-    /// token is only checked here (signed-in ladder launches only); it is not
-    /// written to chat-relay.toml, and the bundled chat-relay DLL predates the
-    /// session secrets file, so it runs without one.
-    /// </remarks>
-    private async Task ConfigureChatRelayAsync(InstallationProfile profile, string accessToken)
-    {
-        try
-        {
-            // Not approved for this ladder, or the player left it unchecked.
-            // A legitimate outcome: the launch proceeds without the bridge.
-            if (!ChatRelayConfigService.IsPluginInstalled(profile.InstallDirectory))
-            {
-                await ChatRelayConfigService.DisableAsync(profile.InstallDirectory);
-                LaunchDiagnostics.Log("chat-relay is not approved for this ladder; this launch has no Discord chat bridge.");
-                return;
-            }
-
-            var settings = new ChatRelayLaunchSettings(
-                _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority),
-                accessToken);
-            if (!await ChatRelayConfigService.EnableAsync(profile.InstallDirectory, settings))
-            {
-                LaunchDiagnostics.Log("chat-relay: the plugin configuration could not be written; the Discord chat bridge is off for this launch.");
-                return;
-            }
-
-            LaunchDiagnostics.Log("chat-relay configured for the Discord chat bridge.");
-        }
-        catch (Exception exception)
-        {
-            LaunchDiagnostics.Log($"chat-relay: configuration failed ({exception.Message}); the Discord chat bridge is off for this launch.");
-        }
-    }
-
     private async Task ConfigureAnnouncementsAsync(InstallationProfile profile, string? gameToken)
     {
         try
@@ -3073,12 +3025,11 @@ public partial class LaunchView : UserControl
     /// signed-in D2RLoader launch, ladder or not.
     /// </summary>
     /// <remarks>
-    /// Never blocks the launch, for the same reason ConfigureChatRelayAsync does
-    /// not: losing global chat costs a convenience, and refusing to start the
-    /// game over it would cost the session. Every failure path leaves the plugin
-    /// disabled and says so in the log.
+    /// Never blocks the launch: losing global chat costs a convenience, and
+    /// refusing to start the game over it would cost the session. Every failure
+    /// path leaves the plugin disabled and says so in the log.
     ///
-    /// Unlike chat-relay this runs for LaunchExperience.Online too. It gets the
+    /// This runs for LaunchExperience.Online too, not only Ladder. It gets the
     /// launch's game token (null when nobody is signed in or minting failed),
     /// and treats "no token" as an ordinary off switch rather than a failure:
     /// playing offline without an account is a supported thing to do.
@@ -3408,7 +3359,6 @@ public partial class LaunchView : UserControl
             if (!isLadderLaunch)
             {
                 await ServerSavesConfigService.DisableAsync(profile.InstallDirectory);
-                await ChatRelayConfigService.DisableAsync(profile.InstallDirectory);
 
                 return await RestoreNonLadderSaveDirectoryAsync(profile);
             }
@@ -3505,7 +3455,6 @@ public partial class LaunchView : UserControl
             _preparedServerSaves = new ServerSaveMonitor(
                 Path.Combine(preparation.DirectoryPath, ".server-saves", "status.json"), statusSessionId, ladder.Id);
 
-            await ConfigureChatRelayAsync(profile, gameToken.AccessToken);
             return true;
         }
         catch (Exception exception)

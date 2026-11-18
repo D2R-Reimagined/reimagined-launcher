@@ -97,7 +97,6 @@ public sealed class D2RLoaderConfigTests : IDisposable
         [
             "d2rl-server-saves.dll",
             "d2rl-lobby-bridge.dll",
-            "d2rl-chat-relay.dll",
             "d2rds.dll",
             "d2rl-maps.dll",
             "auto-waypoint.dll",

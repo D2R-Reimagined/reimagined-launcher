@@ -63,7 +63,7 @@ public sealed class D2RLoaderServiceTests : IDisposable
     [InlineData("d2rl-death-tracker.dll", "Death Tracker")]
     [InlineData("d2rl-kill-tracker.dll", "Kill Tracker")]
     [InlineData("d2rl-server-saves.dll", "Server Saves")]
-    [InlineData("D2RL-chat-relay.dll", "Chat Relay")]
+    [InlineData("D2RL-global-chat.dll", "Global Chat")]
     [InlineData("d2rl-maps.dll", "Maps")]
     [InlineData("custom-plugin.dll", "Custom Plugin")]
     public void DiscoverPreservesFullPluginNameWithoutMetadata(string fileName, string expectedName)

@@ -30,7 +30,6 @@ internal static class D2RLoaderConfigService
         "TRADEPRICECHECK",
         "SERVERSAVES",
         "LOBBYBRIDGE",
-        "CHATRELAY",
         "D2RDS",
         "MOD"
     };

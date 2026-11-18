@@ -12,12 +12,10 @@ public sealed record GlobalChatLaunchSettings(string ApiBaseUrl, string AccessTo
 /// talk to each other in game.
 /// </summary>
 /// <remarks>
-/// This is the two-way counterpart to <see cref="ChatRelayConfigService"/>, and
-/// it differs from that service in two ways that matter.
+/// Two things shape it.
 ///
-/// <para><b>It never installs the plugin.</b> chat-relay ships inside the
-/// launcher build and is copied into place on launch. Global chat does not: it
-/// arrives in the ladder bundle or as an approved extension, or the player
+/// <para><b>It never installs the plugin.</b> Global chat is not bundled with
+/// the launcher: it arrives in the ladder bundle or as an approved extension, or the player
 /// downloads it from the website and drops it into their own mod install. The
 /// launcher's whole job here is to notice that the plugin is present and point
 /// it at the API (the token itself goes in the session secrets file, never in
@@ -27,9 +25,7 @@ public sealed record GlobalChatLaunchSettings(string ApiBaseUrl, string AccessTo
 /// installed before it will write anything.</para>
 ///
 /// <para><b>It is enabled for a D2RLoader launch, not only a ladder one.</b>
-/// chat-relay is ladder-only because it captures what a player types and posts
-/// it onward, which is not something to leave running over someone's ordinary
-/// session. Global chat captures nothing on its own: a player reaches it by
+/// Global chat captures nothing on its own: a player reaches it by
 /// typing <c>/g</c>, or by explicitly turning global mode on. So a player who
 /// has installed the plugin themselves gets global chat in D2RLoader mode.</para>
 ///
