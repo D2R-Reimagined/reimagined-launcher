@@ -150,6 +150,122 @@ public sealed class D2RLoaderInstallerServiceTests : IDisposable
         Assert.False(D2RLoaderInstallerService.IsValidPin(valid with { Files = valid.Files.Take(2).ToArray() }));
     }
 
+    [Fact]
+    public async Task PinnedReimaginedLoaderInstallPlacesAllFourFilesBesideD2RLoader()
+    {
+        var hostBytes = PackedHostBytes();
+        var archivePath = CreateBinaryArchive(
+            ("ReimaginedHost.exe", hostBytes),
+            ("D2RRCore.dll", "MZcore"u8.ToArray()),
+            ("ReimaginedHostRunner.dll", "MZrunner"u8.ToArray()),
+            ("ReimaginedRuntime.dll", "MZruntime"u8.ToArray()));
+        var installDirectory = CreateInstallDirectory();
+        File.WriteAllText(Path.Combine(installDirectory, "D2RLoader.exe"), "existing-d2rloader");
+        File.WriteAllText(Path.Combine(installDirectory, "D2RCore.dll"), "existing-d2rcore");
+        var pin = ReimaginedPin(archivePath, hostBytes, "MZcore"u8.ToArray(), "MZrunner"u8.ToArray(), "MZruntime"u8.ToArray());
+
+        Assert.True(D2RLoaderInstallerService.IsValidPin(pin, LadderLoaderType.ReimaginedLoader));
+        Assert.False(D2RLoaderInstallerService.IsValidPin(pin, LadderLoaderType.D2RLoader));
+        Assert.Equal(4, (await D2RLoaderInstallerService.GetPinnedMismatchesAsync(installDirectory, pin)).Count);
+
+        await new D2RLoaderInstallerService(new HttpClient()).InstallPinnedAsync(
+            installDirectory,
+            pin,
+            (path, _) => { File.Copy(archivePath, path); return Task.CompletedTask; },
+            expectedKind: LadderLoaderType.ReimaginedLoader);
+
+        Assert.Empty(await D2RLoaderInstallerService.GetPinnedMismatchesAsync(installDirectory, pin));
+        Assert.Equal("existing-d2rloader", File.ReadAllText(Path.Combine(installDirectory, "D2RLoader.exe")));
+        Assert.Equal("existing-d2rcore", File.ReadAllText(Path.Combine(installDirectory, "D2RCore.dll")));
+        Assert.Null(LocalD2rdsRigService.ReimaginedLoaderProblem(installDirectory));
+    }
+
+    [Fact]
+    public void ReimaginedLoaderPinRejectsUnpackedHostStubAndMissingFiles()
+    {
+        var stubBytes = "MZstub"u8.ToArray();
+        var archivePath = CreateBinaryArchive(
+            ("ReimaginedHost.exe", stubBytes),
+            ("D2RRCore.dll", "MZcore"u8.ToArray()),
+            ("ReimaginedHostRunner.dll", "MZrunner"u8.ToArray()),
+            ("ReimaginedRuntime.dll", "MZruntime"u8.ToArray()));
+        var stubPin = ReimaginedPin(archivePath, stubBytes, "MZcore"u8.ToArray(), "MZrunner"u8.ToArray(), "MZruntime"u8.ToArray());
+
+        Assert.False(D2RLoaderInstallerService.IsValidPin(stubPin, LadderLoaderType.ReimaginedLoader));
+
+        var hostBytes = PackedHostBytes();
+        var validPin = ReimaginedPin(archivePath, hostBytes, "MZcore"u8.ToArray(), "MZrunner"u8.ToArray(), "MZruntime"u8.ToArray());
+        Assert.False(D2RLoaderInstallerService.IsValidPin(validPin with { Files = validPin.Files.Take(3).ToArray() }, LadderLoaderType.ReimaginedLoader));
+    }
+
+    [Fact]
+    public async Task LobbyBridgeConfigSwitchesBetweenBattleNetAndD2RLoaderModes()
+    {
+        var installDirectory = CreateInstallDirectory();
+        var pluginsDir = Path.Combine(installDirectory, "mods", ModInstallationPaths.LadderModName, "d2rloader", "plugins");
+        var configPath = Path.Combine(installDirectory, "mods", ModInstallationPaths.LadderModName, "d2rloader", "config", LobbyBridgeConfigService.ConfigFileName);
+        Directory.CreateDirectory(pluginsDir);
+        File.WriteAllText(Path.Combine(pluginsDir, LobbyBridgeConfigService.PluginFileName), "dll");
+
+        await LobbyBridgeConfigService.ConfigureForLadderAsync(installDirectory, LadderLoaderType.ReimaginedLoader);
+        Assert.Contains("lobby_mode = \"battlenet\"", File.ReadAllText(configPath));
+
+        await LobbyBridgeConfigService.ConfigureForLadderAsync(installDirectory, LadderLoaderType.D2RLoader);
+        var updated = File.ReadAllText(configPath);
+        Assert.Contains("lobby_mode = \"d2rloader\"", updated);
+        Assert.DoesNotContain("lobby_mode = \"battlenet\"", updated);
+    }
+
+    [Fact]
+    public void BuildReimaginedLoaderArgumentsFormatsWindowsAndLinuxForms()
+    {
+        Assert.Equal(
+            "--game-dir \"C:\\Games\\D2R\" -- -mod ReimaginedLadder -txt",
+            GameLauncherService.BuildReimaginedLoaderArguments(@"C:\Games\D2R", "-mod ReimaginedLadder -txt", includeGameDir: true));
+        Assert.Equal(
+            "-- -mod ReimaginedLadder -txt",
+            GameLauncherService.BuildReimaginedLoaderArguments("/games/d2r", "-mod ReimaginedLadder -txt", includeGameDir: false));
+    }
+
+    private static byte[] PackedHostBytes()
+    {
+        var bytes = new byte[LocalD2rdsRigService.PackedHostMinimumBytes];
+        bytes[0] = (byte)'M';
+        bytes[1] = (byte)'Z';
+        return bytes;
+    }
+
+    private static LadderD2RLoaderResponse ReimaginedPin(
+        string archivePath, byte[] host, byte[] core, byte[] runner, byte[] runtime) => new(
+        "0.1.0-2026-11-23-abc1234",
+        "ReimaginedLoader-0.1.0-2026-11-23-abc1234.zip",
+        Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(archivePath))),
+        new FileInfo(archivePath).Length,
+        [
+            new("ReimaginedHost.exe", Convert.ToHexString(SHA256.HashData(host)), host.Length),
+            new("D2RRCore.dll", Convert.ToHexString(SHA256.HashData(core)), core.Length),
+            new("ReimaginedHostRunner.dll", Convert.ToHexString(SHA256.HashData(runner)), runner.Length),
+            new("ReimaginedRuntime.dll", Convert.ToHexString(SHA256.HashData(runtime)), runtime.Length)
+        ],
+        DateTimeOffset.UtcNow,
+        "/ladders/id/loader/download",
+        LadderLoaderType.ReimaginedLoader);
+
+    private string CreateBinaryArchive(params (string Path, byte[] Content)[] entries)
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var archivePath = Path.Combine(_testDirectory, $"{Guid.NewGuid():N}.zip");
+        using var archive = ZipFile.Open(archivePath, ZipArchiveMode.Create);
+        foreach (var (path, content) in entries)
+        {
+            var entry = archive.CreateEntry(path, CompressionLevel.NoCompression);
+            using var stream = entry.Open();
+            stream.Write(content);
+        }
+
+        return archivePath;
+    }
+
     private string CreateInstallDirectory()
     {
         var installDirectory = Path.Combine(_testDirectory, "install");

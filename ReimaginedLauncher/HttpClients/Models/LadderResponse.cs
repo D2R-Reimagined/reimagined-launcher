@@ -4,6 +4,12 @@ using ReimaginedLauncher.Utilities;
 
 namespace ReimaginedLauncher.HttpClients.Models;
 
+public enum LadderLoaderType
+{
+    D2RLoader = 0,
+    ReimaginedLoader = 1
+}
+
 public sealed record LadderResponse(
     Guid Id,
     string Name,
@@ -11,14 +17,18 @@ public sealed record LadderResponse(
     DateTimeOffset EndDateUtc,
     IReadOnlyList<LadderAllowedExtensionResponse> AllowedExtensions,
     LadderBundleResponse? ActiveBundle,
-    LadderD2RLoaderResponse? RequiredD2RLoader = null)
+    LadderD2RLoaderResponse? RequiredD2RLoader = null,
+    LadderLoaderType LoaderType = LadderLoaderType.D2RLoader,
+    LadderD2RLoaderResponse? RequiredLoader = null)
 {
+    public LadderD2RLoaderResponse? EffectiveRequiredLoader => RequiredLoader ?? RequiredD2RLoader;
+
     public string DateRangeDisplay =>
         $"{StartDateUtc.ToLocalTime():MMM d, yyyy h:mm tt} - {EndDateUtc.ToLocalTime():MMM d, yyyy h:mm tt}";
 }
 
 /// <summary>
-/// The exact D2RLoader build a ladder requires. Sha256/SizeBytes describe the
+/// The exact loader build a ladder requires. Sha256/SizeBytes describe the
 /// archive; Files are the root files that must match byte-for-byte.
 /// </summary>
 public sealed record LadderD2RLoaderResponse(
@@ -28,7 +38,8 @@ public sealed record LadderD2RLoaderResponse(
     long SizeBytes,
     IReadOnlyList<LadderD2RLoaderFileResponse> Files,
     DateTimeOffset UploadedAtUtc,
-    string DownloadPath);
+    string DownloadPath,
+    LadderLoaderType Kind = LadderLoaderType.D2RLoader);
 
 public sealed record LadderD2RLoaderFileResponse(string Path, string Sha256, long SizeBytes);
 

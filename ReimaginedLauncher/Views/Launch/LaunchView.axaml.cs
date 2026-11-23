@@ -510,8 +510,12 @@ public partial class LaunchView : UserControl
         {
             _loaderInventory = discoveredInventory;
         }
+        var selectedLoaderType = SelectedLadder?.LoaderType ?? LadderLoaderType.D2RLoader;
+        var isLadderSetupAction = _ladderAction is LadderAction.Download or LadderAction.Update or LadderAction.Restore;
         RefreshD2RLoaderState(profile, _loaderInventory);
-        var loaderAvailable = D2RLoaderService.CanUseOnlineExperience(profile, out var loaderUnavailableReason);
+        var loaderAvailable = isLadderExperience
+            ? D2RLoaderService.CanUseLadderLoader(profile, selectedLoaderType, allowMissingLoader: isLadderSetupAction, out var loaderUnavailableReason)
+            : D2RLoaderService.CanUseOnlineExperience(profile, out loaderUnavailableReason);
 
         OfflineExperienceButton.Classes.Set("selected", profile.LaunchExperience == LaunchExperience.Offline);
         OnlineExperienceButton.Classes.Set("selected", isOnlineExperience);
@@ -741,14 +745,35 @@ public partial class LaunchView : UserControl
         NoLoaderPluginsText.IsVisible = inventory.Plugins.Count == 0;
         NoLoaderPatchesText.IsVisible = inventory.Patches.Count == 0;
 
-        LoaderStatusBadge.Background = new SolidColorBrush(Color.Parse(inventory.IsInstalled ? "#17351D" : "#3A1818"));
-        LoaderStatusBadgeText.Foreground = new SolidColorBrush(Color.Parse(inventory.IsInstalled ? "#86D88F" : "#E98B91"));
-        LoaderStatusBadgeText.Text = inventory.IsInstalled ? "D2RLoader detected" : "NOT FOUND";
-        LoaderStatusText.Text = inventory.IsInstalled
-            ? $"D2RLoader {inventory.Version ?? "unknown version"} detected beside D2R.exe. "
-              + $"Found {inventory.Plugins.Count} plugin{(inventory.Plugins.Count == 1 ? string.Empty : "s")} and "
-              + $"{inventory.Patches.Count} patch manifest{(inventory.Patches.Count == 1 ? string.Empty : "s")}."
-            : "Place D2RLoader.exe in the same folder as D2R.exe to enable this experience.";
+        var isReimaginedLadder = profile.LaunchExperience == LaunchExperience.Ladder
+                                 && SelectedLadder?.LoaderType == LadderLoaderType.ReimaginedLoader;
+        if (isReimaginedLadder)
+        {
+            var reimaginedProblem = InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory)
+                ? LocalD2rdsRigService.ReimaginedLoaderProblem(profile.InstallDirectory!)
+                : "Select the Diablo II: Resurrected folder that contains D2R.exe.";
+            var reimaginedInstalled = reimaginedProblem is null;
+            LoaderStatusBadge.Background = new SolidColorBrush(Color.Parse(reimaginedInstalled ? "#17351D" : "#3A1818"));
+            LoaderStatusBadgeText.Foreground = new SolidColorBrush(Color.Parse(reimaginedInstalled ? "#86D88F" : "#E98B91"));
+            LoaderStatusBadgeText.Text = reimaginedInstalled ? "Reimagined Loader detected" : "NOT FOUND";
+            var pinnedVersion = SelectedLadder?.EffectiveRequiredLoader?.Version;
+            LoaderStatusText.Text = reimaginedInstalled
+                ? $"Reimagined Loader{(string.IsNullOrWhiteSpace(pinnedVersion) ? string.Empty : $" {pinnedVersion}")} detected beside D2R.exe. "
+                  + $"Found {inventory.Plugins.Count} plugin{(inventory.Plugins.Count == 1 ? string.Empty : "s")} and "
+                  + $"{inventory.Patches.Count} patch manifest{(inventory.Patches.Count == 1 ? string.Empty : "s")}."
+                : "Use Download or Update to install this ladder's Reimagined Loader build beside D2R.exe.";
+        }
+        else
+        {
+            LoaderStatusBadge.Background = new SolidColorBrush(Color.Parse(inventory.IsInstalled ? "#17351D" : "#3A1818"));
+            LoaderStatusBadgeText.Foreground = new SolidColorBrush(Color.Parse(inventory.IsInstalled ? "#86D88F" : "#E98B91"));
+            LoaderStatusBadgeText.Text = inventory.IsInstalled ? "D2RLoader detected" : "NOT FOUND";
+            LoaderStatusText.Text = inventory.IsInstalled
+                ? $"D2RLoader {inventory.Version ?? "unknown version"} detected beside D2R.exe. "
+                  + $"Found {inventory.Plugins.Count} plugin{(inventory.Plugins.Count == 1 ? string.Empty : "s")} and "
+                  + $"{inventory.Patches.Count} patch manifest{(inventory.Patches.Count == 1 ? string.Empty : "s")}."
+                : "Place D2RLoader.exe in the same folder as D2R.exe to enable this experience.";
+        }
 
         var disabledScopes = new[]
             {
@@ -761,7 +786,13 @@ public partial class LaunchView : UserControl
             ? "Global and Reimagined extension loading are enabled in d2rloader.toml."
             : $"Disabled by d2rloader.toml: {string.Join(", ", disabledScopes!)}.";
 
-        var canUseOnline = D2RLoaderService.CanUseOnlineExperience(profile, out var reason);
+        var canUseOnline = isReimaginedLadder
+            ? D2RLoaderService.CanUseLadderLoader(
+                profile,
+                LadderLoaderType.ReimaginedLoader,
+                allowMissingLoader: _ladderAction is LadderAction.Download or LadderAction.Update or LadderAction.Restore,
+                out var reason)
+            : D2RLoaderService.CanUseOnlineExperience(profile, out reason);
         LoaderWarningBanner.IsVisible = !canUseOnline;
         LoaderWarningText.Text = reason ?? string.Empty;
         OpenLoaderFolderButton.IsEnabled = Directory.Exists(inventory.GlobalRoot);
@@ -895,6 +926,7 @@ public partial class LaunchView : UserControl
             || MainWindow.IsGameRunning()
             || profile.Type == InstallationType.D2RMM
             || profile.LaunchExperience is not (LaunchExperience.Online or LaunchExperience.Ladder)
+            || (profile.LaunchExperience == LaunchExperience.Ladder && SelectedLadder?.LoaderType == LadderLoaderType.ReimaginedLoader)
             || !InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory)
             || D2RLoaderService.IsInstalled(profile.InstallDirectory)
             || TopLevel.GetTopLevel(this) is not Window { IsVisible: true })
@@ -909,6 +941,7 @@ public partial class LaunchView : UserControl
     private async Task PromptInstallD2RLoaderAsync(InstallationProfile profile)
     {
         if (_isLoaderInstallPromptOpen
+            || (profile.LaunchExperience == LaunchExperience.Ladder && SelectedLadder?.LoaderType == LadderLoaderType.ReimaginedLoader)
             || !InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory)
             || TopLevel.GetTopLevel(this) is not Window owner)
         {
@@ -923,7 +956,7 @@ public partial class LaunchView : UserControl
             if (inventory.IsInstalled)
             {
                 // A pinned ladder installs its own build through the ladder Update action.
-                if (profile.LaunchExperience == LaunchExperience.Ladder && SelectedLadder?.RequiredD2RLoader is not null)
+                if (profile.LaunchExperience == LaunchExperience.Ladder && SelectedLadder?.EffectiveRequiredLoader is not null)
                 {
                     return;
                 }
@@ -1708,7 +1741,8 @@ public partial class LaunchView : UserControl
                 ladder.ActiveBundle,
                 allowedExtensions: ladder.AllowedExtensions,
                 selectedExtensionIds: GetEffectiveSelectedLadderExtensionIds(ladder),
-                requiredLoader: ladder.RequiredD2RLoader);
+                requiredLoader: ladder.EffectiveRequiredLoader,
+                loaderType: ladder.LoaderType);
             if (generation != _ladderPolicyGeneration) return;
 
             var approvals = MapApprovals(ladder);
@@ -1945,16 +1979,16 @@ public partial class LaunchView : UserControl
             var selectedIds = GetEffectiveSelectedLadderExtensionIds(ladder);
             var readiness = await _ladderBundleService.GetReadinessAsync(installDirectory, bundle,
                 allowedExtensions: ladder.AllowedExtensions, selectedExtensionIds: selectedIds,
-                requiredLoader: ladder.RequiredD2RLoader);
+                requiredLoader: ladder.EffectiveRequiredLoader, loaderType: ladder.LoaderType);
             if (readiness.RequiresBundleRepair)
                 await Task.Run(() => _ladderBundleService.InstallOrRepairAsync(installDirectory, bundle, progress,
-                    requiredLoader: ladder.RequiredD2RLoader));
+                    requiredLoader: ladder.EffectiveRequiredLoader, loaderType: ladder.LoaderType));
             await LadderOptionalExtensionService.SynchronizeAsync(installDirectory!, bundle,
                 ladder.AllowedExtensions, selectedIds,
                 (extension, token) => _apiHttpClient.DownloadOptionalExtensionAsync(ladder.Id, extension, progress, token), progress);
             readiness = await _ladderBundleService.GetReadinessAsync(installDirectory, bundle,
                 allowedExtensions: ladder.AllowedExtensions, selectedExtensionIds: selectedIds,
-                requiredLoader: ladder.RequiredD2RLoader);
+                requiredLoader: ladder.EffectiveRequiredLoader, loaderType: ladder.LoaderType);
             if (!readiness.IsReady) throw new InvalidOperationException(readiness.Status);
             Notifications.SendNotification(
                 $"Signed ladder package r{bundle.Revision} is installed and verified. Play becomes available when the ladder is confirmed live.",
@@ -2533,16 +2567,24 @@ public partial class LaunchView : UserControl
                 return;
             }
 
+            var activeLoaderType = profile.LaunchExperience == LaunchExperience.Ladder
+                ? SelectedLadder?.LoaderType ?? LadderLoaderType.D2RLoader
+                : LadderLoaderType.D2RLoader;
+
             if (profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder)
             {
                 await PromptInstallD2RLoaderAsync(profile);
             }
 
-            if (profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder
-                && !D2RLoaderService.CanUseOnlineExperience(profile, out var loaderUnavailableReason))
+            var canUseLoader = profile.LaunchExperience == LaunchExperience.Ladder
+                ? D2RLoaderService.CanUseLadderLoader(profile, activeLoaderType, allowMissingLoader: false, out var loaderUnavailableReason)
+                : profile.LaunchExperience == LaunchExperience.Online
+                    ? D2RLoaderService.CanUseOnlineExperience(profile, out loaderUnavailableReason)
+                    : (loaderUnavailableReason = null) is null;
+            if (!canUseLoader)
             {
-                LaunchDiagnostics.Log($"D2RLoader launch blocked: {loaderUnavailableReason}");
-                Notifications.SendNotification(loaderUnavailableReason ?? "D2RLoader is unavailable.", "Warning");
+                LaunchDiagnostics.Log($"{D2RLoaderInstallerService.DisplayName(activeLoaderType)} launch blocked: {loaderUnavailableReason}");
+                Notifications.SendNotification(loaderUnavailableReason ?? $"{D2RLoaderInstallerService.DisplayName(activeLoaderType)} is unavailable.", "Warning");
                 return;
             }
 
@@ -2666,6 +2708,10 @@ public partial class LaunchView : UserControl
             await ConfigureReimaginedFeedbackAsync(profile, gameToken);
             await ConfigureAnnouncementsAsync(profile, gameToken);
             await ConfigureSupporterPortalsAsync(profile, gameToken);
+            if (profile.LaunchExperience == LaunchExperience.Ladder)
+            {
+                await LobbyBridgeConfigService.ConfigureForLadderAsync(profile.InstallDirectory, activeLoaderType);
+            }
 
             if (profile.AutomaticBackupsEnabled)
             {
@@ -2706,9 +2752,9 @@ public partial class LaunchView : UserControl
 
                     LaunchDiagnostics.Log("Calling GameLauncherService.LaunchGame.");
                     SetLaunchStatus(profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder
-                        ? "Starting D2RLoader..."
+                        ? $"Starting {D2RLoaderInstallerService.DisplayName(activeLoaderType)}..."
                         : "Starting Diablo II: Resurrected...");
-                    var gameProcess = LauncherService.LaunchGame(reservation);
+                    var gameProcess = LauncherService.LaunchGame(reservation, loaderType: activeLoaderType);
                     if (gameProcess == null)
                     {
                         LaunchDiagnostics.Log("GameLauncherService.LaunchGame did not start a process.");
@@ -2722,7 +2768,7 @@ public partial class LaunchView : UserControl
                     if (profile.Type == InstallationType.Steam
                         || profile.LaunchExperience is LaunchExperience.Online or LaunchExperience.Ladder)
                     {
-                        expectedExePath = LauncherService.GetExpectedGameExecutablePath();
+                        expectedExePath = LauncherService.GetExpectedGameExecutablePath(activeLoaderType);
                     }
 
                     // Lutris hands off to its own wrapper and the exe is commonly
@@ -3559,7 +3605,8 @@ public partial class LaunchView : UserControl
                     activeBundle,
                     allowedExtensions: ladder.AllowedExtensions,
                     selectedExtensionIds: GetEffectiveSelectedLadderExtensionIds(ladder),
-                    requiredLoader: ladder.RequiredD2RLoader);
+                    requiredLoader: ladder.EffectiveRequiredLoader,
+                    loaderType: ladder.LoaderType);
                 if (!readiness.IsReady)
                 {
                     LaunchDiagnostics.Log($"Ladder launch blocked: {readiness.Status}");

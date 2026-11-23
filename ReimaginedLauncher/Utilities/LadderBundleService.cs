@@ -85,7 +85,8 @@ public sealed class LadderBundleService(
         CancellationToken cancellationToken = default,
         IReadOnlyList<LadderAllowedExtensionResponse>? allowedExtensions = null,
         IReadOnlySet<Guid>? selectedExtensionIds = null,
-        LadderD2RLoaderResponse? requiredLoader = null)
+        LadderD2RLoaderResponse? requiredLoader = null,
+        LadderLoaderType loaderType = LadderLoaderType.D2RLoader)
     {
         if (bundle is null)
         {
@@ -101,7 +102,7 @@ public sealed class LadderBundleService(
             return new LadderBundleReadiness(false, false, "Select a valid D2R installation.", ["The install directory is unavailable."]);
         }
 
-        var problems = await GetCompatibilityProblemsAsync(normalized, bundle, requiredLoader, cancellationToken);
+        var problems = await GetCompatibilityProblemsAsync(normalized, bundle, requiredLoader, cancellationToken, loaderType);
         if (!TryLoadTrustedKey(bundle.SigningKeyId, out var readinessKey, out var keyProblem))
         {
             problems.Add(keyProblem!);
@@ -232,16 +233,17 @@ public sealed class LadderBundleService(
         LadderBundleResponse bundle,
         IProgress<LadderBundleProgress>? progress = null,
         CancellationToken cancellationToken = default,
-        LadderD2RLoaderResponse? requiredLoader = null)
+        LadderD2RLoaderResponse? requiredLoader = null,
+        LadderLoaderType loaderType = LadderLoaderType.D2RLoader)
     {
         if (bundle.SchemaVersion < 2) throw new InvalidDataException(LegacyBundleMessage);
         var normalized = InstallDirectoryValidator.NormalizeInstallDirectory(installDirectory)
             ?? throw new InvalidOperationException("Select a valid D2R installation before installing a ladder bundle.");
-        var compatibilityProblems = await GetCompatibilityProblemsAsync(normalized, bundle, requiredLoader, cancellationToken);
+        var compatibilityProblems = await GetCompatibilityProblemsAsync(normalized, bundle, requiredLoader, cancellationToken, loaderType);
         if (compatibilityProblems.Count > 0)
         {
-            await InstallPrerequisitesAsync(normalized, bundle, requiredLoader, compatibilityProblems, progress, cancellationToken);
-            compatibilityProblems = await GetCompatibilityProblemsAsync(normalized, bundle, requiredLoader, cancellationToken);
+            await InstallPrerequisitesAsync(normalized, bundle, requiredLoader, compatibilityProblems, progress, cancellationToken, loaderType);
+            compatibilityProblems = await GetCompatibilityProblemsAsync(normalized, bundle, requiredLoader, cancellationToken, loaderType);
         }
         var preInstallProblems = compatibilityProblems
             .Where(problem => !problem.StartsWith("Reimagined mod", StringComparison.Ordinal))
@@ -253,7 +255,7 @@ public sealed class LadderBundleService(
 
         if (await TryInstallChangedFilesAsync(normalized, bundle, progress, cancellationToken))
         {
-            await VerifyInstalledAsync(normalized, bundle, requiredLoader, cancellationToken);
+            await VerifyInstalledAsync(normalized, bundle, requiredLoader, cancellationToken, loaderType);
             return;
         }
 
@@ -292,16 +294,18 @@ public sealed class LadderBundleService(
         progress?.Report(new LadderBundleProgress("Installing ladder package..."));
         await InstallVerifiedAsync(normalized, bundle, downloaded.Manifest, downloaded.ManifestBytes,
             (stagingRoot, token) => StageVerifiedFilesAsync(stagingRoot, downloaded, token), cancellationToken);
-        await VerifyInstalledAsync(normalized, bundle, requiredLoader, cancellationToken);
+        await VerifyInstalledAsync(normalized, bundle, requiredLoader, cancellationToken, loaderType);
     }
 
     private async Task VerifyInstalledAsync(
         string installDirectory,
         LadderBundleResponse bundle,
         LadderD2RLoaderResponse? requiredLoader,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        LadderLoaderType loaderType = LadderLoaderType.D2RLoader)
     {
-        var readiness = await GetReadinessAsync(installDirectory, bundle, cancellationToken, requiredLoader: requiredLoader);
+        var readiness = await GetReadinessAsync(installDirectory, bundle, cancellationToken,
+            requiredLoader: requiredLoader, loaderType: loaderType);
         if (!readiness.IsReady)
         {
             throw new InvalidDataException("The installed ladder bundle did not pass final verification: " + readiness.Status);
@@ -940,24 +944,45 @@ public sealed class LadderBundleService(
         LadderD2RLoaderResponse? requiredLoader,
         IReadOnlyList<string> problems,
         IProgress<LadderBundleProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        LadderLoaderType loaderType = LadderLoaderType.D2RLoader)
     {
         if (!problems.Any(problem => problem.StartsWith("D2RLoader", StringComparison.Ordinal)
-                                     || problem.StartsWith("D2RCore", StringComparison.Ordinal)))
+                                     || problem.StartsWith("D2RCore", StringComparison.Ordinal)
+                                     || problem.StartsWith("Reimagined Loader", StringComparison.Ordinal)))
         {
             return;
         }
 
         var loaderProgress = new Progress<D2RLoaderInstallProgress>(update =>
             progress?.Report(new LadderBundleProgress(update.Message, update.Percentage)));
-        if (D2RLoaderInstallerService.IsValidPin(requiredLoader))
+        if (loaderType == LadderLoaderType.ReimaginedLoader)
+        {
+            if (!D2RLoaderInstallerService.IsValidPin(requiredLoader, LadderLoaderType.ReimaginedLoader))
+            {
+                throw new InvalidDataException("No trusted Reimagined Loader build is published for this ladder.");
+            }
+            await loaderInstaller.InstallPinnedAsync(
+                installDirectory,
+                requiredLoader!,
+                (path, token) => apiClient.DownloadLadderD2RLoaderAsync(
+                    bundle.LadderId, requiredLoader!, path, loaderProgress, token, LadderLoaderType.ReimaginedLoader),
+                loaderProgress,
+                cancellationToken,
+                LadderLoaderType.ReimaginedLoader);
+            return;
+        }
+
+        if (D2RLoaderInstallerService.IsValidPin(requiredLoader, LadderLoaderType.D2RLoader))
         {
             await loaderInstaller.InstallPinnedAsync(
                 installDirectory,
                 requiredLoader!,
-                (path, token) => apiClient.DownloadLadderD2RLoaderAsync(bundle.LadderId, requiredLoader!, path, loaderProgress, token),
+                (path, token) => apiClient.DownloadLadderD2RLoaderAsync(
+                    bundle.LadderId, requiredLoader!, path, loaderProgress, token, LadderLoaderType.D2RLoader),
                 loaderProgress,
-                cancellationToken);
+                cancellationToken,
+                LadderLoaderType.D2RLoader);
         }
         else
         {
@@ -975,7 +1000,8 @@ public sealed class LadderBundleService(
         string installDirectory,
         LadderBundleResponse bundle,
         LadderD2RLoaderResponse? pinnedLoader,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        LadderLoaderType loaderType = LadderLoaderType.D2RLoader)
     {
         var problems = new List<string>();
         if (TryParseVersionCore(bundle.Compatibility.MinimumLauncherVersion, out var requiredLauncher)
@@ -985,56 +1011,73 @@ public sealed class LadderBundleService(
             problems.Add($"Launcher {bundle.Compatibility.MinimumLauncherVersion} or newer is required; {LauncherVersion} is installed.");
         }
 
-        var loaderPath = Path.Combine(installDirectory, "D2RLoader.exe");
-        if (pinnedLoader is not null)
+        if (loaderType == LadderLoaderType.ReimaginedLoader)
         {
-            if (!D2RLoaderInstallerService.IsValidPin(pinnedLoader))
+            var hostPath = Path.Combine(installDirectory, D2RLoaderInstallerService.ExecutableName(LadderLoaderType.ReimaginedLoader));
+            if (pinnedLoader is null || !D2RLoaderInstallerService.IsValidPin(pinnedLoader, LadderLoaderType.ReimaginedLoader))
             {
-                problems.Add("No trusted D2RLoader build is published for this ladder.");
+                problems.Add("No trusted Reimagined Loader build is published for this ladder.");
             }
             else if ((await D2RLoaderInstallerService.GetPinnedMismatchesAsync(installDirectory, pinnedLoader, cancellationToken)).Count > 0)
             {
-                var installedVersion = File.Exists(loaderPath) ? D2RLoaderService.ReadFileVersion(loaderPath) : null;
-                problems.Add(!File.Exists(loaderPath)
-                    ? $"D2RLoader {pinnedLoader.Version} is required for this ladder and is not installed."
-                    : string.Equals(installedVersion, pinnedLoader.Version, StringComparison.OrdinalIgnoreCase)
-                        ? $"D2RLoader {pinnedLoader.Version} files do not match this ladder's build."
-                        : $"D2RLoader {pinnedLoader.Version} is required for this ladder; {installedVersion ?? "unknown"} is installed.");
+                problems.Add(!File.Exists(hostPath)
+                    ? $"Reimagined Loader {pinnedLoader.Version} is required for this ladder and is not installed."
+                    : $"Reimagined Loader {pinnedLoader.Version} files do not match this ladder's build.");
             }
-        }
-
-        if (!File.Exists(loaderPath))
-        {
-            if (pinnedLoader is null) problems.Add("D2RLoader is not installed.");
         }
         else
         {
-            var loaderVersion = D2RLoaderService.ReadFileVersion(loaderPath);
-            if (TryParseVersionCore(bundle.Compatibility.RequiredD2RLoaderVersion, out var requiredLoader)
-                && requiredLoader > new Version(0, 0, 0)
-                && (!TryParseVersionCore(loaderVersion, out var currentLoader) || currentLoader < requiredLoader))
+            var loaderPath = Path.Combine(installDirectory, "D2RLoader.exe");
+            if (pinnedLoader is not null)
             {
-                problems.Add($"D2RLoader {bundle.Compatibility.RequiredD2RLoaderVersion} or newer is required; {loaderVersion ?? "unknown"} is installed.");
+                if (!D2RLoaderInstallerService.IsValidPin(pinnedLoader, LadderLoaderType.D2RLoader))
+                {
+                    problems.Add("No trusted D2RLoader build is published for this ladder.");
+                }
+                else if ((await D2RLoaderInstallerService.GetPinnedMismatchesAsync(installDirectory, pinnedLoader, cancellationToken)).Count > 0)
+                {
+                    var installedVersion = File.Exists(loaderPath) ? D2RLoaderService.ReadFileVersion(loaderPath) : null;
+                    problems.Add(!File.Exists(loaderPath)
+                        ? $"D2RLoader {pinnedLoader.Version} is required for this ladder and is not installed."
+                        : string.Equals(installedVersion, pinnedLoader.Version, StringComparison.OrdinalIgnoreCase)
+                            ? $"D2RLoader {pinnedLoader.Version} files do not match this ladder's build."
+                            : $"D2RLoader {pinnedLoader.Version} is required for this ladder; {installedVersion ?? "unknown"} is installed.");
+                }
             }
-            if (!string.IsNullOrWhiteSpace(bundle.Compatibility.RequiredD2RLoaderSha256)
-                && !string.Equals(
-                    await Sha256Async(loaderPath, cancellationToken),
-                    bundle.Compatibility.RequiredD2RLoaderSha256,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                problems.Add("D2RLoader does not match the required signed policy hash.");
-            }
-        }
 
-        var corePath = Path.Combine(installDirectory, "D2RCore.dll");
-        if (!string.IsNullOrWhiteSpace(bundle.Compatibility.RequiredD2RCoreSha256)
-            && (!File.Exists(corePath)
-                || !string.Equals(
-                    await Sha256Async(corePath, cancellationToken),
-                    bundle.Compatibility.RequiredD2RCoreSha256,
-                    StringComparison.OrdinalIgnoreCase)))
-        {
-            problems.Add("D2RCore does not match the required signed policy hash.");
+            if (!File.Exists(loaderPath))
+            {
+                if (pinnedLoader is null) problems.Add("D2RLoader is not installed.");
+            }
+            else
+            {
+                var loaderVersion = D2RLoaderService.ReadFileVersion(loaderPath);
+                if (TryParseVersionCore(bundle.Compatibility.RequiredD2RLoaderVersion, out var requiredLoader)
+                    && requiredLoader > new Version(0, 0, 0)
+                    && (!TryParseVersionCore(loaderVersion, out var currentLoader) || currentLoader < requiredLoader))
+                {
+                    problems.Add($"D2RLoader {bundle.Compatibility.RequiredD2RLoaderVersion} or newer is required; {loaderVersion ?? "unknown"} is installed.");
+                }
+                if (!string.IsNullOrWhiteSpace(bundle.Compatibility.RequiredD2RLoaderSha256)
+                    && !string.Equals(
+                        await Sha256Async(loaderPath, cancellationToken),
+                        bundle.Compatibility.RequiredD2RLoaderSha256,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    problems.Add("D2RLoader does not match the required signed policy hash.");
+                }
+            }
+
+            var corePath = Path.Combine(installDirectory, "D2RCore.dll");
+            if (!string.IsNullOrWhiteSpace(bundle.Compatibility.RequiredD2RCoreSha256)
+                && (!File.Exists(corePath)
+                    || !string.Equals(
+                        await Sha256Async(corePath, cancellationToken),
+                        bundle.Compatibility.RequiredD2RCoreSha256,
+                        StringComparison.OrdinalIgnoreCase)))
+            {
+                problems.Add("D2RCore does not match the required signed policy hash.");
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(bundle.Compatibility.RequiredModVersion))

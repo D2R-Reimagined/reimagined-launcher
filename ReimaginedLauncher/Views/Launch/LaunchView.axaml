@@ -168,6 +168,14 @@
                     <TextBlock Text="Local d2rds test (staff)" FontWeight="SemiBold" VerticalAlignment="Center"/>
                     <Button Classes="hero-help" Grid.Column="1" ToolTip.Tip="Runs a dedicated server and a ladder client on this PC against the launcher's API. Your mods\Reimagined (with d2rl-d2rds.dll) is mirrored into mods\ReimaginedLadder, the server starts first with -d2rds, then the game starts as a ladder launch on your own hidden staff ladder: Host makes the game on your local server and saves go through it. Closing the game stops the server. Ladder mode then offers Update to put the signed package back."><TextBlock Text="?" FontFamily="Segoe UI" FontSize="12" LineHeight="16" HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"/></Button>
                   </Grid>
+                  <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                    <TextBlock Text="Game client" VerticalAlignment="Center" FontSize="12"/>
+                    <ComboBox x:Name="LocalRigLoaderComboBox" Grid.Column="1" MinWidth="220" HorizontalAlignment="Left" SelectionChanged="OnLocalRigLoaderChanged"
+                              ToolTip.Tip="D2RLoader: the production game browser. Reimagined Loader: ReimaginedHost.exe with the native Battle.net lobby. The server is D2RLoader either way.">
+                      <ComboBoxItem Content="D2RLoader (game browser)"/>
+                      <ComboBoxItem Content="Reimagined Loader (Battle.net lobby)"/>
+                    </ComboBox>
+                  </Grid>
                   <TextBlock x:Name="LocalRigStatusText" Foreground="{StaticResource GoldTextBrush}" FontSize="12" TextWrapping="Wrap"/>
                   <Button x:Name="LocalRigStartButton" Classes="accent" Content="Start local server + game" HorizontalAlignment="Left" Click="OnLocalRigStartClick"/>
                 </StackPanel>

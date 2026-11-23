@@ -25,9 +25,18 @@ public sealed class D2RLoaderInstallerService
     private const string DownloadUrl = "https://d2rloader.net/downloads/latest";
     private const string VersionUrl = "https://d2rloader.net/api/v1/version";
     private const string LoaderExecutableName = "D2RLoader.exe";
+    private const string ReimaginedHostExecutableName = "ReimaginedHost.exe";
     private const long MaxPinnedArchiveBytes = 128L * 1024 * 1024;
     private static readonly string[] PinnedFileNames = [LoaderExecutableName, "D2RCore.dll", "d2rloader.mpq"];
+    private static readonly string[] ReimaginedPinnedFileNames =
+        [ReimaginedHostExecutableName, "D2RRCore.dll", "ReimaginedHostRunner.dll", "ReimaginedRuntime.dll"];
     private readonly HttpClient _httpClient;
+
+    public static string DisplayName(LadderLoaderType kind) =>
+        kind == LadderLoaderType.ReimaginedLoader ? "Reimagined Loader" : "D2RLoader";
+
+    public static string ExecutableName(LadderLoaderType kind) =>
+        kind == LadderLoaderType.ReimaginedLoader ? ReimaginedHostExecutableName : LoaderExecutableName;
 
     public D2RLoaderInstallerService(HttpClient httpClient)
     {
@@ -147,17 +156,21 @@ public sealed class D2RLoaderInstallerService
         LadderD2RLoaderResponse loader,
         Func<string, CancellationToken, Task> download,
         IProgress<D2RLoaderInstallProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        LadderLoaderType? expectedKind = null)
     {
+        var kind = expectedKind ?? loader.Kind;
+        var label = DisplayName(kind);
+        var executableName = ExecutableName(kind);
         var normalized = InstallDirectoryValidator.NormalizeInstallDirectory(installDirectory);
         if (!InstallDirectoryValidator.IsValidInstallDirectory(normalized))
         {
             throw new InvalidOperationException(
-                "Select the Diablo II: Resurrected folder that contains D2R.exe before installing D2RLoader.");
+                $"Select the Diablo II: Resurrected folder that contains D2R.exe before installing {label}.");
         }
-        if (!IsValidPin(loader))
+        if (!IsValidPin(loader, kind))
         {
-            throw new InvalidDataException("This ladder's D2RLoader build is not valid.");
+            throw new InvalidDataException($"This ladder's {label} build is not valid.");
         }
 
         var tempDirectory = Path.Combine(
@@ -165,38 +178,38 @@ public sealed class D2RLoaderInstallerService
             "d2r-reimagined-launcher",
             "d2rloader-installs",
             Guid.NewGuid().ToString("N"));
-        var archivePath = Path.Combine(tempDirectory, "D2RLoader.zip");
+        var archivePath = Path.Combine(tempDirectory, "loader.zip");
         var stagingDirectory = Path.Combine(tempDirectory, "staging");
         Directory.CreateDirectory(tempDirectory);
 
         try
         {
-            progress?.Report(new D2RLoaderInstallProgress($"Downloading D2RLoader {loader.Version}..."));
+            progress?.Report(new D2RLoaderInstallProgress($"Downloading {label} {loader.Version}..."));
             await download(archivePath, cancellationToken);
 
-            progress?.Report(new D2RLoaderInstallProgress("Extracting D2RLoader..."));
+            progress?.Report(new D2RLoaderInstallProgress($"Extracting {label}..."));
             await Task.Run(
                 () => ExtractArchive(archivePath, stagingDirectory, cancellationToken),
                 cancellationToken);
             if ((await GetPinnedMismatchesAsync(stagingDirectory, loader, cancellationToken)).Count > 0)
             {
                 throw new InvalidDataException(
-                    $"The D2RLoader {loader.Version} archive does not contain the files this ladder requires.");
+                    $"The {label} {loader.Version} archive does not contain the files this ladder requires.");
             }
 
-            progress?.Report(new D2RLoaderInstallProgress($"Installing D2RLoader {loader.Version}..."));
+            progress?.Report(new D2RLoaderInstallProgress($"Installing {label} {loader.Version}..."));
             await Task.Run(
-                () => InstallExtractedFiles(stagingDirectory, normalized!, cancellationToken),
+                () => InstallExtractedFiles(stagingDirectory, normalized!, cancellationToken, executableName),
                 cancellationToken);
 
             var mismatches = await GetPinnedMismatchesAsync(normalized!, loader, cancellationToken);
             if (mismatches.Count > 0)
             {
                 throw new InvalidDataException(
-                    $"D2RLoader {loader.Version} did not install cleanly ({string.Join(", ", mismatches)} still differ). Close D2R and try again.");
+                    $"{label} {loader.Version} did not install cleanly ({string.Join(", ", mismatches)} still differ). Close D2R and try again.");
             }
 
-            progress?.Report(new D2RLoaderInstallProgress($"D2RLoader {loader.Version} installed.", 100));
+            progress?.Report(new D2RLoaderInstallProgress($"{label} {loader.Version} installed.", 100));
         }
         finally
         {
@@ -231,15 +244,24 @@ public sealed class D2RLoaderInstallerService
         return mismatches;
     }
 
-    /// <summary>A pin names exactly the loader's three root files, so nothing from the API can point outside the game folder.</summary>
-    internal static bool IsValidPin(LadderD2RLoaderResponse? loader) =>
-        loader is { SizeBytes: > 0 and <= MaxPinnedArchiveBytes }
-        && IsSha256(loader.Sha256)
-        && loader.Files.Count == PinnedFileNames.Length
-        && PinnedFileNames.All(name => loader.Files.Count(file =>
+    /// <summary>A pin names exactly the loader's root files, so nothing from the API can point outside the game folder.</summary>
+    internal static bool IsValidPin(LadderD2RLoaderResponse? loader, LadderLoaderType? expectedKind = null)
+    {
+        if (loader is not { SizeBytes: > 0 and <= MaxPinnedArchiveBytes } || !IsSha256(loader.Sha256))
+            return false;
+        var kind = expectedKind ?? loader.Kind;
+        if (expectedKind is not null && loader.Kind != expectedKind.Value)
+            return false;
+        var expectedFiles = kind == LadderLoaderType.ReimaginedLoader ? ReimaginedPinnedFileNames : PinnedFileNames;
+        if (loader.Files.Count != expectedFiles.Length)
+            return false;
+        return expectedFiles.All(name => loader.Files.Count(file =>
             string.Equals(file.Path, name, StringComparison.OrdinalIgnoreCase)
-            && file.SizeBytes > 0
+            && file.SizeBytes >= (string.Equals(name, ReimaginedHostExecutableName, StringComparison.OrdinalIgnoreCase)
+                ? LocalD2rdsRigService.PackedHostMinimumBytes
+                : 1)
             && IsSha256(file.Sha256)) == 1);
+    }
 
     private static bool IsSha256(string? value) =>
         value is { Length: 64 } && value.All(Uri.IsHexDigit);
@@ -439,21 +461,22 @@ public sealed class D2RLoaderInstallerService
     internal static void InstallExtractedFiles(
         string stagingDirectory,
         string installDirectory,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string executableName = LoaderExecutableName)
     {
         var loaderCandidates = Directory.GetFiles(
             stagingDirectory,
-            LoaderExecutableName,
+            executableName,
             SearchOption.AllDirectories);
         if (loaderCandidates.Length != 1)
         {
             throw new InvalidDataException(
-                $"Expected one {LoaderExecutableName} in the downloaded archive, but found {loaderCandidates.Length}.");
+                $"Expected one {executableName} in the downloaded archive, but found {loaderCandidates.Length}.");
         }
 
         var sourceRoot = Path.GetDirectoryName(loaderCandidates[0])!;
         var files = Directory.GetFiles(sourceRoot, "*", SearchOption.AllDirectories)
-            .OrderBy(path => string.Equals(Path.GetFileName(path), LoaderExecutableName, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(path => string.Equals(Path.GetFileName(path), executableName, StringComparison.OrdinalIgnoreCase))
             .ToArray();
 
         foreach (var sourcePath in files)

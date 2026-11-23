@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
+using Avalonia.Controls;
 using Avalonia.Interactivity;
 using ReimaginedLauncher.Utilities;
 
@@ -12,7 +13,9 @@ namespace ReimaginedLauncher.Views.Launch;
 /// <summary>
 /// The staff local d2rds rig (see <see cref="LocalD2rdsRigService"/>): one click
 /// starts a dedicated server and a ladder client on this PC. Admin and Moderator
-/// accounts only, in Mod + D2RLoader mode, on Windows.
+/// accounts only, in Mod + D2RLoader mode, on Windows. The client runs on
+/// D2RLoader (its game browser) or on the Reimagined Loader (ReimaginedHost.exe,
+/// with lobby-bridge in Battle.net lobby mode); the server is D2RLoader either way.
 /// </summary>
 public partial class LaunchView
 {
@@ -50,15 +53,35 @@ public partial class LaunchView
                                   && LocalD2rdsRigService.IsStaff(_launcherAuthenticationService.CurrentUser);
         if (!LocalRigPanel.IsVisible) return;
 
-        var problem = _localRigBusy ? null : LocalD2rdsRigService.Problem(profile.InstallDirectory);
+        var loader = MainWindow.Settings.LocalRigLoader;
+        _localRigRefreshing = true;
+        LocalRigLoaderComboBox.SelectedIndex = loader == LocalRigLoader.ReimaginedLoader ? 1 : 0;
+        LocalRigLoaderComboBox.IsEnabled = !_localRigBusy;
+        _localRigRefreshing = false;
+        var problem = _localRigBusy ? null : LocalD2rdsRigService.Problem(profile.InstallDirectory, loader);
         LocalRigStatusText.Text = _localRigStatus
                                   ?? problem
-                                  ?? "Runs a d2rds and a ladder client from your mods\\Reimagined against "
+                                  ?? (loader == LocalRigLoader.ReimaginedLoader
+                                      ? "Runs a d2rds and a Reimagined Loader client (Battle.net lobby) from your mods\\Reimagined against "
+                                      : "Runs a d2rds and a ladder client from your mods\\Reimagined against ")
                                   + _apiHttpClient.BaseAddress.GetLeftPart(UriPartial.Authority) + ".";
         LocalRigStartButton.Content = _localRigBusy && _localRigServer.Count > 0 ? "Stop local test" : "Start local server + game";
         LocalRigStartButton.IsEnabled = _localRigBusy
             ? _localRigServer.Count > 0
             : problem is null && !_isLaunching && !MainWindow.IsInstallInProgress && !MainWindow.IsGameRunning();
+    }
+
+    private bool _localRigRefreshing;
+
+    private async void OnLocalRigLoaderChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_localRigRefreshing || _localRigBusy || LocalRigLoaderComboBox.SelectedIndex < 0) return;
+        var loader = LocalRigLoaderComboBox.SelectedIndex == 1 ? LocalRigLoader.ReimaginedLoader : LocalRigLoader.D2RLoader;
+        if (MainWindow.Settings.LocalRigLoader == loader) return;
+        MainWindow.Settings.LocalRigLoader = loader;
+        _localRigStatus = null;
+        await SettingsManager.SaveAsync(MainWindow.Settings);
+        RefreshLocalRigPanel(MainWindow.Settings.CurrentProfile);
     }
 
     private void SetLocalRigStatus(string? status)
@@ -85,12 +108,13 @@ public partial class LaunchView
     {
         var profile = MainWindow.Settings.CurrentProfile;
         var install = profile.InstallDirectory;
+        var loader = MainWindow.Settings.LocalRigLoader;
         if (_isLaunching || MainWindow.IsInstallInProgress || MainWindow.IsGameRunning())
         {
             Notifications.SendNotification("Close the game (and any server) before starting a local d2rds test.", "Warning");
             return;
         }
-        if (LocalD2rdsRigService.Problem(install) is { } problem)
+        if (LocalD2rdsRigService.Problem(install, loader) is { } problem)
         {
             Notifications.SendNotification(problem, "Warning");
             return;
@@ -133,9 +157,12 @@ public partial class LaunchView
             LaunchDiagnostics.Log($"local d2rds rig: mirror copied {mirror.Copied}, kept {mirror.Unchanged}, removed {mirror.Removed} file(s).");
             if (!await ServerSavesConfigService.DisableAsync(install))
                 throw new InvalidOperationException("server-saves.toml could not be reset before the server starts.");
-            LocalD2rdsRigService.WriteServerConfig(install!, apiBase);
+            LocalD2rdsRigService.WriteServerConfig(install!, apiBase, battleNetJoins: loader == LocalRigLoader.ReimaginedLoader);
             LocalD2rdsRigService.WriteServerSecret(install!, session.ServerKey);
-            D2RLoaderService.EnableExtensionDetailLogs(install!);
+            // D2RLoader's log carries the environment fingerprint its game browser
+            // lists by; a Reimagined Loader server is joined through the Battle.net lobby.
+            if (loader != LocalRigLoader.ReimaginedLoader)
+                D2RLoaderService.EnableExtensionDetailLogs(install!);
             D2RLoaderService.SetDefaultMod(install!, LaunchExperience.Ladder);
 
             var saves = await LadderSaveDirectoryService.PrepareAsync(install, session.LadderId, session.LadderName);
@@ -144,7 +171,7 @@ public partial class LaunchView
 
             SetLocalRigStatus("Starting the local d2rds (its console opens)...");
             var beforeServer = LocalD2rdsRigService.GameProcessIds();
-            using (Process.Start(LocalD2rdsRigService.ServerStartInfo(install!))) { }
+            using (Process.Start(LocalD2rdsRigService.ServerStartInfo(install!, loader))) { }
             var serverDeadline = DateTime.UtcNow + LocalRigServerStartTimeout;
             while (!await LocalD2rdsRigService.IsServerUpAsync(http))
             {
@@ -173,7 +200,16 @@ public partial class LaunchView
             await ConfigureReimaginedFeedbackAsync(rigProfile, gameToken.AccessToken);
             await ConfigureAnnouncementsAsync(rigProfile, gameToken.AccessToken);
             await ConfigureSupporterPortalsAsync(rigProfile, gameToken.AccessToken);
-            _localRigConfigs = await LocalD2rdsRigService.PointAtApiAsync(install!, apiBase);
+            var configs = new Dictionary<string, string?>(await LocalD2rdsRigService.PointAtApiAsync(install!, apiBase),
+                StringComparer.OrdinalIgnoreCase);
+            if (loader == LocalRigLoader.ReimaginedLoader)
+            {
+                // lobby-bridge reads lobby_mode from its own config: Battle.net for this
+                // session, put back when it ends (a later D2RLoader ladder launch shares it).
+                foreach (var (path, text) in await LocalD2rdsRigService.UseBattleNetLobbyAsync(install!))
+                    configs[path] = text;
+            }
+            _localRigConfigs = configs;
 
             var cosmeticSnapshot = await _apiHttpClient.GetCosmeticSnapshotAsync(gameToken.AccessToken);
             if (!await GameSessionSecretsService.WriteAsync(install, new GameSessionSecrets(
@@ -181,9 +217,16 @@ public partial class LaunchView
                 throw new InvalidOperationException("The session file could not be written.");
 
             var beforeClient = LocalD2rdsRigService.GameProcessIds();
-            using (Process.Start(LocalD2rdsRigService.ClientStartInfo(install!, rigProfile))) { }
+            var clientStart = loader == LocalRigLoader.ReimaginedLoader
+                ? LocalD2rdsRigService.ReimaginedClientStartInfo(install!, rigProfile)
+                : LocalD2rdsRigService.ClientStartInfo(install!, rigProfile);
+            LaunchDiagnostics.Log("local d2rds rig: client " + clientStart.FileName + " "
+                                  + (clientStart.ArgumentList.Count > 0 ? string.Join(" ", clientStart.ArgumentList) : clientStart.Arguments));
+            using (Process.Start(clientStart)) { }
             handedOff = true;
-            SetLocalRigStatus($"Running on {session.LadderName}: Multiplayer > Host makes the game on your local server. Closing the game stops the server.");
+            SetLocalRigStatus(loader == LocalRigLoader.ReimaginedLoader
+                ? $"Running on {session.LadderName} (Reimagined Loader): Multiplayer opens the Battle.net lobby; Create Game makes the game on your local server. Closing the game stops the server."
+                : $"Running on {session.LadderName}: Multiplayer > Host makes the game on your local server. Closing the game stops the server.");
             _ = WatchLocalRigAsync(install!, beforeClient, gameToken);
         }
         catch (Exception exception)

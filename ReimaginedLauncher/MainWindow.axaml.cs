@@ -2043,7 +2043,7 @@ public partial class MainWindow : Window
             {
                 var activeOrStarting = false;
                 var anyRunning = false;
-                foreach (var name in new[] { "D2R", "D2RLoader" })
+                foreach (var name in new[] { "D2R", "D2RLoader", "ReimaginedHost" })
                 {
                     foreach (var proc in Process.GetProcessesByName(name))
                     {
@@ -2102,7 +2102,7 @@ public partial class MainWindow : Window
             while (DateTime.UtcNow < teardownDeadline)
             {
                 var stillRunning = false;
-                foreach (var name in new[] { "D2R", "D2RLoader" })
+                foreach (var name in new[] { "D2R", "D2RLoader", "ReimaginedHost" })
                 {
                     foreach (var proc in Process.GetProcessesByName(name))
                     {
@@ -2126,7 +2126,7 @@ public partial class MainWindow : Window
                 Thread.Sleep(100);
             }
 
-            foreach (var name in new[] { "D2R", "D2RLoader" })
+            foreach (var name in new[] { "D2R", "D2RLoader", "ReimaginedHost" })
             {
                 foreach (var proc in Process.GetProcessesByName(name))
                 {
@@ -2192,7 +2192,8 @@ public partial class MainWindow : Window
             // "D2R" lookup misses - and the startup cleanup would then delete a
             // live session's secrets file.
             var count = 0;
-            foreach (var name in OperatingSystem.IsWindows() ? new[] { "D2R", "D2RLoader" } : new[] { "D2R", "D2R.exe", "D2RLoader", "D2RLoader.exe" })
+            // ReimaginedHost.exe is the game too, on the Reimagined Loader.
+            foreach (var name in OperatingSystem.IsWindows() ? new[] { "D2R", "D2RLoader", "ReimaginedHost" } : new[] { "D2R", "D2R.exe", "D2RLoader", "D2RLoader.exe", "ReimaginedHost", "ReimaginedHost.exe" })
             {
                 var running = Process.GetProcessesByName(name);
                 foreach (var process in running)

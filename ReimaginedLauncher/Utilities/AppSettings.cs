@@ -129,6 +129,9 @@ public class AppSettings
     public string? LauncherSettingsFolderOverride { get; set; }
     public string? LauncherInstallFolderOverride { get; set; }
 
+    // Staff local d2rds rig: the loader its game client runs on.
+    public LocalRigLoader LocalRigLoader { get; set; }
+
     [JsonIgnore]
     public string? NexusModsSSOApiKey { get; set; }
 

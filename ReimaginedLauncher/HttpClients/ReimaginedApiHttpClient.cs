@@ -304,19 +304,28 @@ public sealed partial class ReimaginedApiHttpClient
         LadderD2RLoaderResponse loader,
         string destinationPath,
         IProgress<D2RLoaderInstallProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        LadderLoaderType? expectedKind = null)
     {
-        if (!D2RLoaderInstallerService.IsValidPin(loader))
-            throw new InvalidOperationException("This ladder's D2RLoader build is not available for download.");
+        var kind = expectedKind ?? loader.Kind;
+        var label = D2RLoaderInstallerService.DisplayName(kind);
+        if (!D2RLoaderInstallerService.IsValidPin(loader, kind))
+            throw new InvalidOperationException($"This ladder's {label} build is not available for download.");
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromMinutes(15));
         var token = timeout.Token;
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"ladders/{ladderId}/d2rloader/download");
+        var requestPath = !string.IsNullOrWhiteSpace(loader.DownloadPath)
+                          && loader.DownloadPath.StartsWith($"/ladders/{ladderId}/", StringComparison.OrdinalIgnoreCase)
+            ? loader.DownloadPath.TrimStart('/')
+            : kind == LadderLoaderType.ReimaginedLoader
+                ? $"ladders/{ladderId}/loader/download"
+                : $"ladders/{ladderId}/d2rloader/download";
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestPath);
         await AuthorizeAsync(request, token);
         using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
         response.EnsureSuccessStatusCode();
         if (response.Content.Headers.ContentLength is { } length && length != loader.SizeBytes)
-            throw new System.IO.InvalidDataException("The D2RLoader download changed on the server. Refresh the ladder and try again.");
+            throw new System.IO.InvalidDataException($"The {label} download changed on the server. Refresh the ladder and try again.");
         await using var input = await response.Content.ReadAsStreamAsync(token);
         await using var output = new System.IO.FileStream(destinationPath, System.IO.FileMode.Create,
             System.IO.FileAccess.Write, System.IO.FileShare.None, 81920, useAsync: true);
@@ -328,14 +337,14 @@ public sealed partial class ReimaginedApiHttpClient
         {
             received += read;
             if (received > loader.SizeBytes)
-                throw new System.IO.InvalidDataException("The D2RLoader download exceeded its published size.");
+                throw new System.IO.InvalidDataException($"The {label} download exceeded its published size.");
             hash.AppendData(buffer, 0, read);
             await output.WriteAsync(buffer.AsMemory(0, read), token);
-            progress?.Report(new D2RLoaderInstallProgress($"Downloading D2RLoader {loader.Version}...", received * 100d / loader.SizeBytes));
+            progress?.Report(new D2RLoaderInstallProgress($"Downloading {label} {loader.Version}...", received * 100d / loader.SizeBytes));
         }
         if (received != loader.SizeBytes
             || !string.Equals(Convert.ToHexString(hash.GetHashAndReset()), loader.Sha256, StringComparison.OrdinalIgnoreCase))
-            throw new System.IO.InvalidDataException("The D2RLoader download failed its SHA-256 check.");
+            throw new System.IO.InvalidDataException($"The {label} download failed its SHA-256 check.");
     }
 
     public async Task<LadderLaunchTicketResponse> CreateLadderLaunchTicketAsync(

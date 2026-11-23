@@ -14,6 +14,16 @@ namespace ReimaginedLauncher.Utilities;
 
 public sealed record LocalRigMirrorResult(int Copied, int Unchanged, int Removed);
 
+/// <summary>Which loader runs the local rig's game client (the server is always D2RLoader).</summary>
+public enum LocalRigLoader
+{
+    /// <summary>D2RLoader.exe and its game browser (the production lobby).</summary>
+    D2RLoader,
+
+    /// <summary>The Reimagined Loader's ReimaginedHost.exe with lobby-bridge in Battle.net lobby mode.</summary>
+    ReimaginedLoader
+}
+
 /// <summary>
 /// The staff local d2rds rig: a dedicated server and a ladder client on this PC,
 /// from the same files, against the launcher's API.
@@ -54,11 +64,55 @@ public static class LocalD2rdsRigService
 
     public static string SourceRoot(string installDirectory) => Path.Combine(installDirectory, "mods", ModInstallationPaths.NormalModName);
 
-    /// <summary>Why the rig cannot start from this install, or null.</summary>
+    /// <summary>
+    /// The Reimagined Loader's four shipping files (reimagined-loader scriptsuild-dist.ps1
+    /// stages them in out\dist), copied into the D2R folder. Its core is D2RRCore.dll, so
+    /// it sits beside D2RLoader.exe and D2RLoader's own D2RCore.dll.
+    /// </summary>
+    public static readonly string[] ReimaginedLoaderFiles =
+        ["ReimaginedHost.exe", "D2RRCore.dll", "ReimaginedHostRunner.dll", "ReimaginedRuntime.dll"];
+
+    // The packed host carries the engine (about 18 MB); the unpacked dev stub is a few KB
+    // and will not start without --unpatched-engine or --package-host.
+    internal const long PackedHostMinimumBytes = 1024 * 1024;
+
+    /// <summary>Why the rig cannot start with this loader, or null.</summary>
+    public static string? Problem(string? installDirectory, LocalRigLoader loader)
+    {
+        // The Reimagined Loader rig runs server and client on ReimaginedHost.exe:
+        // D2RLoader.exe need not be installed at all.
+        if (loader == LocalRigLoader.ReimaginedLoader)
+        {
+            if (string.IsNullOrWhiteSpace(installDirectory) || !File.Exists(Path.Combine(installDirectory, "D2R.exe")))
+                return "Select a D2R installation.";
+            return ReimaginedLoaderProblem(installDirectory) ?? PluginProblem(installDirectory);
+        }
+        return Problem(installDirectory);
+    }
+
+    /// <summary>Why the D2R folder cannot run the Reimagined Loader client, or null when its 4 files are there.</summary>
+    public static string? ReimaginedLoaderProblem(string installDirectory)
+    {
+        var missing = ReimaginedLoaderFiles.Where(name => !File.Exists(Path.Combine(installDirectory, name))).ToArray();
+        if (missing.Length > 0)
+            return $"The D2R folder is missing {string.Join(", ", missing)}. Copy the Reimagined Loader's 4 files from "
+                   + @"reimagined-loader out\dist (scripts\build-dist.ps1) into it.";
+        if (new FileInfo(Path.Combine(installDirectory, "ReimaginedHost.exe")).Length < PackedHostMinimumBytes)
+            return @"The D2R folder's ReimaginedHost.exe is the unpacked dev host; copy the packed one from reimagined-loader out\dist.";
+        return null;
+    }
+
+    /// <summary>Why the D2RLoader rig cannot start from this install, or null.</summary>
     public static string? Problem(string? installDirectory)
     {
         if (string.IsNullOrWhiteSpace(installDirectory) || !File.Exists(Path.Combine(installDirectory, "D2RLoader.exe")))
             return "Select a D2R installation with D2RLoader installed.";
+        return PluginProblem(installDirectory);
+    }
+
+    /// <summary>Why mods\Reimagined lacks the rig's plugins, or null.</summary>
+    private static string? PluginProblem(string installDirectory)
+    {
         var plugins = Path.Combine(SourceRoot(installDirectory), "d2rloader", "plugins");
         if (!Directory.Exists(plugins)) return "mods\\Reimagined is not installed; the rig runs your local Reimagined.";
         var missing = RequiredPlugins.Where(name => !File.Exists(Path.Combine(plugins, name))).ToArray();
@@ -192,11 +246,21 @@ public static class LocalD2rdsRigService
     /// own (Host makes them). Every player who joins is a cheat operator, as the
     /// host's `op` would make them; a headless server has nobody to type it.
     /// </summary>
-    public static void WriteServerConfig(string installDirectory, string apiBaseUrl)
+    /// <param name="battleNetJoins">
+    /// The client is the Reimagined Loader in Battle.net lobby mode. d2rds then takes
+    /// Battle.net join tokens, which switches D2RCore's environment handshake off for the
+    /// whole process (bnet_join.cpp): every D2RLoader client would time out waiting for
+    /// "host acceptance". So it is on only for a Reimagined Loader rig.
+    /// </param>
+    public static void WriteServerConfig(string installDirectory, string apiBaseUrl, bool battleNetJoins = false)
     {
         if (apiBaseUrl.IndexOfAny(['"', '\\', '\r', '\n']) >= 0) throw new ArgumentException("The API address cannot be written to d2rds.toml.");
         var path = Path.Combine(ModInstallationPaths.LadderModRoot(installDirectory), "d2rloader", "config", "d2rds.toml");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        // Diagnostic switches a staff member set by hand survive the rewrite (off otherwise).
+        var previous = File.Exists(path) ? File.ReadAllText(path) : string.Empty;
+        var logPackets = KeptSwitch(previous, "log_packets");
+        var captureJoinSaves = KeptSwitch(previous, "capture_join_saves");
         var config = $"""
             # Written by the Reimagined launcher for a staff local d2rds test.
             # Only a launch with -d2rds becomes a server; every other launch of this
@@ -209,6 +273,12 @@ public static class LocalD2rdsRigService
             authoritative_saves = true
             standing_games = false
             cheat_operators = true
+            # Battle.net join tokens (Reimagined Loader client only: it turns off the
+            # D2RLoader environment handshake for every client of this server).
+            bnet_token_join = {(battleNetJoins ? "true" : "false")}
+            # Diagnostics, kept from the previous file when set to true by hand.
+            log_packets = {logPackets}
+            capture_join_saves = {captureJoinSaves}
 
             [server]
             game_port = {ServerGamePort}
@@ -233,6 +303,21 @@ public static class LocalD2rdsRigService
 
             """;
         File.WriteAllText(path, config.ReplaceLineEndings(Environment.NewLine), new UTF8Encoding(false));
+    }
+
+    /// <summary>"true" when <paramref name="toml"/> sets <paramref name="key"/> = true, else "false".</summary>
+    internal static string KeptSwitch(string toml, string key)
+    {
+        foreach (var raw in toml.ReplaceLineEndings("\n").Split('\n'))
+        {
+            var line = raw.Trim();
+            if (!line.StartsWith(key, StringComparison.Ordinal)) continue;
+            var rest = line[key.Length..].TrimStart();
+            if (!rest.StartsWith('=')) continue;
+            var value = rest[1..].Split('#')[0].Trim();
+            return value == "true" ? "true" : "false";
+        }
+        return "false";
     }
 
     /// <summary>
@@ -271,7 +356,7 @@ public static class LocalD2rdsRigService
     public static HashSet<int> GameProcessIds()
     {
         var ids = new HashSet<int>();
-        foreach (var name in new[] { "D2R", "D2RLoader" })
+        foreach (var name in new[] { "D2R", "D2RLoader", "ReimaginedHost" })
         {
             foreach (var process in Process.GetProcessesByName(name))
             {
@@ -290,6 +375,29 @@ public static class LocalD2rdsRigService
         UseShellExecute = false
     };
 
+    /// <summary>
+    /// The d2rds server on the Reimagined Loader: ReimaginedHost.exe with the same
+    /// game arguments, so nothing of D2RLoader (D2RLoader.exe, D2RCore.dll) runs.
+    /// </summary>
+    public static ProcessStartInfo ReimaginedServerStartInfo(string installDirectory)
+    {
+        var info = new ProcessStartInfo(Path.Combine(installDirectory, "ReimaginedHost.exe"))
+        {
+            WorkingDirectory = installDirectory,
+            UseShellExecute = false
+        };
+        info.ArgumentList.Add("--game-dir");
+        info.ArgumentList.Add(installDirectory);
+        info.ArgumentList.Add("--");
+        foreach (var argument in ServerStartInfo(installDirectory).Arguments.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            info.ArgumentList.Add(argument);
+        return info;
+    }
+
+    /// <summary>The server start for the rig's loader.</summary>
+    public static ProcessStartInfo ServerStartInfo(string installDirectory, LocalRigLoader loader)
+        => loader == LocalRigLoader.ReimaginedLoader ? ReimaginedServerStartInfo(installDirectory) : ServerStartInfo(installDirectory);
+
     public static ProcessStartInfo ClientStartInfo(string installDirectory, InstallationProfile profile) => new(Path.Combine(installDirectory, "D2RLoader.exe"))
     {
         Arguments = GameLauncherService.BuildLaunchParameters(new InstallationProfile
@@ -303,6 +411,57 @@ public static class LocalD2rdsRigService
         WorkingDirectory = installDirectory,
         UseShellExecute = false
     };
+
+    /// <summary>
+    /// The client on the Reimagined Loader: the packed host in the D2R folder, with the
+    /// same game arguments a D2RLoader ladder launch gets.
+    /// </summary>
+    public static ProcessStartInfo ReimaginedClientStartInfo(string installDirectory, InstallationProfile profile)
+    {
+        var info = new ProcessStartInfo(Path.Combine(installDirectory, "ReimaginedHost.exe"))
+        {
+            WorkingDirectory = installDirectory,
+            UseShellExecute = false
+        };
+        info.ArgumentList.Add("--game-dir");
+        info.ArgumentList.Add(installDirectory);
+        info.ArgumentList.Add("--");
+        foreach (var argument in ClientStartInfo(installDirectory, profile).Arguments.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            info.ArgumentList.Add(argument);
+        return info;
+    }
+
+    /// <summary>
+    /// Puts lobby-bridge in the ladder folder into Battle.net lobby mode for a
+    /// Reimagined Loader session. Returns the file as it was, for <see cref="RestoreConfigs"/>.
+    /// </summary>
+    public static async Task<IReadOnlyDictionary<string, string?>> UseBattleNetLobbyAsync(string installDirectory)
+    {
+        var path = Path.Combine(ModInstallationPaths.LadderModRoot(installDirectory), "d2rloader", "config", "lobby-bridge.toml");
+        var original = File.Exists(path) ? await File.ReadAllTextAsync(path) : null;
+        await File.WriteAllTextAsync(path, WithLobbyMode(original, "battlenet"), new UTF8Encoding(false));
+        return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase) { [path] = original };
+    }
+
+    /// <summary>The config text with its lobby_mode line set (replaced, or added at the end).</summary>
+    internal static string WithLobbyMode(string? text, string mode)
+    {
+        var lines = (text ?? string.Empty).ReplaceLineEndings("\n").Split('\n').ToList();
+        if (lines.Count > 0 && lines[^1].Length == 0) lines.RemoveAt(lines.Count - 1);
+        var setting = $"lobby_mode = \"{mode}\"";
+        var index = lines.FindIndex(line => line.TrimStart().StartsWith("lobby_mode", StringComparison.Ordinal)
+                                            && line.TrimStart()["lobby_mode".Length..].TrimStart().StartsWith('='));
+        if (index >= 0)
+        {
+            lines[index] = setting;
+        }
+        else
+        {
+            lines.Add("# Written by the Reimagined launcher for a local Reimagined Loader test; put back when it ends.");
+            lines.Add(setting);
+        }
+        return string.Join(Environment.NewLine, lines) + Environment.NewLine;
+    }
 
     /// <summary>Ends the given processes and their children; ones already gone are fine.</summary>
     public static void Stop(IEnumerable<int> processIds)

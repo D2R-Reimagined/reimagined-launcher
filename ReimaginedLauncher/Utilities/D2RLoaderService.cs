@@ -216,6 +216,43 @@ public static partial class D2RLoaderService
         return true;
     }
 
+    public static bool CanUseLadderLoader(
+        InstallationProfile profile,
+        HttpClients.Models.LadderLoaderType loaderType,
+        bool allowMissingLoader,
+        out string? reason)
+    {
+        if (loaderType != HttpClients.Models.LadderLoaderType.ReimaginedLoader)
+        {
+            return CanUseOnlineExperience(profile, out reason);
+        }
+
+        if (profile.Type == InstallationType.D2RMM)
+        {
+            reason = "The Ladder experience is not available for D2RMM profiles.";
+            return false;
+        }
+
+        if (!InstallDirectoryValidator.IsValidInstallDirectory(profile.InstallDirectory))
+        {
+            reason = "Select the Diablo II: Resurrected folder that contains D2R.exe.";
+            return false;
+        }
+
+        if (!allowMissingLoader)
+        {
+            var problem = LocalD2rdsRigService.ReimaginedLoaderProblem(profile.InstallDirectory!);
+            if (problem is not null)
+            {
+                reason = problem;
+                return false;
+            }
+        }
+
+        reason = null;
+        return true;
+    }
+
     private static void AddExtensions(
         List<D2RLoaderExtensionInfo> extensions,
         string root,

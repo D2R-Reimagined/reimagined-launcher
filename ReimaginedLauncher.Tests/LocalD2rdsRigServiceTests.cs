@@ -107,6 +107,22 @@ public sealed class LocalD2rdsRigServiceTests : IDisposable
         Assert.Contains("cheat_operators = true", config);
         Assert.Contains("enabled = false", config);
         Assert.Contains("lobby_server_key = \"\"", config);
+        Assert.Contains("log_packets = false", config);
+        // D2RLoader clients need the environment handshake that Battle.net token joins turn off.
+        Assert.Contains("bnet_token_join = false", config);
+
+        // A diagnostic switch set by hand survives the next rig start; anything else is reset.
+        File.WriteAllText(Ladder("d2rloader/config/d2rds.toml"), config.Replace("log_packets = false", "log_packets = true   # by hand")
+            .Replace("cheat_operators = true", "cheat_operators = false"));
+        LocalD2rdsRigService.WriteServerConfig(_install, "http://localhost:5000");
+        var rewritten = File.ReadAllText(Ladder("d2rloader/config/d2rds.toml"));
+        Assert.Contains("log_packets = true", rewritten);
+        Assert.Contains("capture_join_saves = false", rewritten);
+        Assert.Contains("cheat_operators = true", rewritten);
+        Assert.Equal("false", LocalD2rdsRigService.KeptSwitch("log_packets_x = true\n", "log_packets"));
+        LocalD2rdsRigService.WriteServerConfig(_install, "http://localhost:5000", battleNetJoins: true);
+        Assert.Contains("bnet_token_join = true", File.ReadAllText(Ladder("d2rloader/config/d2rds.toml")));
+
         var secrets = File.ReadAllLines(Path.Combine(_install, "reimagined-secrets", "server.toml"));
         Assert.Contains("api_token = \"control\"", secrets);
         Assert.Single(secrets, line => line.StartsWith("lobby_server_key", StringComparison.Ordinal));
@@ -131,6 +147,92 @@ public sealed class LocalD2rdsRigServiceTests : IDisposable
         Assert.Contains("d2rl-d2rds.dll", LocalD2rdsRigService.Problem(_install));
         Write("mods/Reimagined/d2rloader/plugins/d2rl-d2rds.dll", "x");
         Assert.Null(LocalD2rdsRigService.Problem(_install));
+    }
+
+    [Fact]
+    public void Reimagined_loader_needs_its_four_files_in_the_d2r_folder_and_the_packed_host()
+    {
+        File.WriteAllBytes(Path.Combine(_install, "D2R.exe"), [0x4D, 0x5A]);
+        File.WriteAllBytes(Path.Combine(_install, "D2RLoader.exe"), [0x4D, 0x5A]);
+        // D2RLoader's own core keeps its name beside ours.
+        File.WriteAllBytes(Path.Combine(_install, "D2RCore.dll"), [0x4D, 0x5A]);
+        foreach (var plugin in new[] { "d2rl-d2rds.dll", "d2rl-server-saves.dll", "d2rl-lobby-bridge.dll" })
+            Write("mods/Reimagined/d2rloader/plugins/" + plugin, "x");
+        Assert.Null(LocalD2rdsRigService.Problem(_install, LocalRigLoader.D2RLoader));
+
+        var missing = LocalD2rdsRigService.Problem(_install, LocalRigLoader.ReimaginedLoader);
+        Assert.NotNull(missing);
+        foreach (var name in LocalD2rdsRigService.ReimaginedLoaderFiles) Assert.Contains(name, missing);
+        Assert.Contains("D2RRCore.dll", missing);
+
+        File.WriteAllBytes(Path.Combine(_install, "ReimaginedHost.exe"), new byte[3072]); // the unpacked dev stub
+        File.WriteAllBytes(Path.Combine(_install, "D2RRCore.dll"), [0x4D, 0x5A]);
+        File.WriteAllBytes(Path.Combine(_install, "ReimaginedHostRunner.dll"), [0x4D, 0x5A]);
+        Assert.Contains("ReimaginedRuntime.dll", LocalD2rdsRigService.Problem(_install, LocalRigLoader.ReimaginedLoader));
+        File.WriteAllBytes(Path.Combine(_install, "ReimaginedRuntime.dll"), [0x4D, 0x5A]);
+        Assert.Contains("unpacked", LocalD2rdsRigService.Problem(_install, LocalRigLoader.ReimaginedLoader));
+
+        File.WriteAllBytes(Path.Combine(_install, "ReimaginedHost.exe"), new byte[LocalD2rdsRigService.PackedHostMinimumBytes]);
+        Assert.Null(LocalD2rdsRigService.Problem(_install, LocalRigLoader.ReimaginedLoader));
+    }
+
+    [Fact]
+    public void Reimagined_loader_rig_needs_no_d2rloader_and_serves_on_the_host()
+    {
+        File.WriteAllBytes(Path.Combine(_install, "D2R.exe"), [0x4D, 0x5A]);
+        foreach (var plugin in new[] { "d2rl-d2rds.dll", "d2rl-server-saves.dll", "d2rl-lobby-bridge.dll" })
+            Write("mods/Reimagined/d2rloader/plugins/" + plugin, "x");
+        foreach (var name in LocalD2rdsRigService.ReimaginedLoaderFiles)
+            File.WriteAllBytes(Path.Combine(_install, name), [0x4D, 0x5A]);
+        File.WriteAllBytes(Path.Combine(_install, "ReimaginedHost.exe"), new byte[LocalD2rdsRigService.PackedHostMinimumBytes]);
+
+        // No D2RLoader.exe in the folder at all.
+        Assert.False(File.Exists(Path.Combine(_install, "D2RLoader.exe")));
+        Assert.Null(LocalD2rdsRigService.Problem(_install, LocalRigLoader.ReimaginedLoader));
+        Assert.NotNull(LocalD2rdsRigService.Problem(_install, LocalRigLoader.D2RLoader));
+
+        var server = LocalD2rdsRigService.ServerStartInfo(_install, LocalRigLoader.ReimaginedLoader);
+        Assert.Equal(Path.Combine(_install, "ReimaginedHost.exe"), server.FileName);
+        Assert.Equal(["--game-dir", _install, "--", "-mod", "ReimaginedLadder", "-txt", "-d2rds"], server.ArgumentList.ToList());
+        Assert.Equal(Path.Combine(_install, "D2RLoader.exe"), LocalD2rdsRigService.ServerStartInfo(_install, LocalRigLoader.D2RLoader).FileName);
+    }
+
+    [Fact]
+    public void Reimagined_client_is_the_d2r_folders_host_with_the_ladder_game_arguments()
+    {
+        var profile = new InstallationProfile { LaunchExperience = LaunchExperience.Ladder, WindowedMode = true };
+
+        var start = LocalD2rdsRigService.ReimaginedClientStartInfo(_install, profile);
+
+        Assert.Equal(Path.Combine(_install, "ReimaginedHost.exe"), start.FileName);
+        Assert.Equal(_install, start.WorkingDirectory);
+        var args = start.ArgumentList.ToList();
+        Assert.Equal(["--game-dir", _install, "--"], args.Take(3));
+        Assert.Equal(LocalD2rdsRigService.ClientStartInfo(_install, profile).Arguments, string.Join(" ", args.Skip(3)));
+        Assert.Contains("ReimaginedLadder", args);
+        Assert.Contains("-w", args);
+    }
+
+    [Fact]
+    public async Task Battle_net_lobby_mode_is_set_for_the_session_and_put_back()
+    {
+        var path = Write("mods/ReimaginedLadder/d2rloader/config/lobby-bridge.toml",
+            "redirect = true\nlobby_mode = \"d2rloader\"\nsentry = true\n");
+
+        var originals = await LocalD2rdsRigService.UseBattleNetLobbyAsync(_install);
+
+        var text = await File.ReadAllTextAsync(path);
+        Assert.Contains("lobby_mode = \"battlenet\"", text);
+        Assert.DoesNotContain("\"d2rloader\"", text);
+        Assert.Contains("sentry = true", text);
+        LocalD2rdsRigService.RestoreConfigs(originals);
+        Assert.Equal("redirect = true\nlobby_mode = \"d2rloader\"\nsentry = true\n", await File.ReadAllTextAsync(path));
+
+        // No lobby_mode line yet: one is added. A key that only starts with lobby_mode is left alone.
+        Assert.EndsWith("lobby_mode = \"battlenet\"" + Environment.NewLine, LocalD2rdsRigService.WithLobbyMode("redirect = true\n", "battlenet"));
+        var lookalike = LocalD2rdsRigService.WithLobbyMode("lobby_mode_x = 1\n", "battlenet");
+        Assert.Contains("lobby_mode_x = 1", lookalike);
+        Assert.Contains("lobby_mode = \"battlenet\"", lookalike);
     }
 
     [Fact]
