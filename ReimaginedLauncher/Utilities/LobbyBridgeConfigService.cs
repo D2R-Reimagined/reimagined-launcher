@@ -33,9 +33,11 @@ public static class LobbyBridgeConfigService
             ? await File.ReadAllTextAsync(configPath, cancellationToken)
             : null;
         var updated = LocalD2rdsRigService.WithLobbyMode(original, mode);
-        if (string.Equals(original, updated, StringComparison.Ordinal)) return;
-
-        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
-        await File.WriteAllTextAsync(configPath, updated, new UTF8Encoding(false), cancellationToken);
+        if (!string.Equals(original, updated, StringComparison.Ordinal))
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+            await File.WriteAllTextAsync(configPath, updated, new UTF8Encoding(false), cancellationToken);
+        }
+        LaunchDiagnostics.Log($"lobby-bridge configured for {loaderType} (lobby_mode = \"{mode}\").");
     }
 }

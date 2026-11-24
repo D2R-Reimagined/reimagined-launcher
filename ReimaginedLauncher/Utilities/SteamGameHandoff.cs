@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using ReimaginedLauncher.HttpClients.Models;
 
 namespace ReimaginedLauncher.Utilities;
 
@@ -319,17 +320,23 @@ internal sealed class SteamGameHandoff : IDisposable
 
     /// <summary>Submits a validated request to the registered Steam helper using the supplied or newly acquired reservation.</summary>
     internal static (SteamGameHandoff Session, Process Command) Start(InstallationProfile profile, string arguments,
-        SteamGameHandoff? reservation = null)
+        SteamGameHandoff? reservation = null, LadderLoaderType loaderType = LadderLoaderType.D2RLoader)
     {
         var directory = StateDirectory;
         var registration = ReadJson<SteamHandoffRegistration>(Path.Combine(directory, "registration.json"));
         var gameDirectory = profile.InstallDirectory!;
-        var executable = Path.Combine(gameDirectory, GameLauncherService.UsesD2RLoader(profile) ? "D2RLoader.exe" : "D2R.exe");
+        var useReimaginedLoader = profile.LaunchExperience == LaunchExperience.Ladder
+                                  && loaderType == LadderLoaderType.ReimaginedLoader;
+        var executable = Path.Combine(gameDirectory,
+            useReimaginedLoader ? D2RLoaderInstallerService.ExecutableName(LadderLoaderType.ReimaginedLoader)
+            : GameLauncherService.UsesD2RLoader(profile) ? "D2RLoader.exe" : "D2R.exe");
+        var handoffArguments = useReimaginedLoader ? $"-- {arguments}" : arguments;
         if (!GameLauncherService.IsValidSteamProtonLaunch(profile, registration.SteamRoot, executable, out var error))
             throw new InvalidOperationException(error);
         if (!File.Exists(executable)) throw new InvalidOperationException("The selected game executable is missing.");
         if (FindGameProcesses(Path.Combine(gameDirectory, "D2R.exe")).Length != 0
-            || FindGameProcesses(Path.Combine(gameDirectory, "D2RLoader.exe")).Length != 0)
+            || FindGameProcesses(Path.Combine(gameDirectory, "D2RLoader.exe")).Length != 0
+            || FindGameProcesses(Path.Combine(gameDirectory, D2RLoaderInstallerService.ExecutableName(LadderLoaderType.ReimaginedLoader))).Length != 0)
             throw new InvalidOperationException("Close the running D2R game before starting another session.");
         var ownsReservation = reservation is null;
         reservation ??= Reserve();
@@ -339,7 +346,7 @@ internal sealed class SteamGameHandoff : IDisposable
                 throw new InvalidOperationException("The Steam game reservation is not available.");
             var id = reservation._id;
             var request = new SteamHandoffRequest(id, DateTimeOffset.UtcNow, registration.SteamRoot, gameDirectory,
-                profile.ProtonExecutable!, executable, SplitArguments(arguments), profile.EnableLsfg);
+                profile.ProtonExecutable!, executable, SplitArguments(handoffArguments), profile.EnableLsfg);
             WriteJson(Path.Combine(directory, "request.json"), request);
             WriteJson(Path.Combine(directory, "status.json"), new SteamHandoffStatus(id, "pending"));
             var command = new ProcessStartInfo(GameLauncherService.FindExecutableOnPath("steam")
@@ -347,7 +354,7 @@ internal sealed class SteamGameHandoff : IDisposable
             command.ArgumentList.Add("steam://rungameid/" + (((ulong)registration.AppId << 32) | 0x02000000));
             foreach (var key in new[] { "SteamAppId", "SteamGameId", "SteamOverlayGameId", "LD_PRELOAD" }) command.Environment.Remove(key);
             var process = Process.Start(command) ?? throw new InvalidOperationException("Steam did not accept the game handoff.");
-            LaunchDiagnostics.Log($"Steam handoff {id}: launcher-owned session {registration.AppId}, {Path.GetFileName(executable)} {arguments}");
+            LaunchDiagnostics.Log($"Steam handoff {id}: launcher-owned session {registration.AppId}, {Path.GetFileName(executable)} {handoffArguments}");
             reservation._started = true;
             return (reservation, process);
         }
@@ -423,7 +430,8 @@ internal sealed class SteamGameHandoff : IDisposable
         if (!GameLauncherService.IsValidSteamProtonLaunch(profile, request.SteamRoot, request.Executable, out var error))
             throw new InvalidOperationException(error);
         if (request.Executable != Path.Combine(request.GameDirectory, "D2R.exe")
-            && request.Executable != Path.Combine(request.GameDirectory, "D2RLoader.exe"))
+            && request.Executable != Path.Combine(request.GameDirectory, "D2RLoader.exe")
+            && request.Executable != Path.Combine(request.GameDirectory, D2RLoaderInstallerService.ExecutableName(LadderLoaderType.ReimaginedLoader)))
             throw new InvalidOperationException("Unsupported Steam game executable.");
         var command = request.ProtonExecutable;
         if (request.EnableLsfg)

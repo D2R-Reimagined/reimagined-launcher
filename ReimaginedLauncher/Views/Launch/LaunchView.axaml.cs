@@ -650,7 +650,10 @@ public partial class LaunchView : UserControl
             LadderPolicyInlineBadge.IsVisible = false;
         }
 
-        LaunchCommandText.Text = LauncherService.BuildLaunchCommand();
+        LaunchCommandText.Text = LauncherService.BuildLaunchCommand(
+            loaderType: profile.LaunchExperience == LaunchExperience.Ladder
+                ? SelectedLadder?.LoaderType ?? LadderLoaderType.D2RLoader
+                : LadderLoaderType.D2RLoader);
 
         if (!_installationOnly) RefreshLocalFeatures();
 
@@ -1943,7 +1946,7 @@ public partial class LaunchView : UserControl
         LadderAction.Restore => "Restores and verifies the cached ladder package while preserving your normal installation. This does not start the game.",
         LadderAction.Play when _ladderSchedule?.IsPreview(SelectedLadder) == true =>
             "Admin preview: this ladder has not started. You can connect and play to check it, but nothing is saved - every preview starts from an empty character list.",
-        LadderAction.Play => "Verifies the isolated ladder installation, enforces its extension allowlist, and starts ReimaginedLadder through D2RLoader.",
+        LadderAction.Play => $"Verifies the isolated ladder installation, enforces its extension allowlist, and starts ReimaginedLadder through {D2RLoaderInstallerService.DisplayName(SelectedLadder?.LoaderType ?? LadderLoaderType.D2RLoader)}.",
         LadderAction.Waiting => "Your package is ready. Play unlocks after the API confirms the ladder is live and the installation is verified again.",
         _ => _ladderBundleReadiness?.Status ?? "This ladder cannot be played from this installation yet."
     };
