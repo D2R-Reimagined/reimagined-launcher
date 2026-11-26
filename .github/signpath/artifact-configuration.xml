@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration for project "reimagined-launcher".
+  Paste into SignPath (Project -> Artifact configurations) as "initial", or create
+  a separate configuration and set the repo variable SIGNPATH_ARTIFACT_CONFIGURATION_SLUG.
+
+  Covers both Windows release signing requests (uploaded as GitHub Actions ZIP artifacts):
+    1. Inner Windows binaries: ReimaginedLauncher.exe, Squirrel.exe, and
+       D2R Reimagined Launcher_ExecutionStub.exe.
+    2. Final Velopack installer: D2RReimagined.ReimaginedLauncher-win-Setup.exe.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file-set>
+      <include path="*.exe" max-matches="unbounded" />
+      <for-each>
+        <authenticode-sign />
+      </for-each>
+    </pe-file-set>
+  </zip-file>
+</artifact-configuration>

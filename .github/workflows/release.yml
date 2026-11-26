@@ -113,44 +113,6 @@ jobs:
             }
           }
 
-      - name: Upload unsigned Windows executable
-        id: upload_unsigned_exe
-        if: vars.SIGNPATH_SIGNING_POLICY_SLUG != ''
-        uses: actions/upload-artifact@v7
-        with:
-          path: ${{ github.workspace }}\artifacts\ReimaginedLauncher\win-x64\ReimaginedLauncher.exe
-          archive: false
-          retention-days: 1
-
-      - name: Sign Windows executable
-        if: vars.SIGNPATH_SIGNING_POLICY_SLUG != ''
-        uses: signpath/github-action-submit-signing-request@v3
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: f16414f6-32df-4874-a376-940734695369
-          project-slug: reimagined-launcher
-          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
-          artifact-configuration-slug: initial
-          github-artifact-id: ${{ steps.upload_unsigned_exe.outputs.artifact-id }}
-          skip-decompress: true
-          wait-for-completion: true
-          wait-for-completion-timeout-in-seconds: 3600
-          output-artifact-directory: ${{ github.workspace }}\artifacts\signed\exe-win-x64
-
-      - name: Replace Windows executable with signed copy
-        if: vars.SIGNPATH_SIGNING_POLICY_SLUG != ''
-        shell: pwsh
-        run: |
-          $signedFiles = @(Get-ChildItem -LiteralPath '${{ github.workspace }}\artifacts\signed\exe-win-x64' -File)
-          if ($signedFiles.Count -ne 1) {
-            throw "Expected exactly one signed executable, found $($signedFiles.Count)"
-          }
-
-          Copy-Item `
-            -LiteralPath $signedFiles[0].FullName `
-            -Destination '${{ github.workspace }}\artifacts\ReimaginedLauncher\win-x64\ReimaginedLauncher.exe' `
-            -Force
-
       - name: Restore Linux target
         run: dotnet restore ReimaginedLauncher.sln -p:Configuration=Production -r linux-x64
 
@@ -196,7 +158,89 @@ jobs:
             --token "${{ steps.app_token.outputs.token }}" `
             --outputDir "${{ github.workspace }}\artifacts\velopack\linux-x64"
 
-      - name: Package Windows Velopack release
+      - name: Collect Windows binaries for SignPath
+        if: vars.SIGNPATH_SIGNING_POLICY_SLUG != ''
+        shell: pwsh
+        env:
+          SIGNPATH_HOOK_MODE: Collect
+          SIGNPATH_HOOK_WORKDIR: ${{ github.workspace }}\artifacts\signpath
+        run: |
+          $workDir = $env:SIGNPATH_HOOK_WORKDIR
+
+          dnx "vpk@${{ steps.velopack_version.outputs.version }}" --allow-roll-forward -- --yes pack `
+            --packId "D2RReimagined.ReimaginedLauncher" `
+            --packVersion "${{ steps.release_version.outputs.version }}" `
+            --packDir "${{ github.workspace }}\artifacts\ReimaginedLauncher\win-x64" `
+            --mainExe "ReimaginedLauncher.exe" `
+            --packTitle "D2R Reimagined Launcher" `
+            --packAuthors "D2R Reimagined" `
+            --icon "ReimaginedLauncher/Assets/ReimaginedLauncherDesktop.ico" `
+            --runtime "win-x64" `
+            --channel "win" `
+            --noInst `
+            --noPortable `
+            --delta "None" `
+            --signTemplate "pwsh -NoProfile -File .github\scripts\Invoke-VelopackSignPathHook.ps1 {{file...}}" `
+            --outputDir "$workDir\collect-out"
+
+          $collected = @(Get-ChildItem -LiteralPath "$workDir\unsigned" -File -Filter '*.exe')
+          if ($collected.Count -ne 3) {
+            $names = ($collected | ForEach-Object { $_.Name }) -join ', '
+            throw "Expected 3 Windows executables for SignPath (app, Squirrel.exe, execution stub), found $($collected.Count): $names"
+          }
+
+      - name: Upload unsigned Windows binaries
+        id: upload_unsigned_win_binaries
+        if: vars.SIGNPATH_SIGNING_POLICY_SLUG != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned-win-binaries
+          path: ${{ github.workspace }}\artifacts\signpath\unsigned\*.exe
+          retention-days: 1
+
+      - name: Sign Windows binaries
+        if: vars.SIGNPATH_SIGNING_POLICY_SLUG != ''
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: f16414f6-32df-4874-a376-940734695369
+          project-slug: reimagined-launcher
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG || 'initial' }}
+          github-artifact-id: ${{ steps.upload_unsigned_win_binaries.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: ${{ github.workspace }}\artifacts\signpath\signed
+
+      - name: Package Windows Velopack release (signed)
+        if: vars.SIGNPATH_SIGNING_POLICY_SLUG != ''
+        shell: pwsh
+        env:
+          SIGNPATH_HOOK_MODE: Apply
+          SIGNPATH_HOOK_WORKDIR: ${{ github.workspace }}\artifacts\signpath
+        run: |
+          $workDir = $env:SIGNPATH_HOOK_WORKDIR
+
+          dnx "vpk@${{ steps.velopack_version.outputs.version }}" --allow-roll-forward -- --yes pack `
+            --packId "D2RReimagined.ReimaginedLauncher" `
+            --packVersion "${{ steps.release_version.outputs.version }}" `
+            --packDir "${{ github.workspace }}\artifacts\ReimaginedLauncher\win-x64" `
+            --mainExe "ReimaginedLauncher.exe" `
+            --packTitle "D2R Reimagined Launcher" `
+            --packAuthors "D2R Reimagined" `
+            --icon "ReimaginedLauncher/Assets/ReimaginedLauncherDesktop.ico" `
+            --runtime "win-x64" `
+            --channel "win" `
+            --signTemplate "pwsh -NoProfile -File .github\scripts\Invoke-VelopackSignPathHook.ps1 {{file...}}" `
+            --outputDir "${{ github.workspace }}\artifacts\velopack\win-x64"
+
+          Copy-Item `
+            -LiteralPath "$workDir\signed\ReimaginedLauncher.exe" `
+            -Destination '${{ github.workspace }}\artifacts\ReimaginedLauncher\win-x64\ReimaginedLauncher.exe' `
+            -Force
+
+      - name: Package Windows Velopack release (unsigned)
+        if: vars.SIGNPATH_SIGNING_POLICY_SLUG == ''
         shell: pwsh
         run: |
           dnx "vpk@${{ steps.velopack_version.outputs.version }}" --allow-roll-forward -- --yes pack `
@@ -216,8 +260,8 @@ jobs:
         if: vars.SIGNPATH_SIGNING_POLICY_SLUG != ''
         uses: actions/upload-artifact@v7
         with:
+          name: unsigned-win-setup
           path: ${{ github.workspace }}\artifacts\velopack\win-x64\*-Setup.exe
-          archive: false
           retention-days: 1
 
       - name: Sign Windows installer
@@ -228,9 +272,8 @@ jobs:
           organization-id: f16414f6-32df-4874-a376-940734695369
           project-slug: reimagined-launcher
           signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
-          artifact-configuration-slug: initial
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG || 'initial' }}
           github-artifact-id: ${{ steps.upload_unsigned_setup.outputs.artifact-id }}
-          skip-decompress: true
           wait-for-completion: true
           wait-for-completion-timeout-in-seconds: 3600
           output-artifact-directory: ${{ github.workspace }}\artifacts\signed\setup-win-x64
@@ -246,6 +289,52 @@ jobs:
           }
 
           Copy-Item -LiteralPath $signedFiles[0].FullName -Destination $setupFiles[0].FullName -Force
+
+      - name: Verify Windows Authenticode signatures
+        if: vars.SIGNPATH_SIGNING_POLICY_SLUG != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          function Assert-Signed {
+            param([string]$Path)
+            $sig = Get-AuthenticodeSignature -LiteralPath $Path
+            if (-not $sig.SignerCertificate -or $sig.Status -notin @('Valid', 'UnknownError')) {
+              throw "Expected valid Authenticode signature on '$Path', but status was $($sig.Status)."
+            }
+            Write-Host "Verified signature on $Path ($($sig.SignerCertificate.Subject))"
+          }
+
+          Assert-Signed '${{ github.workspace }}\artifacts\ReimaginedLauncher\win-x64\ReimaginedLauncher.exe'
+
+          $setupFiles = @(Get-ChildItem -Path '${{ github.workspace }}\artifacts\velopack\win-x64\*-Setup.exe' -File)
+          if ($setupFiles.Count -ne 1) {
+            throw "Expected 1 Setup.exe, found $($setupFiles.Count)"
+          }
+          Assert-Signed $setupFiles[0].FullName
+
+          $nupkgFiles = @(Get-ChildItem -Path '${{ github.workspace }}\artifacts\velopack\win-x64\*-full.nupkg' -File | Sort-Object LastWriteTime -Descending)
+          $currentNupkg = $nupkgFiles | Where-Object { $_.Name -like "*-${{ steps.release_version.outputs.version }}-full.nupkg" } | Select-Object -First 1
+          if (-not $currentNupkg) {
+            throw "Could not find full nupkg for version ${{ steps.release_version.outputs.version }}"
+          }
+
+          $verifyDir = '${{ github.workspace }}\artifacts\signpath\verify-nupkg'
+          if (Test-Path -LiteralPath $verifyDir) {
+            Remove-Item -LiteralPath $verifyDir -Recurse -Force
+          }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [System.IO.Compression.ZipFile]::ExtractToDirectory($currentNupkg.FullName, $verifyDir)
+
+          $nupkgExes = @(Get-ChildItem -LiteralPath $verifyDir -Recurse -File -Filter '*.exe')
+          if ($nupkgExes.Count -ne 3) {
+            $names = ($nupkgExes | ForEach-Object { $_.Name }) -join ', '
+            throw "Expected 3 executables in $($currentNupkg.Name), found $($nupkgExes.Count): $names"
+          }
+
+          foreach ($exe in $nupkgExes) {
+            Assert-Signed $exe.FullName
+          }
 
       - name: Package Linux Velopack release
         shell: pwsh
