@@ -178,10 +178,13 @@ jobs:
             --runtime "win-x64" `
             --channel "win" `
             --noInst `
-            --noPortable `
             --delta "None" `
             --signTemplate "pwsh -NoProfile -File .github\scripts\Invoke-VelopackSignPathHook.ps1 {{file...}}" `
             --outputDir "$workDir\collect-out"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "vpk collect pack failed with exit code $LASTEXITCODE"
+          }
 
           $collected = @(Get-ChildItem -LiteralPath "$workDir\unsigned" -File -Filter '*.exe')
           if ($collected.Count -ne 3) {
@@ -233,6 +236,10 @@ jobs:
             --channel "win" `
             --signTemplate "pwsh -NoProfile -File .github\scripts\Invoke-VelopackSignPathHook.ps1 {{file...}}" `
             --outputDir "${{ github.workspace }}\artifacts\velopack\win-x64"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "vpk signed pack failed with exit code $LASTEXITCODE"
+          }
 
           Copy-Item `
             -LiteralPath "$workDir\signed\ReimaginedLauncher.exe" `
