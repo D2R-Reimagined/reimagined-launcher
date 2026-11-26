@@ -226,8 +226,14 @@ public sealed class D2RLoaderInstallerServiceTests : IDisposable
             "--game-dir \"C:\\Program Files (x86)\\Diablo II Resurrected\" -- -mod ReimaginedLadder -txt",
             GameLauncherService.BuildReimaginedLoaderArguments(@"C:\Program Files (x86)\Diablo II Resurrected\", "-mod ReimaginedLadder -txt", includeGameDir: true));
         Assert.Equal(
+            "--game-dir \"C:\\Games\\D2R\" -- -mod ReimaginedLadder -txt",
+            GameLauncherService.BuildReimaginedLoaderArguments(@"C:\Games\D2R\\", "-mod ReimaginedLadder -txt", includeGameDir: true));
+        Assert.Equal(
             "--game-dir \"C:\\\\\" -- -mod ReimaginedLadder -txt",
             GameLauncherService.BuildReimaginedLoaderArguments(@"C:\", "-mod ReimaginedLadder -txt", includeGameDir: true));
+        Assert.Equal(
+            "--game-dir \"/games/d2r\" -- -mod ReimaginedLadder -txt",
+            GameLauncherService.BuildReimaginedLoaderArguments("/games/d2r/", "-mod ReimaginedLadder -txt", includeGameDir: true));
         Assert.Equal(
             "-- -mod ReimaginedLadder -txt",
             GameLauncherService.BuildReimaginedLoaderArguments("/games/d2r", "-mod ReimaginedLadder -txt", includeGameDir: false));

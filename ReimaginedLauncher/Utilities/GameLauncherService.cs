@@ -749,7 +749,18 @@ public class GameLauncherService
         // Normalized install directories end with a trailing backslash (e.g. "C:\...\Diablo II Resurrected\").
         // Passing `\"` inside a quoted Windows command-line argument escapes the closing quote in
         // CommandLineToArgvW/MSVC argv parsing and swallows `-- -mod ...` into --game-dir.
-        var trimmed = Path.TrimEndingDirectorySeparator(installDirectory.Trim());
+        // Trim both separator kinds explicitly so Windows paths format identically on Linux runners.
+        var trimmed = installDirectory.Trim();
+        while (trimmed.Length > 1 && (trimmed[^1] == '\\' || trimmed[^1] == '/'))
+        {
+            if (trimmed.Length == 3 && char.IsAsciiLetter(trimmed[0]) && trimmed[1] == ':')
+            {
+                break;
+            }
+
+            trimmed = trimmed[..^1];
+        }
+
         if (trimmed.EndsWith('\\'))
         {
             // Drive root like "C:\": double the trailing backslash so it does not escape the closing quote.
