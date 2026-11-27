@@ -8,7 +8,7 @@ using System.Linq;
 
 namespace ReimaginedLauncher.Utilities;
 
-/// <summary>UnHoarder v3, matching the website validator and distributed 1.1.0 limits.</summary>
+/// <summary>Loot filter schema v3, matching the website validator and Pyre-LootFilter limits.</summary>
 internal static class LootFilterValidation
 {
     public const int MaxBytes = 4 * 1024 * 1024;

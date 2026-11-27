@@ -71,8 +71,24 @@ internal static class LadderRuntimeFileService
     }
 
     internal static bool IsPlayerFilterPath(string targetPath)
-        => ModInstallationPaths.ToSignedPath(targetPath.Replace('\\', '/')).Equals(
-            "mods/Reimagined/d2rloader/config/filter.json", StringComparison.OrdinalIgnoreCase);
+    {
+        var normalized = ModInstallationPaths.ToSignedPath(targetPath.Replace('\\', '/'));
+        if (normalized.Equals("mods/Reimagined/d2rloader/config/filter.json", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        const string filterFolderPrefix = "mods/Reimagined/d2rloader/config/filter/";
+        if (!normalized.StartsWith(filterFolderPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var fileName = normalized[filterFolderPrefix.Length..];
+        return fileName.Length > 5
+               && !fileName.Contains('/')
+               && fileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
+    }
 
     internal static bool IsMutableSignedPath(string targetPath)
     {

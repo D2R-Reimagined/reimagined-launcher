@@ -8,11 +8,11 @@ using System.Threading;
 using System.Threading.Tasks;
 namespace ReimaginedLauncher.HttpClients;
 
-public sealed record AccountLootFilter(string Id, string Name)
+public sealed record AccountLootFilter(string Id, string Name, int Revision = 0)
 {
     public override string ToString() => Name;
 }
-public sealed record AccountLootFilterDetails(string Id, string Name, JsonElement Document);
+public sealed record AccountLootFilterDetails(string Id, string Name, JsonElement Document, int Revision = 0);
 internal sealed class LootFilterRateLimitException(DateTimeOffset retryAt) : HttpRequestException("The server limited filter requests. Please wait before trying again.")
 {
     public DateTimeOffset RetryAt { get; } = retryAt;
@@ -25,7 +25,8 @@ public sealed partial class ReimaginedApiHttpClient
         var result = new List<AccountLootFilter>();
         foreach (var entry in json.RootElement.GetProperty("items").EnumerateArray())
         {
-            result.Add(new AccountLootFilter(entry.GetProperty("id").GetString()!, entry.GetProperty("name").GetString()!));
+            var revision = entry.TryGetProperty("revision", out var revEl) && revEl.TryGetInt32(out var rev) ? rev : 0;
+            result.Add(new AccountLootFilter(entry.GetProperty("id").GetString()!, entry.GetProperty("name").GetString()!, revision));
             if (result.Count > 1000) throw new InvalidDataException("The account filter list is too large.");
         }
         return result;
@@ -36,7 +37,8 @@ public sealed partial class ReimaginedApiHttpClient
         var root = json.RootElement;
         var returnedId = root.GetProperty("id").GetString();
         if (returnedId != id) throw new InvalidDataException("The downloaded filter does not match the selection.");
-        return new AccountLootFilterDetails(id, root.GetProperty("name").GetString()!, root.GetProperty("document").Clone());
+        var revision = root.TryGetProperty("revision", out var revEl) && revEl.TryGetInt32(out var rev) ? rev : 0;
+        return new AccountLootFilterDetails(id, root.GetProperty("name").GetString()!, root.GetProperty("document").Clone(), revision);
     }
     private async Task<JsonDocument> GetLootFilterJsonAsync(string path, CancellationToken token)
     {

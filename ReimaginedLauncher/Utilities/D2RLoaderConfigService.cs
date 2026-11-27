@@ -57,8 +57,7 @@ internal static class D2RLoaderConfigService
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["CONTROLLERQOLUPDATES"] = "CONTROLLERQOL",
-            ["PROJECTILEPERFORMANCEOPTIMIZER"] = "PROJECTILEPERF",
-            ["UNHOARDER"] = "FILTER"
+            ["PROJECTILEPERFORMANCEOPTIMIZER"] = "PROJECTILEPERF"
         };
 
     internal static bool IsNonEditableExtension(string fileName)

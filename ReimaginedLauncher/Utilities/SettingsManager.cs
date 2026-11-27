@@ -137,8 +137,30 @@ public static class SettingsManager
             profile.PinnedLadderServers ??= [];
         }
 
+        var pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
         settings.LaunchCardExpansion ??= [];
-        settings.InstalledLootFilters ??= [];
+        var normalizedInstalled = new Dictionary<string, InstalledLootFilter>(pathComparer);
+        if (settings.InstalledLootFilters is not null)
+        {
+            foreach (var (key, value) in settings.InstalledLootFilters)
+            {
+                if (!string.IsNullOrWhiteSpace(key) && value is not null)
+                    normalizedInstalled[key] = value;
+            }
+        }
+        settings.InstalledLootFilters = normalizedInstalled;
+
+        var normalizedSynced = new Dictionary<string, List<SyncedLootFilterEntry>>(pathComparer);
+        if (settings.SyncedLootFilters is not null)
+        {
+            foreach (var (key, entries) in settings.SyncedLootFilters)
+            {
+                if (string.IsNullOrWhiteSpace(key) || entries is null) continue;
+                normalizedSynced[key] = entries.FindAll(
+                    entry => entry is not null && !string.IsNullOrWhiteSpace(entry.Id) && !string.IsNullOrWhiteSpace(entry.FileName));
+            }
+        }
+        settings.SyncedLootFilters = normalizedSynced;
         if (string.IsNullOrWhiteSpace(settings.LastNavigationTag))
             settings.LastNavigationTag = "Launch";
 
