@@ -126,13 +126,13 @@ public static class LocalD2rdsRigService
     /// Makes mods\ReimaginedLadder an exact copy of mods\Reimagined, but for the
     /// kept folders. Files already the same size and time are left alone.
     /// </summary>
-    /// <remarks>
-    /// The ladder's packed .mpq carries data/global/.DISABLE_DEBUG, D2RLoader's
-    /// switch for its debug tools and cheats. The rig wants both, so it removes
-    /// that marker like any other file the local mod lacks. (2026-10-25: with
-    /// debug on, Teeth once looped its cast animation for ~30 s with nothing cast.)
-    /// </remarks>
-    public static LocalRigMirrorResult Mirror(string installDirectory, CancellationToken cancellationToken = default)
+    /// <param name="removeDisableDebug">
+    /// When true, skips copying <c>data/global/.DISABLE_DEBUG</c> from mods\Reimagined
+    /// and removes any copy already in mods\ReimaginedLadder so debug tools and the
+    /// developer console are available. When false, copies or preserves the marker so
+    /// the local rig behaves like a player session.
+    /// </param>
+    public static LocalRigMirrorResult Mirror(string installDirectory, bool removeDisableDebug = true, CancellationToken cancellationToken = default)
     {
         var source = SourceRoot(installDirectory);
         var target = ModInstallationPaths.LadderModRoot(installDirectory);
@@ -142,7 +142,9 @@ public static class LocalD2rdsRigService
         {
             cancellationToken.ThrowIfCancellationRequested();
             var relative = Path.GetRelativePath(source, file).Replace('\\', '/');
-            if (IsKept(relative) || SkippedExtensions.Contains(Path.GetExtension(relative), StringComparer.OrdinalIgnoreCase)) continue;
+            if (IsKept(relative)
+                || (removeDisableDebug && IsDisableDebugMarker(relative))
+                || SkippedExtensions.Contains(Path.GetExtension(relative), StringComparer.OrdinalIgnoreCase)) continue;
             var ladderRelative = LadderRelative(relative);
             wanted.Add(ladderRelative);
             var destination = Path.Combine(target, ladderRelative.Replace('/', Path.DirectorySeparatorChar));
@@ -163,7 +165,9 @@ public static class LocalD2rdsRigService
         foreach (var file in Directory.EnumerateFiles(target, "*", SearchOption.AllDirectories).ToArray())
         {
             var relative = Path.GetRelativePath(target, file).Replace('\\', '/');
-            if (IsKept(relative) || wanted.Contains(relative)) continue;
+            if (IsKept(relative)
+                || (!removeDisableDebug && IsDisableDebugMarker(relative))
+                || wanted.Contains(relative)) continue;
             File.Delete(file);
             removed++;
         }
@@ -235,6 +239,14 @@ public static class LocalD2rdsRigService
 
     internal static bool IsKept(string relativePath)
         => KeptPrefixes.Any(prefix => relativePath.Replace('\\', '/').StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+
+    internal static bool IsDisableDebugMarker(string relativePath)
+    {
+        var normalized = relativePath.Replace('\\', '/');
+        return normalized.Equals("data/global/.DISABLE_DEBUG", StringComparison.OrdinalIgnoreCase)
+               || normalized.Equals(ModInstallationPaths.NormalModName + ".mpq/data/global/.DISABLE_DEBUG", StringComparison.OrdinalIgnoreCase)
+               || normalized.Equals(ModInstallationPaths.LadderModName + ".mpq/data/global/.DISABLE_DEBUG", StringComparison.OrdinalIgnoreCase);
+    }
 
     // mods\Reimagined's Reimagined.mpq is ReimaginedLadder.mpq in the ladder folder.
     internal static string LadderRelative(string relativePath)

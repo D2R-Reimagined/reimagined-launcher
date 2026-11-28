@@ -57,6 +57,8 @@ public partial class LaunchView
         _localRigRefreshing = true;
         LocalRigLoaderComboBox.SelectedIndex = loader == LocalRigLoader.ReimaginedLoader ? 1 : 0;
         LocalRigLoaderComboBox.IsEnabled = !_localRigBusy;
+        LocalRigRemoveDisableDebugCheckBox.IsChecked = MainWindow.Settings.LocalRigRemoveDisableDebug;
+        LocalRigRemoveDisableDebugCheckBox.IsEnabled = !_localRigBusy;
         _localRigRefreshing = false;
         var problem = _localRigBusy ? null : LocalD2rdsRigService.Problem(profile.InstallDirectory, loader);
         LocalRigStatusText.Text = _localRigStatus
@@ -82,6 +84,15 @@ public partial class LaunchView
         _localRigStatus = null;
         await SettingsManager.SaveAsync(MainWindow.Settings);
         RefreshLocalRigPanel(MainWindow.Settings.CurrentProfile);
+    }
+
+    private async void OnLocalRigRemoveDisableDebugChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_localRigRefreshing || _localRigBusy) return;
+        var removeDisableDebug = LocalRigRemoveDisableDebugCheckBox.IsChecked == true;
+        if (MainWindow.Settings.LocalRigRemoveDisableDebug == removeDisableDebug) return;
+        MainWindow.Settings.LocalRigRemoveDisableDebug = removeDisableDebug;
+        await SettingsManager.SaveAsync(MainWindow.Settings);
     }
 
     private void SetLocalRigStatus(string? status)
@@ -153,7 +164,8 @@ public partial class LaunchView
             await GameSessionSecretsService.ScrubPluginConfigsAsync(install);
 
             SetLocalRigStatus("Mirroring mods\\Reimagined into mods\\ReimaginedLadder...");
-            var mirror = await Task.Run(() => LocalD2rdsRigService.Mirror(install!));
+            var removeDisableDebug = MainWindow.Settings.LocalRigRemoveDisableDebug;
+            var mirror = await Task.Run(() => LocalD2rdsRigService.Mirror(install!, removeDisableDebug));
             LaunchDiagnostics.Log($"local d2rds rig: mirror copied {mirror.Copied}, kept {mirror.Unchanged}, removed {mirror.Removed} file(s).");
             if (!await ServerSavesConfigService.DisableAsync(install))
                 throw new InvalidOperationException("server-saves.toml could not be reset before the server starts.");

@@ -132,6 +132,9 @@ public class AppSettings
     // Staff local d2rds rig: the loader its game client runs on.
     public LocalRigLoader LocalRigLoader { get; set; }
 
+    // Staff local d2rds rig: strip data/global/.DISABLE_DEBUG when mirroring into mods\ReimaginedLadder.
+    public bool LocalRigRemoveDisableDebug { get; set; } = true;
+
     [JsonIgnore]
     public string? NexusModsSSOApiKey { get; set; }
 

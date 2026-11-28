@@ -62,6 +62,38 @@ public sealed class LocalD2rdsRigServiceTests : IDisposable
     }
 
     [Fact]
+    public void Mirror_removes_or_keeps_disable_debug_marker_based_on_option()
+    {
+        Write("mods/Reimagined/Reimagined.mpq/modinfo.json", "{\"savepath\":\"ReimaginedThree/\"}");
+        var sourceMpqMarker = Write("mods/Reimagined/Reimagined.mpq/data/global/.DISABLE_DEBUG", "");
+        var sourceDirectMarker = Write("mods/Reimagined/data/global/.DISABLE_DEBUG", "");
+        Write("mods/ReimaginedLadder/ReimaginedLadder.mpq/data/global/.DISABLE_DEBUG", "");
+        Write("mods/ReimaginedLadder/data/global/.DISABLE_DEBUG", "");
+
+        var stripped = LocalD2rdsRigService.Mirror(_install, removeDisableDebug: true);
+        Assert.Equal(1, stripped.Copied);
+        Assert.Equal(2, stripped.Removed);
+        Assert.False(File.Exists(Ladder("ReimaginedLadder.mpq/data/global/.DISABLE_DEBUG")));
+        Assert.False(File.Exists(Ladder("data/global/.DISABLE_DEBUG")));
+        // Source files in mods\Reimagined are left intact so switching modes never loses them.
+        Assert.True(File.Exists(sourceMpqMarker));
+        Assert.True(File.Exists(sourceDirectMarker));
+
+        var keptFromSource = LocalD2rdsRigService.Mirror(_install, removeDisableDebug: false);
+        Assert.Equal(2, keptFromSource.Copied);
+        Assert.True(File.Exists(Ladder("ReimaginedLadder.mpq/data/global/.DISABLE_DEBUG")));
+        Assert.True(File.Exists(Ladder("data/global/.DISABLE_DEBUG")));
+
+        // Even when mods\Reimagined lacks .DISABLE_DEBUG, unchecking preserves an existing ladder marker.
+        File.Delete(sourceMpqMarker);
+        File.Delete(sourceDirectMarker);
+        var keptInLadder = LocalD2rdsRigService.Mirror(_install, removeDisableDebug: false);
+        Assert.Equal(0, keptInLadder.Removed);
+        Assert.True(File.Exists(Ladder("ReimaginedLadder.mpq/data/global/.DISABLE_DEBUG")));
+        Assert.True(File.Exists(Ladder("data/global/.DISABLE_DEBUG")));
+    }
+
+    [Fact]
     public void Tables_are_every_excel_txt_of_the_local_mod_zipped_flat()
     {
         Write("mods/Reimagined/Reimagined.mpq/data/global/excel/itemstatcost.txt", "stats");

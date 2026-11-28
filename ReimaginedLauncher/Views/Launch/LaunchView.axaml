@@ -177,7 +177,11 @@
                     </ComboBox>
                   </Grid>
                   <TextBlock x:Name="LocalRigStatusText" Foreground="{StaticResource GoldTextBrush}" FontSize="12" TextWrapping="Wrap"/>
-                  <Button x:Name="LocalRigStartButton" Classes="accent" Content="Start local server + game" HorizontalAlignment="Left" Click="OnLocalRigStartClick"/>
+                  <WrapPanel Orientation="Horizontal" ItemSpacing="10" LineSpacing="6">
+                    <Button x:Name="LocalRigStartButton" Classes="accent" Content="Start local server + game" VerticalAlignment="Center" Click="OnLocalRigStartClick"/>
+                    <CheckBox x:Name="LocalRigRemoveDisableDebugCheckBox" Content="Remove .DISABLE_DEBUG" VerticalAlignment="Center" FontSize="12" IsCheckedChanged="OnLocalRigRemoveDisableDebugChanged"
+                              ToolTip.Tip="Automatically remove data\global\.DISABLE_DEBUG from mods\ReimaginedLadder when starting the local test so debug mode and the developer console are available. Uncheck to keep .DISABLE_DEBUG and test as a player."/>
+                  </WrapPanel>
                 </StackPanel>
               </Border>
               </StackPanel></Grid>
